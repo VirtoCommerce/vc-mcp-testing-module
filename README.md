@@ -1,3 +1,3 @@
 # vc-mcp-testing-module
 
-Repositories for Playwright MCP + LLM tests
+Repository for Playwright MCP + LLM tests
