@@ -16,7 +16,7 @@ test.describe('VCST-4199: Search Cross Icon Bug Tests', () => {
 
   test('TC-01: Verify Cross Icon Functionality with Mouse Click', async ({ page }) => {
     // Find the search input field
-    const searchInput = page.locator('input[type="search"], input[placeholder*="search" i], input[aria-label*="search" i]').first();
+    let searchInput = page.locator('input[type="search"], input[placeholder*="search" i], input[aria-label*="search" i]').first();
     
     // If search input is not immediately visible, try to find it in header or navigation
     if (await searchInput.count() === 0) {
@@ -25,6 +25,8 @@ test.describe('VCST-4199: Search Cross Icon Bug Tests', () => {
       if (await searchButton.count() > 0) {
         await searchButton.click();
         await page.waitForTimeout(1000);
+        // Re-query the search input after clicking the search button
+        searchInput = page.locator('input[type="search"], input[placeholder*="search" i], input[aria-label*="search" i]').first();
       }
     }
     
@@ -51,7 +53,7 @@ test.describe('VCST-4199: Search Cross Icon Bug Tests', () => {
 
   test('TC-02: Verify Cross Icon Functionality with Enter Key (Bug Reproduction)', async ({ page }) => {
     // Find the search input field
-    const searchInput = page.locator('input[type="search"], input[placeholder*="search" i], input[aria-label*="search" i]').first();
+    let searchInput = page.locator('input[type="search"], input[placeholder*="search" i], input[aria-label*="search" i]').first();
     
     // If search input is not immediately visible, try to find it
     if (await searchInput.count() === 0) {
@@ -59,6 +61,8 @@ test.describe('VCST-4199: Search Cross Icon Bug Tests', () => {
       if (await searchButton.count() > 0) {
         await searchButton.click();
         await page.waitForTimeout(1000);
+        // Re-query the search input after clicking the search button
+        searchInput = page.locator('input[type="search"], input[placeholder*="search" i], input[aria-label*="search" i]').first();
       }
     }
     
@@ -104,13 +108,15 @@ test.describe('VCST-4199: Search Cross Icon Bug Tests', () => {
 
   test('TC-03: Verify Cross Icon Focus State', async ({ page }) => {
     // Find the search input field
-    const searchInput = page.locator('input[type="search"], input[placeholder*="search" i], input[aria-label*="search" i]').first();
+    let searchInput = page.locator('input[type="search"], input[placeholder*="search" i], input[aria-label*="search" i]').first();
     
     if (await searchInput.count() === 0) {
       const searchButton = page.locator('button[aria-label*="search" i], [data-testid*="search"], .search-button, .search-icon').first();
       if (await searchButton.count() > 0) {
         await searchButton.click();
         await page.waitForTimeout(1000);
+        // Re-query the search input after clicking the search button
+        searchInput = page.locator('input[type="search"], input[placeholder*="search" i], input[aria-label*="search" i]').first();
       }
     }
     
@@ -142,13 +148,15 @@ test.describe('VCST-4199: Search Cross Icon Bug Tests', () => {
 
   test('TC-04: Verify Cross Icon Accessibility', async ({ page }) => {
     // Find the search input field
-    const searchInput = page.locator('input[type="search"], input[placeholder*="search" i], input[aria-label*="search" i]').first();
+    let searchInput = page.locator('input[type="search"], input[placeholder*="search" i], input[aria-label*="search" i]').first();
     
     if (await searchInput.count() === 0) {
       const searchButton = page.locator('button[aria-label*="search" i], [data-testid*="search"], .search-button, .search-icon').first();
       if (await searchButton.count() > 0) {
         await searchButton.click();
         await page.waitForTimeout(1000);
+        // Re-query the search input after clicking the search button
+        searchInput = page.locator('input[type="search"], input[placeholder*="search" i], input[aria-label*="search" i]').first();
       }
     }
     
@@ -181,13 +189,15 @@ test.describe('VCST-4199: Search Cross Icon Bug Tests', () => {
     
     for (const testInput of testInputs) {
       // Find the search input field
-      const searchInput = page.locator('input[type="search"], input[placeholder*="search" i], input[aria-label*="search" i]').first();
+      let searchInput = page.locator('input[type="search"], input[placeholder*="search" i], input[aria-label*="search" i]').first();
       
       if (await searchInput.count() === 0) {
         const searchButton = page.locator('button[aria-label*="search" i], [data-testid*="search"], .search-button, .search-icon').first();
         if (await searchButton.count() > 0) {
           await searchButton.click();
           await page.waitForTimeout(1000);
+          // Re-query the search input after clicking the search button
+          searchInput = page.locator('input[type="search"], input[placeholder*="search" i], input[aria-label*="search" i]').first();
         }
       }
       
