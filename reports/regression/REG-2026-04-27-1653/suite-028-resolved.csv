@@ -530,18 +530,18 @@ password={{USER_PASSWORD}}","[NAV] navigate to {{FRONT_URL}}/cart
 [NETWORK] no 4xx/5xx on any requests during widget render","widget heading absent, .coupons-section missing from DOM, 'Custom code' card not rendered, more than 4 preset cards visible (cap not applied), 'View all coupons & promotions' link missing","none","VCST-4896, VCST-4590","Draft"
 "CART-058","Coupons Sidebar — Preset Coupon Apply Happy Path","Cart > Coupons Sidebar > Apply","Critical","BL-CART-003","ECL-1.3, ECL-14.1","[PRE:SIGNIN_AS:USER_DEFAULT]
 [PRE:RESET_CART]
-User logged in. Cart has at least 1 item ({{TEST_SKU}}). At least one preset coupon card (@td(COUPON_10PCT.code) — promotion '@td(COUPON_10PCT.promo_name)') is visible in the 'Discount & coupons' widget. Theme 2.48.0-pr-2269-cd06 or later deployed.","url={{FRONT_URL}}/cart
+User logged in. Cart has at least 1 item ({{TEST_SKU}}). At least one preset coupon card (QA10OFF — promotion 'QA Coupon English Name') is visible in the 'Discount & coupons' widget. Theme 2.48.0-pr-2269-cd06 or later deployed.","url={{FRONT_URL}}/cart
 user={{USER_EMAIL}}
 password={{USER_PASSWORD}}
-coupon_code=@td(COUPON_10PCT.code)","[NAV] navigate to {{FRONT_URL}}/cart
+coupon_code=QA10OFF","[NAV] navigate to {{FRONT_URL}}/cart
 [WAIT] cart page loads with at least 1 item
 [SCROLL] scroll to 'Discount & coupons' widget (.coupons-section)
-[ASSERT] '@td(COUPON_10PCT.promo_name)' preset card visible with default state (dashed border, receipt-tax icon, arrow-right apply button)
-[ACT] click the arrow-right (apply) button on '@td(COUPON_10PCT.promo_name)' card
+[ASSERT] 'QA Coupon English Name' preset card visible with default state (dashed border, receipt-tax icon, arrow-right apply button)
+[ACT] click the arrow-right (apply) button on 'QA Coupon English Name' card
 [WAIT] wait for API response and card state transition
 [ASSERT] card transitions to applied state
 [SCROLL] scroll up to OrderSummary
-[ASSERT] Discount line item visible in OrderSummary with non-zero amount","[DOM] '@td(COUPON_10PCT.promo_name)' card shows applied state: success-green/highlighted border, round-check icon visible, outline-trash icon visible, arrow-right apply button replaced by trash icon
+[ASSERT] Discount line item visible in OrderSummary with non-zero amount","[DOM] 'QA Coupon English Name' card shows applied state: success-green/highlighted border, round-check icon visible, outline-trash icon visible, arrow-right apply button replaced by trash icon
 [DOM] Discount line item in OrderSummary displays a non-zero negative currency amount
 [MATH] OrderSummary total = subtotal - coupon_discount + shipping + tax (2 decimal places)
 [STATE] card view transitions from default to applied","[API] addCoupon mutation: HTTP 200, errors[] empty
@@ -589,41 +589,41 @@ password={{USER_PASSWORD}}","[NAV] navigate to {{FRONT_URL}}/cart
 [NETWORK] no 5xx","error text not displayed (no feedback to user), wrong error message shown (not 'This code is not valid'), cart total changed after invalid code, console TypeError, 'BOGUS123' somehow applied","none — no coupon was applied","VCST-4896 AC#4, AC#6, AC#8","Draft"
 "CART-061","Coupons Sidebar — Radio-Button Behavior: Applying B While A Is Active Auto-Removes A","Cart > Coupons Sidebar > Radio Behavior","Critical","BL-CART-003","ECL-1.3, ECL-14.1","[PRE:SIGNIN_AS:USER_DEFAULT]
 [PRE:RESET_CART]
-User logged in. Cart has at least 1 item. Two valid coupon codes available: @td(COUPON_10PCT.code) and @td(COUPON_20PCT.code) (or any second valid code). Both are applicable to the cart. Theme 2.48.0-pr-2269-cd06 or later deployed. Design Technique: Decision Table (one coupon active + apply second).","url={{FRONT_URL}}/cart
+User logged in. Cart has at least 1 item. Two valid coupon codes available: QA10OFF and SUPER (or any second valid code). Both are applicable to the cart. Theme 2.48.0-pr-2269-cd06 or later deployed. Design Technique: Decision Table (one coupon active + apply second).","url={{FRONT_URL}}/cart
 user={{USER_EMAIL}}
 password={{USER_PASSWORD}}
-coupon_a=@td(COUPON_10PCT.code)
-coupon_b=@td(COUPON_20PCT.code)","[NAV] navigate to {{FRONT_URL}}/cart
+coupon_a=QA10OFF
+coupon_b=SUPER","[NAV] navigate to {{FRONT_URL}}/cart
 [WAIT] cart page loads
 [SCROLL] to 'Discount & coupons' widget (.coupons-section)
-[ACT] apply @td(COUPON_10PCT.code) (via preset card or custom code card)
-[WAIT] @td(COUPON_10PCT.code) card shows applied state (green border, check icon)
-[ASSERT] verify network: only addCoupon mutation for @td(COUPON_10PCT.code) fired; no removeCoupon
-[ACT] now apply @td(COUPON_20PCT.code) (via its preset card apply button, or via Custom code card with typed code)
+[ACT] apply QA10OFF (via preset card or custom code card)
+[WAIT] QA10OFF card shows applied state (green border, check icon)
+[ASSERT] verify network: only addCoupon mutation for QA10OFF fired; no removeCoupon
+[ACT] now apply SUPER (via its preset card apply button, or via Custom code card with typed code)
 [WAIT] wait for all mutations to complete
-[ASSERT] @td(COUPON_20PCT.code) card shows applied state
-[ASSERT] @td(COUPON_10PCT.code) card returns to default state (not applied)
+[ASSERT] SUPER card shows applied state
+[ASSERT] QA10OFF card returns to default state (not applied)
 [SCROLL] scroll up to OrderSummary
-[ASSERT] only one discount line in OrderSummary (corresponding to @td(COUPON_20PCT.code))","[DOM] @td(COUPON_20PCT.code) card: applied state (green border, check icon, trash icon)
-[DOM] @td(COUPON_10PCT.code) card: default state (dashed border, arrow-right apply button — not applied)
+[ASSERT] only one discount line in OrderSummary (corresponding to SUPER)","[DOM] SUPER card: applied state (green border, check icon, trash icon)
+[DOM] QA10OFF card: default state (dashed border, arrow-right apply button — not applied)
 [STATE] only one coupon is applied at a time (radio-button behavior — VCST-4896 AC#3)
-[DOM] OrderSummary discount line reflects @td(COUPON_20PCT.code) discount only (not stacked)","[API] network sequence: removeCoupon for @td(COUPON_10PCT.code) fires BEFORE addCoupon for @td(COUPON_20PCT.code)
-[API] cart.coupons[] contains only @td(COUPON_20PCT.code) after the sequence (or only 1 entry with isAppliedSuccessfully=true)
+[DOM] OrderSummary discount line reflects SUPER discount only (not stacked)","[API] network sequence: removeCoupon for QA10OFF fires BEFORE addCoupon for SUPER
+[API] cart.coupons[] contains only SUPER after the sequence (or only 1 entry with isAppliedSuccessfully=true)
 [API] errors[] empty on both mutations
 [CONSOLE] no JS errors
-[NETWORK] no 4xx/5xx","both coupons shown as applied simultaneously (multi-coupon stacking — BL-CART-003 violation), @td(COUPON_10PCT.code) card remains in applied state after @td(COUPON_20PCT.code) applied, discount amount = sum of both coupons, removeCoupon mutation not fired for A","Click trash icon to remove active coupon after test","VCST-4896 AC#3, BL-CART-009","Draft"
+[NETWORK] no 4xx/5xx","both coupons shown as applied simultaneously (multi-coupon stacking — BL-CART-003 violation), QA10OFF card remains in applied state after SUPER applied, discount amount = sum of both coupons, removeCoupon mutation not fired for A","Click trash icon to remove active coupon after test","VCST-4896 AC#3, PROPOSED-BL-CART-009","Draft"
 "CART-062","Coupons Sidebar — Cancel Applied Coupon via Trash Icon","Cart > Coupons Sidebar > Cancel","Critical","BL-CART-003","ECL-1.3, ECL-14.1","[PRE:SIGNIN_AS:USER_DEFAULT]
 [PRE:RESET_CART]
-User logged in. Cart has at least 1 item. @td(COUPON_10PCT.code) is applied via the 'Discount & coupons' widget — card in applied state. Theme 2.48.0-pr-2269-cd06 or later deployed. Design Technique: State Transition (applied → default).","url={{FRONT_URL}}/cart
+User logged in. Cart has at least 1 item. QA10OFF is applied via the 'Discount & coupons' widget — card in applied state. Theme 2.48.0-pr-2269-cd06 or later deployed. Design Technique: State Transition (applied → default).","url={{FRONT_URL}}/cart
 user={{USER_EMAIL}}
 password={{USER_PASSWORD}}
-coupon_code=@td(COUPON_10PCT.code)","[NAV] navigate to {{FRONT_URL}}/cart
+coupon_code=QA10OFF","[NAV] navigate to {{FRONT_URL}}/cart
 [WAIT] cart loads
 [SCROLL] to 'Discount & coupons' widget (.coupons-section)
-[ACT] apply @td(COUPON_10PCT.code) (preset card or custom code card)
+[ACT] apply QA10OFF (preset card or custom code card)
 [WAIT] card shows applied state (green border, check icon, trash icon)
 [ASSERT] record cart total in OrderSummary (with discount)
-[ACT] click the trash (outline-trash) icon on the applied '@td(COUPON_10PCT.promo_name)' card
+[ACT] click the trash (outline-trash) icon on the applied 'QA Coupon English Name' card
 [WAIT] wait for removeCoupon mutation and UI update
 [ASSERT] card returns to default state
 [ASSERT] OrderSummary discount line removed
@@ -631,8 +631,8 @@ coupon_code=@td(COUPON_10PCT.code)","[NAV] navigate to {{FRONT_URL}}/cart
 [DOM] JIRA AC#5 compliance: the card is still present in the widget after removal (code display NOT cleared); users can re-apply
 [DOM] Discount line in OrderSummary disappears or shows $0.00
 [MATH] cart total after removal = pre-coupon subtotal + shipping + tax (discount fully removed)
-[STATE] cart.coupons[] no longer contains @td(COUPON_10PCT.code) (or isAppliedSuccessfully=false)","[API] removeCoupon mutation: HTTP 200, errors[] empty
-[API] cart.coupons[] does not contain @td(COUPON_10PCT.code) with isAppliedSuccessfully=true after removal
+[STATE] cart.coupons[] no longer contains QA10OFF (or isAppliedSuccessfully=false)","[API] removeCoupon mutation: HTTP 200, errors[] empty
+[API] cart.coupons[] does not contain QA10OFF with isAppliedSuccessfully=true after removal
 [CONSOLE] no TypeError during removal
 [NETWORK] no 4xx/5xx","trash icon absent on applied card (cannot remove), discount persists in OrderSummary after removal, card disappears from DOM entirely after removal (violates AC#5 — code display should be retained), cart total unchanged, removeCoupon errors[] non-empty","none — coupon removed by this test","VCST-4896 AC#5, AC#6, VCST-4590","Draft"
 "CART-063","Coupons Sidebar — OrderSummary Contains No Inline Coupon Input (Regression Guard)","Cart > Coupons Sidebar > Regression","Critical","BL-CART-003","ECL-14.1","[PRE:SIGNIN_AS:USER_DEFAULT]
@@ -739,18 +739,18 @@ admin_password={{ADMIN_PASSWORD}}","[NAV] {{ADMIN_URL}} — log in as admin
 [NETWORK] no 4xx/5xx","widget hidden when checkout_coupon_enabled=false (if this occurs, flag as potential regression or undocumented intent), setting change not propagated within 5s, admin setting not found","Restore checkout_coupon_enabled = true after test","VCST-4896 (behavior change: feature flag scope), MANUAL ADVISORY — confirm intent with PR author","Draft"
 "CART-069","Coupons Sidebar — Applied Coupon Code Visible as Read-Only on Checkout Review Step","Cart > Coupons Sidebar > Checkout Integration","High","BL-CART-003, BL-CHK-006","ECL-1.3, ECL-14.1","[PRE:SIGNIN_AS:USER_DEFAULT]
 [PRE:RESET_CART]
-User logged in. Cart has at least 1 item. @td(COUPON_10PCT.code) is applicable to cart. Checkout flow accessible. Theme 2.48.0-pr-2269-cd06 or later deployed. Design Technique: State Transition (cart applied → checkout review step).","url={{FRONT_URL}}/cart
+User logged in. Cart has at least 1 item. QA10OFF is applicable to cart. Checkout flow accessible. Theme 2.48.0-pr-2269-cd06 or later deployed. Design Technique: State Transition (cart applied → checkout review step).","url={{FRONT_URL}}/cart
 user={{USER_EMAIL}}
 password={{USER_PASSWORD}}
-coupon_code=@td(COUPON_10PCT.code)","[NAV] navigate to {{FRONT_URL}}/cart
+coupon_code=QA10OFF","[NAV] navigate to {{FRONT_URL}}/cart
 [WAIT] cart page loads
 [SCROLL] to 'Discount & coupons' widget (.coupons-section)
-[ACT] apply @td(COUPON_10PCT.code) via preset card or custom code card
+[ACT] apply QA10OFF via preset card or custom code card
 [WAIT] card in applied state (green border, check icon)
 [ASSERT] discount line visible in OrderSummary
 [ACT] click 'Checkout' or 'Proceed to Checkout'
 [WAIT] checkout page loads and progresses to review step
-[ASSERT] on review step, locate the applied coupon display","[DOM] checkout review step shows a disabled (read-only) VcActionInput displaying '@td(COUPON_10PCT.code)' — the applied coupon code is visible but non-editable on the review page (per checkout/review.vue: appliedCouponCode)
+[ASSERT] on review step, locate the applied coupon display","[DOM] checkout review step shows a disabled (read-only) VcActionInput displaying 'QA10OFF' — the applied coupon code is visible but non-editable on the review page (per checkout/review.vue: appliedCouponCode)
 [DOM] coupon discount line is present in the checkout order summary (discount carried through from /cart)
 [STATE] coupon applied on /cart carries through to checkout review without being reset","[API] cart query at checkout review: cart.coupons[0].isAppliedSuccessfully=true; discount matches /cart value
 [CONSOLE] no JS errors during cart → checkout navigation
