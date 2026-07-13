@@ -1,8 +1,3 @@
----
-applicability: reference
-applicability_rationale: "xAPI GraphQL schema reference. The schema SHAPE is universal across VC, but field availability varies by module set + customer modifications. Customer regenerates from their live introspection."
----
-
 # GraphQL xAPI Schema Reference
 
 > **Source**: Live introspection of `{{BACK_URL}}/graphql` (2026-07-13)
