@@ -5,7 +5,7 @@ import { getAuth, getAuthPool } from '../lib/auth.js';
 import { gql } from '../lib/gql.js';
 import { STORE } from '../config.js';
 
-// Walking-skeleton L2 scenario (L2 note §9.1, Class A + terminal order flow):
+// Walking-skeleton L2 scenario (Class A + terminal order flow):
 // per iteration — add ITEMS items to a fresh cart, read the full cart, optionally create the
 // order from the cart. Every operation is a storefront-exact resolved document from ../queries/.
 //
@@ -33,11 +33,11 @@ const SKIP_ORDER = __ENV.SKIP_ORDER !== '0';
 // picks one by __VU, so distinct carts hit the per-user save path concurrently. USER_POOL=0
 // keeps the single-user (PERF_API_USER) behaviour.
 const USER_POOL = Number(__ENV.USER_POOL || 0);
-const SEED_PASSWORD = __ENV.SEED_PASSWORD || 'LoadTest1!';
+const SEED_PASSWORD = __ENV.SEED_PASSWORD || '';
 const SEED_EMAIL_FORMAT = __ENV.SEED_EMAIL_FORMAT || 'loadtest+%d@example.test';
 
 // smoke = liveness (1 VU, 3 iterations); steady = open-model ramp → hold
-// (ramping-arrival-rate keeps arrivals independent of response time, §5).
+// (ramping-arrival-rate keeps arrivals independent of response time).
 const profiles = {
     smoke: { executor: 'shared-iterations', vus: 1, iterations: Number(__ENV.ITERATIONS || 3), maxDuration: '30m' },
     steady: {
@@ -75,6 +75,9 @@ const SETUP_SEARCH = `query($storeId: String!, $userId: String!, $currencyCode: 
 }`;
 
 export function setup() {
+    if (USER_POOL > 0 && !SEED_PASSWORD) {
+        throw new Error('SEED_PASSWORD is required when USER_POOL>0 (seeded-user pool password)');
+    }
     // Multi-user pool (USER_POOL>0) or the single env user.
     const pool = USER_POOL > 0 ? getAuthPool(BASE_URL, USER_POOL, SEED_EMAIL_FORMAT, SEED_PASSWORD) : null;
     const auth = pool ? pool[0] : getAuth(BASE_URL);

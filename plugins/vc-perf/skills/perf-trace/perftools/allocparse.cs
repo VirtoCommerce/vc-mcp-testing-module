@@ -14,6 +14,11 @@ using Microsoft.Diagnostics.Tracing.Parsers.Clr;
 // Attributes managed allocation from a `dotnet-trace collect --profile gc-verbose` capture
 // (GCAllocationTick events). Four passes: by type, by leaf frame, by first non-BCL caller,
 // and (optionally) representative full stacks for caller-supplied target method substrings.
+if (args.Length < 1)
+{
+    Console.Error.WriteLine("usage: allocparse <trace.nettrace> [topN] [targetSubstring1,targetSubstring2,...]");
+    Environment.Exit(1);
+}
 var path = args[0];
 var topN = args.Length > 1 ? int.Parse(args[1]) : 25;
 var targets = args.Length > 2 ? args[2].Split(',', StringSplitOptions.RemoveEmptyEntries) : [];

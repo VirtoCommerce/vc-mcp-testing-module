@@ -13,6 +13,11 @@ using Microsoft.Diagnostics.Tracing;
 // mode aggregates EF Core command events (count + duration by normalized SQL shape). `inspect`
 // mode lists every provider/event with counts — run it first on a new capture to confirm the
 // event names this build emits, then adjust the command-event matching below if needed.
+if (args.Length < 1)
+{
+    Console.Error.WriteLine("usage: dbparse <trace.nettrace> [inspect]");
+    Environment.Exit(1);
+}
 var path = args[0];
 var mode = args.Length > 1 ? args[1] : "aggregate";
 

@@ -1,7 +1,7 @@
 import http from 'k6/http';
 import { check } from 'k6';
 
-// GraphQL post helper. Measurement discipline (L2 note §8): HTTP 200 with a
+// GraphQL post helper. Measurement discipline: HTTP 200 with a
 // GraphQL `errors` body is a FAILURE — both checks must pass for the iteration
 // to count green. Each request is tagged with the operation name so
 // `http_req_duration{name:...}` sub-metrics and thresholds attribute per-op.

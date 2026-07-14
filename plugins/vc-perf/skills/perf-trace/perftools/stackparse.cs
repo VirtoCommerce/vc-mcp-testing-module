@@ -15,6 +15,11 @@ using Microsoft.Diagnostics.Tracing.Etlx;
 // matched frame — and (b) the top representative caller chains, grouped from the matched
 // frame upward. Complements cpuparse, which stops at the first non-BCL frame and therefore
 // can't see through owners like System.Linq.Queryable.
+if (args.Length < 2)
+{
+    Console.Error.WriteLine("usage: stackparse <trace.nettrace> <frame-substring>[,<substring2>,...] [topN] [maxDepth]");
+    Environment.Exit(1);
+}
 var path = args[0];
 var needles = args[1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 var topN = args.Length > 2 ? int.Parse(args[2]) : 15;

@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# T0 runner (L2 note §11.1): k6 + dotnet-counters, file-first artifacts.
+# T0 runner: k6 + dotnet-counters, file-first artifacts.
 # Usage: loadtests/run.sh [smoke|steady]
 # Env knobs forwarded to the scenario: BASE_URL, ITEMS, RATE, PRODUCT_ID,
 # PRODUCT_FILTER, SKIP_ORDER. SCENARIO picks the scenario file (basename under
-# scenarios/, default cart-order-loop). Credentials: PERF_API_USER / PERF_API_PASSWORD
-# (fallback: ~/.secrets/claude.env). No secrets are printed or passed via argv.
+# scenarios/, default cart-order-loop). PLATFORM_PROCESS names the backend host binary
+# for the EventPipe sidecar (default VirtoCommerce.Platform.Web; feed from profile
+# perf.platformProcess). Credentials: PERF_API_USER / PERF_API_PASSWORD (required env).
+# No secrets are printed or passed via argv.
 set -euo pipefail
 
 DIR=$(cd "$(dirname "$0")" && pwd)
@@ -17,22 +19,14 @@ if [ ! -f "$SCENARIO_FILE" ]; then
     exit 1
 fi
 
-K6="${K6:-$HOME/dev/virto/.tools/k6}"
-if [ ! -x "$K6" ]; then
-    K6=$(command -v k6 || true)
-fi
-if [ -z "$K6" ]; then
-    echo "k6 not found — install to ~/dev/virto/.tools/k6 or PATH" >&2
+K6="${K6:-k6}"
+if ! command -v "$K6" >/dev/null 2>&1 && [ ! -x "$K6" ]; then
+    echo "k6 not found — set K6 to the binary path or add k6 to PATH" >&2
     exit 1
 fi
 
-if [ -z "${PERF_API_USER:-}" ] || [ -z "${PERF_API_PASSWORD:-}" ]; then
-    if [ -f "$HOME/.secrets/claude.env" ]; then
-        . "$HOME/.secrets/claude.env"
-    fi
-fi
-: "${PERF_API_USER:?PERF_API_USER not set (env or ~/.secrets/claude.env)}"
-: "${PERF_API_PASSWORD:?PERF_API_PASSWORD not set (env or ~/.secrets/claude.env)}"
+: "${PERF_API_USER:?PERF_API_USER not set}"
+: "${PERF_API_PASSWORD:?PERF_API_PASSWORD not set}"
 export PERF_API_USER PERF_API_PASSWORD
 
 SHA=$(git -C "$DIR/.." rev-parse --short HEAD)
@@ -45,8 +39,16 @@ mkdir -p "$OUT"
 SUMMARY="$OUT/$STAMP-$SHA.summary.json"
 
 # EventPipe sidecar on the backend pid (optional). Match the app binary, not the
-# `dotnet run` wrapper that carries the same name.
-BACKEND_PID=$(pgrep -f 'bin/[^ ]*/VirtoCommerce.Platform.Web' | head -1 || true)
+# `dotnet run` wrapper that carries the same name. Process name defaults to the VC host
+# binary; override via PLATFORM_PROCESS (fed from profile perf.platformProcess) for
+# projects that rename the host.
+PLATFORM_PROCESS="${PLATFORM_PROCESS:-VirtoCommerce.Platform.Web}"
+if command -v pgrep >/dev/null 2>&1; then
+    BACKEND_PID=$(pgrep -f "bin/[^ ]*/${PLATFORM_PROCESS}" | head -1 || true)
+else
+    # Windows/Git Bash has no pgrep — fall back to the dotnet-counters process list.
+    BACKEND_PID=$(dotnet-counters ps 2>/dev/null | grep -F "$PLATFORM_PROCESS" | awk '{print $1}' | head -1 || true)
+fi
 
 # EventPipe is single-consumer per pid: at most ONE of {dotnet-trace, dotnet-counters}
 # may attach. TRACE=1 (alloc attribution) wins and forces the counters sidecar off.

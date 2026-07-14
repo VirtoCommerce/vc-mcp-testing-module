@@ -8,8 +8,7 @@ L3 of the three-layer performance toolchain:
 | L2 | `loadtests/` (k6, full real stack) | How does the running system behave under scripted load? |
 | **L3** | **this folder** + `dotnet-counters` / `dotnet-trace` | **WHY — which code is responsible for what L2 observed?** |
 
-L3 runs against the live backend while an L2 scenario drives traffic. Worked example (cart
-`addItem` build-up, N=100): `docs/research/2026-07-08-l3-allocation-attribution-cart-recalc.md`.
+L3 runs against the live backend while an L2 scenario drives traffic.
 
 ## Setup
 

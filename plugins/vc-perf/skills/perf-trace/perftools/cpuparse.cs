@@ -13,6 +13,11 @@ using Microsoft.Diagnostics.Tracing.Etlx;
 // capture (SampleProfiler events, ~100Hz per managed thread). Two views: raw (all samples,
 // dominated by idle threadpool waits on a lightly loaded host) and ACTIVE (idle/background/wait
 // stacks excluded, surfacing actual request-path work).
+if (args.Length < 1)
+{
+    Console.Error.WriteLine("usage: cpuparse <trace.nettrace> [topN]");
+    Environment.Exit(1);
+}
 var path = args[0];
 var topN = args.Length > 1 ? int.Parse(args[1]) : 25;
 bool IsBcl(string m) => m is "System.Private.CoreLib" or "System.Collections"

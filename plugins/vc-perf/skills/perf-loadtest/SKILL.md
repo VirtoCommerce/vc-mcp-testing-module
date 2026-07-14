@@ -18,10 +18,14 @@ ${CLAUDE_PLUGIN_ROOT}/skills/perf-loadtest/loadtests/run.sh steady   # ramp + ho
 ```
 
 Target the backend at `perf.backendUrl` from `project-profile.json` (pass it as `BASE_URL`, the
-harness's own env knob — k6 has no direct file-read access to the profile):
+harness's own env knob — k6 has no direct file-read access to the profile). Pass
+`perf.platformProcess` as `PLATFORM_PROCESS` so the L3 EventPipe sidecar attaches to the right
+backend process (projects that rename the host binary must set this, or the sidecar silently
+skips):
 
 ```bash
 BASE_URL="$(jq -r .perf.backendUrl project-profile.json)" \
+  PLATFORM_PROCESS="$(jq -r '.perf.platformProcess // "VirtoCommerce.Platform.Web"' project-profile.json)" \
   ${CLAUDE_PLUGIN_ROOT}/skills/perf-loadtest/loadtests/run.sh steady
 ```
 

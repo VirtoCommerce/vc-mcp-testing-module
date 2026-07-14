@@ -2,7 +2,7 @@ import http from 'k6/http';
 import { b64decode } from 'k6/encoding';
 import { STORE } from '../config.js';
 
-// Token dance for explicit credentials (L2 note §7: acquire in setup(), reuse across VUs).
+// Token dance for explicit credentials: acquire in setup(), reuse across VUs.
 // Returns { token, userId } with userId decoded from the JWT `sub`/`nameid` claim.
 export function getAuthForUser(baseUrl, username, password) {
     const res = http.post(

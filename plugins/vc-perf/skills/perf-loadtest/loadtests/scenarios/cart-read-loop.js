@@ -5,7 +5,7 @@ import { getAuth, getAuthPool } from '../lib/auth.js';
 import { gql } from '../lib/gql.js';
 import { STORE } from '../config.js';
 
-// Read-path L2 scenario (L2 note §6 read/validation subjects): carts are built ONCE
+// Read-path L2 scenario (read/validation subjects): carts are built ONCE
 // in setup() — one per pool user (or one for the single env user) with ITEMS items —
 // and the measured iteration is a pure `getFullCart` read. Isolates the unlocked read
 // path (aggregate cache + GraphQL projection) from the per-user-locked mutation path
@@ -33,7 +33,7 @@ const RATE = Number(__ENV.RATE || 5);
 
 const DISTINCT_PRODUCTS = Number(__ENV.DISTINCT_PRODUCTS || 0);
 const USER_POOL = Number(__ENV.USER_POOL || 0);
-const SEED_PASSWORD = __ENV.SEED_PASSWORD || 'LoadTest1!';
+const SEED_PASSWORD = __ENV.SEED_PASSWORD || '';
 const SEED_EMAIL_FORMAT = __ENV.SEED_EMAIL_FORMAT || 'loadtest+%d@example.test';
 // HOLD stretches the steady window (default 120s) — long holds host sequential L3
 // trace captures inside ONE run, so all captures share identical knobs by construction.
@@ -74,6 +74,9 @@ const SETUP_SEARCH = `query($storeId: String!, $userId: String!, $currencyCode: 
 }`;
 
 export function setup() {
+    if (USER_POOL > 0 && !SEED_PASSWORD) {
+        throw new Error('SEED_PASSWORD is required when USER_POOL>0 (seeded-user pool password)');
+    }
     const pool = USER_POOL > 0 ? getAuthPool(BASE_URL, USER_POOL, SEED_EMAIL_FORMAT, SEED_PASSWORD) : null;
     const users = pool || [getAuth(BASE_URL)];
 

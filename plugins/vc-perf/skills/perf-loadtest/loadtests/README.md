@@ -1,9 +1,7 @@
 # loadtests — L2 walking skeleton (k6, T0 tier)
 
 The missing middle of the perf loop (**bench → load → diagnose → optimize**): a k6 load
-harness against the local Aspire-hosted backend, per the L2 design
-([`../docs/research/2026-06-17-vc-benchmark-l2-coverage.md`](../docs/research/2026-06-17-vc-benchmark-l2-coverage.md),
-§5 profiles, §8 discipline, §11 first step). **T0 tier**: k6 binary + `dotnet-counters`,
+harness against the local Aspire-hosted backend. **T0 tier**: k6 binary + `dotnet-counters`,
 file-first artifacts, no Grafana/TSDB — the consumer of the results is an agent, not a dashboard.
 
 The scenarios and queries here script the **standard vc-frontend** storefront GraphQL operations
@@ -14,8 +12,8 @@ your own frontend before using them for load testing.
 ## Prerequisites
 
 - Backend up via Aspire (`cd ../../aspire-host && aspire run`), GraphQL at `https://localhost:8090/graphql`.
-- k6 binary at `~/dev/virto/.tools/k6` (or on PATH). Single Go binary, no Node.
-- Credentials: `PERF_API_USER` / `PERF_API_PASSWORD` env vars (fallback `~/.secrets/claude.env`).
+- k6 binary on PATH (or point `K6` at it). Single Go binary, no Node.
+- Credentials: `PERF_API_USER` / `PERF_API_PASSWORD` env vars (required).
 - Optional: `dotnet-counters` (`dotnet tool install -g dotnet-counters`) for backend CPU/GC/threadpool capture.
 
 ## Run
@@ -81,7 +79,7 @@ Every measured operation uses the **standard vc-frontend** GraphQL document (`..
 fragments inlined for k6 since it sends one document per request). Product discovery (both
 scenarios) uses a minimal, non-storefront setup query — see `setup()`.
 
-## Measurement discipline (from the L2 note)
+## Measurement discipline
 
 - HTTP 200 with a GraphQL `errors` body **counts as failure** (`gql()` checks both).
 - Per-operation latency via `http_req_duration{name:<op>}` sub-metrics; thresholds are loose
@@ -90,7 +88,7 @@ scenarios) uses a minimal, non-storefront setup query — see `setup()`.
 - Artifacts land in `results/<profile>/<stamp>-<sha>.summary.json` (+ `.counters.csv` when
   `dotnet-counters` is available) — commit SHA in the name so runs compare like-with-like.
 - **Co-location caveat:** k6 + backend + DB on one machine → relative comparisons only, no
-  absolute CPU claims (§8). State the topology with every number.
+  absolute CPU claims. State the topology with every number.
 - L2 is noisy: compare distributions across repeated runs, never single p95s.
 
 ## Orchestration gotchas (cost real time once, 2026-07-09)
@@ -105,10 +103,10 @@ scenarios) uses a minimal, non-storefront setup query — see `setup()`.
 
 ## Not yet built (next increments)
 
-- Full-surface **smoke sweep** over the operation catalog (§9.2) — the skeleton scenarios cover
-  the §9.1 Class-A representative, the order terminal flow, and the read-path subject.
-- Mutation × read **interleave** profile (the `CartProducts` race probe, §5).
+- Full-surface **smoke sweep** over the operation catalog — the skeleton scenarios cover
+  the Class-A representative, the order terminal flow, and the read-path subject.
+- Mutation × read **interleave** profile (the `CartProducts` race probe).
 - `USER_POOL` read band — N distinct cached aggregates (memory-footprint axis of the aggregate
   cache); `cart-read-loop` supports the pool, the band run hasn't been done.
-- DB seed/reset step between runs (§7) — currently no cleanup between runs; plan DB hygiene
+- DB seed/reset step between runs — currently no cleanup between runs; plan DB hygiene
   separately for your project.
