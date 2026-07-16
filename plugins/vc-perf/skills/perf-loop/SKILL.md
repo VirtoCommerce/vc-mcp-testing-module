@@ -95,11 +95,16 @@ State which axis your hypothesis is about BEFORE measuring, and report results p
   cross-session baseline. A frame merely shrinking needs a same-session A/B with identical knobs.
 - **Results are RELATIVE.** Single-VU, co-located k6 + backend + DB on a dev machine: deltas
   and shares are trustworthy, absolute numbers are not.
-- **Claude Code sandbox:** k6, `dotnet-trace`/`dotnet-counters` attach, and anything dialing
-  `127.0.0.1` fail inside the sandbox (hidden process table, blocked localhost) — run those
-  commands with the sandbox disabled. Symptom: k6 gets `connect: connection refused` while a
-  sandboxed `curl https://localhost:8090/health` returns 200 — looks like the backend is down;
-  it isn't.
+- **Claude Code sandbox (the full loop runs from inside a CC session — no host terminal):** the
+  tools work because they are in `sandbox.excludedCommands` (`curl:*`, `dotnet:*`, `k6:*`,
+  `bash …/run.sh:*`, `bash …/l3-capture.sh:*`, `dotnet-trace:*`), which run them OUTSIDE the
+  seccomp. **NEVER pass
+  `dangerouslyDisableSandbox: true`** — counter-intuitively it makes AF_UNIX `socket()` fail EPERM
+  and breaks `dotnet-trace` (a bare, non-excluded `dotnet-trace` also fails `SocketException(13)`).
+  Run `run.sh` normally (k6 dials localhost fine); invoke dotnet-trace via the excluded `dotnet`
+  host and attach with `--diagnostic-port <socket>,connect` (NOT `-p <pid>` — the PID namespace
+  hides the host pid); `-o` must be absolute (`$TMPDIR` is empty in the excluded env). Full recipe
+  + `l3-capture.sh`: the `perf-trace` skill's `perftools/README.md` → "Agentic run".
 - **Keep evidence.** Raw parser output and counters CSVs go to your project's evidence dir;
   findings get a dated note in your project's research/notes dir (see its own README/index for
   the map).

@@ -16,7 +16,53 @@ L3 runs against the live backend while an L2 scenario drives traffic.
 dotnet tool install -g dotnet-counters dotnet-trace dotnet-gcdump
 ```
 
-Find the backend pid: `dotnet-counters ps` (look for `VirtoCommerce.Platform.Web`).
+Find the backend process — the real app host, not a `dotnet run`/watch launcher: `dotnet-counters ps`
+(or `dotnet-trace ps`) and pick the app binary (`PLATFORM_PROCESS` from your profile, default
+`VirtoCommerce.Platform.Web`). On Git Bash where `pgrep` is absent, `dotnet-counters ps | grep` works.
+
+## Agentic run from a sandboxed agent session (e.g. Claude Code)
+
+The whole loop can run from inside a sandboxed agent session — no host terminal. Use `l3-capture.sh`
+(wraps the recipe + gotchas — it must be in your allowlist, see the wrapper bullet) or the raw
+`dotnet … collect` command (always covered by `dotnet:*`). Rules that cost real time to learn:
+
+- **NEVER disable the sandbox** for a dotnet-trace call (`dangerouslyDisableSandbox: true` in Claude
+  Code) — counter-intuitively it makes AF_UNIX `socket()` fail EPERM (worse, not better). Run normally.
+- **Invoke via the `dotnet` host, not bare `dotnet-trace`.** The agent's exec allowlist (Claude Code:
+  `sandbox.excludedCommands` — `dotnet:*`, `dotnet-trace:*`) runs the command OUTSIDE the seccomp that
+  otherwise blocks the AF_UNIX/epoll syscalls .NET's `Socket` ctor needs (a bare sandboxed
+  `dotnet-trace` fails `SocketException(13)`). If `dotnet-trace:*` isn't allow-listed, call the DLL
+  through the host: `dotnet $(find ~/.dotnet/tools/.store/dotnet-trace -name dotnet-trace.dll -path '*/tools/*'|head -1) collect ...`
+- **If you use the `l3-capture.sh` wrapper, allow-list it too** (`bash …/l3-capture.sh:*`, mirroring
+  `run.sh`). The agent matches `excludedCommands` on the TOP-LEVEL command and descendants inherit the
+  jail — an un-allow-listed wrapper runs inside seccomp and re-jails its child `dotnet`, reproducing the
+  EPERM this section prevents. Can't add it? Run the raw `dotnet "$DLL" collect …` line directly (it
+  matches `dotnet:*`).
+- **Use `--diagnostic-port <socket>,connect`, not `-p <pid>`.** A sandboxed session is in its own PID
+  namespace, so `-p` (and `dotnet-trace ps`) can't see the host process. The diagnostic socket is
+  visible in the shared `/tmp` (`/tmp/dotnet-diagnostic-<pid>-*-socket`) — the pid is embedded in the
+  filename, which is what `l3-capture.sh` takes as its first arg.
+- **The pid is the REAL app host, not a launcher.** A `dotnet run`/watch host — or an orchestrator like
+  Aspire that runs `dotnet run --build` — shows a launcher pid whose trace is idle MSBuild/CLI frames.
+  Find the app by tracing candidate sockets ~5s each: the app's trace is tens of MB (~hundreds of
+  threads) with VirtoCommerce/Kestrel/Hangfire frames; the launcher's is small with MSBuild frames.
+- **`-o` must be ABSOLUTE** — `$TMPDIR` is empty in the excluded environment, so a relative/`$TMPDIR`
+  path resolves at `/` → permission denied. Point it at a writable results dir.
+
+```bash
+# CPU/thread capture under an L2 load window (100s) — wrapper (needs `bash …/l3-capture.sh:*` allow-listed):
+bash ${CLAUDE_PLUGIN_ROOT}/skills/perf-trace/perftools/l3-capture.sh \
+  <APP_PID> dotnet-sampled-thread-time 00:01:40 /abs/path/to/results/trace.nettrace
+# …or the raw line, always covered by dotnet:* (no extra allow-listing):
+dotnet $(find ~/.dotnet/tools/.store/dotnet-trace -name dotnet-trace.dll -path '*/tools/*'|head -1) \
+  collect --diagnostic-port /tmp/dotnet-diagnostic-<APP_PID>-<disamb>-socket,connect \
+  --profile dotnet-sampled-thread-time --duration 00:01:40 -o /abs/path/to/results/trace.nettrace
+# then parse (file-based app; `dotnet run` is excluded too):
+dotnet run ${CLAUDE_PLUGIN_ROOT}/skills/perf-trace/perftools/cpuparse.cs /abs/path/to/results/trace.nettrace 40 > out.txt
+```
+
+L2 (k6) needs no special handling: the `run.sh` invocation is in the allowlist, so it dials the backend
+fine — just run it (no sandbox-disable).
 
 ## Which tool for which question
 

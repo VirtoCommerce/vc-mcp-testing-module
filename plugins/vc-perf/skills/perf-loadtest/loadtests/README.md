@@ -55,9 +55,11 @@ endpoint for this) — adapt to whatever seeding mechanism your project provides
 USER_POOL=50 RATE=20 loadtests/run.sh steady
 ```
 
-> **Claude Code sandbox note:** k6 (a Go binary) gets `connection refused` dialing
-> `127.0.0.1` from inside the CC bash sandbox while `curl` succeeds — run `run.sh` with the
-> sandbox disabled.
+> **Claude Code sandbox note:** `bash …/run.sh:*` is in `sandbox.excludedCommands`, so the run
+> executes OUTSIDE the CC sandbox and k6 dials the backend fine — just run it normally. Do **NOT**
+> pass `dangerouslyDisableSandbox` (it doesn't help here and breaks AF_UNIX for sibling tooling
+> like `dotnet-trace`). For L3 trace capture during the load window, see the `perf-trace` skill's
+> `perftools/README.md` → "Agentic run".
 
 ## Scenarios
 
