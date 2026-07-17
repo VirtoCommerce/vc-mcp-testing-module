@@ -2,7 +2,7 @@
 name: qa-test-cases-generator
 description: "[QA Method] Generate agent-native test cases in enriched CSV format from JIRA tickets, features, checklists, or existing suites. Uses business logic invariants and edge case library."
 argument-hint: "VCST-XXXX | domain | suite ID | migrate <suite> | from-checklist <domain>"
-disable-model-invocation: true
+
 ---
 
 # /qa-test-cases-generator — Agent-Native Test Case Generation
@@ -212,9 +212,31 @@ ID, Title, Section, Priority, Business_Rule, Edge_Case_Refs, Preconditions, Test
 - [ ] **References** — **REQUIRED for Critical/High:** JIRA ticket (`VCST-XXXX`), `REQ-*` ID, or user-story link. `BL-*` IDs alone do NOT satisfy this — those belong in `Business_Rule`. Infrastructure/smoke cases use `smoke-baseline` placeholder (never empty).
 - [ ] **Automation_Status** — `Draft` for just-generated cases (default out of this skill). Promote to `Reviewed` only after `/qa-review-tests` returns ≥ PASS WITH WARNINGS AND a human/`qa-lead-orchestrator` approves. `Automated`/`Manual`/`Semi-Automated` = execution mode (implies Reviewed).
 
+### Step 4.5: Provenance tagging (ground every assertion)
+
+Generation is offline, so you tag by best-available source. For **each assertion line**, append a
+`{...}` provenance tag (grammar in `test-case-template.md` → Assertions column):
+
+1. **`{SPEC}`** — the expected behavior is stated in the **tracker ticket's** requirement/AC (Jira or
+   Azure Boards). This is the workhorse for a new feature.
+2. **`{BL}`** — it restates a real `BL-*`/`BL-UI-*` invariant from `business-logic.md`.
+3. **`{DOC}`** — you confirmed it in VirtoOZ docs or product source (`/vc-docs`,
+   `PlatformFrontendSourceCode`, an i18n file). Only tag `{DOC}` if you actually looked it up.
+4. **`{HYPOTHESIS}`** — none of the above; it is an educated guess of a plausible bug. **Phrase it as a
+   question** ("verify whether…"), never as a fact. Do NOT invent literal message strings on these lines
+   (assert the semantic — literal-text rule).
+
+Do **not** emit `{OBSERVED}` during generation — that class is reserved for the live `--verify` pass,
+which is the only step that may confirm a behavior against the deployed build. **New-feature path:**
+offline you will have mostly `{SPEC}` + `{HYPOTHESIS}`; those must be live-verified (upgraded to
+`{OBSERVED}`) by a mandatory `--verify` run before the suite can be promoted past `Draft`.
+
 ### Step 5: Validate & Output
 
 1. **Self-review each case** against the writing guidelines in `test-case-template.md`:
+   - **Every assertion carries a provenance tag** (`{SPEC}`/`{BL}`/`{DOC}`/`{HYPOTHESIS}`); no untagged
+     lines. No literal message/validation strings on `{HYPOTHESIS}` or unconfirmed `{SPEC}` lines —
+     assert the semantic (literal-text rule, DV-016 twin)
    - No assertions mixed into Steps
    - No hardcoded URLs/emails/passwords (all `{{VAR}}`); no hardcoded entity-specific values — IDs, SKUs, prices, addresses, coupons, test cards, order numbers — all resolved via `@td(ALIAS.field)` against [`test-data/aliases.json`](../../../test-data/aliases.json) (see `../testing/qa-postman/test-data-fixtures.md`)
    - Every mutation has `errors[]` check in Cross_Layer_Checks
@@ -326,8 +348,15 @@ Generated test cases route to the correct executing agent by layer:
 
 ## Rules
 
+- **Ground before you assert** — every assertion carries a provenance tag; anything not traceable to `{SPEC}`/`{BL}`/`{DOC}` is a `{HYPOTHESIS}` phrased as a question, and no `{HYPOTHESIS}`/untagged case reaches `Reviewed`. For a new feature (no doc/source), the mandatory `--verify` live pass upgrades hypotheses to `{OBSERVED}`. Never invent literal message strings — assert the semantic (literal-text rule).
 - **Bug hypothesis first** — every case must answer: "what real bug does this catch?" If you cannot answer, do not generate the case. Coverage numbers are vanity metrics.
 - **Minimum effective set** — a smaller suite of targeted cases is better than a large suite of shallow ones. Prefer 5 focused cases over 20 that repeat the same failure mode.
+- **Suite sizing & packing (one suite = one runnable unit)** — pack cases so each CSV is a single feature/module area that **one isolated agent reads and runs in one session** (`/qa-regression` dispatches exactly one QA-expert agent per CSV, batched 3 at a time — the browser pool):
+  - **Target ~20–40 cases per CSV** (repo median is 28). ≤20 is fine for a small feature; treat **>40 as a signal to split**, not a target to fill.
+  - **Split by feature with a suffix**, never by growing one file: `040a/040b/040c` (payment processors), `050b1–050b5` (xCart), `072/072b/072c/072d` (configurable products). Each split suite stays scoped to one runner.
+  - **Cap expensive browser-driven suites at ≤8 cases** — long runner sessions (>2h) produce unreliable results; a suite must finish inside its CI turn/time budget (`MAX_TURNS` default 100, ~10 min per suite).
+  - **Never pad to hit a number** — cull duplicates first (Step 3 §6), then split only when the *legitimate* case count outgrows one session. Smoke aggregators (042/078) are deliberate exceptions.
+  - **Counts live only in `config/test-suites.json`** (`testCount` per suite) — never restate them in the CSV, the suites README, or here. Regenerate/verify with `npm run suites:sync` / `npm run suites:lint`.
 - **Format is non-negotiable** — every case MUST use all 15 columns from `test-case-template.md`
 - **No vague assertions** — "page loads correctly" is not an assertion. Use `[DOM] product title visible` or `[NAV] URL matches /product/*`
 - **No compound steps** — one action per `[ACT]` line. Wrong: `click Add to Cart and verify badge`. Right: separate `[ACT]` and `[ASSERT]`. This rule still applies inside journey cases — each action is one `[ACT]`; the journey is built from many sequential `[ACT]`/`[ASSERT]` rounds, not from compound lines

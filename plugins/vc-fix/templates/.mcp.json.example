@@ -1,5 +1,5 @@
 {
-  "//": "TEMPLATE — copy to .mcp.json (gitignored) and replace every <PLACEHOLDER>. Restart the MCP servers after editing. Windows uses `cmd /c npx`; on Linux/macOS drop the `cmd` + `/c` and call `npx` directly.",
+  "//": "TEMPLATE — copy to .mcp.json (gitignored) and replace every <PLACEHOLDER>. Restart the MCP servers after editing. Windows uses `cmd /c npx`; on Linux/macOS drop the `cmd` + `/c` and call `npx` directly (gen-mcp.mjs does this automatically).",
 
   "mcpServers": {
     "playwright-chrome": {
@@ -9,8 +9,13 @@
         "/c",
         "npx",
         "@playwright/mcp@latest",
-        "--config",
-        "config/mcp-playwright-chrome.config.json"
+        "--browser",
+        "chrome",
+        "--isolated",
+        "--viewport-size",
+        "1920x1080",
+        "--output-dir",
+        "test-results/chrome"
       ]
     },
     "playwright-firefox": {
@@ -20,8 +25,13 @@
         "/c",
         "npx",
         "@playwright/mcp@latest",
-        "--config",
-        "config/mcp-playwright-firefox.config.json"
+        "--browser",
+        "firefox",
+        "--isolated",
+        "--viewport-size",
+        "1920x1080",
+        "--output-dir",
+        "test-results/firefox"
       ]
     },
     "playwright-edge": {
@@ -31,8 +41,13 @@
         "/c",
         "npx",
         "@playwright/mcp@latest",
-        "--config",
-        "config/mcp-playwright-edge.config.json"
+        "--browser",
+        "msedge",
+        "--isolated",
+        "--viewport-size",
+        "1920x1080",
+        "--output-dir",
+        "test-results/edge"
       ]
     },
     "Chrome DevTools": {
