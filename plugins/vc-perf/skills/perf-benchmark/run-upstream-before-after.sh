@@ -13,7 +13,7 @@
 # before/after share a FullName and the JSON drops the Job label).
 #
 # Usage:
-#   run-upstream-before-after.sh <cart|order> <upstream-baseline-ref> [--filter <pattern>]
+#   run-upstream-before-after.sh <target> <upstream-baseline-ref> [--filter <pattern>]
 #     [--job dry|short|default] [--alloc-threshold <pct>] [--time-threshold <pct>] [--upstream-root <dir>]
 #
 #   upstream-baseline-ref  the "before" revision IN THE UPSTREAM REPO (e.g. dev, a SHA, a tag). The
@@ -25,17 +25,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() {
     cat >&2 <<'USAGE'
 Usage:
-  run-upstream-before-after.sh <cart|order> <upstream-baseline-ref> [--filter <pattern>]
+  run-upstream-before-after.sh <target> <upstream-baseline-ref> [--filter <pattern>]
     [--categories <c1,c2,...>] [--job dry|short|default] [--alloc-threshold <pct>]
     [--time-threshold <pct>] [--upstream-root <dir>]
 
-  cart|order             which upstream module (vc-module-x-cart / vc-module-x-order).
+  target                 which upstream module — an entry from perf.benchmark.xapiTargets (e.g.
+                         cart, order); resolves to vc-module-x-<target> by convention, override
+                         via UPSTREAM_REPO_<TARGET> / UPSTREAM_RUNNER_DIR_<TARGET>.
   upstream-baseline-ref  the "before" revision in the UPSTREAM repo. Its working tree is "after".
   --filter               BenchmarkDotNet filter (default '*'). Scope to ONE operation.
   --categories           Comma-separated BenchmarkCategory names (e.g. items,configuration) → BDN
                          --anyCategories. Scope to an AREA. Composes with --filter (intersection).
   --job                  dry (smoke, default) | short | default. Only `default` lets the TIME axis gate.
-  --upstream-root        workspace holding vc-module-x-cart / vc-module-x-order (default: 3 levels up).
+  --upstream-root        workspace holding the upstream vc-module-x-* checkouts (default: the repo's parent — sibling checkouts).
 
   SCOPE: prefer --filter (one operation) or --categories (one area). Do NOT run the full suite ('*')
   in the loop — it is ~13h measured. Measure only what your change touches.
@@ -54,7 +56,8 @@ shift 2
 FILTER='*'
 CATEGORIES=()
 JOB='dry'
-UPSTREAM_ROOT=''
+# honors the UPSTREAM_ROOT env (fed from perf.benchmark.upstreamRoot via /perf-init); --upstream-root wins
+UPSTREAM_ROOT="${UPSTREAM_ROOT:-}"
 COMPARE_EXTRA=()
 
 while [[ $# -gt 0 ]]; do
@@ -75,22 +78,21 @@ CAT_FLAGS=()
 [[ ${#CATEGORIES[@]} -gt 0 ]] && CAT_FLAGS=(--anyCategories "${CATEGORIES[@]}")
 
 REPO="$(git rev-parse --show-toplevel)"
-# override via perf.benchmark.upstreamRoot
-[[ -z "$UPSTREAM_ROOT" ]] && UPSTREAM_ROOT="$(cd "$REPO/../../.." && pwd)"
+# default: sibling checkouts (workspace = the repo's parent dir); deeper monorepo nestings set
+# perf.benchmark.upstreamRoot (env UPSTREAM_ROOT) or pass --upstream-root
+[[ -z "$UPSTREAM_ROOT" ]] && UPSTREAM_ROOT="$(cd "$REPO/.." && pwd)"
 
-case "$DOMAIN" in
-    cart)
-        UP_REPO="$UPSTREAM_ROOT/vc-module-x-cart"
-        RUNNER_DIR="benchmarks/VirtoCommerce.XCart.Benchmark" ;;
-    order)
-        UP_REPO="$UPSTREAM_ROOT/vc-module-x-order"
-        RUNNER_DIR="benchmarks/VirtoCommerce.XOrder.Benchmark" ;;
-    *)
-        echo "Domain must be 'cart' or 'order', got '$DOMAIN'." >&2; exit 2 ;;
-esac
+# The target set is open (any entry from perf.benchmark.xapiTargets); the upstream repo and its
+# runner dir default to the VC benchmark-engine convention (vc-module-x-<target>), override via
+# UPSTREAM_REPO_<TARGET> / UPSTREAM_RUNNER_DIR_<TARGET> for a non-standard layout.
+TARGET_KEY="$(tr '[:lower:]-' '[:upper:]_' <<< "$DOMAIN")"
+up_repo_var="UPSTREAM_REPO_${TARGET_KEY}"
+up_runner_var="UPSTREAM_RUNNER_DIR_${TARGET_KEY}"
+UP_REPO="$UPSTREAM_ROOT/${!up_repo_var:-vc-module-x-${DOMAIN}}"
+RUNNER_DIR="${!up_runner_var:-benchmarks/VirtoCommerce.X${DOMAIN^}.Benchmark}"
 
 if [[ ! -d "$UP_REPO/.git" && ! -f "$UP_REPO/.git" ]]; then
-    echo "Upstream repo not found: $UP_REPO (set --upstream-root)." >&2
+    echo "Upstream repo not found: $UP_REPO (set --upstream-root, or ${up_repo_var} for a non-standard layout)." >&2
     exit 2
 fi
 
@@ -108,7 +110,8 @@ case "$JOB" in
     *) echo "--job must be dry|short|default, got '$JOB'." >&2; exit 2 ;;
 esac
 
-WORKTREE="$(mktemp -d)/upstream-baseline"
+WORKTREE_PARENT="$(mktemp -d)"
+WORKTREE="$WORKTREE_PARENT/upstream-baseline"
 # Each side is the run's results DIRECTORY, not a single file: BenchmarkDotNet writes one
 # *-report-full-compressed.json per benchmark class, so a multi-class scope (--categories, or a broad
 # --filter) emits several. compare-reports.cs reads the whole directory and merges them. The two runs use
@@ -118,6 +121,7 @@ CUR_RESULTS="$UP_REPO/$RUNNER_DIR/BenchmarkDotNet.Artifacts/results"
 
 cleanup() {
     git -C "$UP_REPO" worktree remove --force "$WORKTREE" 2>/dev/null || true
+    rm -rf "$WORKTREE_PARENT"
 }
 trap cleanup EXIT
 

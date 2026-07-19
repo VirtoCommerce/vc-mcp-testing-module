@@ -11,7 +11,8 @@ your own frontend before using them for load testing.
 
 ## Prerequisites
 
-- Backend up via Aspire (`cd ../../aspire-host && aspire run`), GraphQL at `https://localhost:8090/graphql`.
+- Backend up — via Aspire (`cd <your-aspire-host-dir> && aspire run`, see `perf.aspireHostPath` in the
+  profile) or any other way; GraphQL at `<perf.backendUrl>/graphql`.
 - k6 binary on PATH (or point `K6` at it). Single Go binary, no Node.
 - Credentials: `PERF_API_USER` / `PERF_API_PASSWORD` env vars (required).
 - Optional: `dotnet-counters` (`dotnet tool install -g dotnet-counters`) for backend CPU/GC/threadpool capture.
@@ -38,7 +39,8 @@ run so all captures share identical knobs by construction) ·
 best case for per-product memoization; N = discover up to N distinct buyable products and cycle
 them across items — the realistic-mix band; setup logs how many were actually found) ·
 `SKIP_ORDER=0` (enable the `createOrderFromCart` leg — see «Order leg» below) · `BASE_URL` ·
-`STORE_ID` (your store id) · `USER_POOL` (multi-user concurrency, see below) ·
+`STORE_ID` (your store id) · `CURRENCY_CODE` / `CULTURE_NAME` (store currency and culture,
+defaults `USD` / `en-US`) · `USER_POOL` (multi-user concurrency, see below) ·
 `SEED_PASSWORD` / `SEED_EMAIL_FORMAT`.
 
 ## User pool (multi-user concurrency)

@@ -4,6 +4,8 @@ import { STORE } from '../config.js';
 
 // Token dance for explicit credentials: acquire in setup(), reuse across VUs.
 // Returns { token, userId } with userId decoded from the JWT `sub`/`nameid` claim.
+// NOTE: tokens are acquired once and never refreshed — keep a run's total duration under the
+// backend's access-token TTL (long soak runs would need a refresh path; not implemented).
 export function getAuthForUser(baseUrl, username, password) {
     const res = http.post(
         `${baseUrl}/connect/token`,

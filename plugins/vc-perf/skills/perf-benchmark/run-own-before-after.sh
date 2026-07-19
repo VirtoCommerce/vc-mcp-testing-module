@@ -19,11 +19,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() {
     cat >&2 <<'USAGE'
 Usage:
-  run-own-before-after.sh <baseline-git-ref> <cart|order> [--filter <pattern>] [--categories <c1,c2,...>]
+  run-own-before-after.sh <baseline-git-ref> <target> [--filter <pattern>] [--categories <c1,c2,...>]
                       [--job dry|short|default] [--alloc-threshold <pct>] [--time-threshold <pct>]
 
   baseline-git-ref  the "before" revision (dev, a commit SHA, a tag). The current working tree is "after".
-  cart|order        which benchmark runner to drive.
+  target            which benchmark runner to drive — an entry from perf.benchmark.xapiTargets
+                    (e.g. cart, order). Runner dir = RUNNER_DIR_<TARGET> env if set, else
+                    benchmarks/<BENCH_PREFIX>.Benchmark.<Target>.
   --filter          BenchmarkDotNet filter (default '*' — all cases). Scope to ONE operation, e.g.
                     '*ChangeCartItemQuantity*'.
   --categories      Comma-separated BenchmarkCategory names (e.g. items,configuration) → BDN
@@ -68,13 +70,12 @@ CAT_FLAGS=()
 
 # runner dirs come from perf.benchmark.runnerDirs; BENCH_PREFIX is the per-project benchmark
 # project prefix. No default — a wrong guess would silently point at the wrong project's
-# runner dirs; set it via env or /perf-init from the profile.
+# runner dirs; set it via env or /perf-init from the profile. The target set is open (any entry
+# from perf.benchmark.xapiTargets): RUNNER_DIR_<TARGET> env wins, else the conventional layout.
 BENCH_PREFIX="${BENCH_PREFIX:?set BENCH_PREFIX (your benchmark project prefix, e.g. Acme.MainModule) — see /perf-init}"
-case "$RUNNER" in
-    cart) RUNNER_DIR="${RUNNER_DIR_CART:-benchmarks/${BENCH_PREFIX}.Benchmark.Cart}" ;;
-    order) RUNNER_DIR="${RUNNER_DIR_ORDER:-benchmarks/${BENCH_PREFIX}.Benchmark.Order}" ;;
-    *) echo "Runner must be 'cart' or 'order', got '$RUNNER'." >&2; exit 2 ;;
-esac
+TARGET_KEY="$(tr '[:lower:]-' '[:upper:]_' <<< "$RUNNER")"
+runner_dir_var="RUNNER_DIR_${TARGET_KEY}"
+RUNNER_DIR="${!runner_dir_var:-benchmarks/${BENCH_PREFIX}.Benchmark.${RUNNER^}}"
 
 # Job → (run flags, compare-reports.cs --job-kind). Both runners take native BenchmarkDotNet --job
 # (Decision A dropped the cart-only --smoke/--short aliases from the shared BenchmarkProgram), so there
@@ -93,7 +94,8 @@ if ! git -C "$REPO" cat-file -e "${BASELINE_REF}^{commit}" 2>/dev/null; then
     exit 2
 fi
 
-WORKTREE="$(mktemp -d)/perf-baseline"
+WORKTREE_PARENT="$(mktemp -d)"
+WORKTREE="$WORKTREE_PARENT/perf-baseline"
 # Each side is the run's results DIRECTORY, not a single file: BenchmarkDotNet writes one
 # *-report-full-compressed.json per benchmark class, so a multi-class scope (--categories, or a broad
 # --filter spanning classes) emits several. compare-reports.cs reads the whole directory and merges them.
@@ -104,6 +106,7 @@ CUR_RESULTS="$REPO/$RUNNER_DIR/BenchmarkDotNet.Artifacts/results"
 
 cleanup() {
     git -C "$REPO" worktree remove --force "$WORKTREE" 2>/dev/null || true
+    rm -rf "$WORKTREE_PARENT"
 }
 trap cleanup EXIT
 

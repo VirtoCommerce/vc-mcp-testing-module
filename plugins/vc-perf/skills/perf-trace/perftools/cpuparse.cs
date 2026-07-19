@@ -58,6 +58,12 @@ foreach (var d in log.Events)
     }
     byOwner[owner] = byOwner.GetValueOrDefault(owner) + 1;
 }
+if (total == 0)
+{
+    Console.Error.WriteLine("cpuparse: no CPU sample events in this trace — wrong profile (need dotnet-sampled-thread-time / cpu-sampling) or an empty capture.");
+    Environment.Exit(1);
+}
+
 Console.WriteLine($"# CPU samples (on-CPU only): {total}");
 Console.WriteLine($"\n## Top {topN} SELF (leaf) methods by CPU sample %");
 foreach (var kv in byLeaf.OrderByDescending(x => x.Value).Take(topN))

@@ -39,6 +39,12 @@ using (var src = new EventPipeEventSource(path))
     src.Process();
 }
 
+if (total == 0)
+{
+    Console.Error.WriteLine("allocparse: no GCAllocationTick events in this trace — wrong profile (need gc-verbose) or an empty capture.");
+    Environment.Exit(1);
+}
+
 Console.WriteLine($"# GCAllocationTick total (sampled): {total / 1e9:F2} GB across all threads/iterations");
 Console.WriteLine($"# NOTE: GCAllocationTick samples ~ every 100KB allocated per heap; magnitudes are representative, not exact.\n");
 Console.WriteLine($"## Top {topN} allocated TYPES");

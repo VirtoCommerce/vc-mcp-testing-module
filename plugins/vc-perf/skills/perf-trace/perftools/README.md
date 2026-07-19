@@ -24,7 +24,10 @@ Find the backend process — the real app host, not a `dotnet run`/watch launche
 
 The whole loop can run from inside a sandboxed agent session — no host terminal. Use `l3-capture.sh`
 (wraps the recipe + gotchas — it must be in your allowlist, see the wrapper bullet) or the raw
-`dotnet … collect` command (always covered by `dotnet:*`). Rules that cost real time to learn:
+`dotnet … collect` command (always covered by `dotnet:*`). Outside a sandbox the wrapper degrades
+gracefully: the socket route is Linux-only, and when no `/tmp` socket exists (Windows uses named
+pipes) it falls back to plain `dotnet-trace collect -p <pid>` — so the same command line works from
+a host terminal on any OS. Rules that cost real time to learn:
 
 - **NEVER disable the sandbox** for a dotnet-trace call (`dangerouslyDisableSandbox: true` in Claude
   Code) — counter-intuitively it makes AF_UNIX `socket()` fail EPERM (worse, not better). Run normally.

@@ -5,7 +5,7 @@ description: Run the L2 k6 load harness against the live Aspire-hosted backend a
 
 # perf-loadtest — L2 of the three-layer performance loop
 
-The middle layer of the loop (**L1 bench → L2 load → L3 diagnose**, see skill `virto-perf-loop`
+The middle layer of the loop (**L1 bench → L2 load → L3 diagnose**, see skill `perf-loop`
 for the router and cross-layer discipline). L2 drives the real backend with k6 and answers "how
 does the system behave under load" — throughput, p95 latency, error rate, GC counters — as
 opposed to L1's mocked-I/O code-level verdict or L3's WHY-attribution.
@@ -25,6 +25,9 @@ skips):
 
 ```bash
 BASE_URL="$(jq -r .perf.backendUrl project-profile.json)" \
+  STORE_ID="$(jq -r .perf.storeId project-profile.json)" \
+  CURRENCY_CODE="$(jq -r '.perf.currencyCode // "USD"' project-profile.json)" \
+  CULTURE_NAME="$(jq -r '.perf.cultureName // "en-US"' project-profile.json)" \
   PLATFORM_PROCESS="$(jq -r '.perf.platformProcess // "VirtoCommerce.Platform.Web"' project-profile.json)" \
   ${CLAUDE_PLUGIN_ROOT}/skills/perf-loadtest/loadtests/run.sh steady
 ```
@@ -49,5 +52,5 @@ your project:
 ## Role in the loop
 
 Use L2 to answer "how does N/RATE affect latency/GC on the real stack?" — for "did my code
-change regress?" use L1 (`virto-perf-benchmark`); for "who is responsible?" run L3
-(`virto-perf-trace` skill / `perftools/`) under an L2 scenario driving load.
+change regress?" use L1 (`perf-benchmark`); for "who is responsible?" run L3
+(`perf-trace` skill / `perftools/`) under an L2 scenario driving load.

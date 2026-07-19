@@ -12,11 +12,11 @@
 # differently is two different operations, not an overhead delta. Filter to full mutations / commands.
 #
 # Usage:
-#   run-vs-upstream.sh <cart|order> [--filter <pattern>] [--job dry|short|default]
+#   run-vs-upstream.sh <target> [--filter <pattern>] [--job dry|short|default]
 #                      [--alloc-threshold <pct>] [--time-threshold <pct>] [--upstream-root <dir>]
 #
-#   --upstream-root   workspace dir holding vc-module-x-cart / vc-module-x-order
-#                     (default: three levels above this module's repo root).
+#   --upstream-root   workspace dir holding the upstream vc-module-x-* checkouts
+#                     (default: the repo's parent dir — sibling checkouts).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,15 +24,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() {
     cat >&2 <<'USAGE'
 Usage:
-  run-vs-upstream.sh <cart|order> [--filter <pattern>] [--categories <c1,c2,...>] [--job dry|short|default]
+  run-vs-upstream.sh <target> [--filter <pattern>] [--categories <c1,c2,...>] [--job dry|short|default]
                      [--alloc-threshold <pct>] [--time-threshold <pct>] [--upstream-root <dir>]
 
-  cart|order      which domain to compare (this module's runner vs the upstream module's runner).
+  target          which target to compare (this module's runner vs the upstream module's runner) —
+                  an entry from perf.benchmark.xapiTargets (e.g. cart, order). Own runner dir comes
+                  from RUNNER_DIR_<TARGET>; upstream defaults to vc-module-x-<target>, override via
+                  UPSTREAM_REPO_<TARGET> / UPSTREAM_RUNNER_DIR_<TARGET>.
   --filter        BenchmarkDotNet filter (default '*'). Prefer full operations over isolated methods.
   --categories    Comma-separated BenchmarkCategory names (e.g. items,configuration) → BDN
                   --anyCategories. Scope to an AREA. Composes with --filter (intersection).
   --job           dry (smoke, default) | short | default. Only `default` lets the TIME axis gate.
-  --upstream-root workspace holding vc-module-x-cart / vc-module-x-order (default: 3 levels up).
+  --upstream-root workspace holding the upstream vc-module-x-* checkouts (default: the repo's parent — sibling checkouts).
 
   SCOPE: prefer --filter (one operation) or --categories (one area). Do NOT run the full suite ('*')
   in the optimization loop — it is ~13h measured. Measure only what your change touches.
@@ -50,7 +53,8 @@ shift
 FILTER='*'
 CATEGORIES=()
 JOB='dry'
-UPSTREAM_ROOT=''
+# honors the UPSTREAM_ROOT env (fed from perf.benchmark.upstreamRoot via /perf-init); --upstream-root wins
+UPSTREAM_ROOT="${UPSTREAM_ROOT:-}"
 COMPARE_EXTRA=()
 
 while [[ $# -gt 0 ]]; do
@@ -71,24 +75,24 @@ CAT_FLAGS=()
 [[ ${#CATEGORIES[@]} -gt 0 ]] && CAT_FLAGS=(--anyCategories "${CATEGORIES[@]}")
 
 REPO="$(git rev-parse --show-toplevel)"
-# override via perf.benchmark.upstreamRoot
-[[ -z "$UPSTREAM_ROOT" ]] && UPSTREAM_ROOT="$(cd "$REPO/../../.." && pwd)"
+# default: sibling checkouts (workspace = the repo's parent dir); deeper monorepo nestings set
+# perf.benchmark.upstreamRoot (env UPSTREAM_ROOT) or pass --upstream-root
+[[ -z "$UPSTREAM_ROOT" ]] && UPSTREAM_ROOT="$(cd "$REPO/.." && pwd)"
 
 # runner dirs come from perf.benchmark.runnerDirs. No default — a wrong guess would silently
-# point at the wrong project's runner dir; set via env or /perf-init from the profile.
-case "$DOMAIN" in
-    cart)
-        OWN_DIR="$REPO/${RUNNER_DIR_CART:?set RUNNER_DIR_CART (path to your cart benchmark runner) — see /perf-init}"
-        UP_DIR="$UPSTREAM_ROOT/vc-module-x-cart/benchmarks/VirtoCommerce.XCart.Benchmark" ;;
-    order)
-        OWN_DIR="$REPO/${RUNNER_DIR_ORDER:?set RUNNER_DIR_ORDER (path to your order benchmark runner) — see /perf-init}"
-        UP_DIR="$UPSTREAM_ROOT/vc-module-x-order/benchmarks/VirtoCommerce.XOrder.Benchmark" ;;
-    *)
-        echo "Domain must be 'cart' or 'order', got '$DOMAIN'." >&2; exit 2 ;;
-esac
+# point at the wrong project's runner dir; set via env or /perf-init from the profile. The target
+# set is open (any entry from perf.benchmark.xapiTargets); the upstream side defaults to the VC
+# benchmark-engine convention (vc-module-x-<target>), override via UPSTREAM_REPO_<TARGET> /
+# UPSTREAM_RUNNER_DIR_<TARGET> for a non-standard layout.
+TARGET_KEY="$(tr '[:lower:]-' '[:upper:]_' <<< "$DOMAIN")"
+runner_dir_var="RUNNER_DIR_${TARGET_KEY}"
+OWN_DIR="$REPO/${!runner_dir_var:?set ${runner_dir_var} (path to your ${DOMAIN} benchmark runner) — see /perf-init}"
+up_repo_var="UPSTREAM_REPO_${TARGET_KEY}"
+up_runner_var="UPSTREAM_RUNNER_DIR_${TARGET_KEY}"
+UP_DIR="$UPSTREAM_ROOT/${!up_repo_var:-vc-module-x-${DOMAIN}}/${!up_runner_var:-benchmarks/VirtoCommerce.X${DOMAIN^}.Benchmark}"
 
 if [[ ! -d "$UP_DIR" ]]; then
-    echo "Upstream runner not found: $UP_DIR (set --upstream-root)." >&2
+    echo "Upstream runner not found: $UP_DIR (set --upstream-root, or ${up_repo_var} / ${up_runner_var} for a non-standard layout)." >&2
     exit 2
 fi
 

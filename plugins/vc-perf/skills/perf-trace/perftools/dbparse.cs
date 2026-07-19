@@ -10,7 +10,8 @@ using Microsoft.Diagnostics.Tracing;
 // Usage: dbparse <trace.nettrace> [inspect]
 //
 // Attributes DB command load from a `dotnet-trace collect --profile database` capture. Default
-// mode aggregates EF Core command events (count + duration by normalized SQL shape). `inspect`
+// mode aggregates EF Core command events (count by normalized SQL shape — volume + rate answer
+// "how much DB work"; per-command duration isn't in the default capture). `inspect`
 // mode lists every provider/event with counts — run it first on a new capture to confirm the
 // event names this build emits, then adjust the command-event matching below if needed.
 if (args.Length < 1)

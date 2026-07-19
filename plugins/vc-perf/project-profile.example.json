@@ -5,6 +5,8 @@
     "aspireHostPath": "../../aspire-host",
     "platformProcess": "VirtoCommerce.Platform.Web",
     "storeId": "<your-store-id>",
+    "currencyCode": "USD",
+    "cultureName": "en-US",
     "benchmark": {
       "xapiTargets": ["cart", "order"],
       "benchPrefix": "<YourProject>.MainModule",
@@ -12,7 +14,7 @@
         "cart": "benchmarks/<YourProject>.MainModule.Benchmark.Cart",
         "order": "benchmarks/<YourProject>.MainModule.Benchmark.Order"
       },
-      "upstreamRoot": "../..",
+      "upstreamRoot": "..",
       "categories": ["items", "configuration", "checkout", "recalculate", "validation"]
     },
     "loadtest": {

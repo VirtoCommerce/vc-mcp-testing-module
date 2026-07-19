@@ -34,6 +34,8 @@ config. Do NOT duplicate vc-fix's onboarding, tracker/host/auth questions, or pr
 3. **Add the `perf` block to `project-profile.json`** — additive deepMerge, never rewrite the
    vc-fix profile. Ask only what is perf-specific and not already derivable:
    - how the backend runs locally → `perf.aspireHostPath` (Aspire) or `perf.backendUrl` (plain URL)
+   - the store context for load tests → `perf.storeId` + `perf.currencyCode` / `perf.cultureName`
+     (defaults `USD` / `en-US`)
    - the platform process name for trace attribution → `perf.platformProcess` (default `VirtoCommerce.Platform.Web`)
    - which XAPI modules the project extends (L1 candidates) → `perf.benchmark.xapiTargets` + `runnerDirs`
    - load-test fixtures (a buyable product / org / config ids) — discover from the live catalog where

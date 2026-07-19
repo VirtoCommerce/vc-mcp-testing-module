@@ -53,7 +53,9 @@ fi
 : "${PERF_API_PASSWORD:?PERF_API_PASSWORD not set}"
 export PERF_API_USER PERF_API_PASSWORD
 
-SHA=$(git -C "$DIR/.." rev-parse --short HEAD)
+# Artifact stamp: the revision of the code UNDER TEST — the consumer repo you invoke this from
+# (cwd), not the plugin install dir. Non-git cwd (or no git) degrades to "nogit", never aborts.
+SHA=$(git rev-parse --short HEAD 2>/dev/null || echo nogit)
 STAMP=$(date +%Y%m%d-%H%M%S)
 OUT="$DIR/results/$PROFILE"
 if [ "$SCENARIO" != "cart-order-loop" ]; then
@@ -119,12 +121,16 @@ stop_sidecars() {
 trap stop_sidecars EXIT
 
 echo "k6 run: scenario=$SCENARIO profile=$PROFILE sha=$SHA base=$BASE_URL"
+# A k6 threshold breach exits non-zero — a valid verdict, not a script failure. Suspend
+# `set -e` around the run so the artifact printout and exit-code propagation below still happen.
+set +e
 "$K6" run \
     -e PROFILE="$PROFILE" \
     -e BASE_URL="$BASE_URL" \
     -e SUMMARY_PATH="$SUMMARY" \
     "$SCENARIO_FILE"
 K6_EXIT=$?
+set -e
 
 stop_sidecars
 trap - EXIT

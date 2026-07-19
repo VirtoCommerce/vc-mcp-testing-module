@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Agentic L3 trace capture against the running backend from inside a SANDBOXED AGENT session
 # (e.g. Claude Code) — no host terminal needed. See perftools/README.md → "Agentic run".
+# Outside a sandbox it degrades gracefully: the Unix-socket route is Linux-only, so when no
+# socket is found (Windows uses named pipes) it falls back to plain `dotnet-trace collect -p`.
 #
 # Usage:
 #   l3-capture.sh <backend-pid> <profile> <duration> <output-abs-path>
@@ -36,16 +38,28 @@ DURATION="${3:-00:01:40}"
 OUT="${4:?absolute output path required}"
 
 case "$OUT" in
-    /*) : ;;
-    *) echo "l3-capture: output must be an ABSOLUTE path (excluded env has empty TMPDIR)"; exit 2 ;;
+    /*|[A-Za-z]:*) : ;;
+    *) echo "l3-capture: output must be an ABSOLUTE path (relative paths are unreliable across hosts/sandboxes)"; exit 2 ;;
 esac
 
-# `|| true` so a no-match doesn't trip `set -e`/`pipefail` before the friendly guard below fires.
-DLL=$(find "$HOME/.dotnet/tools/.store/dotnet-trace" -name dotnet-trace.dll -path '*/tools/*' 2>/dev/null | head -1) || true
-[ -n "$DLL" ] || { echo "l3-capture: dotnet-trace.dll not found (dotnet tool install -g dotnet-trace)"; exit 3; }
-
+# Socket-first (Linux, incl. any sandboxed agent session): connect by diagnostic socket — no pid
+# lookup, works across PID namespaces. `|| true` so a no-match doesn't trip `set -e`/`pipefail`.
 SOCK=$(ls -t /tmp/dotnet-diagnostic-"${PID}"-*-socket 2>/dev/null | head -1) || true
-[ -n "$SOCK" ] || { echo "l3-capture: no diagnostic socket for pid $PID (wrong pid? check the backend)"; exit 4; }
+if [ -n "$SOCK" ]; then
+    # Prefer the DLL-through-`dotnet` form (sandbox exec-allowlist friendly — see WHY above);
+    # fall back to the tool shim when the global-tool store isn't at the default location.
+    DLL=$(find "$HOME/.dotnet/tools/.store/dotnet-trace" -name dotnet-trace.dll -path '*/tools/*' 2>/dev/null | head -1) || true
+    echo "l3-capture: pid=$PID sock=$SOCK profile=$PROFILE duration=$DURATION out=$OUT"
+    if [ -n "$DLL" ]; then
+        exec dotnet "$DLL" collect --diagnostic-port "${SOCK},connect" --profile "$PROFILE" --duration "$DURATION" -o "$OUT"
+    fi
+    command -v dotnet-trace >/dev/null 2>&1 || { echo "l3-capture: dotnet-trace not found (dotnet tool install -g dotnet-trace)"; exit 3; }
+    exec dotnet-trace collect --diagnostic-port "${SOCK},connect" --profile "$PROFILE" --duration "$DURATION" -o "$OUT"
+fi
 
-echo "l3-capture: pid=$PID sock=$SOCK profile=$PROFILE duration=$DURATION out=$OUT"
-exec dotnet "$DLL" collect --diagnostic-port "${SOCK},connect" --profile "$PROFILE" --duration "$DURATION" -o "$OUT"
+# No Unix socket — Windows (named-pipe transport, invisible to the /tmp glob) or a wrong pid.
+# Fall back to the standard by-pid invocation; requires a host terminal (from a sandboxed agent
+# session the pid is invisible — see WHY above) and dotnet-trace on PATH.
+command -v dotnet-trace >/dev/null 2>&1 || { echo "l3-capture: no diagnostic socket for pid $PID and dotnet-trace not on PATH (wrong pid? check the backend; dotnet tool install -g dotnet-trace)"; exit 4; }
+echo "l3-capture: pid=$PID (no Unix socket — using dotnet-trace -p) profile=$PROFILE duration=$DURATION out=$OUT"
+exec dotnet-trace collect -p "$PID" --profile "$PROFILE" --duration "$DURATION" -o "$OUT"

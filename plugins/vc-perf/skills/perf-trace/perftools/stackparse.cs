@@ -91,6 +91,14 @@ foreach (var d in log.Events)
     byChain[chain] = byChain.GetValueOrDefault(chain) + 1;
 }
 
+if (total == 0 || matched == 0)
+{
+    Console.Error.WriteLine(total == 0
+        ? "stackparse: no sample events in this trace — wrong profile or an empty capture."
+        : $"stackparse: 0 of {total} samples matched [needles: {string.Join(", ", needles)}] — check the needle list.");
+    Environment.Exit(1);
+}
+
 Console.WriteLine($"# Samples: {total} total, {matched} matched ({100.0 * matched / total:F2}%) [needles: {string.Join(", ", needles)}]");
 Console.WriteLine($"\n## Ranked responsible callers (first non-BCL frame above matched region)");
 foreach (var kv in byCaller.OrderByDescending(x => x.Value).Take(topN))

@@ -1,9 +1,9 @@
 ---
-name: virto-perf-benchmark
+name: perf-benchmark
 description: Run VirtoCommerce x-module BenchmarkDotNet suites (the XAPI targets configured in perf.benchmark.xapiTargets) and turn two runs into a machine-readable performance verdict. Use to check whether a change regressed allocations or time across two revisions of this module's own source, between this module's override and the upstream stock path, or across an upstream before/after. Advisory only — never a CI gate.
 ---
 
-# virto-perf-benchmark
+# perf-benchmark
 
 A local development & code-analysis instrument for the VirtoCommerce experience-API benchmark suites
 (the XAPI targets configured in `perf.benchmark.xapiTargets` — extensible to any module). It runs
@@ -140,7 +140,7 @@ runner. Mechanism: a git worktree at the baseline revision (never `git checkout`
 tree is in concurrent use) + the current tree, run each, compare.
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/skills/perf-benchmark/run-own-before-after.sh <baseline-ref> <cart|order> \
+${CLAUDE_PLUGIN_ROOT}/skills/perf-benchmark/run-own-before-after.sh <baseline-ref> <target> \
   [--filter <pattern>] [--categories <c1,c2,...>] [--job dry|short|default] [--alloc-threshold <pct>] [--time-threshold <pct>]
 
 # examples — ALWAYS scope (see "Scope your run"); never the bare full suite in the loop
@@ -164,7 +164,7 @@ runner vs the upstream module's runner. The runner namespaces + class names diff
 uses `--match method`; the upstream side is the baseline, so a ratio > 1 is this module's overhead.
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/skills/perf-benchmark/run-vs-upstream.sh <cart|order> \
+${CLAUDE_PLUGIN_ROOT}/skills/perf-benchmark/run-vs-upstream.sh <target> \
   [--filter <pattern>] [--categories <c1,c2,...>] [--job dry|short|default] [--upstream-root <dir>] [--alloc-threshold <pct>] [--time-threshold <pct>]
 
 run-vs-upstream.sh cart --filter '*ChangeCartItemQuantity*'   # Dry default; add --job default for trustworthy time (ask the human)
@@ -172,7 +172,15 @@ run-vs-upstream.sh cart --filter '*ChangeCartItemQuantity*'   # Dry default; add
 
 The helper runs the upstream runner (builds upstream from source, self-contained in its repo) and this
 module's runner, then `compare-reports.cs --match method <upstream.json> <own.json>`. `--upstream-root`
-defaults to three levels above this repo (the workspace holding `vc-module-x-cart` / `vc-module-x-order`).
+defaults to the repo's parent dir (sibling checkouts); deeper monorepo nestings set
+`perf.benchmark.upstreamRoot` (env `UPSTREAM_ROOT`).
+
+`<target>` is any entry from `perf.benchmark.xapiTargets` (e.g. `cart`, `order`). Each helper resolves
+the own runner dir from `RUNNER_DIR_<TARGET>` (see `/perf-init`); the upstream side defaults to the VC
+convention `vc-module-x-<target>/benchmarks/VirtoCommerce.X<Target>.Benchmark` and can be overridden per
+target via `UPSTREAM_REPO_<TARGET>` / `UPSTREAM_RUNNER_DIR_<TARGET>` for a non-standard layout. (Today
+the upstream benchmark engines ship for Cart and Order; any module that gains one works by the same
+convention with no plugin change.)
 
 > **Validity**: compare FULL operations (`ChangeCartItemQuantity`, `CreateOrderFromCart`, …), not an
 > isolated overridden method. Where this module *reimplements* a method wholesale (e.g. `RecalculateAsync`),
@@ -184,7 +192,7 @@ defaults to three levels above this repo (the workspace holding `vc-module-x-car
 two upstream revisions (this module is not involved). Same runner both sides → `--match fullname`.
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/skills/perf-benchmark/run-upstream-before-after.sh <cart|order> <upstream-baseline-ref> \
+${CLAUDE_PLUGIN_ROOT}/skills/perf-benchmark/run-upstream-before-after.sh <target> <upstream-baseline-ref> \
   [--filter <pattern>] [--categories <c1,c2,...>] [--job dry|short|default] [--upstream-root <dir>] [--alloc-threshold <pct>] [--time-threshold <pct>]
 
 run-upstream-before-after.sh cart dev --filter '*CreateOrderFromCart*'   # Dry default; add --job default for trustworthy time (ask the human)

@@ -6,7 +6,7 @@ description: Capture a dotnet-trace / dotnet-counters session against the live b
 # perf-trace — L3 of the three-layer performance loop
 
 The attribution layer of the loop (**L1 bench → L2 load → L3 diagnose**, see skill
-`virto-perf-loop` for the router and cross-layer discipline). L3 runs against the live backend
+`perf-loop` for the router and cross-layer discipline). L3 runs against the live backend
 **while an L2 scenario drives traffic**, and answers WHY — which code is responsible for what L2
 observed.
 

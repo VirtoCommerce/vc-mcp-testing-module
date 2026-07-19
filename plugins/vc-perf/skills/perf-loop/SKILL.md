@@ -1,15 +1,15 @@
 ---
-name: virto-perf-loop
+name: perf-loop
 description: >
   Orchestrates the three-layer performance loop (bench → load → diagnose → optimize → verify)
   on the local Aspire-hosted backend. Use when the user asks to "run the perf loop", "load test
   X", "profile the backend", "where do the allocations come from", "why is this operation slow",
   or to verify a performance fix end-to-end. Routes to the right layer and tool; does not
-  duplicate them. For pure BenchmarkDotNet before/after comparison use `virto-perf-benchmark` directly.
+  duplicate them. For pure BenchmarkDotNet before/after comparison use `perf-benchmark` directly.
 user-invocable: true
 ---
 
-# virto-perf-loop — the three-layer performance loop
+# perf-loop — the three-layer performance loop
 
 The loop: **L1 bench → L2 load → L3 diagnose → optimize → verify (re-run L1 + L2/L3)**.
 Each layer has its own harness and its own doc — this skill is the router and the
@@ -19,7 +19,7 @@ write-ups before starting a new one.
 
 | Layer | Harness | Doc / skill | Answers |
 |---|---|---|---|
-| L1 | `${CLAUDE_PLUGIN_ROOT}/skills/perf-benchmark/` (BenchmarkDotNet, I/O mocked) | skill `virto-perf-benchmark` | Did MY code's alloc/time envelope regress? (machine-readable verdict) |
+| L1 | `${CLAUDE_PLUGIN_ROOT}/skills/perf-benchmark/` (BenchmarkDotNet, I/O mocked) | skill `perf-benchmark` | Did MY code's alloc/time envelope regress? (machine-readable verdict) |
 | L2 | `${CLAUDE_PLUGIN_ROOT}/skills/perf-loadtest/loadtests/` (k6, full real stack) | `perf-loadtest/loadtests/README.md` | How does the running system behave under load? (p95, counters) |
 | L3 | `${CLAUDE_PLUGIN_ROOT}/skills/perf-trace/perftools/` + dotnet-counters/trace | `perf-trace/perftools/README.md` | WHY — which code is responsible? (attribution) |
 
@@ -27,7 +27,7 @@ write-ups before starting a new one.
 
 | Question shape | Entry point |
 |---|---|
-| "did my change regress?" (code-level, before/after) | L1: `virto-perf-benchmark` (Dry alloc verdict, seconds) |
+| "did my change regress?" (code-level, before/after) | L1: `perf-benchmark` (Dry alloc verdict, seconds) |
 | "how does N/RATE affect latency/GC on the real stack?" | L2: `${CLAUDE_PLUGIN_ROOT}/skills/perf-loadtest/loadtests/run.sh` |
 | "who allocates / who burns CPU / where is the time?" | L3 under L2 load: `${CLAUDE_PLUGIN_ROOT}/skills/perf-trace/perftools/README.md` decision matrix |
 | "verify a fix end-to-end" | full loop: L2+L3 baseline → apply fix → rebuild → L2+L3 again → L1 verdict if the change is bench-visible |
@@ -78,7 +78,8 @@ State which axis your hypothesis is about BEFORE measuring, and report results p
 3. **Trace second**: STOP counters (EventPipe conflicts — see `perf-trace/perftools/README.md`
    gotchas), then `dotnet-trace collect` with the profile the axis calls for, under the same k6
    scenario.
-4. Parse with `${CLAUDE_PLUGIN_ROOT}/skills/perf-trace/perftools/allocparse` / `cpuparse`;
+4. Parse with the perftools file-based apps —
+   `dotnet run ${CLAUDE_PLUGIN_ROOT}/skills/perf-trace/perftools/allocparse.cs` / `cpuparse.cs`;
    attribute to the responsible frames.
 5. Fix → redeploy (backend rebuild via Aspire) → repeat 2–4 with identical knobs (`ITEMS`,
    `RATE`, scenario) → compare.
