@@ -86,7 +86,7 @@ case "$JOB" in
     *) echo "--job must be dry|short|default, got '$JOB'." >&2; exit 2 ;;
 esac
 
-REPO="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+REPO="$(git rev-parse --show-toplevel)"
 
 if ! git -C "$REPO" cat-file -e "${BASELINE_REF}^{commit}" 2>/dev/null; then
     echo "Baseline ref '$BASELINE_REF' is not a valid commit in $REPO." >&2

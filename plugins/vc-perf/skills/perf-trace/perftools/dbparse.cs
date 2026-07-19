@@ -108,17 +108,18 @@ string Normalize(string sql)
     var s = sql.TrimStart();
     var verb = new string(s.TakeWhile(char.IsLetter).ToArray()).ToUpperInvariant();
     var table = "";
-    var idx = s.IndexOf(verb switch
+    var token = verb switch
     {
         "SELECT" => "FROM ",
         "DELETE" => "FROM ",
         "INSERT" => "INTO ",
         "UPDATE" => "UPDATE ",
         _ => " ",
-    }, StringComparison.OrdinalIgnoreCase);
+    };
+    var idx = s.IndexOf(token, StringComparison.OrdinalIgnoreCase);
     if (idx >= 0)
     {
-        var after = s[(idx + 5)..].TrimStart('"', ' ');
+        var after = s[(idx + token.Length)..].TrimStart('"', ' ');
         table = new string(after.TakeWhile(c => char.IsLetterOrDigit(c) || c is '_' or '.').ToArray());
     }
 

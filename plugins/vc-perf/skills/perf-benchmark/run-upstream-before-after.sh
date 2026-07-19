@@ -74,7 +74,7 @@ done
 CAT_FLAGS=()
 [[ ${#CATEGORIES[@]} -gt 0 ]] && CAT_FLAGS=(--anyCategories "${CATEGORIES[@]}")
 
-REPO="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+REPO="$(git rev-parse --show-toplevel)"
 # override via perf.benchmark.upstreamRoot
 [[ -z "$UPSTREAM_ROOT" ]] && UPSTREAM_ROOT="$(cd "$REPO/../../.." && pwd)"
 

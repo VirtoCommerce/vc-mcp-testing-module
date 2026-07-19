@@ -35,6 +35,7 @@ const SKIP_ORDER = __ENV.SKIP_ORDER !== '0';
 const USER_POOL = Number(__ENV.USER_POOL || 0);
 const SEED_PASSWORD = __ENV.SEED_PASSWORD || '';
 const SEED_EMAIL_FORMAT = __ENV.SEED_EMAIL_FORMAT || 'loadtest+%d@example.test';
+const HOLD = __ENV.HOLD || '120s';
 
 // smoke = liveness (1 VU, 3 iterations); steady = open-model ramp → hold
 // (ramping-arrival-rate keeps arrivals independent of response time).
@@ -47,7 +48,7 @@ const profiles = {
         preAllocatedVUs: 50,
         stages: [
             { target: RATE, duration: '10s' },
-            { target: RATE, duration: '120s' },
+            { target: RATE, duration: HOLD },
         ],
     },
 };
