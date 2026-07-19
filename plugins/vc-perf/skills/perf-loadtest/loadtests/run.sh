@@ -13,7 +13,31 @@ DIR=$(cd "$(dirname "$0")" && pwd)
 PROFILE="${1:-smoke}"
 BASE_URL="${BASE_URL:-https://localhost:8090}"
 SCENARIO="${SCENARIO:-cart-order-loop}"
-SCENARIO_FILE="$DIR/scenarios/$SCENARIO.js"
+
+# PAYLOAD_DIR lets a consumer project supply its own scenarios/ (+ optional queries/)
+# while reusing this plugin's stable transport (lib/) and config.js. Empty/unset keeps
+# today's behaviour unchanged: run the plugin's own bundled scenarios from $DIR.
+RUN_DIR="$DIR"
+if [ -n "${PAYLOAD_DIR:-}" ]; then
+    if [ ! -d "$PAYLOAD_DIR" ]; then
+        echo "PAYLOAD_DIR not found: $PAYLOAD_DIR" >&2
+        exit 1
+    fi
+    if [ ! -d "$PAYLOAD_DIR/scenarios" ]; then
+        echo "PAYLOAD_DIR has no scenarios/: $PAYLOAD_DIR" >&2
+        exit 1
+    fi
+    RUN_DIR="$(mktemp -d)"
+    trap 'rm -rf "$RUN_DIR"' EXIT
+    cp -r "$DIR/lib" "$RUN_DIR/"
+    cp "$DIR/config.js" "$RUN_DIR/"
+    cp -r "$PAYLOAD_DIR/scenarios" "$RUN_DIR/"
+    if [ -d "$PAYLOAD_DIR/queries" ]; then
+        cp -r "$PAYLOAD_DIR/queries" "$RUN_DIR/"
+    fi
+fi
+
+SCENARIO_FILE="$RUN_DIR/scenarios/$SCENARIO.js"
 if [ ! -f "$SCENARIO_FILE" ]; then
     echo "scenario not found: $SCENARIO_FILE" >&2
     exit 1
@@ -85,6 +109,11 @@ stop_sidecars() {
     if [ -n "$COUNTERS_PID" ]; then
         kill -INT "$COUNTERS_PID" 2>/dev/null || true
         wait "$COUNTERS_PID" 2>/dev/null || true
+    fi
+    # Folds in the PAYLOAD_DIR ephemeral run-dir cleanup — this trap replaces the one set
+    # right after mktemp, so RUN_DIR removal has to live here too, not just at mktemp time.
+    if [ "$RUN_DIR" != "$DIR" ]; then
+        rm -rf "$RUN_DIR"
     fi
 }
 trap stop_sidecars EXIT
