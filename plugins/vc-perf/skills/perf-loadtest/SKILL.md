@@ -35,6 +35,18 @@ BASE_URL="$(jq -r .perf.backendUrl project-profile.json)" \
 Full knob list, prerequisites (k6 binary, credentials, `dotnet-counters`), the user-pool mechanism
 for multi-user concurrency, and orchestration gotchas: `loadtests/README.md`.
 
+### `perf.loadtest.*` profile keys are operator-bridged, not auto-read
+
+`run.sh` and the k6 scenarios read **env vars only** (k6 has no direct file-read access to the
+profile) — the `perf.loadtest` keys in `project-profile.json` are not piped in automatically:
+
+- `perf.loadtest.fixtures.productIds` — export `PRODUCT_IDS=<comma-separated ids>` yourself (e.g.
+  `PRODUCT_IDS="$(jq -r '.perf.loadtest.fixtures.productIds | join(",")' project-profile.json)"`)
+  before invoking `run.sh`; the scenarios read `__ENV.PRODUCT_IDS`, not the profile file.
+- `perf.loadtest.seedEndpoint` — currently **reserved/unused**: no script or scenario in this
+  harness reads it. Treat it as documentation of where a seed-users endpoint lives, not a wired
+  knob, until a consumer is added.
+
 ## Scenarios and queries ship as standard vc-frontend examples — adapt per project
 
 Everything under `loadtests/scenarios/` and `loadtests/queries/` scripts the **standard

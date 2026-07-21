@@ -31,7 +31,7 @@ write-ups before starting a new one.
 | "how does N/RATE affect latency/GC on the real stack?" | L2: `${CLAUDE_PLUGIN_ROOT}/skills/perf-loadtest/loadtests/run.sh` |
 | "who allocates / who burns CPU / where is the time?" | L3 under L2 load: `${CLAUDE_PLUGIN_ROOT}/skills/perf-trace/perftools/README.md` decision matrix |
 | "verify a fix end-to-end" | full loop: L2+L3 baseline → apply fix → rebuild → L2+L3 again → L1 verdict if the change is bench-visible |
-| "what SHOULD I suspect in this hot path?" (pre-measurement) | optional L0 hypothesis pass — the loop verifies, never trusts it: (a) VC-specific antipatterns → `knowledge/vc-perf-antipatterns.md`; (b) generic .NET → `dotnet-diag:analyzing-dotnet-performance`; (c) when the suspect path is EF → `dotnet-data:optimizing-ef-core-queries`. (b)/(c) are soft prerequisites — see the L0 note below |
+| "what SHOULD I suspect in this hot path?" (pre-measurement) | optional L0 hypothesis pass — the loop verifies, never trusts it: (a) VC-specific antipatterns → `${CLAUDE_PLUGIN_ROOT}/knowledge/vc-perf-antipatterns.md`; (b) generic .NET → `dotnet-diag:analyzing-dotnet-performance`; (c) when the suspect path is EF → `dotnet-data:optimizing-ef-core-queries`. (b)/(c) are soft prerequisites — see the L0 note below |
 
 Marketplace composition (see your project's evidence/notes dir for the comparison writeup):
 `dotnet-diag:microbenchmarking` backs L1 BDN internals; adding
@@ -45,7 +45,7 @@ PerfView-only — the TraceEvent parsers can't decode it yet. Plain `collect` st
 `optimizing-ef-core-queries`). vc-perf does NOT hard-depend on them (they are a different
 marketplace) — `/perf-init` detects them and prints the `/plugin marketplace add VirtoCommerce/... ` +
 `/plugin install` commands to add them if missing. The VC-specific L0 list
-(`knowledge/vc-perf-antipatterns.md`) ships with vc-perf and needs no prerequisite.
+(`${CLAUDE_PLUGIN_ROOT}/knowledge/vc-perf-antipatterns.md`) ships with vc-perf and needs no prerequisite.
 
 **L1 blind spot (structural):** L1 mocks the repository/`DbContext`, so anything in the real
 save path (`SaveChangesAsync`, EF change tracking, triggers) does not exist there. A save-path

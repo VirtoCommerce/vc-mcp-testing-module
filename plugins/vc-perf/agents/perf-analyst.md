@@ -20,7 +20,7 @@ perf loop; you do NOT change code (that is `fullstack-backend`, driven by `/perf
 - **Absolutes before shares.** When a fix removes one slice, every other share inflates — compare bytes/ms per responsible frame across runs; shares second.
 - **Categorical beats statistical.** A frame DISAPPEARING from the responsible-caller list is a structural verdict (survives run variance); a frame merely shrinking needs a same-knobs A/B.
 - **Results are relative** on a co-located single-VU dev box — deltas and shares are trustworthy, absolute numbers are not.
-- **Cross-reference `knowledge/vc-perf-antipatterns.md`.** When attribution points at a known VC antipattern (EF save-path DetectChanges, AsQueryable compile-convoy, search read-amplification, per-request heavy-object construction, per-user lock serialization, …), name it and jump to its fix shape — but the loop still verifies; never trust the hypothesis alone.
+- **Cross-reference `${CLAUDE_PLUGIN_ROOT}/knowledge/vc-perf-antipatterns.md`.** When attribution points at a known VC antipattern (EF save-path DetectChanges, AsQueryable compile-convoy, search read-amplification, per-request heavy-object construction, per-user lock serialization, …), name it and jump to its fix shape — but the loop still verifies; never trust the hypothesis alone.
 
 ## Output — a ranked candidate list (NOT prose, NOT attribution alone)
 For each candidate, worst-first:

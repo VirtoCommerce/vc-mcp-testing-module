@@ -29,7 +29,7 @@ config. Do NOT duplicate vc-fix's onboarding, tracker/host/auth questions, or pr
      if not, print the commands to add them and let the operator opt in — do not force:
      `/plugin marketplace add VirtoCommerce/dotnet-agent-skills` (confirm the exact source) then
      `/plugin install dotnet-diag@... dotnet-data@...`. The VC-specific L0 list
-     (`knowledge/vc-perf-antipatterns.md`) ships with this plugin and needs nothing installed.
+     (`${CLAUDE_PLUGIN_ROOT}/knowledge/vc-perf-antipatterns.md`) ships with this plugin and needs nothing installed.
 
 3. **Add the `perf` block to `project-profile.json`** — additive deepMerge, never rewrite the
    vc-fix profile. Ask only what is perf-specific and not already derivable:
@@ -39,7 +39,10 @@ config. Do NOT duplicate vc-fix's onboarding, tracker/host/auth questions, or pr
    - the platform process name for trace attribution → `perf.platformProcess` (default `VirtoCommerce.Platform.Web`)
    - which XAPI modules the project extends (L1 candidates) → `perf.benchmark.xapiTargets` + `runnerDirs`
    - load-test fixtures (a buyable product / org / config ids) — discover from the live catalog where
-     possible, don't hardcode → `perf.loadtest.fixtures`
+     possible, don't hardcode → `perf.loadtest.fixtures`. Note: the harness does not read this key
+     directly — export it as `PRODUCT_IDS` (comma-separated) when invoking `run.sh` (see
+     `perf-loadtest/SKILL.md`). `perf.loadtest.seedEndpoint` is likewise recorded for reference only;
+     no script currently consumes it.
    See `project-profile.example.json` for the block shape.
 
 4. **Verify** — print the resolved `perf` block and the detected toolchain (which layers are runnable

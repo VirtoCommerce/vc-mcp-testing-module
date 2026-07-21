@@ -133,19 +133,21 @@ the `mean*` fields for decisions and rely on `allocStatus`. `benchmarks[]` is so
 Three scenarios, distinguished by *where the two sides come from*. They all reduce to "two JSON reports
 → compare-reports.cs".
 
-### 1. Own before/after — IMPLEMENTED
+### 1. Own before/after — IMPLEMENTED (harness) — requires benchmark runner projects in the target project
 
 "Did **my** change regress this module's paths?" Two revisions of *this* module's own source, same
 runner. Mechanism: a git worktree at the baseline revision (never `git checkout`/`stash` — the working
 tree is in concurrent use) + the current tree, run each, compare.
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/skills/perf-benchmark/run-own-before-after.sh <baseline-ref> <target> \
+BENCH_PREFIX=<your-benchmark-project-prefix> ${CLAUDE_PLUGIN_ROOT}/skills/perf-benchmark/run-own-before-after.sh <baseline-ref> <target> \
   [--filter <pattern>] [--categories <c1,c2,...>] [--job dry|short|default] [--alloc-threshold <pct>] [--time-threshold <pct>]
 
 # examples — ALWAYS scope (see "Scope your run"); never the bare full suite in the loop
-run-own-before-after.sh HEAD~1 cart --filter '*ChangeCartItemQuantity*'   # one operation (Dry default → alloc verdict, seconds)
-run-own-before-after.sh HEAD~1 cart --categories items,configuration       # one area (Dry default)
+# BENCH_PREFIX is required (no default — see run-own-before-after.sh); use the project's own
+# benchmark project prefix, e.g. Acme.MainModule for benchmarks/Acme.MainModule.Benchmark.Cart
+BENCH_PREFIX=Acme.MainModule run-own-before-after.sh HEAD~1 cart --filter '*ChangeCartItemQuantity*'   # one operation (Dry default → alloc verdict, seconds)
+BENCH_PREFIX=Acme.MainModule run-own-before-after.sh HEAD~1 cart --categories items,configuration       # one area (Dry default)
 # add --job default ONLY for a trustworthy time number — and ask the human first (tens of minutes)
 ```
 
@@ -157,7 +159,7 @@ lets the time axis gate, `dry`/`short` keep it advisory). It exits with compare-
 > the cart-only `--smoke`/`--short` aliases from the shared `BenchmarkProgram`), so the helper passes
 > `--job` uniformly — no per-runner dialect to hide.
 
-### 2. Own vs upstream — IMPLEMENTED
+### 2. Own vs upstream — IMPLEMENTED (harness) — requires benchmark runner projects in the target project
 
 "How much overhead does my override add over the stock path?" The *same* benchmark on this module's
 runner vs the upstream module's runner. The runner namespaces + class names differ by design, so this
@@ -186,7 +188,7 @@ convention with no plugin change.)
 > isolated overridden method. Where this module *reimplements* a method wholesale (e.g. `RecalculateAsync`),
 > the two sides are different operations, not an overhead delta — the ratio there is meaningless.
 
-### 3. Dependency before/after — IMPLEMENTED
+### 3. Dependency before/after — IMPLEMENTED (harness) — requires benchmark runner projects in the target project
 
 "Did an **upstream** change regress?" A property of the upstream module, measured on its own runner at
 two upstream revisions (this module is not involved). Same runner both sides → `--match fullname`.

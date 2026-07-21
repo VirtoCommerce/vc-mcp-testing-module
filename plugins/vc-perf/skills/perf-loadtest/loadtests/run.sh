@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # T0 runner: k6 + dotnet-counters, file-first artifacts.
 # Usage: loadtests/run.sh [smoke|steady]
-# Env knobs forwarded to the scenario: BASE_URL, ITEMS, RATE, PRODUCT_ID,
-# PRODUCT_FILTER, SKIP_ORDER. SCENARIO picks the scenario file (basename under
-# scenarios/, default cart-order-loop). PLATFORM_PROCESS names the backend host binary
-# for the EventPipe sidecar (default VirtoCommerce.Platform.Web; feed from profile
-# perf.platformProcess). Credentials: PERF_API_USER / PERF_API_PASSWORD (required env).
-# No secrets are printed or passed via argv.
+# Env knobs forwarded to the scenario: BASE_URL, ITEMS, RATE, PRODUCT_ID, PRODUCT_IDS,
+# PRODUCT_FILTER, DISTINCT_PRODUCTS, SKIP_ORDER, STORE_ID. USER_POOL, SEED_PASSWORD,
+# SEED_EMAIL_FORMAT configure the multi-user seeding pool (see README.md). SCENARIO picks
+# the scenario file (basename under scenarios/, default cart-order-loop). PLATFORM_PROCESS
+# names the backend host binary for the EventPipe sidecar (default
+# VirtoCommerce.Platform.Web; feed from profile perf.platformProcess). Credentials:
+# PERF_API_USER / PERF_API_PASSWORD (required env). No secrets are printed or passed via argv.
 set -euo pipefail
 
 DIR=$(cd "$(dirname "$0")" && pwd)
