@@ -17,21 +17,26 @@ cross-layer discipline. A fully worked end-to-end example lives in your project'
 evidence/notes dir (see the discipline section below) — check there for prior loop
 write-ups before starting a new one.
 
+> **Resolving `$pluginRoot`**: every path below uses `$pluginRoot` as a placeholder for this
+> plugin's active install path — resolve it once per task via `claude plugin list --json` (see
+> [`../../knowledge/plugin-root.md`](../../knowledge/plugin-root.md)) and reuse it. It is NOT a
+> shell variable and `$CLAUDE_PLUGIN_ROOT` does **not** expand in the Bash tool shell.
+
 | Layer | Harness | Doc / skill | Answers |
 |---|---|---|---|
-| L1 | `${CLAUDE_PLUGIN_ROOT}/skills/perf-benchmark/` (BenchmarkDotNet, I/O mocked) | skill `perf-benchmark` | Did MY code's alloc/time envelope regress? (machine-readable verdict) |
-| L2 | `${CLAUDE_PLUGIN_ROOT}/skills/perf-loadtest/loadtests/` (k6, full real stack) | `perf-loadtest/loadtests/README.md` | How does the running system behave under load? (p95, counters) |
-| L3 | `${CLAUDE_PLUGIN_ROOT}/skills/perf-trace/perftools/` + dotnet-counters/trace | `perf-trace/perftools/README.md` | WHY — which code is responsible? (attribution) |
+| L1 | `$pluginRoot/skills/perf-benchmark/` (BenchmarkDotNet, I/O mocked) | skill `perf-benchmark` | Did MY code's alloc/time envelope regress? (machine-readable verdict) |
+| L2 | `$pluginRoot/skills/perf-loadtest/loadtests/` (k6, full real stack) | `perf-loadtest/loadtests/README.md` | How does the running system behave under load? (p95, counters) |
+| L3 | `$pluginRoot/skills/perf-trace/perftools/` + dotnet-counters/trace | `perf-trace/perftools/README.md` | WHY — which code is responsible? (attribution) |
 
 ## Step 0 — route the question
 
 | Question shape | Entry point |
 |---|---|
 | "did my change regress?" (code-level, before/after) | L1: `perf-benchmark` (Dry alloc verdict, seconds) |
-| "how does N/RATE affect latency/GC on the real stack?" | L2: `${CLAUDE_PLUGIN_ROOT}/skills/perf-loadtest/loadtests/run.sh` |
-| "who allocates / who burns CPU / where is the time?" | L3 under L2 load: `${CLAUDE_PLUGIN_ROOT}/skills/perf-trace/perftools/README.md` decision matrix |
+| "how does N/RATE affect latency/GC on the real stack?" | L2: `$pluginRoot/skills/perf-loadtest/loadtests/run.sh` |
+| "who allocates / who burns CPU / where is the time?" | L3 under L2 load: `$pluginRoot/skills/perf-trace/perftools/README.md` decision matrix |
 | "verify a fix end-to-end" | full loop: L2+L3 baseline → apply fix → rebuild → L2+L3 again → L1 verdict if the change is bench-visible |
-| "what SHOULD I suspect in this hot path?" (pre-measurement) | optional L0 hypothesis pass — the loop verifies, never trusts it: (a) VC-specific antipatterns → `${CLAUDE_PLUGIN_ROOT}/knowledge/vc-perf-antipatterns.md`; (b) generic .NET → `dotnet-diag:analyzing-dotnet-performance`; (c) when the suspect path is EF → `dotnet-data:optimizing-ef-core-queries`. (b)/(c) are soft prerequisites — see the L0 note below |
+| "what SHOULD I suspect in this hot path?" (pre-measurement) | optional L0 hypothesis pass — the loop verifies, never trusts it: (a) VC-specific antipatterns → `$pluginRoot/knowledge/vc-perf-antipatterns.md`; (b) generic .NET → `dotnet-diag:analyzing-dotnet-performance`; (c) when the suspect path is EF → `dotnet-data:optimizing-ef-core-queries`. (b)/(c) are soft prerequisites — see the L0 note below |
 
 Marketplace composition (see your project's evidence/notes dir for the comparison writeup):
 `dotnet-diag:microbenchmarking` backs L1 BDN internals; adding
@@ -45,7 +50,7 @@ PerfView-only — the TraceEvent parsers can't decode it yet. Plain `collect` st
 `optimizing-ef-core-queries`). vc-perf does NOT hard-depend on them (they are a different
 marketplace) — `/perf-init` detects them and prints the `/plugin marketplace add VirtoCommerce/... ` +
 `/plugin install` commands to add them if missing. The VC-specific L0 list
-(`${CLAUDE_PLUGIN_ROOT}/knowledge/vc-perf-antipatterns.md`) ships with vc-perf and needs no prerequisite.
+(`$pluginRoot/knowledge/vc-perf-antipatterns.md`) ships with vc-perf and needs no prerequisite.
 
 **L1 blind spot (structural):** L1 mocks the repository/`DbContext`, so anything in the real
 save path (`SaveChangesAsync`, EF change tracking, triggers) does not exist there. A save-path
@@ -73,13 +78,13 @@ State which axis your hypothesis is about BEFORE measuring, and report results p
    wrong pid, not "no allocations". If module DLLs were overlaid, also check the pid's start
    time postdates the deploy.
 2. **Counters first** (cheap envelope): start `dotnet-counters monitor/collect` in the
-   background, drive load with `${CLAUDE_PLUGIN_ROOT}/skills/perf-loadtest/loadtests/run.sh`,
+   background, drive load with `$pluginRoot/skills/perf-loadtest/loadtests/run.sh`,
    harvest the CSV when the k6 summary lands.
 3. **Trace second**: STOP counters (EventPipe conflicts — see `perf-trace/perftools/README.md`
    gotchas), then `dotnet-trace collect` with the profile the axis calls for, under the same k6
    scenario.
 4. Parse with the perftools file-based apps —
-   `dotnet run ${CLAUDE_PLUGIN_ROOT}/skills/perf-trace/perftools/allocparse.cs` / `cpuparse.cs`;
+   `dotnet run $pluginRoot/skills/perf-trace/perftools/allocparse.cs` / `cpuparse.cs`;
    attribute to the responsible frames.
 5. Fix → redeploy (backend rebuild via Aspire) → repeat 2–4 with identical knobs (`ITEMS`,
    `RATE`, scenario) → compare.

@@ -12,9 +12,14 @@ opposed to L1's mocked-I/O code-level verdict or L3's WHY-attribution.
 
 ## Running it
 
+> **Resolving `$pluginRoot`**: every command below uses `$pluginRoot` as a placeholder for this
+> plugin's active install path — resolve it once per task via `claude plugin list --json` (see
+> [`../../knowledge/plugin-root.md`](../../knowledge/plugin-root.md)) and reuse it. It is NOT a
+> shell variable and `$CLAUDE_PLUGIN_ROOT` does **not** expand in the Bash tool shell.
+
 ```bash
-${CLAUDE_PLUGIN_ROOT}/skills/perf-loadtest/loadtests/run.sh smoke    # 1 VU × 3 iterations — liveness
-${CLAUDE_PLUGIN_ROOT}/skills/perf-loadtest/loadtests/run.sh steady   # ramp + hold
+$pluginRoot/skills/perf-loadtest/loadtests/run.sh smoke    # 1 VU × 3 iterations — liveness
+$pluginRoot/skills/perf-loadtest/loadtests/run.sh steady   # ramp + hold
 ```
 
 Target the backend at `perf.backendUrl` from `project-profile.json` (pass it as `BASE_URL`, the
@@ -29,7 +34,7 @@ BASE_URL="$(jq -r .perf.backendUrl project-profile.json)" \
   CURRENCY_CODE="$(jq -r '.perf.currencyCode // "USD"' project-profile.json)" \
   CULTURE_NAME="$(jq -r '.perf.cultureName // "en-US"' project-profile.json)" \
   PLATFORM_PROCESS="$(jq -r '.perf.platformProcess // "VirtoCommerce.Platform.Web"' project-profile.json)" \
-  ${CLAUDE_PLUGIN_ROOT}/skills/perf-loadtest/loadtests/run.sh steady
+  $pluginRoot/skills/perf-loadtest/loadtests/run.sh steady
 ```
 
 Full knob list, prerequisites (k6 binary, credentials, `dotnet-counters`), the user-pool mechanism

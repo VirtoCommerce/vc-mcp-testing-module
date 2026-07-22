@@ -33,7 +33,10 @@ not by a red→green unit test. See `.claude/rules/perf-gates.md`.
 5. **Route — reuse `qa-fix-routing`.** Use vc-fix's routing to decide client-repo vs upstream module.
    A platform-level fix measured as a local POC is reverted locally and promoted through an upstream PR.
 6. **Review — reuse `backend-reviewer`.** Have vc-fix's `backend-reviewer` review the diff before the PR,
-   and additionally apply the perf-PR review lenses in `${CLAUDE_PLUGIN_ROOT}/knowledge/vc-perf-antipatterns.md`
+   and additionally apply the perf-PR review lenses in `$pluginRoot/knowledge/vc-perf-antipatterns.md`
+   (`$pluginRoot` = this plugin's active install path, resolved once per task via
+   `claude plugin list --json` — see `knowledge/plugin-root.md`; NOT a shell variable,
+   `$CLAUDE_PLUGIN_ROOT` does not expand in the Bash tool shell)
    (cache-key completeness + concurrency on cached instances, thread-safety of mutable cached state).
 7. **PR — open, never merge.** Open the PR on the routed repo via the same mechanics vc-fix uses.
    The no-auto-merge triple guard applies (`perf-gates.md`): a perf PR ends at "open".

@@ -133,6 +133,11 @@ the `mean*` fields for decisions and rely on `allocStatus`. `benchmarks[]` is so
 Three scenarios, distinguished by *where the two sides come from*. They all reduce to "two JSON reports
 → compare-reports.cs".
 
+> **Resolving `$pluginRoot`**: every command below uses `$pluginRoot` as a placeholder for this
+> plugin's active install path — resolve it once per task via `claude plugin list --json` (see
+> [`knowledge/plugin-root.md`](../../knowledge/plugin-root.md)) and reuse it. It is NOT a shell
+> variable and `$CLAUDE_PLUGIN_ROOT` does **not** expand in the Bash tool shell.
+
 ### 1. Own before/after — IMPLEMENTED (harness) — requires benchmark runner projects in the target project
 
 "Did **my** change regress this module's paths?" Two revisions of *this* module's own source, same
@@ -140,7 +145,7 @@ runner. Mechanism: a git worktree at the baseline revision (never `git checkout`
 tree is in concurrent use) + the current tree, run each, compare.
 
 ```bash
-BENCH_PREFIX=<your-benchmark-project-prefix> ${CLAUDE_PLUGIN_ROOT}/skills/perf-benchmark/run-own-before-after.sh <baseline-ref> <target> \
+BENCH_PREFIX=<your-benchmark-project-prefix> $pluginRoot/skills/perf-benchmark/run-own-before-after.sh <baseline-ref> <target> \
   [--filter <pattern>] [--categories <c1,c2,...>] [--job dry|short|default] [--alloc-threshold <pct>] [--time-threshold <pct>]
 
 # examples — ALWAYS scope (see "Scope your run"); never the bare full suite in the loop
@@ -166,7 +171,7 @@ runner vs the upstream module's runner. The runner namespaces + class names diff
 uses `--match method`; the upstream side is the baseline, so a ratio > 1 is this module's overhead.
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/skills/perf-benchmark/run-vs-upstream.sh <target> \
+$pluginRoot/skills/perf-benchmark/run-vs-upstream.sh <target> \
   [--filter <pattern>] [--categories <c1,c2,...>] [--job dry|short|default] [--upstream-root <dir>] [--alloc-threshold <pct>] [--time-threshold <pct>]
 
 run-vs-upstream.sh cart --filter '*ChangeCartItemQuantity*'   # Dry default; add --job default for trustworthy time (ask the human)
@@ -194,7 +199,7 @@ convention with no plugin change.)
 two upstream revisions (this module is not involved). Same runner both sides → `--match fullname`.
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/skills/perf-benchmark/run-upstream-before-after.sh <target> <upstream-baseline-ref> \
+$pluginRoot/skills/perf-benchmark/run-upstream-before-after.sh <target> <upstream-baseline-ref> \
   [--filter <pattern>] [--categories <c1,c2,...>] [--job dry|short|default] [--upstream-root <dir>] [--alloc-threshold <pct>] [--time-threshold <pct>]
 
 run-upstream-before-after.sh cart dev --filter '*CreateOrderFromCart*'   # Dry default; add --job default for trustworthy time (ask the human)

@@ -52,16 +52,20 @@ a host terminal on any OS. Rules that cost real time to learn:
 - **`-o` must be ABSOLUTE** — `$TMPDIR` is empty in the excluded environment, so a relative/`$TMPDIR`
   path resolves at `/` → permission denied. Point it at a writable results dir.
 
+`$pluginRoot` below is this plugin's active install path — resolve it once per task via
+`claude plugin list --json` (see [`../../../knowledge/plugin-root.md`](../../../knowledge/plugin-root.md));
+it is NOT a shell variable and `$CLAUDE_PLUGIN_ROOT` does **not** expand in the Bash tool shell.
+
 ```bash
 # CPU/thread capture under an L2 load window (100s) — wrapper (needs `bash …/l3-capture.sh:*` allow-listed):
-bash ${CLAUDE_PLUGIN_ROOT}/skills/perf-trace/perftools/l3-capture.sh \
+bash $pluginRoot/skills/perf-trace/perftools/l3-capture.sh \
   <APP_PID> dotnet-sampled-thread-time 00:01:40 /abs/path/to/results/trace.nettrace
 # …or the raw line, always covered by dotnet:* (no extra allow-listing):
 dotnet $(find ~/.dotnet/tools/.store/dotnet-trace -name dotnet-trace.dll -path '*/tools/*'|head -1) \
   collect --diagnostic-port /tmp/dotnet-diagnostic-<APP_PID>-<disamb>-socket,connect \
   --profile dotnet-sampled-thread-time --duration 00:01:40 -o /abs/path/to/results/trace.nettrace
 # then parse (file-based app; `dotnet run` is excluded too):
-dotnet run ${CLAUDE_PLUGIN_ROOT}/skills/perf-trace/perftools/cpuparse.cs /abs/path/to/results/trace.nettrace 40 > out.txt
+dotnet run $pluginRoot/skills/perf-trace/perftools/cpuparse.cs /abs/path/to/results/trace.nettrace 40 > out.txt
 ```
 
 L2 (k6) needs no special handling: the `run.sh` invocation is in the allowlist, so it dials the backend

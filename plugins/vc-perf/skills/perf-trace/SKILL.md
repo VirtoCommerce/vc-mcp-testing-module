@@ -32,12 +32,15 @@ dotnet-counters ps | grep -F "<perf.platformProcess>"
    dotnet-trace collect -p <pid> --profile database -o db.nettrace                       # DB command wall-time
    ```
 
-3. Parse with the matching file-based app under `${CLAUDE_PLUGIN_ROOT}/skills/perf-trace/perftools/`:
+3. Parse with the matching file-based app under `$pluginRoot/skills/perf-trace/perftools/`
+   (`$pluginRoot` is this plugin's active install path — resolve it once per task via
+   `claude plugin list --json`, see [`../../knowledge/plugin-root.md`](../../knowledge/plugin-root.md);
+   it is NOT a shell variable and `$CLAUDE_PLUGIN_ROOT` does **not** expand in the Bash tool shell):
 
    ```bash
-   dotnet run ${CLAUDE_PLUGIN_ROOT}/skills/perf-trace/perftools/allocparse.cs -- alloc.nettrace 25
-   dotnet run ${CLAUDE_PLUGIN_ROOT}/skills/perf-trace/perftools/cpuparse.cs -- cpu.nettrace 25
-   dotnet run ${CLAUDE_PLUGIN_ROOT}/skills/perf-trace/perftools/dbparse.cs -- db.nettrace
+   dotnet run $pluginRoot/skills/perf-trace/perftools/allocparse.cs -- alloc.nettrace 25
+   dotnet run $pluginRoot/skills/perf-trace/perftools/cpuparse.cs -- cpu.nettrace 25
+   dotnet run $pluginRoot/skills/perf-trace/perftools/dbparse.cs -- db.nettrace
    ```
 
 Full decision matrix (which tool for which question), gotchas, and why these parsers exist

@@ -29,7 +29,10 @@ config. Do NOT duplicate vc-fix's onboarding, tracker/host/auth questions, or pr
      if not, print the commands to add them and let the operator opt in — do not force:
      `/plugin marketplace add VirtoCommerce/dotnet-agent-skills` (confirm the exact source) then
      `/plugin install dotnet-diag@... dotnet-data@...`. The VC-specific L0 list
-     (`${CLAUDE_PLUGIN_ROOT}/knowledge/vc-perf-antipatterns.md`) ships with this plugin and needs nothing installed.
+     (`$pluginRoot/knowledge/vc-perf-antipatterns.md` — `$pluginRoot` = this plugin's active install
+     path, resolved once per task via `claude plugin list --json`, see `knowledge/plugin-root.md`;
+     NOT a shell variable, `$CLAUDE_PLUGIN_ROOT` does not expand in the Bash tool shell) ships with
+     this plugin and needs nothing installed.
 
 3. **Add the `perf` block to `project-profile.json`** — additive deepMerge, never rewrite the
    vc-fix profile. Ask only what is perf-specific and not already derivable:
