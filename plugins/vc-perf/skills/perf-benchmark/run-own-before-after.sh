@@ -94,6 +94,11 @@ if ! git -C "$REPO" cat-file -e "${BASELINE_REF}^{commit}" 2>/dev/null; then
     exit 2
 fi
 
+if [[ ! -d "$REPO/$RUNNER_DIR" ]]; then
+    echo "Runner dir not found: $REPO/$RUNNER_DIR (set ${runner_dir_var} for a non-standard layout — see /perf-init)." >&2
+    exit 2
+fi
+
 WORKTREE_PARENT="$(mktemp -d)"
 WORKTREE="$WORKTREE_PARENT/perf-baseline"
 # Each side is the run's results DIRECTORY, not a single file: BenchmarkDotNet writes one

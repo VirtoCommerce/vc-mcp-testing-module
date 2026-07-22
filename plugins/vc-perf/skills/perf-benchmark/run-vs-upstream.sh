@@ -91,6 +91,11 @@ up_repo_var="UPSTREAM_REPO_${TARGET_KEY}"
 up_runner_var="UPSTREAM_RUNNER_DIR_${TARGET_KEY}"
 UP_DIR="$UPSTREAM_ROOT/${!up_repo_var:-vc-module-x-${DOMAIN}}/${!up_runner_var:-benchmarks/VirtoCommerce.X$(printf '%s' "${DOMAIN:0:1}" | tr '[:lower:]' '[:upper:]')${DOMAIN:1}.Benchmark}"
 
+if [[ ! -d "$OWN_DIR" ]]; then
+    echo "Own runner not found: $OWN_DIR (set ${runner_dir_var} for a non-standard layout — see /perf-init)." >&2
+    exit 2
+fi
+
 if [[ ! -d "$UP_DIR" ]]; then
     echo "Upstream runner not found: $UP_DIR (set --upstream-root, or ${up_repo_var} / ${up_runner_var} for a non-standard layout)." >&2
     exit 2

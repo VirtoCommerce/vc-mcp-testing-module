@@ -15,6 +15,10 @@ set -euo pipefail
 
 DIR=$(cd "$(dirname "$0")" && pwd)
 PROFILE="${1:-smoke}"
+if [ "$PROFILE" != "smoke" ] && [ "$PROFILE" != "steady" ]; then
+    echo "invalid profile: '$PROFILE' (expected smoke|steady). Pass a scenario via SCENARIO=, not as arg 1." >&2
+    exit 1
+fi
 BASE_URL="${BASE_URL:-https://localhost:8090}"
 SCENARIO="${SCENARIO:-cart-order-loop}"
 
