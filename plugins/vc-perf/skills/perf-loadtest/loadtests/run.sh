@@ -8,6 +8,9 @@
 # names the backend host binary for the EventPipe sidecar (default
 # VirtoCommerce.Platform.Web; feed from profile perf.platformProcess). Credentials:
 # PERF_API_USER / PERF_API_PASSWORD (required env). No secrets are printed or passed via argv.
+# Other knobs: K6 (k6 binary path, default `k6` on PATH); PAYLOAD_DIR (a consumer scenarios/+queries/
+# dir to run instead of the bundled ones, see below); RESULTS_DIR (artifact base dir — set to a
+# workspace path so artifacts survive plugin updates, see below).
 set -euo pipefail
 
 DIR=$(cd "$(dirname "$0")" && pwd)
@@ -58,9 +61,14 @@ export PERF_API_USER PERF_API_PASSWORD
 # (cwd), not the plugin install dir. Non-git cwd (or no git) degrades to "nogit", never aborts.
 SHA=$(git rev-parse --short HEAD 2>/dev/null || echo nogit)
 STAMP=$(date +%Y%m%d-%H%M%S)
-OUT="$DIR/results/$PROFILE"
+# RESULTS_DIR is the base directory for artifacts. Default keeps today's behaviour ($DIR/results),
+# but $DIR is inside the plugin INSTALL dir (a managed marketplace/cache clone) — results there are
+# ephemeral (wiped on plugin update) and pollute a repo you don't own. Set RESULTS_DIR to a path in
+# the consumer workspace (e.g. RESULTS_DIR="$PWD/.vc-perf/results", gitignored) to keep artifacts.
+RESULTS_DIR="${RESULTS_DIR:-$DIR/results}"
+OUT="$RESULTS_DIR/$PROFILE"
 if [ "$SCENARIO" != "cart-order-loop" ]; then
-    OUT="$DIR/results/$SCENARIO/$PROFILE"
+    OUT="$RESULTS_DIR/$SCENARIO/$PROFILE"
 fi
 mkdir -p "$OUT"
 SUMMARY="$OUT/$STAMP-$SHA.summary.json"

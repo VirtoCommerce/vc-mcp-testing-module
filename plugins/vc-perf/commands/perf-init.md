@@ -48,5 +48,15 @@ config. Do NOT duplicate vc-fix's onboarding, tracker/host/auth questions, or pr
      no script currently consumes it.
    See `project-profile.example.json` for the block shape.
 
-4. **Verify** — print the resolved `perf` block and the detected toolchain (which layers are runnable
-   given the installed prerequisites). Do not proceed to a run.
+4. **Collect the load-test credentials** (only if load testing — L2). The harness authenticates as a
+   real user on the target deployment through `PERF_API_USER` / `PERF_API_PASSWORD` — `run.sh` hard-requires
+   both (`: "${PERF_API_USER:?}"`), so onboarding must obtain them or the first run aborts. Ask the operator
+   for a load-test user that can complete the scenario end to end (e.g. place an order for `cart-order-loop`),
+   and write the pair to the **gitignored `.env.local`** (the vc-fix per-developer secrets file) — never
+   `project-profile.json` and never a committed `.env.<env>`. These are the **local** load credentials, and
+   they are deliberately distinct from the cloud `LOGIN` / `PASSWORD` the pipeline environment uses: keep the
+   two separate, do not reuse or fall back between them.
+
+5. **Verify** — print the resolved `perf` block and the detected toolchain (which layers are runnable
+   given the installed prerequisites), and confirm `PERF_API_USER` / `PERF_API_PASSWORD` are present in
+   `.env.local` when L2 is in scope (report presence only — never echo the values). Do not proceed to a run.

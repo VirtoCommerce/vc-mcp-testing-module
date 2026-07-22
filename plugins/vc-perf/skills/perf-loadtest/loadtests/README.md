@@ -41,7 +41,14 @@ them across items — the realistic-mix band; setup logs how many were actually 
 `SKIP_ORDER=0` (enable the `createOrderFromCart` leg — see «Order leg» below) · `BASE_URL` ·
 `STORE_ID` (your store id) · `CURRENCY_CODE` / `CULTURE_NAME` (store currency and culture,
 defaults `USD` / `en-US`) · `USER_POOL` (multi-user concurrency, see below) ·
-`SEED_PASSWORD` / `SEED_EMAIL_FORMAT`.
+`SEED_PASSWORD` / `SEED_EMAIL_FORMAT` ·
+`K6` (k6 binary path — default `k6` on PATH; set it to an off-PATH binary) ·
+`PAYLOAD_DIR` (a consumer-owned dir with `scenarios/` (+ optional `queries/`) to run instead of the
+bundled ones — the harness combines it with the plugin's generic `lib/` + `config.js` in a temp
+run-dir; use this rather than editing the install, see `../SKILL.md`) ·
+`RESULTS_DIR` (artifact base dir, default `<install>/results` — set to a workspace path, e.g.
+`RESULTS_DIR="$PWD/.vc-perf/results"`, so artifacts survive plugin updates and don't land in the
+install-managed clone).
 
 ## User pool (multi-user concurrency)
 
@@ -57,11 +64,15 @@ endpoint for this) — adapt to whatever seeding mechanism your project provides
 USER_POOL=50 RATE=20 loadtests/run.sh steady
 ```
 
-> **Claude Code sandbox note:** `bash …/run.sh:*` is in `sandbox.excludedCommands`, so the run
-> executes OUTSIDE the CC sandbox and k6 dials the backend fine — just run it normally. Do **NOT**
-> pass `dangerouslyDisableSandbox` (it doesn't help here and breaks AF_UNIX for sibling tooling
-> like `dotnet-trace`). For L3 trace capture during the load window, see the `perf-trace` skill's
-> `perftools/README.md` → "Agentic run".
+> **Claude Code sandbox note:** to dial the local backend, `run.sh` must run OUTSIDE the CC
+> sandbox, which means its command must match an entry in `sandbox.excludedCommands`. The skill
+> invokes it by **absolute path without a `bash` prefix** (`<pluginRoot>/skills/perf-loadtest/loadtests/run.sh …`),
+> so a relative `bash loadtests/run.sh:*` entry does **not** match — add the resolved absolute form
+> instead: `<pluginRoot>/skills/perf-loadtest/loadtests/run.sh:*` (the path is per-install — resolve
+> `$pluginRoot` via `claude plugin list --json`). Once matched, k6 dials the backend fine — just run
+> it normally. Do **NOT** pass `dangerouslyDisableSandbox` (it doesn't help here and breaks AF_UNIX
+> for sibling tooling like `dotnet-trace`). For L3 trace capture during the load window, see the
+> `perf-trace` skill's `perftools/README.md` → "Agentic run".
 
 ## Scenarios
 
@@ -89,8 +100,10 @@ scenarios) uses a minimal, non-storefront setup query — see `setup()`.
 - Per-operation latency via `http_req_duration{name:<op>}` sub-metrics; thresholds are loose
   skeleton ceilings — tighten after a baseline.
 - Token acquired **once** in `setup()`, reused across VUs.
-- Artifacts land in `results/<profile>/<stamp>-<sha>.summary.json` (+ `.counters.csv` when
+- Artifacts land in `$RESULTS_DIR/<profile>/<stamp>-<sha>.summary.json` (+ `.counters.csv` when
   `dotnet-counters` is available) — commit SHA in the name so runs compare like-with-like.
+  `RESULTS_DIR` defaults to `<install>/results` (ephemeral — wiped on plugin update); set it to a
+  workspace path to keep artifacts.
 - **Co-location caveat:** k6 + backend + DB on one machine → relative comparisons only, no
   absolute CPU claims. State the topology with every number.
 - L2 is noisy: compare distributions across repeated runs, never single p95s.

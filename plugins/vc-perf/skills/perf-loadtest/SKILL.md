@@ -52,19 +52,30 @@ profile) — the `perf.loadtest` keys in `project-profile.json` are not piped in
   harness reads it. Treat it as documentation of where a seed-users endpoint lives, not a wired
   knob, until a consumer is added.
 
-## Scenarios and queries ship as standard vc-frontend examples — adapt per project
+## Consumer scenarios/queries: point `PAYLOAD_DIR` at your own dir — do NOT edit the install
 
 Everything under `loadtests/scenarios/` and `loadtests/queries/` scripts the **standard
 vc-frontend** GraphQL operations (`getFullCart`, `addItemsCart`, `createOrderFromCart`). If your
 client project overrides the storefront schema, the shipped documents may not match it exactly —
-re-resolve them against your own frontend before relying on the numbers. To adapt this harness for
-your project:
+re-resolve them against your own frontend before relying on the numbers.
 
-1. Keep `lib/auth.js` and `lib/gql.js` (transport — generic).
-2. Replace `queries/*.graphql` with your project's storefront-exact documents if they differ from
-   the standard ones.
-3. Replace (or add) `scenarios/*.js` with your project's iteration shape.
-4. Set `STORE_ID` (backs `config.js`'s `STORE.storeId`) from `perf.storeId`.
+**Do NOT edit the plugin's own `scenarios/`/`queries/`.** This skill runs from an install-managed
+clone (marketplace/cache), so edits there are ephemeral (wiped on plugin update) and pollute a repo
+you don't own. Instead keep your project's scenarios (+ queries) in a **consumer-owned directory**
+and point the harness at it with `PAYLOAD_DIR`:
+
+```bash
+# in your repo, e.g.  perf-payload/{scenarios/<name>.js, queries/*.graphql}
+PAYLOAD_DIR="$PWD/perf-payload" SCENARIO=<name> \
+  BASE_URL=... STORE_ID=... \
+  $pluginRoot/skills/perf-loadtest/loadtests/run.sh steady
+```
+
+`run.sh` assembles a temp run-dir combining the plugin's generic transport (`lib/auth.js`,
+`lib/gql.js`) + `config.js` with your `PAYLOAD_DIR/scenarios/` (and `queries/` if present), so you
+reuse the stable auth/gql layer and own only the project-specific documents. `PAYLOAD_DIR` must
+contain a `scenarios/` dir; `queries/` is optional. Keep the transport generic — never copy `lib/`
+into your payload. Set `STORE_ID` (backs `config.js`'s `STORE.storeId`) from `perf.storeId`.
 
 ## Role in the loop
 
