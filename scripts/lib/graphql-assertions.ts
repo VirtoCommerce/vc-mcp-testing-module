@@ -101,7 +101,7 @@ export function evaluateAssertion(
   responses: Map<string, GraphQLResponse>,
   variables: Record<string, string>
 ): AssertionResult {
-  const predicate = substituteVars(assertion.predicate, variables);
+  const predicate = stripProvenance(substituteVars(assertion.predicate, variables));
 
   // VAR is variable-vs-literal — no response needed, no label binding to enforce.
   if (assertion.kind === "VAR") {
@@ -162,6 +162,20 @@ function substituteVars(s: string, vars: Record<string, string>): string {
   });
 }
 
+// Trailing grounding-provenance tag (Dim 10 / GRD-001; project memory
+// project_assertion_provenance_grounding_gate) — authors append {SPEC}/{BL}/{DOC}/
+// {OBSERVED}/{HYPOTHESIS} to the END of an assertion line for traceability. It is
+// lint-scanned against the raw line (scripts/test-cases/lint-test-cases.ts PROVENANCE_RE) and
+// was never meant to be part of the evaluated predicate — strip it before dispatch
+// so numeric (`>=`/`<=`), equality (`=`), and regex (`matches /…/`) predicates don't
+// choke on trailing `{...}` text. Single-brace, so it can't collide with `{{VAR}}`
+// substitution above.
+const PROVENANCE_SUFFIX_RE = /\s*\{(?:SPEC|BL|DOC|OBSERVED|HYPOTHESIS)\}\s*$/;
+
+function stripProvenance(s: string): string {
+  return s.replace(PROVENANCE_SUFFIX_RE, "").trim();
+}
+
 function evaluateErrorsPredicate(
   a: Assertion,
   r: GraphQLResponse,
@@ -218,6 +232,39 @@ function evaluateErrorsPredicate(
     actual: "unrecognized predicate — expected empty|non-empty",
     message: `Could not parse ERRORS predicate: "${predicate}"`,
   };
+}
+
+// A path token may legitimately contain spaces AND `=`/`!=`/`*` INSIDE a
+// `[...]` filter bracket, e.g. `items[?fullName!=Ava Adams]` or
+// `items[*?status=Cancelled].length`. A plain `(\S+)` capture truncates at the
+// first space, and a plain operator regex mistakes the `=` inside the filter for
+// the comparison operator. This fragment matches a path as a run of
+// non-space/non-bracket chars PLUS whole `[...]` groups (whose bodies may hold
+// spaces/operators), so bracketed filters survive intact.
+const PATH_TOKEN = String.raw`(?:\[[^\]]*\]|[^\s\[\]])+`;
+
+// Find the first `ops` operator that is NOT inside a `[...]` filter bracket, so
+// `items[*?status=Cancelled].length = data.x.totalCount` splits on the real
+// comparison `=`, not the `=` inside the filter. `ops` must be ordered
+// longest-first so multi-char operators (>=, <=, ~=) win over their prefixes.
+function splitTopLevelOp(
+  s: string,
+  ops: string[]
+): { lhs: string; op: string; rhs: string } | null {
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "[") depth++;
+    else if (ch === "]") depth = Math.max(0, depth - 1);
+    else if (depth === 0) {
+      for (const op of ops) {
+        if (s.startsWith(op, i)) {
+          return { lhs: s.slice(0, i).trim(), op, rhs: s.slice(i + op.length).trim() };
+        }
+      }
+    }
+  }
+  return null;
 }
 
 function evaluateDataPredicate(
@@ -295,7 +342,7 @@ function evaluateDataPredicate(
     };
   }
 
-  const nullMatch = predicate.match(/^(\S+)\s+is\s+(null|non-null)\b/i);
+  const nullMatch = predicate.match(new RegExp(`^(${PATH_TOKEN})\\s+is\\s+(null|non-null)\\b`, "i"));
   if (nullMatch) {
     const [, path, want] = nullMatch;
     const value = resolveByPath(r, path);
@@ -311,7 +358,7 @@ function evaluateDataPredicate(
     };
   }
 
-  const guidMatch = predicate.match(/^(\S+)\s+is\s+non-empty\s+GUID\b/i);
+  const guidMatch = predicate.match(new RegExp(`^(${PATH_TOKEN})\\s+is\\s+non-empty\\s+GUID\\b`, "i"));
   if (guidMatch) {
     const [, path] = guidMatch;
     const value = resolveByPath(r, path);
@@ -328,7 +375,7 @@ function evaluateDataPredicate(
     };
   }
 
-  const regexMatch = predicate.match(/^(\S+)\s+matches\s+\/(.+)\/([gimsu]*)$/);
+  const regexMatch = predicate.match(new RegExp(`^(${PATH_TOKEN})\\s+matches\\s+/(.+)/([gimsu]*)$`));
   if (regexMatch) {
     const [, path, pattern, flags] = regexMatch;
     const value = resolveByPath(r, path);
@@ -371,9 +418,9 @@ function evaluateDataPredicate(
   //
   // Guarded by BOTH sides containing a `data.` path so we don't pre-empt the
   // single-path-vs-literal branch below (`data.X.amount >= 100`).
-  const crossOrderMatch = predicate.match(/^(.+?)\s*(>=|<=|>|<)\s*(.+)$/);
+  const crossOrderMatch = splitTopLevelOp(predicate, [">=", "<=", ">", "<"]);
   if (crossOrderMatch) {
-    const [, lhsRaw, op, rhsRaw] = crossOrderMatch;
+    const { lhs: lhsRaw, op, rhs: rhsRaw } = crossOrderMatch;
     const stripBrackets = (s: string) => s.replace(/\[[^\]]*\]/g, "");
     const lhsHasPath = /(?:^|[^\w])data\.\w/.test(stripBrackets(lhsRaw));
     const rhsHasPath = /(?:^|[^\w])data\.\w/.test(stripBrackets(rhsRaw));
@@ -418,7 +465,7 @@ function evaluateDataPredicate(
     }
   }
 
-  const numericMatch = predicate.match(/^(\S+)\s*(>=|<=|>|<)\s*(-?\d+(?:\.\d+)?)\s*$/);
+  const numericMatch = predicate.match(new RegExp(`^(${PATH_TOKEN})\\s*(>=|<=|>|<)\\s*(-?\\d+(?:\\.\\d+)?)\\s*$`));
   if (numericMatch) {
     const [, path, op, nStr] = numericMatch;
     const value = resolveByPath(r, path);
@@ -453,9 +500,9 @@ function evaluateDataPredicate(
   //   data.x.extendedPrice.amount = data.x.listPrice.amount * data.x.quantity
   //   (1111 - data.x.subTotal.amount) ≈ 100
   //   data.x.total = data.x.subtotal + data.x.tax - data.x.discount
-  const arithMatch = predicate.match(/^(.+?)\s*(=|≈|~=)\s*(.+)$/);
+  const arithMatch = splitTopLevelOp(predicate, ["≈", "~=", "="]);
   if (arithMatch) {
-    const [, lhsRaw, op, rhsRaw] = arithMatch;
+    const { lhs: lhsRaw, op, rhs: rhsRaw } = arithMatch;
     // Strip filter-bracket bodies so hyphens in GUIDs (e.g. `[?id=37e4-…]`)
     // and `*` in `[*?key=value]` aren't mistaken for arithmetic operators.
     const stripBrackets = (s: string) => s.replace(/\[[^\]]*\]/g, "");
@@ -498,9 +545,9 @@ function evaluateDataPredicate(
     }
   }
 
-  const equalsMatch = predicate.match(/^(\S+)\s*=\s*(.+)$/);
+  const equalsMatch = splitTopLevelOp(predicate, ["="]);
   if (equalsMatch) {
-    const [, path, rawExpected] = equalsMatch;
+    const { lhs: path, rhs: rawExpected } = equalsMatch;
     const expectedStr = rawExpected.trim().replace(/^"|"$/g, "");
     const value = resolveByPath(r, path);
     const actualStr = typeof value === "string" ? value : JSON.stringify(value);
@@ -577,7 +624,7 @@ function evaluateNullPredicate(
   r: GraphQLResponse,
   predicate: string
 ): AssertionResult {
-  const m = predicate.match(/^(\S+)/);
+  const m = predicate.match(new RegExp(`^(${PATH_TOKEN})`));
   if (!m) {
     return {
       raw: a.raw,
@@ -606,7 +653,7 @@ function evaluateCountPredicate(
   r: GraphQLResponse,
   predicate: string
 ): AssertionResult {
-  const m = predicate.match(/^(\S+)\s*(=|==|>=|<=|>|<)\s*(\d+)/);
+  const m = predicate.match(new RegExp(`^(${PATH_TOKEN})\\s*(=|==|>=|<=|>|<)\\s*(\\d+)`));
   if (!m) {
     return {
       raw: a.raw,

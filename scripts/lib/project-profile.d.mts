@@ -8,6 +8,16 @@ export interface ProfileRepo {
   kind?: "frontend" | "module" | "platform";
   host?: "github" | "azure-repos";
   defaultBranch?: string;
+  /** Per-repo toolchain overrides (else the kind default) — see ClientRepoMeta in ci/lib/repo-router.ts. */
+  installCmd?: string;
+  buildCmd?: string;
+  typecheckCmd?: string;
+  lintCmd?: string;
+  testCmd?: string;
+  /** The platform repo this was forked/derived from (provenance). */
+  upstream?: string;
+  /** The platform version/tag the fork was cut from (provenance anchor). */
+  upstreamRef?: string;
 }
 
 export interface ProjectProfile {
@@ -38,6 +48,8 @@ export interface ProjectProfile {
     clientGithubAccount: string;
   };
   repos: { client: ProfileRepo[]; platform: ProfileRepo[] };
+  /** Opt-in for the passive session-telemetry hook. true ⇒ record to <outputRoot>/.vc-fix/; absent/false ⇒ the hook is a full no-op. */
+  selfDiagnostics: boolean;
 }
 
 export const PROFILE_DEFAULTS: ProjectProfile;

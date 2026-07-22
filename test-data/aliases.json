@@ -1,8 +1,17 @@
 {
   "_meta": {
     "description": "Test data aliases for @td() references in suite CSVs. Syntax: @td(ALIAS.field) or @td(file, filter, column)",
-    "version": "1.5.29",
+    "version": "1.5.38",
     "updated": "GENERATED",
+    "changelog_1_5_38": "PAGE-3 fr-FR: added a French sibling of the return-policy page (store cultures en-GB default / de-DE / fr-FR). /qa-return-policy now serves THREE separate single-culture pages (the platform's multi-lang model): en-US 'QA Return Policy', de-DE 'QA Rückgaberichtlinie', fr-FR 'QA Politique de retour et de remboursement' — all Published, 5 blocks each, on vcst. New alias PB_RETURN_POLICY_FR (group_id in aliases.vcst.json). FR content authored in test-data/cms/page-content.json (PB_RETURN_POLICY.fr-FR). Spec gained frName/frAlias; seed-pagebuilder-pages.mjs reconcileMultiLang gained an FR branch + a culture-heal step (enforceCulture, content-safe metadata upsert — a create/publish at a SHARED permalink can flip a sibling's cultureName, proven live when the FR create flipped EN→fr-FR; healed back). Idempotent; td:validate:cms-pages + 168 unit tests + td:reconcile green. NOTE (not a fix): this only gives PAGE-3 an FR version — it does NOT fix the underlying content-leak defect where an UNPUBLISHED language serves default-language content instead of 404. CMS-028's 'unpublished-language → 404' coverage should be re-pointed to a genuinely-unpublished culture and the product defect filed separately. Browser DOM render of /en|/de|/fr/qa-return-policy remains delegated to qa-frontend-expert.",
+    "changelog_1_5_37": "REG-2026-07-21-1438 PageBuilder CONTENT: audited canonical qa-* pages' block content and found 3 of 5 were EMPTY shells (rendered blank despite Published): PB_HOMEPAGE, PB_RETURN_POLICY(en-US), PB_SUMMER_PREVIEW = 0 blocks (PB_WHOLESALE_GUIDE/PB_RETURN_POLICY(de-DE)/PB_PARTNER_SUPPORT had 5 each). Added content-block fixture test-data/cms/page-content.json (JSON-shaped to POST /api/page-builder-pages/grouped/{id}/content — {settings,content:[title|text|predefined-product-list]}; SKUs use the @discover:N marker resolved live, no hardcoded SKUs/GUIDs). seed-pagebuilder-pages.mjs now fills EMPTY shells from the fixture (preserving existing content on populated pages) via ensurePageState(). Live result: HOMEPAGE 7, RP(en) 5, SUMMER 6 blocks filled; the 3 populated pages kept. Two proven platform facts drove the impl (documented in pagebuilder-pages-specs.mjs): (1) content+schedule MUST land in ONE publish — a 2nd publish drains the just-promoted empty draft and wipes content; (2) a future/Pending page hides content in every projection. Consequently PB_SUMMER_PREVIEW's baseline is IN-WINDOW/Active (start -1d, end +60d) — the only state with verifiable live content (CMS-034 200); CMS-033 (future→404) toggles start to future in its own steps. Fixture drift-guard folded into td:validate:cms-pages; unit tests in scripts/unit/seed-pagebuilder-pages.test.mjs. CAVEAT (browser, delegated): storefront DOM render of all pages + the CMS-033/034 date-toggle reveal remain to be confirmed by qa-frontend-expert in the re-run.",
+    "changelog_1_5_36": "REG-2026-07-21-1438 PAGE-3/PAGE-4 reconcile completed on vcst (coordinator-approved). PAGE-3 (return policy): the PageBuilder multi-language model is TWO single-culture pages SHARING a permalink (not one group with pages[]) — reconciled /qa-return-policy to serve BOTH en-US 'QA Return Policy' (Published, group a08d0245 — promoted from the drifted 'QA Return Policy-2') AND de-DE 'QA Rückgaberichtlinie' (Published, group 216bcc85). Archived (reversible, NOT deleted) 5 drifted duplicates: QA Return Policy (copy)/(copy 2), QA Rückgaberichtlinie-DE -2, QA Rückgaberichtlinießde, QA Rückgaberichtlinie (copy 2). PB_RETURN_POLICY group_id now written to aliases.vcst.json (= EN group). PAGE-4 (summer): schedule set to future-launch baseline StartDate=+7d / EndDate=+60d (relative-to-now, recomputed each seed) per pagebuilder-pages.md — the CMS-033 not-yet-live→404 precondition; CMS-034 toggles StartDate to past per its own steps. seed-pagebuilder-pages.mjs extended with multiLang + schedule handling (idempotent); specs + unit tests + td:validate:cms-pages updated. CAVEAT (needs browser, delegated): the vcst storefront is an SPA returning HTTP 200 for every route, so EN-renders / DE-renders / wrong-language-404 (CMS-027/028/035) must be confirmed at DOM level by qa-frontend-expert; and the EN page's block content (content API returns null) may need UI re-authoring if the render is thin.",
+    "changelog_1_5_35": "REG-2026-07-21-1438 published-page unblock: added 5 inline PageBuilder page aliases (PB_HOMEPAGE, PB_WHOLESALE_GUIDE, PB_RETURN_POLICY, PB_SUMMER_PREVIEW, PB_PARTNER_SUPPORT) for the canonical qa-* pages (test-data/cms/pagebuilder-pages.md). ~22 published-page cases (CMS-027–035, 078–085, 121–125) were BLOCKED by test-data drift on vcst-qa (not a product bug): qa-homepage-spring-sale was Archived and qa-return-policy was displaced by drifted DE/copy variants. New reconcile seeder scripts/seed-data/cms/seed-pagebuilder-pages.mjs (npm run seed:cms-pages) restores canonical pages to Published + expected permalink via the PageBuilder REST API (POST /grouped upsert→Draft then /grouped/publishing/{id}?publish=true), idempotently, matching pages by EXACT name (never a '(copy)'/'-2' clone), reporting permalink conflicts instead of forcing. Single source of truth pagebuilder-pages-specs.mjs; drift-guard td:validate:cms-pages; unit tests scripts/unit/seed-pagebuilder-pages.test.mjs. Runtime group_id in aliases.vcst.json. Reconcile result on vcst 2026-07-21: PAGE-1 republished; PAGE-2/4/5 already Published; PAGE-3 (return-policy) CONFLICT — /qa-return-policy held by de-DE 'QA Rückgaberichtlinie', no clean en-US 'QA Return Policy' page exists → reported for manual cleanup.",
+    "changelog_1_5_34": "REG-2026-07-21-1438 unblock: added RESTRICTED_CMS_ADMIN inline alias — a restricted back-office Manager account (email AGENT-TEST-restricted-cms@test.virtocommerce.com, read-only Page Builder role AGENT-TEST-Restricted-CMS-Viewer = builder:access+builder:read, NO builder:update, isAdministrator=false) for suite 059 CMS-123 (Save/Load/Clone hidden/disabled) + CMS-124 (copy endpoint POST /api/page-builder-pages/grouped/{tgt}/content/{src} → 403 for restricted token). Both were BLOCKED because no such account existed (only Administrator + storefront/B2B accounts; storefront users 400 user_cannot_login_in_store on back-office /connect/token). Provisioned on vcst via scripts/seed-data/platform/seed-backoffice-rbac.mjs (npm run seed:rbac); single source of truth backoffice-rbac-specs.mjs; drift-guard td:validate:rbac; unit tests scripts/unit/seed-backoffice-rbac.test.mjs. Runtime platform_id/user_id/role_id in aliases.vcst.json; password is {{RESTRICTED_CMS_ADMIN_PASSWORD}} from .env.local (VCST-5406).",
+    "changelog_1_5_33": "VCST-5233 CPN-062 collision fix: added COUPON_LC_CASEFIDELITY alias (CSV-backed → promotions/coupons COU-027, promo P21 'AGENT-TEST Lowercase Coupon Case Fidelity', 5% off cart, public+active). Its code 'agenttestlc062' is lowercase (/[a-z]/) and its all-uppercase form 'AGENTTESTLC062' is NOT a valid/existing coupon on vcst-qa (probed 2026-07-21: 0 matches), so the VCST-5233 uppercasing bug turns it INVALID (ValidateCoupon false) — a clean fail signal — instead of matching a wrong coupon. This replaces COUPON_SUPER('super') for CPN-062's apply/validate step, where uppercasing 'super' silently matched the UNRELATED live 'SUPER'/'Super Discount' coupon (20% off) and confounded the guard. COUPON_SUPER + COU-024 left intact for CPN-015 (display/copy case). New promo P21 (promotions.csv) + coupon COU-027 (coupons.csv) seeded via seed-promotions.mjs; drift guard: npm run td:validate:marketing; teardown: npm run seed:promotions:teardown -- --only P21.",
+    "changelog_1_5_32": "VCST-5482 order/quote state fixtures (JSON-shaped-to-Swagger pilot): added 5 JSON-fixture aliases — COMPLETED_ORDER, SHIPPED_ORDER, PROCESSING_ORDER (test-data/orders/*.json), QUOTE_WITH_ADMIN_RESPONSE, ACCEPTED_QUOTE (test-data/quotes/*.json). These are the first `json`-backed aliases: static fields (number/status/currency/total) resolve from the Swagger-shaped fixture body, the runtime id resolves from aliases.<env>.json (seeded by scripts/seed-data/seed-order-states.mjs / seed-quotes.mjs, `npm run seed:orders`/`seed:quotes`). Single source of truth for state/transitions/aliases: scripts/seed-data/orders-specs.mjs; drift-guard: `npm run td:validate:orders`. Unblocks previously-DEFERRED order/quote states in suites 014/015. Feature-gated states (invoice/returns/substitution/negotiation/OOS/discontinued/expired) stay DEFERRED (see test-data/README.md).",
+    "changelog_1_5_30": "VCST-5304/5469 TLC Phase-2/3 sync (2026-07-17, sales-rep pr-2-8c40 / theme 2.54.0-pr-2380-230b live verification): added platform_id field to ORG_SUSPENDED (was missing — needed so 050m's organizationId-vs-business-key drift fix (D1) can retarget not_served_org/unassigned_org assertions to the real platform GUID). Added SR_REP_NOCUSTOMERS_ORGCTX gap-fixture alias (test-data/sales-rep/sales-reps.csv, seeded=false — NOT ready for /qa-seed-data, needs a seeder enhancement to grant org-context membership without registering a served customer). Also fixed a pre-existing unquoted-comma data bug in sales-reps.csv row SR_REP_LOCKED's test_purpose field (silently absorbed before the context_org column existed; surfaced as a column-misalignment once the trailing column was added).",
+    "changelog_1_5_31": "VCST-5304/5469 CORRECTED test design (TLC-2026-07-17-1603, live verification on vcst-qa): SR-FE-030 (089) and its SR_REP_NOCUSTOMERS_ORGCTX gap-fixture (added in 1.5.30) proved architecturally unreachable — a sales-rep org membership IS the served-customer relationship, so 'permissioned rep + org context + zero served customers' cannot exist; the seed-sales-rep.mjs enhancement it depended on is the WRONG fix and was NOT built. SR_REP_NOCUSTOMERS_ORGCTX stays seeded=false and is retired (do not seed). Added the SALES_REP_NOCUSTOMERS auth-role alias (mirrors SALES_REP) backing the genuinely-reachable case 050m SR-GQL-041, which proves the real invariant live-verified this run: a rep holding sales-rep:access as a GLOBAL role (SR_REP_NOCUSTOMERS, zero org memberships) gets a clean salesRepCustomers 200/totalCount=0/errors[] empty — not a redirect, not an error.",
     "changelog_1_5_25": "VCST-5028 suite 027b re-auth: added MULTI_ORG_TF_BR_EMPLOYEE and MULTI_ORG_TF_BR_MAINTAINER inline aliases. Both resolve to the same physical MULTI_ORG_TF_BR account (email/password/store_id identical) but are semantically distinct: EMPLOYEE = BuildRight org-employee context (no xapi:my_organization:edit → changeRole/lock/invite MUST reject); MAINTAINER = TechFlow org-maintainer context (should carry xapi:my_organization:edit → Finding #1 guard). Used by ORGM-003/007/012 and ORGM-017/018 respectively. resolveRole falls back to *_EMAIL/*_PASSWORD env vars; for these aliases the env vars are identical to MULTI_ORG_TF_BR_EMAIL/PASSWORD — no new .env entries needed beyond already-set MULTI_ORG_TF_BR_* vars.",
     "changelog_1_5_23": "VCST-5135 ProductPoints fixtures REWORKED 2026-06-24: the original LOY-010..013 were eligibility-only clones with ZERO product factors (functionally hollow — earned no points). Discovered live in Admin (qa-backend-expert) that a ProductPoints program's earn rule lives in a SEPARATE sub-resource (LoyaltyProgramProductFactor = {loyaltyProgramId, productId, factor-points}, PUT /api/loyalty-program-product-factors/factors), NOT on the program entity. Replaced LOY-010..013 with a 10-program set LOY-010..019 that varies REAL mechanics: single-SKU earn (LOY-010), multi-SKU summation (LOY-011), VIP-exclusive earn (LOY-012), wholesaler tier (LOY-013), future/expired windows (LOY-014/015, new start_offset_days/end_offset_days CSV cols → ISO dates), inactive-with-factors (LOY-016), priority stacking (LOY-017), zero-points BVA (LOY-018), localized+multi (LOY-019). New fixture program-factors.csv (program_id,sku,factor) holds the per-product point values; seeder resolves SKU→productId at runtime via POST /api/catalog/search/products searchPhrase 'code:\"<SKU>\"' (no hardcoded GUIDs). seed-loyalty.mjs rebuilt to construct from GET /api/loyalty-programs/new/{type} skeleton (not brittle clone), set dates/store/localizedName/eligibility, then PUT factors. Aliases reworked: LOY_PP_ALL/VIP/WHOLESALE repointed, LOY_PP_VIP_INACTIVE→LOY_PP_INACTIVE, added LOY_PP_MULTI/FUTURE/EXPIRED/PRIORITY/ZERO/LOCALIZED. All seeded=false pending /qa-seed-data (or node scripts/seed-data/seed-loyalty.mjs).",
     "changelog_1_5_19": "Added LOYALTY_NOBAL_USER inline alias (AGENT-TEST-nobal@test.virtocommerce.com, VIP group, zero balance) for MCO-GQL-005 LOYALTY_INSUFFICIENT_BALANCE test. LOYALTY_VIP_USER balance was seeded to ~4.87M PTS on 2026-06-22 for MCO-GQL-001/003/004 — it can no longer trigger insufficient-balance at finite cart quantities. FIXTURE-SEEDING REQUIRED: provision Customer member + security account on vcst-qa with no loyalty balance before first run. email_env=LOYALTY_NOBAL_USER_EMAIL / password_env=LOYALTY_NOBAL_USER_PASSWORD must be set in .env.local.",
@@ -35,6 +44,31 @@
     "changelog_1_5_27": "VCST-5406: reseeded vcst-qa via the unified scripts/seed-data/seed-company-users.mjs (all kinds) on 2026-07-01 after teardown; refreshed org + contact platform_id caches in b2b/organizations.csv (19) + b2b/contacts.csv (14) from the fresh seed. Impersonation re-seed hints now point to `npm run seed:impersonation`. B2B graph reconciles clean (org-scoped roles only, VCST-5028). Note: b2b/users.csv user platform_id caches remain informational (resolved live by email); a handful of orgs (child AcmeWest + ORG-005..008) exist in DB but lag the Member search index.",
     "changelog_1_5_28": "VCST-5406 follow-up: swept the last password literals into the {{VAR}} pattern. 4 alias password fields (AGENT_TEST_IMP_CUSTOMER, MULTI_ORG_TF_BR[/_EMPLOYEE/_MAINTAINER]) → {{DEFAULT_TEST_PASSWORD}}; 15 real-credential Password1! literals in create-account bodies of suites 027/027b/050d → {{DEFAULT_TEST_PASSWORD}}. Left intentional test inputs alone (031/082 Test/Any/WrongPassword1! are registration/negative inputs, not stored secrets).",
     "changelog_1_5_29": "VCST-5089 (Per-store Asset Public URL rewrite in XAPI) regression authoring: added STORE_ASSET_TEST_URL inline alias (stable placeholder CDN host for setting/resetting Store.assetPublicUrl in tests — value is intentionally non-resolving DNS, same pattern as the live QA verification's cdn-test-vcst5089.govirto.com; only the HOST is asserted, 404/ERR_NAME_NOT_RESOLVED on the image itself is expected and acceptable). Added EXTERNAL_HOST_IMAGE_PRODUCT inline alias pinning the one concrete external-image product captured live during QA verification (product name + external host) for the BUG-1 regression guard (external URLs must NOT be rewritten when VirtoCommerce:StoreAssets:KnownAssetHosts is configured) — captured on vcptcore-qa 2026-07-14, see tests/Sprint-current/VCST-5089/test-execution-report.md; flagged env-portable-with-caveat since catalog composition diverges per env (per feedback reference_per_env_aliases_overlay) — the consuming case is marked Automation_Status=Draft pending per-env confirmation that the pinned product name resolves."
+  },
+  "COMPLETED_ORDER": {
+    "json": "orders/completed-order",
+    "fields": { "number": "number", "status": "status", "currency": "currency", "total": "total", "id": "id" },
+    "notes": "VCST-5482 — customer order in Completed state (shipment Delivered), owned by {{USER_EMAIL}}. Static fields from the JSON fixture; runtime id from aliases.<env>.json (npm run seed:orders). Unblocks suite 014 CHK-025/039/040, ORD-001/003/007/008/009/010/035."
+  },
+  "SHIPPED_ORDER": {
+    "json": "orders/shipped-order",
+    "fields": { "number": "number", "status": "status", "currency": "currency", "total": "total", "id": "id" },
+    "notes": "VCST-5482 — customer order in Shipped state (shipment Sent + tracking number), owned by {{USER_EMAIL}}. Runtime id from aliases.<env>.json (npm run seed:orders). Unblocks suite 014 CHK-013, ORD-006/012/030."
+  },
+  "PROCESSING_ORDER": {
+    "json": "orders/processing-order",
+    "fields": { "number": "number", "status": "status", "currency": "currency", "total": "total", "id": "id" },
+    "notes": "VCST-5482 — customer order in Processing state, owned by {{USER_EMAIL}}. Runtime id from aliases.<env>.json (npm run seed:orders). Unblocks suite 014 CHK-024, ORD-047."
+  },
+  "QUOTE_WITH_ADMIN_RESPONSE": {
+    "json": "quotes/quote-admin-response",
+    "fields": { "number": "number", "status": "status", "currency": "currency", "id": "id" },
+    "notes": "VCST-5482 — RFQ submitted by {{ORG_USER_EMAIL}} with admin per-line pricing applied. Runtime id from aliases.<env>.json (npm run seed:quotes). Unblocks suite 015 QUOTE-004/005/006/008/009/018/020/021/025."
+  },
+  "ACCEPTED_QUOTE": {
+    "json": "quotes/quote-accepted",
+    "fields": { "number": "number", "status": "status", "currency": "currency", "id": "id" },
+    "notes": "VCST-5482 — admin-priced RFQ accepted by the buyer (ready to convert). Runtime id from aliases.<env>.json (npm run seed:quotes). Unblocks suite 015 QUOTE-007/024/027/028/030."
   },
   "CFG_LAPTOP": {
     "file": "products/configurable-products",
@@ -718,7 +752,19 @@
       "promo_name": "promo_name",
       "id": "coupon_id"
     },
-    "_notes": "COU-024 'Test 100%' promotion, code='super' (stored lowercase). No endDate, no cart-subtotal threshold. Used by CPN-015 and CPN-062 as the canonical lowercase-stored coupon for VCST-5233 case-fidelity regression. toUpperCase() in coupon-item.vue force-uppercases to 'SUPER' on /account/coupons — the bug this alias guards against. ValidateCoupon is case-sensitive: 'SUPER' -> false, 'super' -> true."
+    "_notes": "COU-024 'Test 100%' promotion, code='super' (stored lowercase). No endDate, no cart-subtotal threshold. Used by CPN-015 as a lowercase-stored coupon for VCST-5233 case-fidelity display/copy regression. toUpperCase() in coupon-item.vue force-uppercases to 'SUPER' on /account/coupons — the bug this alias guards against. NOTE: on vcst-qa an UNRELATED uppercase coupon 'SUPER' (promo 'Super Discount', 20% off cart) also exists, so uppercasing 'super' matches that WRONG coupon rather than returning invalid — which confounds the APPLY-step guard. For the CPN-062 apply/validate case use COUPON_LC_CASEFIDELITY instead (collision-free). ValidateCoupon is case-sensitive: 'SUPER' -> matches the other coupon, 'super' -> its own."
+  },
+  "COUPON_LC_CASEFIDELITY": {
+    "file": "promotions/coupons",
+    "filter": {
+      "coupon_id": "COU-027"
+    },
+    "fields": {
+      "code": "code",
+      "promo_name": "promo_name",
+      "id": "coupon_id"
+    },
+    "_notes": "COU-027 (promo P21 'AGENT-TEST Lowercase Coupon Case Fidelity', 5% off cart subtotal, public + active, no endDate, no threshold). Dedicated collision-free lowercase coupon for the CPN-062 VCST-5233 apply/validate case-fidelity guard. code='agenttestlc062' satisfies /[a-z]/; its all-uppercase form 'AGENTTESTLC062' is NOT a valid/existing coupon on the env (probed vcst-qa 2026-07-21: 0 matches), so uppercasing (VCST-5233 bug) => ValidateCoupon false => 'This code is not valid' (clean fail signal while unfixed); lowercase preserved (once fixed) => applies. Unlike COUPON_SUPER('super'), uppercasing does NOT hit the unrelated 'SUPER'/'Super Discount' coupon. Seeded by seed-promotions.mjs; teardown: npm run seed:promotions:teardown -- --only P21. No runtime GUID here — resolves by static business key (coupon_id/code)."
   },
   "LOYALTY_SETTINGS": {
     "_inline": true,
@@ -1151,6 +1197,7 @@
     "fields": {
       "name": "org_name",
       "id": "org_id",
+      "platform_id": "platform_id",
       "status": "status"
     }
   },
@@ -2057,6 +2104,23 @@
     "notes": "Seeded 2026-05-19 via scripts/seed-data/seed-standard-products.mjs. Platform code=QA-TIER-001 (matches sku field). Product GUID: 9d709714-7905-429f-88e9-d5e342854425. Tier pricing: list=$29.99 minQty=1, sale=$26.99 minQty=10, sale=$23.99 minQty=20. stock=200. Unblocks CART-078. Env var: TIER_PRICED_SKU.",
     "_status": "seeded-20260519"
   },
+  "PROD_SALE_SIMPLE": {
+    "file": "products/test-products",
+    "filter": {
+      "product_id": "PROD-105"
+    },
+    "fields": {
+      "sku": "sku",
+      "code": "sku",
+      "name": "product_name",
+      "listPrice": "price",
+      "salePrice": "sale_price",
+      "currency": "currency",
+      "category": "category"
+    },
+    "notes": "Fresh, fully-seeded on-sale product (list 29.99 / sale 19.99) for CPN-059 BL-CART-003 — coupon discount must compute from the SALE price, not the list price. Seeded by scripts/seed-data/seed-standard-products.mjs from test-products.csv PROD-105 (sale via the sale_price column -> pricelist sale). Resolved by SKU (SALE-001) — NO runtime GUID committed, so no aliases.<env>.json writeback is needed (same pattern as every PROD_* alias). The pricelist is assigned to the store virtual catalog with no membership condition, so the sale is visible to guest / personal (USER_DEFAULT) / org users alike; stock is placed on the store MAIN fulfillment center. Replaces PROD_VARIATION_PARENT_SALE (STD-002 / EKJ-76373636), whose imported product was deleted from vcst-qa (id e5c00858 now 404s / xAPI totalCount=0). Env-invariant business keys only; multi-env-safe by construction.",
+    "_status": "seeded-20260721"
+  },
   "PROD_CONFIGURABLE": {
     "file": "products/configurable-products",
     "filter": {
@@ -2295,7 +2359,9 @@
     "_inline": true,
     "percentageCode": "QA10OFF",
     "percentageCode_alias": "COUPON_10PCT",
+    "percentagePct": "10",
     "percentageCode_value": "10% off cart, unlimited uses, expires 2026-12-31",
+    "percentageCode_verified": "Verified live on vcst-qa 2026-07-21: promotion P01 'QA Test - VCST-4590 Coupon Public' (05470c48-33f2-4a93-a0a5-2eaf6981ee68) isActive=true isPublic=true, reward RewardCartGetOfRelSubtotal amount=10 (genuine 10% of cart subtotal — NOT a flat amount). Coupon QA10OFF: unlimited uses (maxUsesNumber=0), 0 uses, expires 2026-12-31. Use @td(COUPONS.percentagePct)=10 for the discount computation in CPN-059. Distinct from the misconfigured env preset ZUR10 (labelled 10% but applies a flat ~$50) — do NOT use ZUR10. NOTE: the cart sidebar renders promotionCoupons(first:4, sort:endDate:asc); QA10OFF (endDate 2026-12-31) is NOT guaranteed to appear among the 4 preset cards, so apply it via the sidebar's Custom-code entry field.",
     "fixedAmountCode": "FIXED5",
     "fixedAmountCode_alias": "COUPON_FIXED5",
     "fixedAmountCode_value": "$5 fixed off cart subtotal, expires 2026-12-31",
@@ -3579,6 +3645,25 @@
     },
     "slug": ""
   },
+  "SALES_REP": {
+    "_inline": true,
+    "_notes": "Auth-only role alias for the scoped sales-rep xAPI (/graphql/sales-rep) — resolves to the SAME account as SR_REP_PRIMARY (agent-test-sr-primary@example.com). Mirrors the canonical role registry entry in scripts/lib/user-roles.mjs (key: SALES_REP, emailVars: SALES_REP_EMAIL, passwordVar: TEST_USER_PASSWORD). SR_REP_PRIMARY itself stays CSV-backed (sales-rep/sales-reps.csv) for its non-credential fields (id/email/fullName/store/…) used by @td() elsewhere in 050m; this alias exists only so graphql-auth.ts's [AUTH role=SALES_REP] can resolve credentials without a password column in that CSV (seed-sales-rep.mjs assigns REP_PASSWORD = SR_REP_PASSWORD || TEST_USER_PASSWORD || 'Password1!' to every seeded rep, including SR_REP_PRIMARY).",
+    "email_env": "SALES_REP_EMAIL",
+    "password_env": "TEST_USER_PASSWORD"
+  },
+  "SALES_REP_NOCUSTOMERS": {
+    "_inline": true,
+    "_notes": "Auth-only role alias for the scoped sales-rep xAPI (/graphql/sales-rep) — resolves to the SAME account as SR_REP_NOCUSTOMERS (agent-test-sr-nocustomers@example.com, rep 'Nora None'). Mirrors the SALES_REP alias above; exists so graphql-auth.ts's [AUTH role=SALES_REP_NOCUSTOMERS] can resolve credentials without a password column on the CSV-backed SR_REP_NOCUSTOMERS alias. Backs 050m SR-GQL-041 (VCST-5304/5469 corrected test design, 2026-07-17): this rep's JWT carries permission=sales-rep:access (a GLOBAL role, zero org memberships), and salesRepCustomers on the scoped schema returns HTTP 200/totalCount=0/errors[] empty for it — proven live this run. Storefront counterpart: the myCustomersRoute guard redirects this rep to /account/dashboard (089 SR-FE-013), NOT the empty-customers table (SR-FE-030 was deprecated as architecturally unreachable — a sales-rep org membership IS the served-customer relationship, so 'permissioned + org context + zero served' cannot exist).",
+    "email_env": "SALES_REP_NOCUSTOMERS_EMAIL",
+    "password_env": "TEST_USER_PASSWORD"
+  },
+  "SR_REP_LOCKED_TFCTX": {
+    "_inline": true,
+    "_notes": "Auth-only role for SR_REP_LOCKED (agent-test-sr-locked@example.com) signing in under its UNLOCKED served org ORG-002/TechFlow via an ORG-SCOPED password grant. Its DEFAULT org is ORG-001/ACME, whose membership is per-org locked, so a plain grant returns 400 user_is_locked_in_organization (proven live, VCST-5304 2026-07-17). Sending organization_id=@td(ORG_TECHFLOW.platform_id) + storeId signs it in under TechFlow (HTTP 200); the lock still excludes ACME from salesRepCustomers/salesRepCustomer/salesRepOrders (confound-checked: an unlocked rep with the same org-scoped token still returns all its orgs, so the exclusion is the lock, not token scope). Unblocks 050m SR-GQL-012/017/024 headlessly (no browser). storeId defaults to STORE_ID. Same account as the CSV-backed SR_REP_LOCKED alias, which stays for its @td id/email/membership fields.",
+    "email_env": "SR_REP_LOCKED_EMAIL",
+    "password_env": "TEST_USER_PASSWORD",
+    "organization_id": "@td(ORG_TECHFLOW.platform_id)"
+  },
   "SR_REP_PRIMARY": {
     "file": "sales-rep/sales-reps",
     "filter": {
@@ -3660,6 +3745,28 @@
     "name": "AGENT-TEST-SR-Owner-Acme",
     "phone": "+1-206-555-0142"
   },
+  "SR_ADMIN_CUSTOMER_ONLY": {
+    "file": "sales-rep/admin-users",
+    "filter": {
+      "user_key": "SR_ADMIN_CUSTOMER_ONLY"
+    },
+    "fields": {
+      "email": "email",
+      "userName": "user_name",
+      "roleName": "role_name"
+    }
+  },
+  "SR_ADMIN_NO_READ": {
+    "file": "sales-rep/admin-users",
+    "filter": {
+      "user_key": "SR_ADMIN_NO_READ"
+    },
+    "fields": {
+      "email": "email",
+      "userName": "user_name",
+      "roleName": "role_name"
+    }
+  },
   "SR_REP_ACME2": {
     "file": "sales-rep/sales-reps",
     "filter": {
@@ -3704,5 +3811,80 @@
       "fullName": "full_name",
       "store": "store"
     }
+  },
+  "SR_REP_NOCUSTOMERS_ORGCTX": {
+    "file": "sales-rep/sales-reps",
+    "filter": {
+      "rep_key": "SR_REP_NOCUSTOMERS_ORGCTX"
+    },
+    "fields": {
+      "id": "contact_id",
+      "user_id": "user_id",
+      "email": "email",
+      "firstName": "first_name",
+      "lastName": "last_name",
+      "fullName": "full_name",
+      "store": "store",
+      "context_org": "context_org"
+    },
+    "_notes": "RETIRED (TLC-2026-07-17-1603, VCST-5304/5469) — was a GAP fixture for the since-deprecated 089 SR-FE-030 (formerly SR-FE-013b). Live verification proved the state it targeted (permissioned rep + org context + zero served customers) is architecturally unreachable: a sales-rep org membership IS the served-customer relationship, so the seed-sales-rep.mjs enhancement this fixture depended on was the WRONG fix and was never built. Stays seeded=false permanently — do NOT seed, do NOT resolve @td(SR_REP_NOCUSTOMERS_ORGCTX.id) in any live run. Kept only for traceability of the retracted approach; see SALES_REP_NOCUSTOMERS for the genuinely-reachable replacement case (050m SR-GQL-041)."
+  },
+  "RESTRICTED_CMS_ADMIN": {
+    "_inline": true,
+    "_comment": "Restricted back-office (Manager) account for CMS RBAC tests CMS-123/124 (suite 059-page-builder): authenticates into the back office but LACKS Page Builder update (builder:update) — read-only Page Builder role (builder:access + builder:read). isAdministrator=false so permission checks apply (an admin would get 204, not the 403 CMS-124 asserts). email is an env-invariant AGENT-TEST business key; the PASSWORD is a {{RESTRICTED_CMS_ADMIN_PASSWORD}} secret from .env.local (never committed). Runtime platform_id/user_id/role_id resolve from aliases.<env>.json (written by scripts/seed-data/platform/seed-backoffice-rbac.mjs — npm run seed:rbac). Single source of truth: scripts/seed-data/platform/backoffice-rbac-specs.mjs; drift-guard: npm run td:validate:rbac; teardown: npm run seed:rbac:teardown.",
+    "email": "AGENT-TEST-restricted-cms@test.virtocommerce.com",
+    "login": "AGENT-TEST-restricted-cms@test.virtocommerce.com",
+    "password_var": "RESTRICTED_CMS_ADMIN_PASSWORD",
+    "role": "AGENT-TEST-Restricted-CMS-Viewer",
+    "excluded_permission": "builder:update",
+    "user_type": "Manager"
+  },
+  "PB_HOMEPAGE": {
+    "_inline": true,
+    "_comment": "Canonical PageBuilder page PAGE-1 (test-data/cms/pagebuilder-pages.md). Reconciled to Published @ /qa-homepage-spring-sale by scripts/seed-data/cms/seed-pagebuilder-pages.mjs (npm run seed:cms-pages). Runtime group_id in aliases.<env>.json. Suites 059/060 CMS-027/029/031/078-085.",
+    "name": "QA Homepage Spring Sale",
+    "permalink": "/qa-homepage-spring-sale",
+    "culture": "en-US",
+    "expect_status": "Published"
+  },
+  "PB_WHOLESALE_GUIDE": {
+    "_inline": true,
+    "_comment": "Canonical PageBuilder page PAGE-2 — user-group personalized (B2B Wholesale). Published @ /qa-wholesale-buyer-guide. Runtime group_id in aliases.<env>.json. CMS-024/025/121-125.",
+    "name": "QA Wholesale Buyer Guide 2026",
+    "permalink": "/qa-wholesale-buyer-guide",
+    "culture": "en-US",
+    "expect_status": "Published"
+  },
+  "PB_RETURN_POLICY": {
+    "_inline": true,
+    "_comment": "Canonical PageBuilder page PAGE-3 (EN) — multi-language EN+DE+FR sharing /qa-return-policy (separate single-culture pages, per the platform model). Runtime group_id in aliases.<env>.json. CMS-027/028/031/035.",
+    "name": "QA Return Policy",
+    "permalink": "/qa-return-policy",
+    "culture": "en-US",
+    "expect_status": "Published"
+  },
+  "PB_RETURN_POLICY_FR": {
+    "_inline": true,
+    "_comment": "fr-FR sibling of PAGE-3 sharing /qa-return-policy (serves /fr/qa-return-policy). Store cultures: en-GB (default), de-DE, fr-FR. Content in test-data/cms/page-content.json PB_RETURN_POLICY.fr-FR; runtime group_id in aliases.<env>.json (seed:cms-pages). CMS-027/035 FR coverage.",
+    "name": "QA Politique de retour et de remboursement",
+    "permalink": "/qa-return-policy",
+    "culture": "fr-FR",
+    "expect_status": "Published"
+  },
+  "PB_SUMMER_PREVIEW": {
+    "_inline": true,
+    "_comment": "Canonical PageBuilder page PAGE-4 — scheduled promo @ /qa-summer-collection-preview. Runtime group_id in aliases.<env>.json. CMS-030/033/034.",
+    "name": "QA Summer Collection Preview",
+    "permalink": "/qa-summer-collection-preview",
+    "culture": "en-US",
+    "expect_status": "Published"
+  },
+  "PB_PARTNER_SUPPORT": {
+    "_inline": true,
+    "_comment": "Canonical PageBuilder page PAGE-5 — org-restricted (TechFlow) @ /qa-partner-portal-support. Runtime group_id in aliases.<env>.json. CMS-024/025/026/030.",
+    "name": "QA Partner Portal Support",
+    "permalink": "/qa-partner-portal-support",
+    "culture": "en-US",
+    "expect_status": "Published"
   }
 }

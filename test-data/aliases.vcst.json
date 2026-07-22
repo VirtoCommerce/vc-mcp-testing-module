@@ -587,5 +587,61 @@
   },
   "SR_OWNER_ACME": {
     "id": "d4962ba5-cc2e-478c-b265-bad4dbc671ec"
+  },
+  "COMPLETED_ORDER": {
+    "id": "51cc5eb9-23d4-47fe-b46d-36e03dc53b2f",
+    "number": "AGENT-TEST-ORD-COMPLETED"
+  },
+  "SHIPPED_ORDER": {
+    "id": "8b3eef55-aded-4589-b1fa-04fd06b02909",
+    "number": "AGENT-TEST-ORD-SHIPPED"
+  },
+  "PROCESSING_ORDER": {
+    "id": "fa8f601d-a217-4caf-b761-32ae1898ee2f",
+    "number": "AGENT-TEST-ORD-PROCESSING"
+  },
+  "QUOTE_WITH_ADMIN_RESPONSE": {
+    "id": "85de013a-305e-44a0-96a8-1fd7ee51c790",
+    "number": "AGENT-TEST-QTE-ADMIN-RESPONSE"
+  },
+  "ACCEPTED_QUOTE": {
+    "id": "56da2e96-e32b-42f4-885e-57261ce60e12",
+    "number": "AGENT-TEST-QTE-ACCEPTED"
+  },
+  "RESTRICTED_CMS_ADMIN": {
+    "_inline": true,
+    "platform_id": "6e261ed3-9bf7-44ac-8e9b-324babab3d84",
+    "user_id": "6e261ed3-9bf7-44ac-8e9b-324babab3d84",
+    "role_id": "AGENT-TEST-Restricted-CMS-Viewer"
+  },
+  "PB_HOMEPAGE": {
+    "_inline": true,
+    "group_id": "cf53deac-0eb8-466c-8785-df8b0cbd5a35",
+    "permalink": "/qa-homepage-spring-sale"
+  },
+  "PB_WHOLESALE_GUIDE": {
+    "_inline": true,
+    "group_id": "2ee75ae8-7f45-4974-b6f8-70dcd0c9a0b7",
+    "permalink": "/qa-wholesale-buyer-guide"
+  },
+  "PB_SUMMER_PREVIEW": {
+    "_inline": true,
+    "group_id": "b6b4c481-02af-4b9f-8184-a5c8e26b5d68",
+    "permalink": "/qa-summer-collection-preview"
+  },
+  "PB_PARTNER_SUPPORT": {
+    "_inline": true,
+    "group_id": "52bdc541-c5a3-4d1e-8df0-5d1970a30eef",
+    "permalink": "/qa-partner-portal-support"
+  },
+  "PB_RETURN_POLICY": {
+    "_inline": true,
+    "group_id": "a08d0245-f089-4d27-8526-3191ba17ee7b",
+    "permalink": "/qa-return-policy"
+  },
+  "PB_RETURN_POLICY_FR": {
+    "_inline": true,
+    "group_id": "3b556eab-f811-4d10-8c8a-48c209a4c2e1",
+    "permalink": "/qa-return-policy"
   }
 }

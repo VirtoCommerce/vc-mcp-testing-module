@@ -73,9 +73,9 @@ Every feature decomposes into testable layers. Each layer has its own output for
 | Backend & Admin Checklists (29 domains, 244 items) | `skills/qa-checklist/backend-admin-checklists.md` — Bundle v14.0.8, 27 Admin modules + 2 API (REST + xAPI) |
 | GraphQL xAPI Checklist (83 items) | `skills/qa-checklist/graphql-checklist.md` — xCatalog, xCart, xOrder, xProfile, xQuote, xCMS, xFrontend + New Query/Mutation Verification |
 | GraphiQL Interaction Guide | `knowledge/api/graphiql-interaction.md` — CodeMirror editor interaction, auth headers, query typing, execution |
-| **Authoring Runner-Native GraphQL Cases** | `knowledge/api/graphql-test-cases-runner.md` — **READ THIS BEFORE writing or migrating any GraphQL test case.** Canonical contract for the `Steps` / `Assertions` / `Cleanup` grammar consumed by `scripts/graphql-runner.ts`: tag list, predicate shapes, path syntax, `@td()` + capture rules, schema validation, authoring checklist, gold-standard examples (050i). |
+| **Authoring Runner-Native GraphQL Cases** | `knowledge/api/graphql-test-cases-runner.md` — **READ THIS BEFORE writing or migrating any GraphQL test case.** Canonical contract for the `Steps` / `Assertions` / `Cleanup` grammar consumed by `scripts/graphql/graphql-runner.ts`: tag list, predicate shapes, path syntax, `@td()` + capture rules, schema validation, authoring checklist, gold-standard examples (050i). |
 | **Live Discovery + Random Inputs** | `knowledge/execution/live-discovery.md` — **READ THIS BEFORE authoring any case that names a product/address/cart/coupon entity.** Decision tree separating `{{VAR}}` (per-env) / `@td()` (assertion target) / `live-discover` (drift-resilient entity lookup) / `random-data` (unique inputs with `AGENT-TEST-` cleanup prefix). JS helpers: `scripts/lib/live-discover.ts`, `scripts/lib/random-data.ts`. CSV-runner recipes via `[GQL-OP]+[GQL-CAPTURE]`. Parallel-run isolation via the agent user pool. |
-| Live xAPI Schema Snapshot | `knowledge/api/graphql-schema.md` — types/fields/inputs from live introspection. Every new GraphQL query/mutation MUST validate against this (or run `scripts/graphql-runner.ts --query "<inline>"` for a live check). |
+| Live xAPI Schema Snapshot | `knowledge/api/graphql-schema.md` — types/fields/inputs from live introspection. Every new GraphQL query/mutation MUST validate against this (or run `scripts/graphql/graphql-runner.ts --query "<inline>"` for a live check). |
 | Test Case Template (15-col CSV) | `skills/qa-test-cases-generator/test-case-template.md` |
 
 ### What Makes Good VC Test Cases
@@ -175,7 +175,7 @@ Browsers: `playwright-chrome` (primary), `playwright-firefox`, `playwright-edge`
 | Test Case Generator Skill | `skills/qa-test-cases-generator/SKILL.md` |
 | xAPI & REST API Reference | `skills/qa-api/xapi-query-ref.md` — ready-to-use query/mutation signatures for Steps column |
 | API Test Case Patterns | `skills/qa-api/api-test-case-patterns.md` — coverage checklists, REST/GraphQL step tags, per-domain test ID patterns, negative test sets, skeletons |
-| Test Data Combination Design | `skills/qa-generate-data/SKILL.md` — DESIGN cross-entity combinations (learn-live → pairwise matrix → reuse/gap → `@td()` combo aliases) BEFORE seeding. Run in workflow step 5b. |
+| Test Data Combination Design | `skills/qa-generate-data/SKILL.md` — DESIGN cross-entity combinations (learn-live → pairwise matrix → reuse/gap → `@td()` combo aliases) BEFORE seeding. Run in workflow step 5b. **Delegate the actual authoring of new seeders / fixtures / validators to the `test-data-engineer` agent** — you design what data is needed; it writes (and unit-tests) the scripts that provision it (`knowledge/execution/test-data-authoring.md`). |
 | Test Data Seeding | `skills/qa-seed-data/SKILL.md` |
 | E2E Scenario Catalog (105) | `skills/qa-plan/e2e-scenario-catalog.md` |
 | Module → Suite Mapping | `knowledge/execution/module-suite-map.md` |
@@ -204,7 +204,7 @@ BLOCKED ❌ → escalate to qa-lead
 2. **Decompose into layers** — Which layers apply? (API, GraphQL, Admin, Storefront, E2E). Record in test plan
 3. **Explore per layer (MANDATORY)** — Run `/qa-sbtm <feature>` first to surface unknown unknowns before writing test cases. Then explore per layer: Storefront labels, Admin blades, API schemas, GraphQL operations (see UI Exploration Protocol above). Use `/qa-api ref <module>` to get exact mutation/query signatures before writing test steps
 4. **Apply test design techniques (MANDATORY)** — Run `/qa-test-design <feature>` to systematically derive test conditions before writing cases. **The techniques serve the four Mental Model questions — they don't replace them.** Use them to operationalize "how do we break this?" and "what wasn't considered?": pairwise for toggles/flags, decision tables for business rules, state transitions for lifecycles, **error guessing for "what if X breaks?" gaps the spec missed**, BVA for numeric edges. Produces structured test conditions that feed directly into step 6. Skip this step only for trivial bug-fix verifications with < 3 test cases.
-5. **Create test plan** — Save to `tests/SprintXX-XX/VCST-XXXX/test-plan.md` with **Layer Coverage Matrix**:
+5. **Create test plan** — Save to `reports/tickets/SprintXX-XX/VCST-XXXX/test-plan.md` with **Layer Coverage Matrix**:
    ```
    | Layer | Applicable? | # Cases | Assigned Agent | Target Suite |
    |-------|-------------|---------|---------------|-------------|
@@ -245,7 +245,7 @@ BLOCKED ❌ → escalate to qa-lead
    seeds the gap fixtures (they are `seeded=false` templates until then) and writes real IDs back so
    `@td(COMBO_ALIAS.field)` resolves. Document `{{VAR}}` bindings + the `@td()` combination aliases in
    the Test_Data column. (Step 5b designs + authors the data; this step provisions it.)
-9. **Organize into suites** — Only `Reviewed` cases go into regression-eligible suites. API→`Backend/api/049-*`, GraphQL→`Backend/graphql/050*`, Admin→`Backend/<module>/*`, Storefront→`Frontend/<area>/*`, E2E→feature suite. `Draft` cases live in `tests/Sprint-current/VCST-XXXX/` until promoted
+9. **Organize into suites** — Only `Reviewed` cases go into regression-eligible suites. API→`Backend/api/049-*`, GraphQL→`Backend/graphql/050*`, Admin→`Backend/<module>/*`, Storefront→`Frontend/<area>/*`, E2E→feature suite. `Draft` cases live in `reports/tickets/Sprint-current/VCST-XXXX/` until promoted
 10. **Create RTM** — Per-layer coverage: "AC-1 covered by API-042, GQL-042, E2E-042". Target >=95% overall (each applicable layer must have cases for a requirement to count as fully covered)
 11. **Validate (MANDATORY)** — P0/P1 per layer: UI in Playwright, API via Postman/curl, GraphQL in GraphiQL. Fix mismatches
 12. **Deliver Feature Test Matrix** — Test plan path, cases by layer × priority (Draft vs Reviewed counts), coverage %, delegation per layer, JIRA links

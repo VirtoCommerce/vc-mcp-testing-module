@@ -8,16 +8,16 @@ Three agent teams for the Virto Commerce platform: **QA** (quality assurance), *
 /qa-smoke                    # Daily smoke test (12 P0 tests, ~15 min)
 /qa-test VCST-1234           # Test a specific JIRA ticket
 /qa-regression critical      # Run P0 regression suites
-/qa-regression full          # Full 104-suite regression
+/qa-regression full          # Full 110-suite regression
 /ba-analyze                  # Full business analysis
 /ba-analyze flows            # User flow analysis only
 ```
 
 ---
 
-## Agent Inventory (18 agents + per-team shared instructions)
+## Agent Inventory (19 agents + per-team shared instructions)
 
-### QA Team (10 agents + shared-instructions)
+### QA Team (11 agents + shared-instructions)
 
 | Agent | Model | Color | Purpose |
 |-------|-------|-------|---------|
@@ -27,6 +27,7 @@ Three agent teams for the Virto Commerce platform: **QA** (quality assurance), *
 | **qa-testing-expert** | opus | green | Interactive testing, Figma comparison, debugging |
 | **ui-ux-expert** | sonnet | pink | Storybook, WCAG 2.1 AA, design system |
 | **test-management-specialist** | sonnet | purple | Test planning, case writing, coverage tracking |
+| **test-data-engineer** | opus | teal | Authors seeders / fixtures / `@td()` aliases / validators + unit tests (`/qa-generate-data` + `/qa-seed-data`); write-capable in this repo only, no browser |
 | **regression-orchestrator** | sonnet | orange | Parallel regression + smoke mode, retries, reports |
 | **autonomous-regression-orchestrator** | sonnet | orange | Agent Teams regression: token bucket, failure recovery, JIRA integration |
 | **autonomous-test-runner** | sonnet | orange | Standalone autonomous test execution agent |
@@ -55,22 +56,24 @@ one reviewer per repo kind**, picked by the routed repo's `kind`. Gate ladder:
 |-------|-------|-------|---------|
 | **fullstack-backend** | opus | green | Fixes a single `vc-module-*` / `vc-platform` repo — .NET 10 / C# + the module's Admin SPA (Angular). Reproduce-as-test → minimal fix → PR. Interactive twin of `ci/agents/fix-backend-agent.md`. Skills: `/dotnet-unit-test`, `/dotnet-fix`, `/angular-admin`. |
 | **backend-reviewer** | opus | blue | Reviews the C#/Angular local diff before the PR (Gate 4): single-repo, no test edits, no breaking changes, BL-* preserved, minimal & idiomatic. |
-| **fullstack-frontend** | opus | cyan | Fixes the `vc-frontend` storefront — Vue 3 / TS / Vite + the in-repo UI kit + Storybook. Reproduce-as-vitest-test → minimal fix → PR. Interactive twin of `ci/agents/fix-frontend-agent.md`. Skills: `/vue-unit-test`, `/vue-fix` (`/storybook-test` optional). |
+| **fullstack-frontend** | opus | cyan | Fixes the `vc-frontend` storefront — Vue 3 / TS / Vite + the in-repo UI kit + Storybook — **and** a `vc-module-*` repo's declared embedded Vue 3 frontend sub-app (e.g. `vc-module-pagebuilder`'s page-builder shell, scoped to the sub-app path). Reproduce-as-vitest-test (or the sub-app's own `tsx --test`/ephemeral harness) → minimal fix → PR. Interactive twin of `ci/agents/fix-frontend-agent.md`. Skills: `/vue-unit-test`, `/vue-fix`, `/vc-shell-fix` (`/storybook-test` optional). |
 | **frontend-reviewer** | opus | blue | Reviews the Vue/TS local diff before the PR (Gate 4): single-repo, no test/story edits, no breaking prop/event/slot or GraphQL contract, BL-UI preserved, minimal & idiomatic. |
 
 ---
 
-## Slash Commands (19)
+## Slash Commands (28)
 
 Full argument reference: [`.claude/rules/skills-commands.md`](../../rules/skills-commands.md).
 
-### QA Commands
+### QA & Setup Commands
 
 | Command | Purpose | Speed |
 |---------|---------|-------|
+| `/project-init` | Onboard the toolset onto a deployment: native-platform vs client, tracker + code host, `project-profile.json` + `.mcp.json`, verify access | varies |
 | `/qa-smoke` | Daily pre-deploy smoke (12 P0 tests, GO/NO-GO) | ~15 min |
 | `/qa-test VCST-XXXX` | Test a JIRA ticket, feature, or PR | varies |
 | `/qa-regression [scope]` | Run regression suites (smoke/critical/sprint/full) | varies |
+| `/qa-triage-results [RUN_ID]` | Triage a completed run's FAILs: classify real-bug vs test-defect vs flaky, live-verify, route fixes (never files a ticket) | varies |
 | `/qa-coverage-generation [scope]` | Orchestrated parallel coverage generation with CI support | varies |
 | `/qa-test-lifecycle` | Unified pipeline: sync stale cases + analyze gaps + generate + review + verify (PR, module, diff, suite, domain) | varies |
 | `/qa-test-plan [sprint]` | Build a sprint test plan from JIRA + merged PRs in the sprint window | varies |
@@ -78,12 +81,19 @@ Full argument reference: [`.claude/rules/skills-commands.md`](../../rules/skills
 | `/qa-status` | Dashboard: run status, JIRA queue, env health | < 30 sec |
 | `/qa-bug [description]` | Reproduce, document, and optionally file a JIRA bug | ~5 min |
 | `/qa-fix VCST-XXXX` | Autonomous fix of an already-filed bug: triage → reproduce-as-test → minimal single-repo fix → PR → STOP for human review (never auto-merges) | varies |
+| `/qa-hotfix VCST-XXXX` | Release a hotfix of a merged+released fix into the current latest-stable bundles (gated writes, never auto-merges) | varies |
+| `/qa-hotfix-check VCST-XXXX` | Deliver an already-released hotfix onto the deployed stable + regression envs; verify live, transition tickets | varies |
+| `/qa-bundle-check vN` | Compare a stable bundle's pinned versions against the latest same-line hotfixes on GitHub | varies |
 | `/qa-monitoring [layer]` | Online bug monitoring from App Insights: query → dedup → triage → live repro → report (detect-and-report only) | varies |
 | `/qa-design [target]` | Dual Storybook + Storefront BL-UI audit | varies |
 | `/qa-exploratory [area]` | Guided exploratory testing session with heuristics | ~20 min |
 | `/qa-seed-data [profile]` | Seed / tear down test data (Postman MCP + seed scripts) | varies |
+| `/qa-local-env [VCST-XXXX]` | Spin up a local VC stack (start-local + Docker) pinned to the deployed manifest; fresh DB per run | varies |
+| `/qa-sitemap` | Refresh `knowledge/domain/sitemap.md` from the live storefront (diff-gated xAPI crawler) | varies |
 | `/qa-env-check` | Validate env vars, endpoints, MCP servers, test infra | < 30 sec |
 | `/qa-onboarding [env]` | Customer onboarding flow: install → first green smoke run + first bug filed | varies |
+| `/code-review-full` | Full multi-dimension code review of the working diff | varies |
+| `/vc-self-check [session]` | Self-diagnose the plugin from this session's telemetry → local `DIAG-*.md` (never modifies the install, never sends) | varies |
 | `/qa-sync-tests` | _(deprecated — redirects to `/qa-test-lifecycle`)_ | — |
 
 ### BA Commands
@@ -145,14 +155,14 @@ Reads JIRA ticket, maps to affected components, dispatches specialists, reports 
 ### 3. Regression (`/qa-regression [scope]`)
 Reads `config/test-suites.json`, dispatches sub-agents in batches of 3, retries with browser fallback chain.
 
-**Autonomous mode** (`/qa-regression [scope] --autonomous`): Uses `autonomous-regression-orchestrator` with Agent Teams for enhanced orchestration — 3+1 token bucket, exponential backoff (30s→60s→120s), persistent failure tracking, consolidated reporting via `scripts/reporting.ts`, and auto-JIRA ticket creation. Results in `results/{RUN_ID}/`.
+**Autonomous mode** (`/qa-regression [scope] --autonomous`): Uses `autonomous-regression-orchestrator` with Agent Teams for enhanced orchestration — 3+1 token bucket, exponential backoff (30s→60s→120s), persistent failure tracking, consolidated reporting via `scripts/regression/reporting.ts`, and auto-JIRA ticket creation. Results in `results/{RUN_ID}/`.
 
 | Selection | Suites | Use Case |
 |-----------|--------|----------|
 | `smoke` | 042, 078 | Daily pre-deploy |
 | `critical` | 042, 078, 039, 044, 049 | P0 gate |
 | `sprint` | Plan-driven (sprint-*-summary.json) | Sprint release |
-| `full` | All 104 | Production release |
+| `full` | All 110 | Production release |
 | `frontend` | All Frontend/ suites | Frontend only |
 | `backend` | All Backend/ suites | Backend only |
 
@@ -194,13 +204,13 @@ QA agents use a **four-layer prompt architecture**:
 3. **Skill Set** (technique) — how to find what's broken
 4. **Design Decisions** (constraints) — tools and boundaries
 
-Shared knowledge files in `knowledge/` (27 files) — full annotated list in `.claude/rules/agents.md`. Includes `business-logic.md`, `graphql-schema.md`, `graphql-test-cases-runner.md`, `live-discovery.md`, `vc-module-architecture.md`, and the BA documentation style guide `virto-doc-style.md` (four audience skeletons: Customer / Admin / Developer / Sales).
+Shared knowledge files in `knowledge/` (28 files) — full annotated list in `.claude/rules/agents.md`. Includes `business-logic.md`, `graphql-schema.md`, `graphql-test-cases-runner.md`, `live-discovery.md`, `vc-module-architecture.md`, and the BA documentation style guide `virto-doc-style.md` (four audience skeletons: Customer / Admin / Developer / Sales).
 
 ---
 
 ## Customizing Agents
 
-All 18 agents are flat `.md` files at the plugin root `agents/` (plugin agent discovery is non-recursive — no team subfolders): 10 QA + 4 BA + 4 Developers. The three per-team `shared-instructions.md` files and this README live under `knowledge/agents/` (a plain reference dir, not scanned as components). Shared knowledge files are in `knowledge/` (28 files). Each agent is a Markdown file with YAML frontmatter (name, description, model, color). Edit the `.md` file to customize behavior.
+All 19 agents are flat `.md` files at the plugin root `agents/` (plugin agent discovery is non-recursive — no team subfolders): 11 QA + 4 BA + 4 Developers. The three per-team `shared-instructions.md` files and this README live under `knowledge/agents/` (a plain reference dir, not scanned as components). Shared knowledge files are in `knowledge/` (28 files). Each agent is a Markdown file with YAML frontmatter (name, description, model, color). Edit the `.md` file to customize behavior.
 
 ---
 

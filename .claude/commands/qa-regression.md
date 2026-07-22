@@ -126,11 +126,16 @@ Create `REG-YYYY-MM-DD-HHMM` and output directory `reports/regression/{RUN_ID}/`
 
 ### Step 3 — Initialize Status Tracker & Launch Live Dashboard
 1. Write `reports/regression/test-run-status.json` with all suites in `pending` state (run-level `status: "in_progress"`).
-2. **Launch the live HTML dashboard in the background** so the user watches progress fill in from the start:
+2. **ALWAYS launch the live HTML dashboard in the background — automatically, on EVERY run, without being asked.** This is mandatory, not optional: never wait for the user to request the dashboard, and never ask whether to launch it. It fires for every selection and every execution mode — browser-pool runs AND single runner-native suites (e.g. 050m) alike. Launch it here, right after writing `test-run-status.json` and **before dispatching any suite agent (Step 4)**:
    ```
    npm run report:regression:watch -- --run-id {RUN_ID}
    ```
    Run it **detached / in the background** (do not block on it). It opens `reports/regression/{RUN_ID}/regression-report.html` in the browser immediately (a "pending" view), regenerates every ~10s as suites complete, and — because it reads `test-run-status.json` — auto-refreshes the page (`<meta refresh>`) until the run is `completed`, then settles into the final static report and exits on its own. Spawning `npm run …` is a Node script, not a browser/UI action, so it does not trip the real-user hook.
+
+   > **⚠ Watcher OWNERSHIP + lifecycle — the load-bearing rule (this is why the dashboard "freezes"):** the watcher MUST be launched by the **persistent session that owns the run for its whole duration** — i.e. the top-level `/qa-regression` session, using ITS OWN background mechanism. **NEVER let an ephemeral sub-agent own the watcher.** A sub-agent's background processes are **killed the instant its turn ends**, but the run outlives it (runner sub-agents keep writing `suite-*-results.json`, consolidation happens turns later) — so a watcher spawned *inside* the `regression-orchestrator`/`test-runner` sub-agent dies mid-run and the HTML goes stale even though results keep updating. Therefore:
+   > - If you (the top-level session) **dispatch** suite execution to the `regression-orchestrator` sub-agent or runner sub-agents, **YOU launch the watcher here first, in your own background** — do not delegate the launch.
+   > - **Self-heal (check on every wake / task-notification while the run is `in_progress`):** if `regression-report.html`'s mtime is older than ~60s while `test-run-status.json` is still `in_progress` (or any `suite-*-results.json` still shows PENDING/running), the watcher has died — **relaunch it** (same command) or run the one-shot `npm run report:regression -- --run-id {RUN_ID}` to refresh, then relaunch the watcher. Do this without being asked.
+   > - The watcher is a plain Node process; the durable owner is the main-loop `run_in_background` (it survives across turns and re-notifies on exit), never a Task-dispatched agent.
 
 ### Step 4 — Dispatch Sub-Agents in Batches of 3
 
@@ -233,6 +238,7 @@ Agents MUST resolve credentials via `@td()` at runtime — never hardcode in pro
 - Never share browser slots between concurrent agents
 - Priority order: P0 before P1 before P2
 - Always write test-run-status.json (external tools + the live HTML dashboard monitor it — update it at each state change so the dashboard reflects real progress)
+- **Always auto-launch the live dashboard watcher (Step 3) — every run, every mode, without asking.** Spawn `npm run report:regression:watch -- --run-id {RUN_ID}` in the background immediately after writing `test-run-status.json` and before dispatching any suite agent. Never wait for the user to request it, and never ask whether to launch it — it applies to browser-pool runs and single runner-native suites (e.g. 050m) equally.
 - **Split the suite-by-suite results by layer.** The Step 6 report's results table is written as two subsections — `Frontend Suites` (`regression/suites/Frontend/`) and `Backend Suites` (`regression/suites/Backend/`) — classified by the layer directory each suite's CSV lives under in `config/test-suites.json`, each with its own pass/fail sub-total. Loyalty splits across layers (083/083b → Frontend; 075/075b/075c → Backend); admin/GraphQL suites (050*, 0XX admin) → Backend.
 - Read URLs from .env via `config.js`, never hardcode
 - If >50% suites fail, flag as critical_failure — suggest `/qa-sync-tests` to check for stale test cases

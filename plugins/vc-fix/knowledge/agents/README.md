@@ -3,7 +3,7 @@
 `vc-fix` ships a narrow slice of the full `vc-qa` agent crew, scoped to five workflows: project
 setup (`/project-init`), bug filing (`/qa-bug`), bug fixing (`/qa-fix` + its dev team), bug
 verification (`/qa-verify-fix`), online bug monitoring (`/qa-monitoring`), and plugin
-self-diagnostics (`/vc-self-check`). **8 agents, 7 commands, 15 skills** — no regression
+self-diagnostics (`/vc-self-check`) + direct feedback (`/vc-feedback`). **8 agents, 8 commands, 16 skills** — no regression
 orchestration, no BA team, no Storybook/a11y/design-system tooling. Those live only in the full
 `vc-qa` plugin (not shipped here).
 
@@ -16,6 +16,7 @@ orchestration, no BA team, no Storybook/a11y/design-system tooling. Those live o
 /qa-verify-fix VCST-1234     # Verify a fix, transition the ticket
 /qa-monitoring both          # Query App Insights, dedup, triage, live-repro, report
 /vc-self-check               # Diagnose whether the plugin's own skills ran correctly
+/vc-feedback "…" 👎          # Attach your own verdict to this session (silent-failure signal)
 ```
 
 ---
@@ -44,7 +45,7 @@ auto-merges.** No browser.
 |-------|-------|---------|
 | **fullstack-backend** | opus | Fixes a single `vc-module-*` / `vc-platform` repo — .NET 10 / C# + the module's Admin SPA (Angular). Reproduce-as-test → minimal fix → PR. Skills: `/dotnet-unit-test`, `/dotnet-fix`, `/angular-admin`. |
 | **backend-reviewer** | opus | Reviews the C#/Angular local diff before the PR (Gate 4): single-repo, no test edits, no breaking changes, BL-* preserved, minimal & idiomatic. |
-| **fullstack-frontend** | opus | Fixes the `vc-frontend` storefront — Vue 3 / TS / Vite + the in-repo UI kit + Storybook. Reproduce-as-vitest-test → minimal fix → PR. Skills: `/vue-unit-test`, `/vue-fix`. |
+| **fullstack-frontend** | opus | Fixes the `vc-frontend` storefront — Vue 3 / TS / Vite + the in-repo UI kit + Storybook — **and** a `module` repo's declared embedded frontend sub-app on the same stack (e.g. `vc-module-pagebuilder`'s Vue 3 shell), scoped to the sub-app path within that module's single-repo checkout. Reproduce-as-vitest-test (or, for a module sub-app, its own `tsx --test`/ephemeral harness) → minimal fix → PR. Skills: `/vue-unit-test`, `/vue-fix`, `/vc-shell-fix` (module-embedded sub-app). |
 | **frontend-reviewer** | opus | Reviews the Vue/TS local diff before the PR (Gate 4): single-repo, no test/story edits, no breaking prop/event/slot or GraphQL contract, BL-UI preserved, minimal & idiomatic. |
 
 **Dropped from the full `vc-qa` crew** (not shipped in `vc-fix`): `qa-lead-orchestrator` (its
@@ -65,7 +66,7 @@ top-level session performs it directly), `ui-ux-expert`, `regression-orchestrato
 | `/qa-verify-fix VCST-XXXX` | Verify a bug fix: fetch ticket, reproduce STR, confirm fix, regression checks, transition the ticket |
 | `/qa-monitoring [layer]` | Online bug monitoring from App Insights: query → dedup (fingerprint) → triage → live repro → report. Detect-and-report only — never files a ticket or auto-fixes |
 | `/qa-env-check` | Validate env vars, endpoints, MCP servers |
-| `/vc-self-check` | Self-diagnostics (Tier B): read this session's passive telemetry (`hooks/session-telemetry.mjs` → `.vc-fix/diagnostics/`) + transcript + the `knowledge/diagnostics/skill-expectations.md` oracle → per-skill verdict + severity + proposed fix → LOCAL `DIAG-*.md`. `deliver` sub-step contributes a scrubbed, consent-gated PR/issue to VirtoCommerce. Never modifies the install; `disable-model-invocation` |
+| `/vc-self-check` | Self-diagnostics (Tier B): read this session's passive telemetry (`hooks/session-telemetry.mjs` → `.vc-fix/diagnostics/`) + transcript + the `knowledge/diagnostics/skill-expectations.md` oracle → per-skill verdict + severity + proposed fix → LOCAL `DIAG-*.md`. `deliver` sub-step contributes a scrubbed, consent-gated PR/issue to VirtoCommerce. Never modifies the install; model-invocable (no `disable-model-invocation`) so the end-of-turn tail-trigger can auto-run it silently; recursion blocked by span-drop + `selfCheckSeen` + per-signature dedup |
 
 **Dropped from the full `vc-qa` crew:** `/qa-smoke`, `/qa-test`, `/qa-regression`,
 `/qa-coverage-generation`, `/qa-test-lifecycle`, `/qa-test-plan`, `/qa-sync-tests`,
