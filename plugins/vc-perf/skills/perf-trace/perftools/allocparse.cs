@@ -54,13 +54,20 @@ foreach (var kv in byType.OrderByDescending(x => x.Value.bytes).Take(topN))
     Console.WriteLine($"{kv.Value.bytes / 1e6,12:F1} {100.0 * kv.Value.bytes / total,6:F1}%  {kv.Key}");
 }
 
-// ---- Pass 2: allocation by CALL STACK (needs TraceLog etlx) ----
+// ---- Pass 2: allocation by CALL STACK + RESPONSIBLE caller (single pass over log.Events) ----
 Console.WriteLine($"\n## Top {topN} allocation call-stack leaf frames (by GCAllocationTick, stack-resolved)");
 var etlx = TraceLog.CreateFromEventPipeDataFile(path);
 using var log = new TraceLog(etlx);
 var byFrame = new Dictionary<string, long>();     // leaf method
 var byModule = new Dictionary<string, long>();    // owning module
+var byOwner = new Dictionary<string, long>();     // first non-BCL caller
 long stacked = 0, nostack = 0;
+// keep in sync with cpuparse.cs IsBcl
+bool IsBcl(string m) => m is "System.Private.CoreLib" or "System.Collections"
+    or "System.Collections.Immutable" or "System.Linq" or "System.Linq.Expressions"
+    or "System.Memory" or "System.ObjectModel" or "System.Private.Xml" or "netstandard"
+    or "System.Text.RegularExpressions" or "System.Runtime" or "System.Collections.Concurrent"
+    or "System.Threading" or "System.Threading.Tasks" or "System.Text.Json" or "System.Net.Sockets";
 foreach (var data in log.Events)
 {
     if (data is not GCAllocationTickTraceData tick)
@@ -80,33 +87,6 @@ foreach (var data in log.Events)
     var module = cs.CodeAddress.ModuleName;
     byFrame[$"{module}!{leaf}"] = byFrame.GetValueOrDefault($"{module}!{leaf}") + tick.AllocationAmount64;
     byModule[module] = byModule.GetValueOrDefault(module) + tick.AllocationAmount64;
-}
-Console.WriteLine($"# stack-resolved {stacked / 1e9:F2} GB, no-stack {nostack / 1e9:F2} GB");
-Console.WriteLine($"{"bytes(MB)",12} {"share",7}  module!leafMethod");
-foreach (var kv in byFrame.OrderByDescending(x => x.Value).Take(topN))
-{
-    Console.WriteLine($"{kv.Value / 1e6,12:F1} {100.0 * kv.Value / stacked,6:F1}%  {kv.Key}");
-}
-
-// ---- Pass 3: attribute to the first "responsible" (non-BCL) caller ----
-Console.WriteLine($"\n## Allocation by RESPONSIBLE caller (first non-BCL frame walking up from leaf)");
-bool IsBcl(string m) => m is "System.Private.CoreLib" or "System.Collections"
-    or "System.Collections.Immutable" or "System.Linq" or "System.Linq.Expressions"
-    or "System.Memory" or "System.ObjectModel" or "System.Private.Xml" or "netstandard"
-    or "System.Text.RegularExpressions" or "System.Runtime" or "System.Collections.Concurrent";
-var byOwner = new Dictionary<string, long>();
-foreach (var data in log.Events)
-{
-    if (data is not GCAllocationTickTraceData tick)
-    {
-        continue;
-    }
-
-    var cs = data.CallStack();
-    if (cs == null)
-    {
-        continue;
-    }
 
     var owner = "(bcl-only)";
     for (var f = cs; f != null; f = f.Caller)
@@ -119,6 +99,15 @@ foreach (var data in log.Events)
     }
     byOwner[owner] = byOwner.GetValueOrDefault(owner) + tick.AllocationAmount64;
 }
+Console.WriteLine($"# stack-resolved {stacked / 1e9:F2} GB, no-stack {nostack / 1e9:F2} GB");
+Console.WriteLine($"{"bytes(MB)",12} {"share",7}  module!leafMethod");
+foreach (var kv in byFrame.OrderByDescending(x => x.Value).Take(topN))
+{
+    Console.WriteLine($"{kv.Value / 1e6,12:F1} {100.0 * kv.Value / stacked,6:F1}%  {kv.Key}");
+}
+
+// ---- Pass 3: attribute to the first "responsible" (non-BCL) caller ----
+Console.WriteLine($"\n## Allocation by RESPONSIBLE caller (first non-BCL frame walking up from leaf)");
 Console.WriteLine($"{"bytes(MB)",12} {"share",7}  responsible module!method");
 foreach (var kv in byOwner.OrderByDescending(x => x.Value).Take(topN))
 {

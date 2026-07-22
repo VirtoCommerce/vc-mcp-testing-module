@@ -18,8 +18,8 @@ equivalent:
 
 - **No auto-merge** (triple guard). A perf PR ends at "open", never merged.
 - **Client-code containment.** A fix lands in the client repo unless it is a platform issue, then it
-  goes upstream — route via vc-fix's `qa-fix-routing`, do not re-implement routing.
-- **Single repo per change**; a conventions pass before review (`backend-reviewer`).
+  goes upstream — route via `vc-fix:qa-fix-routing`, do not re-implement routing.
+- **Single repo per change**; a conventions pass before review (`vc-fix:backend-reviewer`).
 
 ## Advisory only
 

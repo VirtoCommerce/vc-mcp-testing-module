@@ -29,11 +29,11 @@ backend process (projects that rename the host binary must set this, or the side
 skips):
 
 ```bash
-BASE_URL="$(jq -r .perf.backendUrl project-profile.json)" \
-  STORE_ID="$(jq -r .perf.storeId project-profile.json)" \
-  CURRENCY_CODE="$(jq -r '.perf.currencyCode // "USD"' project-profile.json)" \
-  CULTURE_NAME="$(jq -r '.perf.cultureName // "en-US"' project-profile.json)" \
-  PLATFORM_PROCESS="$(jq -r '.perf.platformProcess // "VirtoCommerce.Platform.Web"' project-profile.json)" \
+BASE_URL="$(jq -r .perf.backendUrl "${PROJECT_PROFILE_PATH:-project-profile.json}")" \
+  STORE_ID="$(jq -r .perf.storeId "${PROJECT_PROFILE_PATH:-project-profile.json}")" \
+  CURRENCY_CODE="$(jq -r '.perf.currencyCode // "USD"' "${PROJECT_PROFILE_PATH:-project-profile.json}")" \
+  CULTURE_NAME="$(jq -r '.perf.cultureName // "en-US"' "${PROJECT_PROFILE_PATH:-project-profile.json}")" \
+  PLATFORM_PROCESS="$(jq -r '.perf.platformProcess // "VirtoCommerce.Platform.Web"' "${PROJECT_PROFILE_PATH:-project-profile.json}")" \
   $pluginRoot/skills/perf-loadtest/loadtests/run.sh steady
 ```
 
@@ -46,7 +46,7 @@ for multi-user concurrency, and orchestration gotchas: `loadtests/README.md`.
 profile) — the `perf.loadtest` keys in `project-profile.json` are not piped in automatically:
 
 - `perf.loadtest.fixtures.productIds` — export `PRODUCT_IDS=<comma-separated ids>` yourself (e.g.
-  `PRODUCT_IDS="$(jq -r '.perf.loadtest.fixtures.productIds | join(",")' project-profile.json)"`)
+  `PRODUCT_IDS="$(jq -r '.perf.loadtest.fixtures.productIds | join(",")' "${PROJECT_PROFILE_PATH:-project-profile.json}")"`)
   before invoking `run.sh`; the scenarios read `__ENV.PRODUCT_IDS`, not the profile file.
 - `perf.loadtest.seedEndpoint` — currently **reserved/unused**: no script or scenario in this
   harness reads it. Treat it as documentation of where a seed-users endpoint lives, not a wired

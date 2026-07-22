@@ -21,6 +21,7 @@ const Q = {
 };
 
 const BASE_URL = __ENV.BASE_URL || 'https://localhost:8090';
+const SKIP_TLS = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(BASE_URL);
 const PROFILE = __ENV.PROFILE || 'smoke';
 const ITEMS = Number(__ENV.ITEMS || 5);
 const RATE = Number(__ENV.RATE || 5);
@@ -54,7 +55,7 @@ const profiles = {
 };
 
 export const options = {
-    insecureSkipTLSVerify: true, // local dev certificate
+    insecureSkipTLSVerify: SKIP_TLS, // only for a local dev cert; verify against real hosts
     summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'count'],
     scenarios: { cartOrderLoop: profiles[PROFILE] },
     thresholds: {

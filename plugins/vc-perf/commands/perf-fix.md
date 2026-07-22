@@ -21,7 +21,7 @@ not by a red→green unit test. See `.claude/rules/perf-gates.md`.
    then hand the artifacts to the **`perf-analyst`** agent. It returns ranked optimization candidates.
 2. **Pick one candidate** with the operator (highest ROI first). Confirm the axis, the fix shape, and
    where it lands (FE / client project / upstream module).
-3. **Implement — reuse `fullstack-backend`.** Spawn vc-fix's `fullstack-backend` agent to write the
+3. **Implement — reuse `vc-fix:fullstack-backend`.** Spawn the `vc-fix:fullstack-backend` agent to write the
    minimal, single-repo optimization diff (it uses the `dotnet-fix` skill). Pass it the candidate and
    the fix shape. **Tell it the perf proof is a verdict, not a unit test** — its "reproduction" gate is
    the baseline measurement, its "green" is the improved re-measurement (step 4), per `perf-gates.md`.
@@ -30,9 +30,9 @@ not by a red→green unit test. See `.claude/rules/perf-gates.md`.
    show `improved` (L1) or the responsible frame gone / p95 down (L2/L3). A flat verdict = the fix did
    nothing measurable → back to step 2. (Remember L1 is blind to real I/O — a save-path/cache/network
    fix reads flat on L1; verify it on L2+L3.)
-5. **Route — reuse `qa-fix-routing`.** Use vc-fix's routing to decide client-repo vs upstream module.
+5. **Route — reuse `vc-fix:qa-fix-routing`.** Use vc-fix's routing to decide client-repo vs upstream module.
    A platform-level fix measured as a local POC is reverted locally and promoted through an upstream PR.
-6. **Review — reuse `backend-reviewer`.** Have vc-fix's `backend-reviewer` review the diff before the PR,
+6. **Review — reuse `vc-fix:backend-reviewer`.** Have `vc-fix:backend-reviewer` review the diff before the PR,
    and additionally apply the perf-PR review lenses in `$pluginRoot/knowledge/vc-perf-antipatterns.md`
    (`$pluginRoot` = this plugin's active install path, resolved once per task via
    `claude plugin list --json` — see `knowledge/plugin-root.md`; NOT a shell variable,
