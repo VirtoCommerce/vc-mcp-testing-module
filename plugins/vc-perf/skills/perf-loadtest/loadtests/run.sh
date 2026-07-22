@@ -98,15 +98,22 @@ TRACE_FILE=""
 COUNTERS_PID=""
 COUNTERS_CSV=""
 
-if [ "${TRACE:-0}" = "1" ] && [ -n "$BACKEND_PID" ] && command -v dotnet-trace >/dev/null 2>&1; then
-    TRACE_FILE="$OUT/$STAMP-$SHA.alloc.nettrace"
-    # gc-verbose surfaces GCAllocationTick (sampled ~every 100 KB) with type names +
-    # stacks — the input for allocation-by-caller attribution. --duration caps an
-    # orphaned capture; the EXIT trap stops it as soon as k6 finishes.
-    dotnet-trace collect -p "$BACKEND_PID" --profile gc-verbose -o "$TRACE_FILE" \
-        --duration 00:00:10:00 >/dev/null 2>&1 &
-    TRACE_PID=$!
-    echo "dotnet-trace (gc-verbose) collecting from pid $BACKEND_PID → $TRACE_FILE"
+if [ "${TRACE:-0}" = "1" ]; then
+    # TRACE=1 wins and owns the pid exclusively: attach dotnet-trace if possible, otherwise
+    # SKIP the sidecar — never fall through to counters. EventPipe is single-consumer, and a run
+    # asked to produce an allocation .nettrace must not silently become a counters run instead.
+    if [ -n "$BACKEND_PID" ] && command -v dotnet-trace >/dev/null 2>&1; then
+        TRACE_FILE="$OUT/$STAMP-$SHA.alloc.nettrace"
+        # gc-verbose surfaces GCAllocationTick (sampled ~every 100 KB) with type names +
+        # stacks — the input for allocation-by-caller attribution. --duration caps an
+        # orphaned capture; the EXIT trap stops it as soon as k6 finishes.
+        dotnet-trace collect -p "$BACKEND_PID" --profile gc-verbose -o "$TRACE_FILE" \
+            --duration 00:00:10:00 >/dev/null 2>&1 &
+        TRACE_PID=$!
+        echo "dotnet-trace (gc-verbose) collecting from pid $BACKEND_PID → $TRACE_FILE"
+    else
+        echo "note: TRACE=1 but no backend pid or dotnet-trace not found — skipping sidecar (NOT falling back to counters) — k6 summary only" >&2
+    fi
 elif [ "${NO_COUNTERS:-0}" != "1" ] && [ -n "$BACKEND_PID" ] && command -v dotnet-counters >/dev/null 2>&1; then
     COUNTERS_CSV="$OUT/$STAMP-$SHA.counters.csv"
     # --duration caps the capture so an externally-killed runner can't orphan it.
