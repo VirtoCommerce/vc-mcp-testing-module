@@ -38,6 +38,8 @@ if [ -n "${PAYLOAD_DIR:-}" ]; then
     cp -r "$PAYLOAD_DIR/scenarios" "$RUN_DIR/"
     if [ -d "$PAYLOAD_DIR/queries" ]; then
         cp -r "$PAYLOAD_DIR/queries" "$RUN_DIR/"
+    elif [ -d "$DIR/queries" ]; then
+        cp -r "$DIR/queries" "$RUN_DIR/"
     fi
 fi
 

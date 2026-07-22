@@ -89,7 +89,7 @@ runner_dir_var="RUNNER_DIR_${TARGET_KEY}"
 OWN_DIR="$REPO/${!runner_dir_var:?set ${runner_dir_var} (path to your ${DOMAIN} benchmark runner) — see /perf-init}"
 up_repo_var="UPSTREAM_REPO_${TARGET_KEY}"
 up_runner_var="UPSTREAM_RUNNER_DIR_${TARGET_KEY}"
-UP_DIR="$UPSTREAM_ROOT/${!up_repo_var:-vc-module-x-${DOMAIN}}/${!up_runner_var:-benchmarks/VirtoCommerce.X${DOMAIN^}.Benchmark}"
+UP_DIR="$UPSTREAM_ROOT/${!up_repo_var:-vc-module-x-${DOMAIN}}/${!up_runner_var:-benchmarks/VirtoCommerce.X$(printf '%s' "${DOMAIN:0:1}" | tr '[:lower:]' '[:upper:]')${DOMAIN:1}.Benchmark}"
 
 if [[ ! -d "$UP_DIR" ]]; then
     echo "Upstream runner not found: $UP_DIR (set --upstream-root, or ${up_repo_var} / ${up_runner_var} for a non-standard layout)." >&2

@@ -155,6 +155,12 @@ using (var src = new EventPipeEventSource(path))
     src.Process();
 }
 
+if (bySource.Count == 0)
+{
+    Console.Error.WriteLine("dbparse: no DB DiagnosticSource activities — wrong profile (need --profile database) or empty capture.");
+    Environment.Exit(1);
+}
+
 Console.WriteLine("# DB command activities by DiagnosticSource source :: event");
 Console.WriteLine($"{"count",10}  source :: event");
 foreach (var kv in bySource.OrderByDescending(x => x.Value))

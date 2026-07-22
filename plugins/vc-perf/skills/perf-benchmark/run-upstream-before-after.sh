@@ -89,7 +89,7 @@ TARGET_KEY="$(tr '[:lower:]-' '[:upper:]_' <<< "$DOMAIN")"
 up_repo_var="UPSTREAM_REPO_${TARGET_KEY}"
 up_runner_var="UPSTREAM_RUNNER_DIR_${TARGET_KEY}"
 UP_REPO="$UPSTREAM_ROOT/${!up_repo_var:-vc-module-x-${DOMAIN}}"
-RUNNER_DIR="${!up_runner_var:-benchmarks/VirtoCommerce.X${DOMAIN^}.Benchmark}"
+RUNNER_DIR="${!up_runner_var:-benchmarks/VirtoCommerce.X$(printf '%s' "${DOMAIN:0:1}" | tr '[:lower:]' '[:upper:]')${DOMAIN:1}.Benchmark}"
 
 if [[ ! -d "$UP_REPO/.git" && ! -f "$UP_REPO/.git" ]]; then
     echo "Upstream repo not found: $UP_REPO (set --upstream-root, or ${up_repo_var} for a non-standard layout)." >&2

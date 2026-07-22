@@ -75,7 +75,7 @@ CAT_FLAGS=()
 BENCH_PREFIX="${BENCH_PREFIX:?set BENCH_PREFIX (your benchmark project prefix, e.g. Acme.MainModule) — see /perf-init}"
 TARGET_KEY="$(tr '[:lower:]-' '[:upper:]_' <<< "$RUNNER")"
 runner_dir_var="RUNNER_DIR_${TARGET_KEY}"
-RUNNER_DIR="${!runner_dir_var:-benchmarks/${BENCH_PREFIX}.Benchmark.${RUNNER^}}"
+RUNNER_DIR="${!runner_dir_var:-benchmarks/${BENCH_PREFIX}.Benchmark.$(printf '%s' "${RUNNER:0:1}" | tr '[:lower:]' '[:upper:]')${RUNNER:1}}"
 
 # Job → (run flags, compare-reports.cs --job-kind). Both runners take native BenchmarkDotNet --job
 # (Decision A dropped the cart-only --smoke/--short aliases from the shared BenchmarkProgram), so there
@@ -113,14 +113,15 @@ trap cleanup EXIT
 echo "[own-before-after] baseline=$BASELINE_REF runner=$RUNNER job=$JOB filter='$FILTER' categories='${CATEGORIES[*]}'" >&2
 git -C "$REPO" worktree add --detach "$WORKTREE" "$BASELINE_REF" >&2
 
-# Carry the gitignored bench-feed nuget.config into the worktree (all three runner dirs).
-for d in Cart Core Order; do
-    src="$REPO/benchmarks/${BENCH_PREFIX}.Benchmark.$d/nuget.config"
-    dst="$WORKTREE/benchmarks/${BENCH_PREFIX}.Benchmark.$d/nuget.config"
-    if [[ -f "$src" && -d "$(dirname "$dst")" ]]; then
-        cp "$src" "$dst"
+# Carry any gitignored nuget.config under benchmarks/ into the worktree. Generic: copy whatever
+# the main tree has that the worktree lacks.
+while IFS= read -r cfg; do
+    rel="${cfg#"$REPO/"}"
+    dst="$WORKTREE/$rel"
+    if [[ ! -f "$dst" && -d "$(dirname "$dst")" ]]; then
+        cp "$cfg" "$dst"
     fi
-done
+done < <(find "$REPO/benchmarks" -name nuget.config 2>/dev/null)
 
 run_one() { # $1 = tree root, $2 = label
     local root="$1" label="$2"
