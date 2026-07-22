@@ -101,6 +101,11 @@ if ! git -C "$UP_REPO" cat-file -e "${BASELINE_REF}^{commit}" 2>/dev/null; then
     exit 2
 fi
 
+if [[ ! -d "$UP_REPO/$RUNNER_DIR" ]]; then
+    echo "Upstream runner not found: $UP_REPO/$RUNNER_DIR (set ${up_runner_var} for a non-standard layout — see /perf-init)." >&2
+    exit 2
+fi
+
 # Both runners take native BenchmarkDotNet --job (Decision A dropped the cart-only --smoke/--short
 # aliases from the shared BenchmarkProgram), so there is no per-domain dialect split anymore.
 case "$JOB" in
