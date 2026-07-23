@@ -100,10 +100,14 @@ scenarios) uses a minimal, non-storefront setup query — see `setup()`.
 - **PRODUCT_IDS drift:** `addItemsCart` can no-op on a stale/disabled product id instead of
   erroring (the platform's async-settle / disabled-product-is-a-silent-no-op behavior) — a
   green HTTP 200 with no GraphQL errors but an effectively empty cart. Both scenarios assert
-  the settled item count (`cart-order-loop` via a `getFullCart` check per iteration,
-  `cart-read-loop` via a `setup()`-time verification before the cart is handed to the
-  measured loop) so a drifted `PRODUCT_IDS` fails loud instead of silently measuring the
-  wrong workload/cart-size band. Re-run `qa-seed-data`/refresh `PRODUCT_IDS` if this fires.
+  the settled `itemsQuantity` (total unit count), NOT `items.length` — adding the same product
+  multiple times consolidates into one line item with quantity summed (see cart platform's
+  same-SKU-merges-not-duplicates rule), so `items.length` varies with how many distinct
+  products an iteration used while `itemsQuantity` is always `ITEMS` regardless of
+  consolidation. `cart-order-loop` checks this via a `getFullCart` check per iteration;
+  `cart-read-loop` verifies it once in `setup()` before the cart is handed to the measured
+  loop — so a drifted `PRODUCT_IDS` fails loud instead of silently measuring the wrong
+  workload/cart-size band. Refresh `PRODUCT_IDS` (or reseed your test data) if this fires.
 - Per-operation latency via `http_req_duration{name:<op>}` sub-metrics; thresholds are loose
   skeleton ceilings — tighten after a baseline.
 - Token acquired **once** in `setup()`, reused across VUs.

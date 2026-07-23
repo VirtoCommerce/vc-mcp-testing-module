@@ -130,9 +130,13 @@ export default function (ctx) {
     const full = gql(BASE_URL, token, 'getFullCart', Q.getFullCart, { ...STORE, userId, cartId });
     // addItemsCart can settle async / silently no-op on a stale or disabled product id (see
     // ../README.md «PRODUCT_IDS drift») — assert against this settled read, not the mutation
-    // response, so a silently-empty cart doesn't measure as a green iteration.
+    // response, so a silently-empty cart doesn't measure as a green iteration. Assert
+    // itemsQuantity (total unit count), NOT items.length: per BL-CART-007, adding the same
+    // product multiple times consolidates into one line with quantity summed, so items.length
+    // varies with how many distinct products this iteration cycled through (1 by default) while
+    // itemsQuantity is always ITEMS regardless of consolidation.
     check(full, {
-        'getFullCart: items match ITEMS': (c) => !!c && !!c.cart && Array.isArray(c.cart.items) && c.cart.items.length === ITEMS,
+        'getFullCart: itemsQuantity matches ITEMS': (c) => !!c && !!c.cart && c.cart.itemsQuantity === ITEMS,
     }, { name: 'getFullCart' });
 
     if (!SKIP_ORDER) {

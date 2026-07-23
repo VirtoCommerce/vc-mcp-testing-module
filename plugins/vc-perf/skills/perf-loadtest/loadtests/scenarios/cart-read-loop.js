@@ -126,14 +126,17 @@ export function setup() {
         // addItemsCart can settle async / silently no-op on a stale or disabled product id (see
         // ../README.md «PRODUCT_IDS drift») — verify the settled item count before handing this
         // cart to the measured read loop, so the whole run doesn't silently measure the wrong
-        // cart-size band.
+        // cart-size band. Verify itemsQuantity (total unit count), NOT items.length: per
+        // BL-CART-007, adding the same product multiple times consolidates into one line with
+        // quantity summed, so items.length depends on DISTINCT_PRODUCTS (1 by default) while
+        // itemsQuantity is always ITEMS regardless of consolidation.
         const full = gql(BASE_URL, auth.token, 'setup:getFullCart', Q.getFullCart, {
             ...STORE, userId: auth.userId, cartId,
         });
-        const settledItems = full && full.cart && full.cart.items;
-        if (!Array.isArray(settledItems) || settledItems.length !== ITEMS) {
+        const settledQuantity = full && full.cart && full.cart.itemsQuantity;
+        if (settledQuantity !== ITEMS) {
             throw new Error(
-                `setup: cart for user ${i} has ${settledItems ? settledItems.length : 0}/${ITEMS} items after settling — a stale/disabled PRODUCT_IDS entry silently no-ops (see ../README.md)`,
+                `setup: cart for user ${i} has itemsQuantity=${settledQuantity ?? 0}/${ITEMS} after settling — a stale/disabled PRODUCT_IDS entry silently no-ops (see ../README.md)`,
             );
         }
 
