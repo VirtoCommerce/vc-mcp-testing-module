@@ -1,6 +1,7 @@
 // Standard-storefront scenario — scripts the standard vc-frontend cart/order flow
 // (addItemsCart -> getFullCart -> optional createOrderFromCart). Adapt the ops in ../queries/
 // if your project overrides the storefront schema; see ../README.md.
+import { check } from 'k6';
 import { getAuth, getAuthPool } from '../lib/auth.js';
 import { gql } from '../lib/gql.js';
 import { STORE } from '../config.js';
@@ -126,7 +127,13 @@ export default function (ctx) {
         return; // creation failure already counted by the checks
     }
 
-    gql(BASE_URL, token, 'getFullCart', Q.getFullCart, { ...STORE, userId, cartId });
+    const full = gql(BASE_URL, token, 'getFullCart', Q.getFullCart, { ...STORE, userId, cartId });
+    // addItemsCart can settle async / silently no-op on a stale or disabled product id (see
+    // ../README.md «PRODUCT_IDS drift») — assert against this settled read, not the mutation
+    // response, so a silently-empty cart doesn't measure as a green iteration.
+    check(full, {
+        'getFullCart: items match ITEMS': (c) => !!c && !!c.cart && Array.isArray(c.cart.items) && c.cart.items.length === ITEMS,
+    }, { name: 'getFullCart' });
 
     if (!SKIP_ORDER) {
         gql(BASE_URL, token, 'createOrderFromCart', Q.createOrderFromCart, { command: { cartId } });

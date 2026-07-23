@@ -123,6 +123,20 @@ export function setup() {
             throw new Error(`setup: cart creation failed for user ${i}`);
         }
 
+        // addItemsCart can settle async / silently no-op on a stale or disabled product id (see
+        // ../README.md «PRODUCT_IDS drift») — verify the settled item count before handing this
+        // cart to the measured read loop, so the whole run doesn't silently measure the wrong
+        // cart-size band.
+        const full = gql(BASE_URL, auth.token, 'setup:getFullCart', Q.getFullCart, {
+            ...STORE, userId: auth.userId, cartId,
+        });
+        const settledItems = full && full.cart && full.cart.items;
+        if (!Array.isArray(settledItems) || settledItems.length !== ITEMS) {
+            throw new Error(
+                `setup: cart for user ${i} has ${settledItems ? settledItems.length : 0}/${ITEMS} items after settling — a stale/disabled PRODUCT_IDS entry silently no-ops (see ../README.md)`,
+            );
+        }
+
         return { token: auth.token, userId: auth.userId, cartId };
     });
 

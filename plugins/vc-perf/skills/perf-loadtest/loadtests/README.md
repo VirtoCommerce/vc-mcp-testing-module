@@ -97,6 +97,13 @@ scenarios) uses a minimal, non-storefront setup query — see `setup()`.
 ## Measurement discipline
 
 - HTTP 200 with a GraphQL `errors` body **counts as failure** (`gql()` checks both).
+- **PRODUCT_IDS drift:** `addItemsCart` can no-op on a stale/disabled product id instead of
+  erroring (the platform's async-settle / disabled-product-is-a-silent-no-op behavior) — a
+  green HTTP 200 with no GraphQL errors but an effectively empty cart. Both scenarios assert
+  the settled item count (`cart-order-loop` via a `getFullCart` check per iteration,
+  `cart-read-loop` via a `setup()`-time verification before the cart is handed to the
+  measured loop) so a drifted `PRODUCT_IDS` fails loud instead of silently measuring the
+  wrong workload/cart-size band. Re-run `qa-seed-data`/refresh `PRODUCT_IDS` if this fires.
 - Per-operation latency via `http_req_duration{name:<op>}` sub-metrics; thresholds are loose
   skeleton ceilings — tighten after a baseline.
 - Token acquired **once** in `setup()`, reused across VUs.
