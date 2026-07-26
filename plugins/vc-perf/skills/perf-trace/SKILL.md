@@ -46,6 +46,28 @@ dotnet-counters ps | grep -F "<perf.platformProcess>"
 Full decision matrix (which tool for which question), gotchas, and why these parsers exist
 instead of an off-the-shelf tool: `perftools/README.md`.
 
+## Start here when the question is "which operation costs what"
+
+Before reaching for `dotnet-trace` at all: if the question is *which GraphQL operation issues which
+backend calls, and where its time goes*, the OTel spans Aspire already collects answer it with **no
+profiler, no rebuild, and no in-process counters**. This is the cheapest first cut of L3 and it
+routinely reorders the candidate list before any code is touched.
+
+```bash
+aspire otel spans backend --apphost "$AH" --follow --format Json --non-interactive > spans.json &
+OP_TAG=1 ITERATIONS=6 <loadtests>/run.sh smoke     # OP_TAG labels each request ?op=<name>; 1 VU
+kill %1
+node $pluginRoot/skills/perf-trace/perftools/op_attrib.js spans.json --last
+```
+
+Requires **1 VU** (`smoke`): attribution is by time containment, so requests must not overlap — the
+tool counts overlaps and refuses rather than emitting meaningless numbers. Details and the three
+traps it avoids (no `traceId` grouping, union-not-sum time, no datastore double-count):
+`perftools/README.md`.
+
+Reach for `dotnet-trace` when this leaves a large **`in-proc`** share — time no downstream call
+explains — since that is where allocation/CPU attribution is the only way forward.
+
 ## EventPipe is single-consumer — the gotcha that costs real time
 
 `dotnet-counters` and `dotnet-trace` cannot both attach to the same pid at once. **Stop

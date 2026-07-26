@@ -65,7 +65,17 @@ export PERF_API_USER PERF_API_PASSWORD
 
 # Artifact stamp: the revision of the code UNDER TEST — the consumer repo you invoke this from
 # (cwd), not the plugin install dir. Non-git cwd (or no git) degrades to "nogit", never aborts.
-SHA=$(git rev-parse --short HEAD 2>/dev/null || echo nogit)
+# PERF_SHA overrides it (CI, or a run driven from a script whose cwd is not the repo under test).
+# The resolved repo is echoed with the run header: taking the stamp from cwd means a shell sitting
+# in a *different* repo silently mislabels the artifact, and an A/B compared across two
+# differently-stamped arms is worse than one with no stamp at all.
+if [ -n "${PERF_SHA:-}" ]; then
+    SHA="$PERF_SHA"
+    SHA_REPO="(PERF_SHA override)"
+else
+    SHA=$(git rev-parse --short HEAD 2>/dev/null || echo nogit)
+    SHA_REPO=$(git rev-parse --show-toplevel 2>/dev/null || echo "(not a git repo)")
+fi
 STAMP=$(date +%Y%m%d-%H%M%S)
 # RESULTS_DIR is the base directory for artifacts. Default keeps today's behaviour ($DIR/results),
 # but $DIR is inside the plugin INSTALL dir (a managed marketplace/cache clone) — results there are
@@ -147,6 +157,13 @@ stop_sidecars() {
 trap stop_sidecars EXIT
 
 echo "k6 run: scenario=$SCENARIO profile=$PROFILE sha=$SHA base=$BASE_URL"
+# Only announce labelling when gql.js will actually apply it — it honours the exact value 1, so
+# `OP_TAG=0` must not print a line claiming requests are labelled.
+if [ "${OP_TAG:-}" = "1" ]; then
+    echo "  sha from: $SHA_REPO   OP_TAG=1 (requests labelled ?op=<name>)"
+else
+    echo "  sha from: $SHA_REPO"
+fi
 # A k6 threshold breach exits non-zero — a valid verdict, not a script failure. Suspend
 # `set -e` around the run so the artifact printout and exit-code propagation below still happen.
 set +e

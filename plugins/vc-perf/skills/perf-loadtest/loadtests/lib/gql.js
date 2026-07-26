@@ -32,8 +32,26 @@ export function gqlQuiet(baseUrl, token, name, query, variables) {
     return body ? body.data : null;
 }
 
+// Every GraphQL operation posts to the same `/graphql` path, so a server-side trace cannot tell
+// `getFullCart` from `createOrderFromCart` — which makes per-operation work attribution impossible
+// from spans alone. The query string travels onto the server span, so it is the cheapest way to
+// label a request without touching the system under test (L3 `perftools/op_attrib.js` reads it).
+//
+// VERSION-DEPENDENT: verified present as the span attribute `url.query` on .NET 10 / Aspire
+// (measured 2026-07-26), but ASP.NET Core has historically omitted url.query pending redaction
+// support, so do not assume it on every runtime. `op_attrib.js` prints a loud
+// "0 of N requests carried an op= label" warning when the attribute is absent, precisely because
+// that output is otherwise indistinguishable from a correct run with OP_TAG unset.
+//
+// Default OFF so the measured request is byte-identical unless attribution is explicitly asked
+// for. GraphQL ignores unknown query parameters — the harness's own "no GraphQL errors" check
+// is what proves that on any given backend.
+const OP_TAG = __ENV.OP_TAG === '1';
+
 function post(baseUrl, token, name, query, variables) {
-    return http.post(`${baseUrl}/graphql`, JSON.stringify({ query, variables }), {
+    const url = OP_TAG ? `${baseUrl}/graphql?op=${encodeURIComponent(name)}` : `${baseUrl}/graphql`;
+
+    return http.post(url, JSON.stringify({ query, variables }), {
         headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,

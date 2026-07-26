@@ -48,7 +48,36 @@ bundled ones — the harness combines it with the plugin's generic `lib/` + `con
 run-dir; use this rather than editing the install, see `../SKILL.md`) ·
 `RESULTS_DIR` (artifact base dir, default `<install>/results` — set to a workspace path, e.g.
 `RESULTS_DIR="$PWD/.vc-perf/results"`, so artifacts survive plugin updates and don't land in the
-install-managed clone).
+install-managed clone) ·
+`OP_TAG=1` (label requests for L3 attribution, see below) ·
+`PERF_SHA` (override the artifact stamp; default is `git rev-parse --short HEAD` of the **cwd**,
+and the run header echoes which repo it came from — a shell sitting in another repo otherwise
+mislabels the artifact silently).
+
+### `OP_TAG=1` — make requests attributable per operation
+
+Every GraphQL operation POSTs to the same `/graphql` path, so a server-side trace cannot tell
+`getFullCart` from `createOrderFromCart`. With `OP_TAG=1` the harness posts to
+`/graphql?op=<operation>` instead, which makes each request self-labelling for
+`perftools/op_attrib.js` (L3). Default OFF, so the measured request is byte-identical unless
+attribution is explicitly asked for — GraphQL ignores unknown query parameters, and the harness's
+own "no GraphQL errors" check is what proves it per backend.
+
+**Runtime caveat:** this relies on the server span carrying the query string as `url.query`, which
+is version-dependent — verified on .NET 10 / Aspire (2026-07-26), but ASP.NET Core has historically
+omitted `url.query` pending redaction support. `op_attrib.js` warns loudly (`0 of N requests carried
+an "op=" label`) rather than silently pooling every operation under `/graphql`, since that output
+would otherwise look identical to a correct run with the flag unset.
+
+Pair it with a **1 VU** capture (`smoke`): attribution assigns each client span to the request whose
+time interval contains it, which requires non-overlapping requests.
+
+```bash
+aspire otel spans backend --apphost "$AH" --follow --format Json --non-interactive > spans.json &
+OP_TAG=1 ITERATIONS=6 loadtests/run.sh smoke        # 1 VU, sequential
+kill %1
+node ../perf-trace/perftools/op_attrib.js spans.json --last   # paths relative to skills/perf-loadtest/
+```
 
 ## User pool (multi-user concurrency)
 

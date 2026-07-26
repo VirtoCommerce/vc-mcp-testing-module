@@ -78,6 +78,7 @@ fine — just run it (no sandbox-disable).
 | Allocation churn (traffic) — who allocates? | `dotnet-trace collect -p <pid> --profile gc-verbose` | `allocparse` |
 | On-CPU time — who burns CPU? | `dotnet-trace collect -p <pid> --profile dotnet-sampled-thread-time` | `cpuparse` |
 | Wall-time in DB / EF commands | `dotnet-trace collect -p <pid> --profile database`, or OTel spans in Aspire dashboard | PerfView / manual |
+| **Which operation causes which backend calls, and where its time goes** | `aspire otel spans <res> --follow --format Json` during a **1 VU** `OP_TAG=1` run | **`op_attrib`** |
 | Leak / resident footprint | `dotnet-gcdump collect -p <pid>` before/after, diff | `dotnet-gcdump report`, PerfView |
 | GC behaviour, gen sizes, LOH | `dotnet-counters monitor -p <pid> System.Runtime` (`gc.collections`, `gc.last_collection.heap.size`, `gc.pause.time`, `gc.heap.total_allocated`, `process.memory.working_set`) | live / CSV |
 
@@ -154,3 +155,44 @@ dotnet run perftools/dbparse.cs -- /path/to/db.nettrace
 
 The BCL-module and idle/background filter lists live at the top of each parser `.cs` — extend
 them when a new background subsystem shows up in traces.
+
+### `op_attrib.js` — per-operation attribution from OTel spans (no `dotnet-trace`, no rebuild)
+
+The others read a `.nettrace`. This one reads an **Aspire OTel span capture** and answers a
+different question: *which GraphQL operation caused which backend calls, and where did its time
+go?* Node only, no dependencies, no code change to the system under test — which is the point: it
+replaces the in-process counters you would otherwise hand-write, instrument, rebuild and redeploy
+to learn "how many searches does one `addOrUpdateCartShipment` issue?".
+
+```bash
+# paths relative to skills/perf-trace/ (as with the dotnet run examples above)
+aspire otel spans backend --apphost "$AH" --follow --format Json --non-interactive > spans.json &
+OP_TAG=1 ITERATIONS=6 ../perf-loadtest/loadtests/run.sh smoke   # 1 VU — see the condition below
+kill %1
+node perftools/op_attrib.js spans.json --last [--rows]
+```
+
+Output: calls issued per request per operation (ES / SQL / Redis / outbound HTTP, median), where
+each operation's **time** goes per backend, each operation's share of wall time, ES calls split by
+target index, and — separately — background Hangfire work that ran inside the window but was not
+caused by the requests.
+
+Three things it does that a naive reading of the same spans gets wrong:
+
+- **It does not group by `traceId`.** Measured on a VC backend: every `POST /graphql` server span
+  was ALONE in its trace (152 of 152) — trace context is not propagated into the downstream ES /
+  SQL / Redis client spans. Grouping by trace attributes nothing, and a "root = longest parentless
+  span" fallback yields a table that looks per-request but is not. It attributes by **time
+  containment** instead, which is why the capture must be **1 VU**: with overlapping requests a
+  span cannot be assigned to one of several in flight. The script counts overlaps and **refuses**
+  rather than printing numbers that mean nothing.
+- **It unions time instead of summing it.** Overlapping calls inside one request would otherwise
+  sum past the request's own duration — the same discipline that corrects a "55% of spans are Redis
+  PUBLISH" reading to its true 1–2.5% of wall time.
+- **It never double-counts a datastore call.** The ES client emits both a logical span
+  (`search`, carrying `db.system`) and the raw HTTP span for the same call (no `db.system`);
+  buckets are keyed on `db.system`, and the uninstrumented leg to any host already seen carrying
+  `db.system` is dropped.
+
+An `in-proc` column reports duration minus the union of ALL downstream calls — CPU, lock waits, GC.
+A large share there means the next step is a CPU profile (`cpuparse`), not another call-count cut.
