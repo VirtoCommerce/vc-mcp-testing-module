@@ -14,7 +14,7 @@
 #                 Kestrel + threadpool) with VirtoCommerce/Kestrel frames; a launcher's is small
 #                 with MSBuild frames. The app pid is stable until the next backend restart.
 #   profile       dotnet-sampled-thread-time (CPU/thread) | gc-verbose (alloc) | gc-collect (cheap)
-#   duration      HH:MM:SS (e.g. 00:01:40)
+#   duration      dd:hh:mm:ss (dotnet-trace's format, e.g. 00:00:01:40 = 100s)
 #   output        ABSOLUTE writable path ending in .nettrace (relative/$TMPDIR fails — see below)
 #
 # WHY THE INDIRECTION (do not "simplify"):
@@ -34,7 +34,7 @@ set -euo pipefail
 
 PID="${1:?backend app pid required (the real Kestrel host, not a dotnet run/watch launcher)}"
 PROFILE="${2:-dotnet-sampled-thread-time}"
-DURATION="${3:-00:01:40}"
+DURATION="${3:-00:00:01:40}"
 OUT="${4:?absolute output path required}"
 
 case "$OUT" in

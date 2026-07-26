@@ -85,7 +85,9 @@ SUMMARY="$OUT/$STAMP-$SHA.summary.json"
 # projects that rename the host.
 PLATFORM_PROCESS="${PLATFORM_PROCESS:-VirtoCommerce.Platform.Web}"
 if command -v pgrep >/dev/null 2>&1; then
-    BACKEND_PID=$(pgrep -f "bin/[^ ]*/${PLATFORM_PROCESS}" | head -1 || true)
+    # pgrep -f matches an extended regex — escape dots so `VirtoCommerce.Platform.Web`
+    # (or any custom name) matches literally and can't attach to a differently-named neighbour.
+    BACKEND_PID=$(pgrep -f "bin/[^ ]*/${PLATFORM_PROCESS//./\\.}" | head -1 || true)
 else
     # Windows/Git Bash has no pgrep — fall back to the dotnet-counters process list.
     BACKEND_PID=$(dotnet-counters ps 2>/dev/null | grep -F "$PLATFORM_PROCESS" | awk '{print $1}' | head -1 || true)
@@ -137,7 +139,9 @@ stop_sidecars() {
     # Folds in the PAYLOAD_DIR ephemeral run-dir cleanup — this trap replaces the one set
     # right after mktemp, so RUN_DIR removal has to live here too, not just at mktemp time.
     if [ "$RUN_DIR" != "$DIR" ]; then
-        rm -rf "$RUN_DIR"
+        # `|| true`: with `set -e` re-enabled after the k6 run, a failed cleanup here must not
+        # abort before the artifact printout and `exit $K6_EXIT` below (matches kill/wait above).
+        rm -rf "$RUN_DIR" || true
     fi
 }
 trap stop_sidecars EXIT
