@@ -123,8 +123,17 @@ function classify(s, dbHosts) {
     }
 
     if (sys === 'elasticsearch') {
-        const op = a['db.operation'] || s.name;
-        const idx = a['db.elasticsearch.path_parts.index'];
+        let op = a['db.operation'] || s.name;
+        const url = a['url.full'] || '';
+        // The client reports the typed-keys search variant as db.operation=POST rather than
+        // `search` (measured: 38 spans, all `/<index>/_search?typed_keys=true`). Splitting those
+        // into a separate `es:POST` bucket UNDER-COUNTS searches for any faceted query — it made a
+        // 3-search catalog request read as 1 search plus unexplained work. Classify by the endpoint.
+        if (/\/_search\b/.test(url)) { op = 'search'; }
+        // Those same spans also lack the index attribute, so fall back to the index segment of the
+        // URL — otherwise identical searches land in two different columns.
+        const idx = a['db.elasticsearch.path_parts.index']
+            || (/^https?:\/\/[^/]+\/([^/?]+)\/_search\b/.exec(url)?.[1] ?? null);
         // Index names are environment-scoped (<org>-<env>-<...>-<entity>-<state>). Keep the last
         // two segments: specific enough to tell a product search from a member search, generic
         // across deployments.
