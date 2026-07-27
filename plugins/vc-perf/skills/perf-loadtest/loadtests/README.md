@@ -152,6 +152,13 @@ scenarios) uses a minimal, non-storefront setup query — see `setup()`.
 - **Co-location caveat:** k6 + backend + DB on one machine → relative comparisons only, no
   absolute CPU claims. State the topology with every number.
 - L2 is noisy: compare distributions across repeated runs, never single p95s.
+- **Reduce each rep with `tools/parse_rep.mjs <summary.json>`** rather than reading summaries side by
+  side — it emits iterations, rate, iteration duration, per-operation p95/med/count and the
+  scenario's own counters as one small JSON. Iteration count is
+  `metrics.iterations.values.count`; the shallower `metrics.iterations.count` is `undefined`, which
+  silently becomes 0 and turns any per-iteration figure into a division by zero. A counter the
+  scenario never declared is omitted rather than printed as 0 — "this scenario places no orders" and
+  "this run placed no orders" must not look alike.
 
 ## Orchestration gotchas (cost real time once, 2026-07-09)
 

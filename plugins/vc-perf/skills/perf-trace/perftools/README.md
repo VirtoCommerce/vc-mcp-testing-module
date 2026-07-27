@@ -79,6 +79,8 @@ fine — just run it (no sandbox-disable).
 | On-CPU time — who burns CPU? | `dotnet-trace collect -p <pid> --profile dotnet-sampled-thread-time` | `cpuparse` |
 | Wall-time in DB / EF commands | `dotnet-trace collect -p <pid> --profile database`, or OTel spans in Aspire dashboard | PerfView / manual |
 | **Which operation causes which backend calls, and where its time goes** | `aspire otel spans <res> --follow --format Json` during a **1 VU** `OP_TAG=1` run | **`op_attrib`** |
+| **How often per request does the module do X in-process** (no client span to attribute) | same capture, module emits `<prefix>count.*` span attributes; concurrency OK | **`counters_metric`** |
+| **Cache-invalidation / search volume per iteration, and its true share of wall time** | same capture + the k6 iteration count | **`publish_metric`** |
 | Leak / resident footprint | `dotnet-gcdump collect -p <pid>` before/after, diff | `dotnet-gcdump report`, PerfView |
 | GC behaviour, gen sizes, LOH | `dotnet-counters monitor -p <pid> System.Runtime` (`gc.collections`, `gc.last_collection.heap.size`, `gc.pause.time`, `gc.heap.total_allocated`, `process.memory.working_set`) | live / CSV |
 
@@ -196,3 +198,48 @@ Three things it does that a naive reading of the same spans gets wrong:
 
 An `in-proc` column reports duration minus the union of ALL downstream calls — CPU, lock waits, GC.
 A large share there means the next step is a CPU profile (`cpuparse`), not another call-count cut.
+
+### `counters_metric.mjs` — in-process counts per operation, from the same capture
+
+`op_attrib` can only see work that leaves the process. When the question is "how many times per
+request does the module build a validation context / clone the cart", there is no client span to
+attribute, and the module has to emit the count itself. The convention this tool reads: the module
+tags **its request's own activity** with `<prefix>count.<name>` (exact integers) and optionally
+`<prefix>time.<name>` (accumulated ms).
+
+```bash
+node perftools/counters_metric.mjs spans.json --prefix opus.
+```
+
+Because these ride on the request's own server span, reading them is a group-by rather than an
+attribution — so unlike `op_attrib` this is **not restricted to 1 VU**.
+
+Two things to know before writing the emitting side:
+
+- **Tag `HttpContext.Features.Get<IHttpActivityFeature>()?.Activity`, never `Activity.Current`.** On
+  a backend with Application Insights enabled, `Activity.Current` inside a request is a *parentless*
+  `Microsoft.ApplicationInsights.OperationContext` — Internal, unrecorded, never exported, and the
+  ASP.NET activity is not reachable by walking `.Parent` either. Tags written there vanish entirely
+  (measured: 0 attributes on 119 exported server spans). The symptom is this tool reporting "no
+  server spans carry an attribute with prefix X" on a run you know emitted them.
+- **A count is a lead, not a finding.** Emit a `time.*` alongside anything you intend to act on.
+  Measured on one backend: a cart→order conversion ran 9–18× per request and cost 0.1–0.5% of request
+  time. The tool prints `median [min..max]` and marks varying counters precisely so a *fixed* cost per
+  invocation is distinguishable from a *per-item* multiplier — the cheapest discriminator there is.
+
+### `publish_metric.mjs` — invalidation and search volume per iteration
+
+```bash
+node perftools/publish_metric.mjs spans.json <iterations> [--search-host <substr>]
+```
+
+`<iterations>` is `metrics.iterations.values.count` from the k6 summary — note the `.values.` level.
+Reports Redis `PUBLISH` and search calls inside the load window, per iteration, plus the **union** of
+their intervals as a share of wall time. It derives the window by clustering server spans on idle
+gaps and taking the busiest cluster, because `--follow` also replays the dashboard's ring-buffer
+history (measured: 35 min of capture around a 7 min run).
+
+**Denormalise before claiming a win.** A per-iteration figure moves with both numerator and
+denominator: measured once, PUBLISH/iteration halved while publishes/second *rose* 16% — the change
+was throughput, not less work. The absolute in-window count and window length are printed for exactly
+this check.
