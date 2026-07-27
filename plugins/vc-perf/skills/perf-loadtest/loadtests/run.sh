@@ -137,13 +137,44 @@ else
     echo "note: EventPipe sidecar skipped (TRACE off + NO_COUNTERS, or pid/tool not found) — k6 summary only"
 fi
 
+# Waits up to $2 seconds for pid $1 to exit. Returns 1 if it is still alive after that.
+# `wait` alone cannot express a deadline, and a sidecar that ignores its stop signal would
+# otherwise block the runner until --duration elapses.
+wait_for_exit() {
+    _pid=$1
+    _deadline=$2
+    _waited=0
+    while kill -0 "$_pid" 2>/dev/null; do
+        [ "$_waited" -ge "$_deadline" ] && return 1
+        sleep 1
+        _waited=$((_waited + 1))
+    done
+
+    return 0
+}
+
 stop_sidecars() {
+    # dotnet-trace DOES honour SIGINT, and needs it: on the way out it flushes and writes the
+    # .nettrace footer ("Stopping the trace. This may take several minutes depending on the
+    # application being traced"), so it must not be hurried. Measured: exits ~2 s after SIGINT
+    # with a complete file. The unbounded wait is deliberate — a big trace legitimately takes
+    # a while, and truncating it is worse than waiting.
     if [ -n "$TRACE_PID" ]; then
         kill -INT "$TRACE_PID" 2>/dev/null || true
         wait "$TRACE_PID" 2>/dev/null || true
     fi
+    # dotnet-counters does NOT honour SIGINT without a controlling terminal — which a backgrounded
+    # sidecar never has. Measured: it ignored SIGINT for 10 s+, so the `wait` here blocked until
+    # --duration expired and the whole runner hung for ten minutes after k6 had already finished
+    # and written its summary. SIGTERM stops it in ~2 s and the CSV is written complete.
+    # SIGINT is still sent first, so a future version that grows a handler shuts down its own way.
     if [ -n "$COUNTERS_PID" ]; then
         kill -INT "$COUNTERS_PID" 2>/dev/null || true
+        if ! wait_for_exit "$COUNTERS_PID" 3; then
+            kill -TERM "$COUNTERS_PID" 2>/dev/null || true
+            # Last resort: a wedged sidecar must never again outlive the run that started it.
+            wait_for_exit "$COUNTERS_PID" 15 || kill -KILL "$COUNTERS_PID" 2>/dev/null || true
+        fi
         wait "$COUNTERS_PID" 2>/dev/null || true
     fi
     # Folds in the PAYLOAD_DIR ephemeral run-dir cleanup — this trap replaces the one set
