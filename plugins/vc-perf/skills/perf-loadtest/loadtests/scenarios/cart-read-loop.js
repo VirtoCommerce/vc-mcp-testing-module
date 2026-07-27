@@ -2,11 +2,12 @@
 // (getFullCart in a loop). Adapt the ops in ../queries/ if your project overrides the
 // storefront schema; see ../README.md.
 import { getAuth, getAuthPool } from '../lib/auth.js';
-import { gql } from '../lib/gql.js';
+import { gql, gqlQuiet } from '../lib/gql.js';
 import { STORE } from '../config.js';
 
 // Read-path L2 scenario (read/validation subjects): carts are built ONCE
-// in setup() — one per pool user (or one for the single env user) with ITEMS items —
+// in setup() — one per pool user (or one for the single env user), cleared then filled with
+// ITEMS items so a cart left behind by an earlier run cannot push the count past ITEMS —
 // and the measured iteration is a pure `getFullCart` read. Isolates the unlocked read
 // path (aggregate cache + GraphQL projection) from the per-user-locked mutation path
 // that cart-order-loop.js exercises.
@@ -22,6 +23,7 @@ import { STORE } from '../config.js';
 // USER_POOL=0 · BASE_URL · SUMMARY_PATH.
 
 const Q = {
+    clearCart: open('../queries/clearCart.graphql'),
     addItemsCart: open('../queries/addItemsCart.graphql'),
     getFullCart: open('../queries/getFullCart.graphql'),
 };
@@ -115,6 +117,14 @@ export function setup() {
         for (let n = 0; n < ITEMS; n++) {
             cartItems.push({ productId: productIds[n % productIds.length], quantity: 1 });
         }
+        // Clear first: `addItemsCart` carries no cartId/cartName, so x-cart resolves this user's
+        // EXISTING cart rather than creating one, and BL-CART-007 sums repeated products. A cart
+        // left behind by an earlier run would push itemsQuantity past ITEMS and abort setup at the
+        // check below — so a second run against the same seeded users would never start.
+        gqlQuiet(BASE_URL, auth.token, 'setup:clearCart', Q.clearCart, {
+            command: { ...STORE, userId: auth.userId },
+        });
+
         const added = gql(BASE_URL, auth.token, 'setup:addItemsCart', Q.addItemsCart, {
             command: { ...STORE, userId: auth.userId, cartItems },
         });

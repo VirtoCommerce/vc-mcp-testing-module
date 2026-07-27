@@ -5,9 +5,11 @@ harness against the local Aspire-hosted backend. **T0 tier**: k6 binary + `dotne
 file-first artifacts, no Grafana/TSDB — the consumer of the results is an agent, not a dashboard.
 
 The scenarios and queries here script the **standard vc-frontend** storefront GraphQL operations
-(`getFullCart`, `addItemsCart`, `createOrderFromCart` — see `../queries/`). They are examples to
-adapt: if your client project overrides the storefront schema, re-resolve these documents against
-your own frontend before using them for load testing.
+(`getFullCart`, `addItemsCart`, `createOrderFromCart` — see `../queries/`) — with one deliberate
+exception, `clearCart.graphql`, a schema-valid, vendor-neutral fixture document (no standard
+storefront mutation clears a whole cart). They are examples to adapt: if your client project
+overrides the storefront schema, re-resolve these documents against your own frontend before using
+them for load testing.
 
 ## Prerequisites
 
@@ -59,13 +61,13 @@ mislabels the artifact silently).
 Every GraphQL operation POSTs to the same `/graphql` path, so a server-side trace cannot tell
 `getFullCart` from `createOrderFromCart`. With `OP_TAG=1` the harness posts to
 `/graphql?op=<operation>` instead, which makes each request self-labelling for
-`perftools/op_attrib.js` (L3). Default OFF, so the measured request is byte-identical unless
+`perftools/op_attrib.mjs` (L3). Default OFF, so the measured request is byte-identical unless
 attribution is explicitly asked for — GraphQL ignores unknown query parameters, and the harness's
 own "no GraphQL errors" check is what proves it per backend.
 
 **Runtime caveat:** this relies on the server span carrying the query string as `url.query`, which
 is version-dependent — verified on .NET 10 / Aspire (2026-07-26), but ASP.NET Core has historically
-omitted `url.query` pending redaction support. `op_attrib.js` warns loudly (`0 of N requests carried
+omitted `url.query` pending redaction support. `op_attrib.mjs` warns loudly (`0 of N requests carried
 an "op=" label`) rather than silently pooling every operation under `/graphql`, since that output
 would otherwise look identical to a correct run with the flag unset.
 
@@ -76,7 +78,7 @@ time interval contains it, which requires non-overlapping requests.
 aspire otel spans backend --apphost "$AH" --follow --format Json --non-interactive > spans.json &
 OP_TAG=1 ITERATIONS=6 loadtests/run.sh smoke        # 1 VU, sequential
 kill %1
-node ../perf-trace/perftools/op_attrib.js spans.json --last   # paths relative to skills/perf-loadtest/
+node ../perf-trace/perftools/op_attrib.mjs spans.json --last   # paths relative to skills/perf-loadtest/
 ```
 
 ## User pool (multi-user concurrency)
@@ -107,13 +109,13 @@ USER_POOL=50 RATE=20 loadtests/run.sh steady
 
 | Scenario (`SCENARIO=`) | Iteration shape | Measures |
 |---|---|---|
-| `cart-order-loop` (default) | add items → read → (optional) order, per iteration | mutation path (per-user lock, save path) |
-| `cart-read-loop` | carts built ONCE in `setup()` (`ITEMS` = cart size, one cart per pool user), measured loop is a pure `getFullCart`; carts are not cleaned up (no standard cart-removal op) | read path (aggregate cache, GraphQL projection); `ITEMS` is the cart-size band knob (5/50/200) |
+| `cart-order-loop` (default) | clearCart → add items → read → (optional) order, per iteration | mutation path (per-user lock, save path) |
+| `cart-read-loop` | carts built ONCE in `setup()` (`ITEMS` = cart size, one cart per pool user), measured loop is a pure `getFullCart`; carts are not cleaned up between runs — `clearCart` empties a cart, it does not delete one, and there is still no standard cart-removal op | read path (aggregate cache, GraphQL projection); `ITEMS` is the cart-size band knob (5/50/200) |
 
 ## What one iteration does (cart-order-loop)
 
-Default (`SKIP_ORDER=1`, the walking skeleton): `addItemsCart` (ITEMS items in one call) →
-`getFullCart`.
+Default (`SKIP_ORDER=1`, the walking skeleton): `clearCart` → `addItemsCart` (ITEMS items in one
+call) → `getFullCart`.
 
 `SKIP_ORDER=0`: the same, plus `createOrderFromCart` on the resulting cart. Whether an
 otherwise-empty/default cart already satisfies your store's checkout validation rules is
@@ -125,7 +127,10 @@ scenarios) uses a minimal, non-storefront setup query — see `setup()`.
 
 ## Measurement discipline
 
-- HTTP 200 with a GraphQL `errors` body **counts as failure** (`gql()` checks both).
+- HTTP 200 with a GraphQL `errors` body **counts as failure** (`gql()` checks both). The fixture
+  `clearCart` call is the one exception: it goes through `gqlQuiet`, which warns on a GraphQL
+  errors body but records no check — deliberately kept out of the measured thresholds, not a
+  measurement subject.
 - **PRODUCT_IDS drift:** `addItemsCart` can no-op on a stale/disabled product id instead of
   erroring (the platform's async-settle / disabled-product-is-a-silent-no-op behavior) — a
   green HTTP 200 with no GraphQL errors but an effectively empty cart. Both scenarios assert

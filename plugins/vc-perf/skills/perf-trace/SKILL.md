@@ -57,7 +57,7 @@ routinely reorders the candidate list before any code is touched.
 aspire otel spans backend --apphost "$AH" --follow --format Json --non-interactive > spans.json &
 OP_TAG=1 ITERATIONS=6 <loadtests>/run.sh smoke     # OP_TAG labels each request ?op=<name>; 1 VU
 kill %1
-node $pluginRoot/skills/perf-trace/perftools/op_attrib.js spans.json --last
+node $pluginRoot/skills/perf-trace/perftools/op_attrib.mjs spans.json --last
 ```
 
 Requires **1 VU** (`smoke`): attribution is by time containment, so requests must not overlap — the

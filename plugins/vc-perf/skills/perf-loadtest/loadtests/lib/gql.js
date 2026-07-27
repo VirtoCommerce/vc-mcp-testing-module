@@ -28,6 +28,11 @@ export function gql(baseUrl, token, name, query, variables) {
 export function gqlQuiet(baseUrl, token, name, query, variables) {
     const res = post(baseUrl, token, name, query, variables);
     const body = safeJson(res);
+    // No `check()` — a quiet op must stay out of the measured thresholds. But a silent failure
+    // here would masquerade as success, so still warn on a GraphQL errors body, same as gql().
+    if (body && body.errors) {
+        console.warn(`${name}: ${JSON.stringify(body.errors).slice(0, 400)}`);
+    }
 
     return body ? body.data : null;
 }
@@ -35,11 +40,11 @@ export function gqlQuiet(baseUrl, token, name, query, variables) {
 // Every GraphQL operation posts to the same `/graphql` path, so a server-side trace cannot tell
 // `getFullCart` from `createOrderFromCart` — which makes per-operation work attribution impossible
 // from spans alone. The query string travels onto the server span, so it is the cheapest way to
-// label a request without touching the system under test (L3 `perftools/op_attrib.js` reads it).
+// label a request without touching the system under test (L3 `perftools/op_attrib.mjs` reads it).
 //
 // VERSION-DEPENDENT: verified present as the span attribute `url.query` on .NET 10 / Aspire
 // (measured 2026-07-26), but ASP.NET Core has historically omitted url.query pending redaction
-// support, so do not assume it on every runtime. `op_attrib.js` prints a loud
+// support, so do not assume it on every runtime. `op_attrib.mjs` prints a loud
 // "0 of N requests carried an op= label" warning when the attribute is absent, precisely because
 // that output is otherwise indistinguishable from a correct run with OP_TAG unset.
 //

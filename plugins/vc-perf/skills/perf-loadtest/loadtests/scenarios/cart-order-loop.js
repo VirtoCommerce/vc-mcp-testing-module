@@ -1,14 +1,16 @@
 // Standard-storefront scenario — scripts the standard vc-frontend cart/order flow
-// (addItemsCart -> getFullCart -> optional createOrderFromCart). Adapt the ops in ../queries/
-// if your project overrides the storefront schema; see ../README.md.
+// (clearCart -> addItemsCart -> getFullCart -> optional createOrderFromCart). Adapt the ops in
+// ../queries/ if your project overrides the storefront schema; see ../README.md.
 import { check } from 'k6';
 import { getAuth, getAuthPool } from '../lib/auth.js';
-import { gql } from '../lib/gql.js';
+import { gql, gqlQuiet } from '../lib/gql.js';
 import { STORE } from '../config.js';
 
 // Walking-skeleton L2 scenario (Class A + terminal order flow):
-// per iteration — add ITEMS items to a fresh cart, read the full cart, optionally create the
-// order from the cart. Every operation is a storefront-exact resolved document from ../queries/.
+// per iteration — clear the cart, add ITEMS items, read the full cart, optionally create the
+// order from the cart. Every MEASURED operation is a storefront-exact resolved document from
+// ../queries/; the leading clear is a fixture step (see queries/clearCart.graphql) issued quietly,
+// and it is what makes "a fresh cart" true rather than assumed.
 //
 // Knobs (env): PROFILE=smoke|steady · ITEMS=5 · RATE=5 (steady arrivals/s) ·
 // ITERATIONS=3 (smoke iteration count — raise for a stable L3 attribution sample) ·
@@ -16,6 +18,7 @@ import { STORE } from '../config.js';
 // SKIP_ORDER=1 · BASE_URL · SUMMARY_PATH.
 
 const Q = {
+    clearCart: open('../queries/clearCart.graphql'),
     addItemsCart: open('../queries/addItemsCart.graphql'),
     getFullCart: open('../queries/getFullCart.graphql'),
     createOrderFromCart: open('../queries/createOrderFromCart.graphql'),
@@ -119,6 +122,16 @@ export default function (ctx) {
         cartItems.push({ productId: productIds[i % productIds.length], quantity: 1 });
     }
 
+    // Start every iteration from an EMPTY cart. `addItemsCart` carries no cartId, so x-cart
+    // resolves the cart by (storeId, userId, cartName, currency, type) rather than by id, and
+    // `clearCart` goes through the identical `CartCommandHandler.GetCartSearchCriteria`, so both
+    // target the same cart. BL-CART-007 then sums the quantity of a repeated product. Without
+    // this clear the cart grows by ITEMS every iteration: the itemsQuantity check below fails from
+    // iteration 2 onward, and — worse, because it is silent — every measured operation runs
+    // against a monotonically growing cart, so per-operation medians describe a moving target
+    // instead of a cart of ITEMS. Quiet: clearing an already-empty cart is a no-op, not a failure.
+    gqlQuiet(BASE_URL, token, 'clearCart', Q.clearCart, { command: { ...STORE, userId } });
+
     const added = gql(BASE_URL, token, 'addItemsCart', Q.addItemsCart, {
         command: { ...STORE, userId, cartItems },
     });
@@ -134,7 +147,14 @@ export default function (ctx) {
     // itemsQuantity (total unit count), NOT items.length: per BL-CART-007, adding the same
     // product multiple times consolidates into one line with quantity summed, so items.length
     // varies with how many distinct products this iteration cycled through (1 by default) while
-    // itemsQuantity is always ITEMS regardless of consolidation.
+    // itemsQuantity is ITEMS — which holds only because the iteration starts from a cleared cart
+    // AND runs one VU per user. The `steady` profile uses `ramping-arrival-rate` with
+    // `preAllocatedVUs: 50` while `USER_POOL` defaults to 0, so with the default all VUs share one
+    // user and therefore one cart: concurrent VUs interleave clear/add/read, and x-cart's per-user
+    // lock serializes the mutations but does not stop one VU's read from observing a cart another
+    // VU just cleared. The invariant needs a cleared cart AND one VU per user (`smoke`, or `steady`
+    // with `USER_POOL` at least the VU count) — with the default shared cart, `steady` concurrent
+    // clears still race.
     check(full, {
         'getFullCart: itemsQuantity matches ITEMS': (c) => !!c && !!c.cart && c.cart.itemsQuantity === ITEMS,
     }, { name: 'getFullCart' });

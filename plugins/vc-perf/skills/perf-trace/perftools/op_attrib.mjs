@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * op_attrib.js — attribute backend work to the GraphQL operation that caused it, from an
+ * op_attrib.mjs — attribute backend work to the GraphQL operation that caused it, from an
  * `aspire otel spans <resource> --follow --format Json` capture. Node only, no dependencies.
  *
  * WHAT IT ANSWERS
@@ -43,7 +43,7 @@
  *   request. Spans in a trace containing an `Internal | JOB *` span are reported separately.
  *
  * USAGE
- *   node op_attrib.js <spans.json> [--last] [--rows] [--max-overlap-pct N]
+ *   node op_attrib.mjs <spans.json> [--last] [--rows] [--max-overlap-pct N]
  *     --last              keep only the final activity cluster. `--follow` replays the dashboard
  *                         ring buffer, so a capture bracketing a 60 s run can hold 20+ minutes of
  *                         older requests. The fresh run is always last.
@@ -52,7 +52,12 @@
  *                         Above 0 you are accepting ambiguous attribution — see the note above.
  */
 
-// ESM: the repo's package.json sets "type": "module", so .js here is an ES module.
+// `.mjs`, not `.js`: the documented entry point is $pluginRoot — the per-version plugin CACHE dir,
+// which has no ancestor package.json, so a `.js` file there is CommonJS and these imports throw
+// `SyntaxError: Cannot use import statement outside a module`. It happens to load on Node >= 22.7
+// (ESM syntax detection unflagged) and fails on Node 20 LTS. Sibling plugins get away with `.js`
+// only because they ship their own package.json declaring "type": "module" — vc-perf ships none,
+// so the extension has to carry it.
 import fs from 'node:fs';
 import readline from 'node:readline';
 import process from 'node:process';
@@ -60,7 +65,7 @@ import process from 'node:process';
 const args = process.argv.slice(2);
 const file = args[0];
 if (!file || file.startsWith('--')) {
-    console.error('usage: node op_attrib.js <spans.json> [--last] [--rows] [--max-overlap-pct N]');
+    console.error('usage: node op_attrib.mjs <spans.json> [--last] [--rows] [--max-overlap-pct N]');
     process.exit(1);
 }
 // A bare `--flag` with no value, a non-numeric value, or the `--flag=N` form would all yield NaN,

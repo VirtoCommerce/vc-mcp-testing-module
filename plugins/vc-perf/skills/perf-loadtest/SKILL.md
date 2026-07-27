@@ -55,9 +55,11 @@ profile) — the `perf.loadtest` keys in `project-profile.json` are not piped in
 ## Consumer scenarios/queries: point `PAYLOAD_DIR` at your own dir — do NOT edit the install
 
 Everything under `loadtests/scenarios/` and `loadtests/queries/` scripts the **standard
-vc-frontend** GraphQL operations (`getFullCart`, `addItemsCart`, `createOrderFromCart`). If your
-client project overrides the storefront schema, the shipped documents may not match it exactly —
-re-resolve them against your own frontend before relying on the numbers.
+vc-frontend** GraphQL operations (`getFullCart`, `addItemsCart`, `createOrderFromCart`) — with one
+deliberate exception, `clearCart.graphql`, a schema-valid, vendor-neutral fixture document (no
+standard storefront mutation clears a whole cart). If your client project overrides the storefront
+schema, the shipped documents may not match it exactly — re-resolve them against your own frontend
+before relying on the numbers.
 
 **Do NOT edit the plugin's own `scenarios/`/`queries/`.** This skill runs from an install-managed
 clone (marketplace/cache), so edits there are ephemeral (wiped on plugin update) and pollute a repo

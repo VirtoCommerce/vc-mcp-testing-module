@@ -156,7 +156,7 @@ dotnet run perftools/dbparse.cs -- /path/to/db.nettrace
 The BCL-module and idle/background filter lists live at the top of each parser `.cs` — extend
 them when a new background subsystem shows up in traces.
 
-### `op_attrib.js` — per-operation attribution from OTel spans (no `dotnet-trace`, no rebuild)
+### `op_attrib.mjs` — per-operation attribution from OTel spans (no `dotnet-trace`, no rebuild)
 
 The others read a `.nettrace`. This one reads an **Aspire OTel span capture** and answers a
 different question: *which GraphQL operation caused which backend calls, and where did its time
@@ -169,7 +169,7 @@ to learn "how many searches does one `addOrUpdateCartShipment` issue?".
 aspire otel spans backend --apphost "$AH" --follow --format Json --non-interactive > spans.json &
 OP_TAG=1 ITERATIONS=6 ../perf-loadtest/loadtests/run.sh smoke   # 1 VU — see the condition below
 kill %1
-node perftools/op_attrib.js spans.json --last [--rows]
+node perftools/op_attrib.mjs spans.json --last [--rows]
 ```
 
 Output: calls issued per request per operation (ES / SQL / Redis / outbound HTTP, median), where
