@@ -36,6 +36,10 @@ if (!file) {
     console.error('usage: node parse_rep.mjs <summary.json>');
     process.exit(1);
 }
+if (!fs.existsSync(file)) {
+    console.error(`summary not found: ${file}`);
+    process.exit(1);
+}
 
 const data = JSON.parse(fs.readFileSync(file, 'utf8'));
 const m = data.metrics || {};
@@ -64,12 +68,20 @@ for (const key of Object.keys(m)) {
 // the only place its domain-level success criterion (orders placed, carts cleared) is recorded.
 // k6's own built-in counters are excluded by name: they are transport bookkeeping, and leaving them
 // in buries the one or two metrics that carry the scenario's meaning.
-const K6_BUILTIN_COUNTERS = new Set(['data_sent', 'data_received', 'dropped_iterations', 'iterations']);
+// Matched on the BASE name: k6 emits tagged submetrics as `name{tag:value}`, so an exact-match set
+// lets `iterations{scenario:x}` and `data_sent{group::setup}` through as if they were the
+// scenario's own. Name-based is the only mechanism available — the summary JSON does not flag which
+// metrics are built in.
+const K6_BUILTIN_COUNTERS = new Set([
+    'data_sent', 'data_received', 'dropped_iterations', 'iterations', 'checks_total',
+]);
+const K6_BUILTIN_PREFIXES = ['http_', 'ws_', 'grpc_'];
 const counters = {};
 for (const [name, metric] of Object.entries(m)) {
-    if (metric.type === 'counter' && !name.startsWith('http_') && !K6_BUILTIN_COUNTERS.has(name)) {
-        counters[name] = metric.values && metric.values.count;
-    }
+    if (metric.type !== 'counter') { continue; }
+    const base = name.replace(/\{.*$/, '');
+    if (K6_BUILTIN_PREFIXES.some(p => base.startsWith(p)) || K6_BUILTIN_COUNTERS.has(base)) { continue; }
+    counters[name] = metric.values && metric.values.count;
 }
 
 const out = {

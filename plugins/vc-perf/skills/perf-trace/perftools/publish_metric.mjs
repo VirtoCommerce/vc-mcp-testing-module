@@ -14,12 +14,12 @@
  *   larger. Span count and duration-sum are both non-metrics under overlap; only the union of merged
  *   intervals is a share of wall time.
  *
- * WHY A WINDOW
- *   The capture is started before k6 and stopped after it, and `--follow` also replays the
- *   dashboard's ring-buffer history — measured 35 minutes of capture around a 7 minute run. A raw
- *   total therefore also counts background-job, idle and previous-run activity. The load window is
- *   derived from HTTP *server* spans, which exist only while traffic is driven: they are clustered on
- *   idle gaps and the busiest cluster is taken as the run.
+ * THE WINDOW IS A GUESS UNLESS YOU PIN IT
+ *   The capture holds more than one run (`--follow` replays the dashboard ring buffer). The window is
+ *   derived by clustering server spans on idle gaps — but reps driven back-to-back with no sleep land
+ *   inside the gap and MERGE, which inflates the headline per-iteration figure with no warning
+ *   (measured: two 30 s reps 20 s apart reported 2x). The block count is always printed; when reps
+ *   run close together, pin the window with --since/--until.
  *
  * DENORMALISE BEFORE CLAIMING A WIN
  *   A per-iteration figure moves with BOTH numerator and denominator. Measured: PUBLISH/iteration
@@ -28,32 +28,51 @@
  *
  * USAGE
  *   node perftools/publish_metric.mjs <spans.json> <iterations> [--search-host <substr>]
+ *                                     [--idle-gap <ms>] [--since <iso>] [--until <iso>]
  *
- *   <spans.json>     `aspire otel spans <resource> --follow --format Json` output
  *   <iterations>     metrics.iterations.values.count from the k6 summary (note the `.values.` level)
- *   --search-host    substring matching the search backend's span destination (default `elastic`);
- *                    a managed cluster shows e.g. `...elastic-cloud.com:9243`
+ *   --search-host    substring matching the search backend's span destination (default `elastic`)
  *
  * Both sides of an A/B MUST be measured with this same script and the same flags.
  */
 
 import fs from 'node:fs';
 import readline from 'node:readline';
+import { deriveWindow, describeWindow, parseWindowFlags } from './_window.mjs';
 
-const args = process.argv.slice(2);
+let windowOpts, rest;
+try { ({ rest, windowOpts } = parseWindowFlags(process.argv.slice(2))); }
+catch (e) { console.error(e.message); process.exit(1); }
+
 const positional = [];
 let searchHost = 'elastic';
-for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--search-host') { searchHost = args[++i]; }
-    else { positional.push(args[i]); }
+for (let i = 0; i < rest.length; i++) {
+    if (rest[i] === '--search-host') { searchHost = rest[++i]; }
+    else { positional.push(rest[i]); }
 }
 const [file, iterArg] = positional;
 
-if (!file || !iterArg) {
+if (!file || iterArg === undefined) {
     console.error('usage: node publish_metric.mjs <spans.json> <iterations> [--search-host <substr>]');
+    console.error('                               [--idle-gap <ms>] [--since <iso>] [--until <iso>]');
+    process.exit(1);
+}
+if (searchHost === undefined) {
+    console.error('--search-host needs a value');
     process.exit(1);
 }
 const iterations = Number(iterArg);
+// Unvalidated, this silently yields `NaN /iteration` — and the classic way to get here is reading
+// `metrics.iterations.count` instead of `metrics.iterations.values.count`, which is `undefined`.
+if (!Number.isFinite(iterations) || iterations <= 0) {
+    console.error(`iterations must be a positive number, got \`${iterArg}\`.`);
+    console.error('it is metrics.iterations.values.count in the k6 summary — note the `.values.` level.');
+    process.exit(1);
+}
+if (!fs.existsSync(file)) {
+    console.error(`capture not found: ${file}`);
+    process.exit(1);
+}
 
 const spans = { pub: [], server: [], search: [] };
 
@@ -62,14 +81,18 @@ rl.on('line', line => {
     if (!line.trim()) { return; }
     let arr;
     try { arr = JSON.parse(line); } catch { return; }
+    if (!Array.isArray(arr)) { return; }
     for (const s of arr) {
         const st = Date.parse(s.timestamp);
-        const en = st + (s.durationMs || 0);
+        if (!Number.isFinite(st)) { continue; }
+        // Coerce: a string durationMs would string-concatenate and produce an absurd union.
+        const dur = Number(s.durationMs);
+        const en = st + (Number.isFinite(dur) ? dur : 0);
         if (s.name === 'PUBLISH') { spans.pub.push([st, en]); }
         // Health probes and the dashboard run for the whole capture, so including them would stretch
         // the window far past the k6 run and dilute the per-iteration figure with background-job
         // activity. Only load-bearing request spans define the window.
-        if (s.kind === 'Server' && !/health|\{controller=/i.test(s.name)) { spans.server.push(st); }
+        if (s.kind === 'Server' && !/health|\{controller=/i.test(s.name)) { spans.server.push({ start: st, end: en }); }
         if ((s.destination || '').includes(searchHost) && s.name === 'search') { spans.search.push([st, en]); }
     }
 });
@@ -93,6 +116,7 @@ function union(intervals) {
 // Contiguous runs of publishes; a gap this large separates distinct invalidation episodes.
 const BURST_GAP_MS = 50;
 function bursts(intervals) {
+    if (!intervals.length) { return []; }
     const starts = intervals.map(x => x[0]).sort((a, b) => a - b);
     const out = [];
     let n = 1;
@@ -106,37 +130,28 @@ function bursts(intervals) {
 }
 
 rl.on('close', () => {
-    if (!spans.server.length) {
+    const win = deriveWindow(spans.server, windowOpts);
+    if (!win) {
         console.error('no HTTP server spans - cannot establish the load window');
         process.exit(2);
     }
-    const IDLE_GAP_MS = 60_000;
-    const starts = spans.server.slice().sort((a, b) => a - b);
-    const clusters = [[starts[0], starts[0], 1]];
-    for (let i = 1; i < starts.length; i++) {
-        const last = clusters[clusters.length - 1];
-        if (starts[i] - last[1] <= IDLE_GAP_MS) { last[1] = starts[i]; last[2]++; }
-        else { clusters.push([starts[i], starts[i], 1]); }
-    }
-    const load = clusters.sort((a, b) => b[2] - a[2])[0];
-    const [winStart, winEnd] = load;
-    if (clusters.length > 1) {
-        console.log(`note: ${clusters.length} activity blocks in capture; using the busiest (${load[2]} request spans)`);
-    }
-    const inWindow = iv => iv.filter(([s]) => s >= winStart && s <= winEnd);
+    const inWindow = iv => iv.filter(([s]) => s >= win.start && s <= win.end);
+    const windowMs = win.end - win.start;
 
     const pub = inWindow(spans.pub);
     const search = inWindow(spans.search);
     const b = bursts(pub);
     const big = b.filter(x => x >= 100);
+    const pubUnion = union(pub);
+    const searchUnion = union(search);
 
-    console.log(`load window       : ${((winEnd - winStart) / 1000).toFixed(0)}s   iterations: ${iterations}`);
+    console.log(describeWindow(win) + `   iterations: ${iterations}`);
     console.log(`PUBLISH  in-window: ${pub.length}  (${(pub.length / iterations).toFixed(1)} /iteration)`);
-    console.log(`  union wall      : ${(union(pub) / 1000).toFixed(1)}s  (${(100 * union(pub) / (winEnd - winStart)).toFixed(2)}% of window)`);
+    console.log(`  union wall      : ${(pubUnion / 1000).toFixed(1)}s  (${(100 * pubUnion / windowMs).toFixed(2)}% of window)`);
     console.log(`  bursts >=100    : ${big.length}  carrying ${(100 * big.reduce((a, c) => a + c, 0) / (pub.length || 1)).toFixed(1)}% of publishes`);
-    console.log(`  top burst sizes : ${b.slice(0, 8).join(', ')}`);
+    console.log(`  top burst sizes : ${b.length ? b.slice(0, 8).join(', ') : '(none)'}`);
     console.log(`search   in-window: ${search.length}  (${(search.length / iterations).toFixed(1)} /iteration)  [host ~ ${searchHost}]`);
-    console.log(`  union wall      : ${(union(search) / 1000).toFixed(1)}s  (${(100 * union(search) / (winEnd - winStart)).toFixed(2)}% of window)`);
+    console.log(`  union wall      : ${(searchUnion / 1000).toFixed(1)}s  (${(100 * searchUnion / windowMs).toFixed(2)}% of window)`);
     if (!search.length) {
         console.log('  (0 matched - check --search-host against the `destination` field in the capture)');
     }

@@ -208,11 +208,12 @@ tags **its request's own activity** with `<prefix>count.<name>` (exact integers)
 `<prefix>time.<name>` (accumulated ms).
 
 ```bash
-node perftools/counters_metric.mjs spans.json --prefix opus.
+node perftools/counters_metric.mjs spans.json --prefix opus. [--since <iso>] [--until <iso>]
 ```
 
 Because these ride on the request's own server span, reading them is a group-by rather than an
-attribution — so unlike `op_attrib` this is **not restricted to 1 VU**.
+attribution — so unlike `op_attrib` this is **not restricted to 1 VU**. It *is* restricted to one
+load window: see the window note below, which applies to this tool and `publish_metric` alike.
 
 Two things to know before writing the emitting side:
 
@@ -230,14 +231,29 @@ Two things to know before writing the emitting side:
 ### `publish_metric.mjs` — invalidation and search volume per iteration
 
 ```bash
-node perftools/publish_metric.mjs spans.json <iterations> [--search-host <substr>]
+node perftools/publish_metric.mjs spans.json <iterations> [--search-host <substr>] [--since <iso>] [--until <iso>]
 ```
 
 `<iterations>` is `metrics.iterations.values.count` from the k6 summary — note the `.values.` level.
 Reports Redis `PUBLISH` and search calls inside the load window, per iteration, plus the **union** of
-their intervals as a share of wall time. It derives the window by clustering server spans on idle
-gaps and taking the busiest cluster, because `--follow` also replays the dashboard's ring-buffer
-history (measured: 35 min of capture around a 7 min run).
+their intervals as a share of wall time.
+
+#### The load window, and when to pin it (both span readers)
+
+A capture is **not one run**: `--follow` replays the dashboard's ring-buffer history, so previous
+runs, warm-up probing and idle background work are in the same file (measured: 35 min of capture
+around a 7 min run). Both readers therefore derive a window by clustering server spans on idle gaps
+(`--idle-gap`, default 60 s) and taking the busiest cluster, and both print the block count and the
+request count in the window.
+
+**Reps driven back-to-back merge into one window.** `run.sh` has no inter-rep sleep, so consecutive
+reps land inside the idle gap and are treated as a single run — measured, that doubled the headline
+per-iteration figure. The tell is a request count in the banner that is larger than one rep's worth.
+When reps run close together, stop guessing and pin the window:
+
+```bash
+node perftools/publish_metric.mjs spans.json 180 --since 2026-07-27T10:45:00Z --until 2026-07-27T10:52:00Z
+```
 
 **Denormalise before claiming a win.** A per-iteration figure moves with both numerator and
 denominator: measured once, PUBLISH/iteration halved while publishes/second *rose* 16% — the change
