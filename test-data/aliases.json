@@ -1,7 +1,7 @@
 {
   "_meta": {
     "description": "Test data aliases for @td() references in suite CSVs. Syntax: @td(ALIAS.field) or @td(file, filter, column)",
-    "version": "1.5.38",
+    "version": "1.5.39",
     "updated": "GENERATED",
     "changelog_1_5_38": "PAGE-3 fr-FR: added a French sibling of the return-policy page (store cultures en-GB default / de-DE / fr-FR). /qa-return-policy now serves THREE separate single-culture pages (the platform's multi-lang model): en-US 'QA Return Policy', de-DE 'QA Rückgaberichtlinie', fr-FR 'QA Politique de retour et de remboursement' — all Published, 5 blocks each, on vcst. New alias PB_RETURN_POLICY_FR (group_id in aliases.vcst.json). FR content authored in test-data/cms/page-content.json (PB_RETURN_POLICY.fr-FR). Spec gained frName/frAlias; seed-pagebuilder-pages.mjs reconcileMultiLang gained an FR branch + a culture-heal step (enforceCulture, content-safe metadata upsert — a create/publish at a SHARED permalink can flip a sibling's cultureName, proven live when the FR create flipped EN→fr-FR; healed back). Idempotent; td:validate:cms-pages + 168 unit tests + td:reconcile green. NOTE (not a fix): this only gives PAGE-3 an FR version — it does NOT fix the underlying content-leak defect where an UNPUBLISHED language serves default-language content instead of 404. CMS-028's 'unpublished-language → 404' coverage should be re-pointed to a genuinely-unpublished culture and the product defect filed separately. Browser DOM render of /en|/de|/fr/qa-return-policy remains delegated to qa-frontend-expert.",
     "changelog_1_5_37": "REG-2026-07-21-1438 PageBuilder CONTENT: audited canonical qa-* pages' block content and found 3 of 5 were EMPTY shells (rendered blank despite Published): PB_HOMEPAGE, PB_RETURN_POLICY(en-US), PB_SUMMER_PREVIEW = 0 blocks (PB_WHOLESALE_GUIDE/PB_RETURN_POLICY(de-DE)/PB_PARTNER_SUPPORT had 5 each). Added content-block fixture test-data/cms/page-content.json (JSON-shaped to POST /api/page-builder-pages/grouped/{id}/content — {settings,content:[title|text|predefined-product-list]}; SKUs use the @discover:N marker resolved live, no hardcoded SKUs/GUIDs). seed-pagebuilder-pages.mjs now fills EMPTY shells from the fixture (preserving existing content on populated pages) via ensurePageState(). Live result: HOMEPAGE 7, RP(en) 5, SUMMER 6 blocks filled; the 3 populated pages kept. Two proven platform facts drove the impl (documented in pagebuilder-pages-specs.mjs): (1) content+schedule MUST land in ONE publish — a 2nd publish drains the just-promoted empty draft and wipes content; (2) a future/Pending page hides content in every projection. Consequently PB_SUMMER_PREVIEW's baseline is IN-WINDOW/Active (start -1d, end +60d) — the only state with verifiable live content (CMS-034 200); CMS-033 (future→404) toggles start to future in its own steps. Fixture drift-guard folded into td:validate:cms-pages; unit tests in scripts/unit/seed-pagebuilder-pages.test.mjs. CAVEAT (browser, delegated): storefront DOM render of all pages + the CMS-033/034 date-toggle reveal remain to be confirmed by qa-frontend-expert in the re-run.",
@@ -43,31 +43,60 @@
     "changelog_1_5_22": "VCST-5135 ProductPoints program fixtures: programs.csv updated with seeded=true + platform_ids for LOY-010..013 (seeded 2026-06-24 via seed-loyalty.mjs). LOY_PP_* alias notes updated to reflect live IDs. Added 5 VCST-5135 combination aliases [LOY_PP_5135_01..05] covering: all-customers earn (LOY-010), VIP-only earn (LOY-011 + LOYALTY_VIP_USER), VIP-only blocked (non-VIP user — LOYALTY_NOBAL_USER has no Wholesaler group so serves as non-VIP), wholesaler earn (LOY-012), inactive program blocked (LOY-013). VCST-5135 programs are already provisioned — no /qa-seed-data step needed for programs.",
     "changelog_1_5_27": "VCST-5406: reseeded vcst-qa via the unified scripts/seed-data/seed-company-users.mjs (all kinds) on 2026-07-01 after teardown; refreshed org + contact platform_id caches in b2b/organizations.csv (19) + b2b/contacts.csv (14) from the fresh seed. Impersonation re-seed hints now point to `npm run seed:impersonation`. B2B graph reconciles clean (org-scoped roles only, VCST-5028). Note: b2b/users.csv user platform_id caches remain informational (resolved live by email); a handful of orgs (child AcmeWest + ORG-005..008) exist in DB but lag the Member search index.",
     "changelog_1_5_28": "VCST-5406 follow-up: swept the last password literals into the {{VAR}} pattern. 4 alias password fields (AGENT_TEST_IMP_CUSTOMER, MULTI_ORG_TF_BR[/_EMPLOYEE/_MAINTAINER]) → {{DEFAULT_TEST_PASSWORD}}; 15 real-credential Password1! literals in create-account bodies of suites 027/027b/050d → {{DEFAULT_TEST_PASSWORD}}. Left intentional test inputs alone (031/082 Test/Any/WrongPassword1! are registration/negative inputs, not stored secrets).",
-    "changelog_1_5_29": "VCST-5089 (Per-store Asset Public URL rewrite in XAPI) regression authoring: added STORE_ASSET_TEST_URL inline alias (stable placeholder CDN host for setting/resetting Store.assetPublicUrl in tests — value is intentionally non-resolving DNS, same pattern as the live QA verification's cdn-test-vcst5089.govirto.com; only the HOST is asserted, 404/ERR_NAME_NOT_RESOLVED on the image itself is expected and acceptable). Added EXTERNAL_HOST_IMAGE_PRODUCT inline alias pinning the one concrete external-image product captured live during QA verification (product name + external host) for the BUG-1 regression guard (external URLs must NOT be rewritten when VirtoCommerce:StoreAssets:KnownAssetHosts is configured) — captured on vcptcore-qa 2026-07-14, see tests/Sprint-current/VCST-5089/test-execution-report.md; flagged env-portable-with-caveat since catalog composition diverges per env (per feedback reference_per_env_aliases_overlay) — the consuming case is marked Automation_Status=Draft pending per-env confirmation that the pinned product name resolves."
+    "changelog_1_5_29": "VCST-5089 (Per-store Asset Public URL rewrite in XAPI) regression authoring: added STORE_ASSET_TEST_URL inline alias (stable placeholder CDN host for setting/resetting Store.assetPublicUrl in tests — value is intentionally non-resolving DNS, same pattern as the live QA verification's cdn-test-vcst5089.govirto.com; only the HOST is asserted, 404/ERR_NAME_NOT_RESOLVED on the image itself is expected and acceptable). Added EXTERNAL_HOST_IMAGE_PRODUCT inline alias pinning the one concrete external-image product captured live during QA verification (product name + external host) for the BUG-1 regression guard (external URLs must NOT be rewritten when VirtoCommerce:StoreAssets:KnownAssetHosts is configured) — captured on vcptcore-qa 2026-07-14, see tests/Sprint-current/VCST-5089/test-execution-report.md; flagged env-portable-with-caveat since catalog composition diverges per env (per feedback reference_per_env_aliases_overlay) — the consuming case is marked Automation_Status=Draft pending per-env confirmation that the pinned product name resolves.",
+    "changelog_1_5_39": "Cart-suite test-data gaps (TLC-2026-07-25): (1) NEW PROD_MULTI_CURRENCY (test-products.csv PROD-106 / SKU QA-MULTICUR-001, 24.99 USD + 22.49 EUR) — the first genuinely multi-currency AGENT-TEST fixture. Root cause it fixes: seed-standard-products.mjs created only a USD pricelist and hardcoded currency:'USD' on every price row, so switching the storefront to EUR collapsed every AGENT-TEST line to 0.00 with a disabled qty stepper and blocked the currency-switch-with-coupon case (CART-093). The seeder now creates ONE PRICELIST PER CURRENCY (SEED-<date>-Standards-<CUR>) driven by the new `price_eur` CSV column via standard-specs.mjs buildCurrencyPriceSets(), registers the currencies first (ensureCurrencies), and tears down every currency's pricelist. (2) NEW PROD_SUB_FIVE (PROD-107 / QA-SUBFIVE-001, $3.49) — makes the fixed-amount-discount-exceeds-subtotal boundary reachable; COUPON_FIXED5 is $5 off and the cheapest fixture was $9.99, so the 'total floors at zero' assertion passed vacuously. (3) PROD_OOS / PROD_LOW_STOCK / PROD_PACK_SIZE / PROD_TIER_PRICED gained `slug` + `url` fields, backed by new env-invariant `product_slug` / `storefront_url` columns, so cases navigate {{FRONT_URL}}@td(ALIAS.url) instead of hand-composing /product/<sku> — which renders a client-side 404 (HTTP 200 SPA soft-404). The only live-working path is /seed-test-fixtures/<product-slug>, which is DERIVABLE from the seeder's own slug rules (standard-specs.mjs productSlug / storefrontPathForAdHoc) and is drift-guarded, not hand-maintained. (4) Stale GUIDs + the pre-seeding 'Template only — NOT seeded' recipe removed from these four aliases' notes and from the test-products.csv notes column (they have been live-seeded since 2026-05-19; ids belong in aliases.<env>.json). (5) .env.vcst OOS_SKU / PACK_SIZE_SKU / TIER_PRICED_SKU pointed at OOS-PRODUCT-001 / BULK-PAPER-001 / CISCO-SW24-001, which do NOT EXIST on the env (verified 2026-07-25) and disagreed with these aliases — repointed to the canonical QA-* business keys; td:validate:standard now fails any .env.* whose non-empty *_SKU disagrees with the CSV row. @td(PROD_*.sku) is the single source of truth; the env vars are a legacy convenience mirror. PROD-106/107 are AUTHORED, NOT YET SEEDED — run `TEST_ENV=<env> npm run seed:products`."
   },
   "COMPLETED_ORDER": {
     "json": "orders/completed-order",
-    "fields": { "number": "number", "status": "status", "currency": "currency", "total": "total", "id": "id" },
+    "fields": {
+      "number": "number",
+      "status": "status",
+      "currency": "currency",
+      "total": "total",
+      "id": "id"
+    },
     "notes": "VCST-5482 — customer order in Completed state (shipment Delivered), owned by {{USER_EMAIL}}. Static fields from the JSON fixture; runtime id from aliases.<env>.json (npm run seed:orders). Unblocks suite 014 CHK-025/039/040, ORD-001/003/007/008/009/010/035."
   },
   "SHIPPED_ORDER": {
     "json": "orders/shipped-order",
-    "fields": { "number": "number", "status": "status", "currency": "currency", "total": "total", "id": "id" },
+    "fields": {
+      "number": "number",
+      "status": "status",
+      "currency": "currency",
+      "total": "total",
+      "id": "id"
+    },
     "notes": "VCST-5482 — customer order in Shipped state (shipment Sent + tracking number), owned by {{USER_EMAIL}}. Runtime id from aliases.<env>.json (npm run seed:orders). Unblocks suite 014 CHK-013, ORD-006/012/030."
   },
   "PROCESSING_ORDER": {
     "json": "orders/processing-order",
-    "fields": { "number": "number", "status": "status", "currency": "currency", "total": "total", "id": "id" },
+    "fields": {
+      "number": "number",
+      "status": "status",
+      "currency": "currency",
+      "total": "total",
+      "id": "id"
+    },
     "notes": "VCST-5482 — customer order in Processing state, owned by {{USER_EMAIL}}. Runtime id from aliases.<env>.json (npm run seed:orders). Unblocks suite 014 CHK-024, ORD-047."
   },
   "QUOTE_WITH_ADMIN_RESPONSE": {
     "json": "quotes/quote-admin-response",
-    "fields": { "number": "number", "status": "status", "currency": "currency", "id": "id" },
+    "fields": {
+      "number": "number",
+      "status": "status",
+      "currency": "currency",
+      "id": "id"
+    },
     "notes": "VCST-5482 — RFQ submitted by {{ORG_USER_EMAIL}} with admin per-line pricing applied. Runtime id from aliases.<env>.json (npm run seed:quotes). Unblocks suite 015 QUOTE-004/005/006/008/009/018/020/021/025."
   },
   "ACCEPTED_QUOTE": {
     "json": "quotes/quote-accepted",
-    "fields": { "number": "number", "status": "status", "currency": "currency", "id": "id" },
+    "fields": {
+      "number": "number",
+      "status": "status",
+      "currency": "currency",
+      "id": "id"
+    },
     "notes": "VCST-5482 — admin-priced RFQ accepted by the buyer (ready to convert). Runtime id from aliases.<env>.json (npm run seed:quotes). Unblocks suite 015 QUOTE-007/024/027/028/030."
   },
   "CFG_LAPTOP": {
@@ -168,11 +197,6 @@
   },
   "CFG_022_SECTIONS": {
     "_inline": true,
-    "A": "4374665b-997a-4c69-91f5-a519305ee1f7",
-    "B": "c0d2212e-152d-4708-ab77-e424e3ffd76e",
-    "C": "0fffe046-af4d-4372-ad62-b0b2d47708b3",
-    "D": "0a22799a-b0c6-4a58-a4e4-46f3258cb743",
-    "config_id": "db10a28b-6e11-4e01-b567-9a6de73a06fa",
     "fields": {
       "A": "A",
       "B": "B",
@@ -184,12 +208,6 @@
   },
   "CFG_023_SECTIONS": {
     "_inline": true,
-    "Base": "d707dc6e-0087-42fb-a1fb-6819b31e729c",
-    "Creme": "162ee815-721c-433f-af67-877a491d48f3",
-    "Message": "93c47e7f-965f-4773-9b13-8df9c86f2bca",
-    "Text": "44dc99d3-e5e9-494a-bef3-9a7fbdae5159",
-    "Image": "bae96ccc-e6a8-4c9a-8563-f457d385eb31",
-    "config_id": "d38b8383-f15c-496e-91dd-026e2399f55a",
     "fields": {
       "Base": "Base",
       "Creme": "Creme",
@@ -202,9 +220,6 @@
   },
   "CFG_023_OPTIONS": {
     "_inline": true,
-    "Base_Default": "42b0c2b3-5351-4e25-945b-b0cbc908d8ef",
-    "Creme_Default": "0cb0634f-b442-4fe9-82c2-a78cd9b8b8a9",
-    "Message_Default": "538b5b7f-ca99-495f-8e54-9871883d37df",
     "fields": {
       "Base_Default": "Base_Default",
       "Creme_Default": "Creme_Default",
@@ -214,8 +229,6 @@
   },
   "CFG_017_SECTIONS": {
     "_inline": true,
-    "Text": "a2fc5823-2be8-44d4-9cc6-304f14470843",
-    "config_id": "f03082c4-11a8-4e62-ab66-21c62570fe40",
     "fields": {
       "Text": "Text",
       "config_id": "config_id"
@@ -224,7 +237,6 @@
   },
   "PROD_FULL_FIELD_COVERAGE": {
     "_inline": true,
-    "id": "0b6297e8-d100-4419-ac54-8bf240777271",
     "code": "ALCE0128",
     "name": "Animal Crossing New Horizons Nintendo Switch Game Deals",
     "fields": {
@@ -2057,9 +2069,11 @@
       "sku": "sku",
       "name": "product_name",
       "price": "price",
-      "id": "product_id"
+      "id": "product_id",
+      "slug": "product_slug",
+      "url": "storefront_url"
     },
-    "notes": "Seeded 2026-05-19 via scripts/seed-data/seed-standard-products.mjs. Platform code=QA-OOS-001 (matches sku field). Product GUID: 1585405d-b4b1-4aa2-ba6d-34c22152b933. stock=0, isAvailable=false, isInStock=false (verified xAPI). Unblocks CART-046 CART-082. Env var: OOS_SKU.",
+    "notes": "Permanent out-of-stock fixture (stock 0 on every FC, inventory status Enabled — a Disabled status makes xAPI addItem silently no-op instead of surfacing the OOS state). Seeded by scripts/seed-data/products/seed-standard-products.mjs from test-products.csv PROD-101; resolved by business key (code/SKU QA-OOS-001) — NO runtime GUID committed here (ids live in aliases.<env>.json). NAVIGATE VIA @td(PROD_OOS.url), composed as {{FRONT_URL}}@td(PROD_OOS.url). Do NOT hand-build /product/<sku>: that route renders a client-side 404 (HTTP 200 SPA soft-404) — confirmed 2026-07-25. The category page also ships the 'Show in stock' filter on, which hides this fixture, so the direct url is the reliable entry point. Unblocks CART-046 CART-082 + the suite-002 PDP OOS cases. Env var OOS_SKU must equal this sku (enforced by td:validate:standard).",
     "_status": "seeded-20260519"
   },
   "PROD_LOW_STOCK": {
@@ -2071,9 +2085,11 @@
       "sku": "sku",
       "name": "product_name",
       "price": "price",
-      "id": "product_id"
+      "id": "product_id",
+      "slug": "product_slug",
+      "url": "storefront_url"
     },
-    "notes": "Seeded 2026-05-19 via scripts/seed-data/seed-standard-products.mjs. Platform code=QA-LOW-001 (matches sku field). Product GUID: ca405b27-efb8-453b-9561-c8efe38c10b4. stock=5 (verified xAPI). Must not go OOS — top up if it drops. Unblocks CART-037. Env var: LOW_STOCK_SKU.",
+    "notes": "Near-limit stock fixture (stock 5 on the store MAIN fulfillment center); must NOT go OOS — top up if it drops. Seeded by scripts/seed-data/products/seed-standard-products.mjs from test-products.csv PROD-102; resolved by business key (code/SKU QA-LOW-001) — NO runtime GUID committed here (ids live in aliases.<env>.json). NAVIGATE VIA @td(PROD_LOW_STOCK.url), composed as {{FRONT_URL}}@td(PROD_LOW_STOCK.url); /product/<sku> renders a client-side 404 (HTTP 200 SPA soft-404) — confirmed 2026-07-25. Unblocks CART-037. Env var LOW_STOCK_SKU must equal this sku (enforced by td:validate:standard).",
     "_status": "seeded-20260519"
   },
   "PROD_PACK_SIZE": {
@@ -2085,9 +2101,11 @@
       "sku": "sku",
       "name": "product_name",
       "price": "price",
-      "id": "product_id"
+      "id": "product_id",
+      "slug": "product_slug",
+      "url": "storefront_url"
     },
-    "notes": "Resolves by business key (code/SKU QA-PACK-001 = product_id PROD-103); no runtime GUID pinned here (env-specific — lives in the platform, not this committed file). Seeded via scripts/seed-data/seed-standard-products.mjs (idempotent look-up-by-code). minQuantity=6, packSize=6, stock=60 (verified xAPI, reconfirmed live 2026-07-14). Unblocks CART-054/CART-055. Env var: PACK_SIZE_SKU.",
+    "notes": "MOQ / pack-size fixture (minQuantity=6, packSize=6, stock=60 — applied at create time from standard-specs.mjs SPEC_OVERLAYS['PROD-103']; reconfirmed live 2026-07-25). Resolves by business key (code/SKU QA-PACK-001) — no runtime GUID pinned here (env-specific; ids live in aliases.<env>.json). NAVIGATE VIA @td(PROD_PACK_SIZE.url), composed as {{FRONT_URL}}@td(PROD_PACK_SIZE.url); /product/<sku> does not resolve. Unblocks CART-054/CART-055. Env var PACK_SIZE_SKU must equal this sku (enforced by td:validate:standard).",
     "_status": "seeded"
   },
   "PROD_TIER_PRICED": {
@@ -2099,10 +2117,48 @@
       "sku": "sku",
       "name": "product_name",
       "price": "price",
-      "id": "product_id"
+      "id": "product_id",
+      "slug": "product_slug",
+      "url": "storefront_url"
     },
-    "notes": "Seeded 2026-05-19 via scripts/seed-data/seed-standard-products.mjs. Platform code=QA-TIER-001 (matches sku field). Product GUID: 9d709714-7905-429f-88e9-d5e342854425. Tier pricing: list=$29.99 minQty=1, sale=$26.99 minQty=10, sale=$23.99 minQty=20. stock=200. Unblocks CART-078. Env var: TIER_PRICED_SKU.",
+    "notes": "Tier-priced fixture (list $29.99 minQty=1, sale $26.99 minQty=10, sale $23.99 minQty=20 — applied at create time from standard-specs.mjs SPEC_OVERLAYS['PROD-104']; stock=200). Seeded by scripts/seed-data/products/seed-standard-products.mjs; resolved by business key (code/SKU QA-TIER-001) — NO runtime GUID committed here (ids live in aliases.<env>.json). NAVIGATE VIA @td(PROD_TIER_PRICED.url), composed as {{FRONT_URL}}@td(PROD_TIER_PRICED.url); /product/<sku> does not resolve. Unblocks CART-078. Env var TIER_PRICED_SKU must equal this sku (enforced by td:validate:standard).",
     "_status": "seeded-20260519"
+  },
+  "PROD_MULTI_CURRENCY": {
+    "file": "products/test-products",
+    "filter": {
+      "product_id": "PROD-106"
+    },
+    "fields": {
+      "sku": "sku",
+      "name": "product_name",
+      "price": "price",
+      "currency": "currency",
+      "price_eur": "price_eur",
+      "id": "product_id",
+      "slug": "product_slug",
+      "url": "storefront_url"
+    },
+    "notes": "THE dual-currency fixture: priced in BOTH USD (24.99) and EUR (22.49), each in its own single-currency pricelist (SEED-20260519-Standards-USD / -EUR) assigned to the store virtual catalog with no membership condition, so guest / personal / org users all see both. It exists because every other AGENT-TEST fixture is USD-only — switching the storefront to EUR collapsed those lines to 0.00 with a disabled qty stepper, so a currency-switch-with-coupon case (CART-093) failed for the wrong reason (zero subtotal, not the rule under test). Assert `price` in USD and `price_eur` in EUR; NEVER assert the two are equal. NAVIGATE VIA @td(PROD_MULTI_CURRENCY.url), composed as {{FRONT_URL}}@td(PROD_MULTI_CURRENCY.url). Resolved by business key (SKU QA-MULTICUR-001) — no runtime GUID committed. Provision with `TEST_ENV=<env> npm run seed:products`.",
+    "_status": "seeded-20260725"
+  },
+  "PROD_SUB_FIVE": {
+    "file": "products/test-products",
+    "filter": {
+      "product_id": "PROD-107"
+    },
+    "fields": {
+      "sku": "sku",
+      "name": "product_name",
+      "price": "price",
+      "currency": "currency",
+      "price_eur": "price_eur",
+      "id": "product_id",
+      "slug": "product_slug",
+      "url": "storefront_url"
+    },
+    "notes": "Sub-$5 fixture ($3.49 USD / EUR 3.19) — the only fixture cheap enough to make the fixed-amount-discount-exceeds-subtotal boundary genuinely reachable. @td(COUPON_FIXED5.code) is $5 off cart subtotal and the previously-cheapest fixture was $9.99, so a 'total floors at zero, never goes negative' assertion passed vacuously. Use qty=1 of this row as the whole cart. Keep the price strictly below the COUPON_FIXED5 discount amount; re-check this row if that coupon is ever re-valued. NAVIGATE VIA @td(PROD_SUB_FIVE.url), composed as {{FRONT_URL}}@td(PROD_SUB_FIVE.url). Resolved by business key (SKU QA-SUBFIVE-001) — no runtime GUID committed. Provision with `TEST_ENV=<env> npm run seed:products`.",
+    "_status": "seeded-20260725"
   },
   "PROD_SALE_SIMPLE": {
     "file": "products/test-products",
@@ -2211,13 +2267,11 @@
     ],
     "states_distinct": 15,
     "cities_distinct": 20,
-    "default_address_id": "dbcb94fa-e085-4fe7-8cea-90ddee015a62",
     "notes": "MIGRATED 2026-07-01: TechFlow was recreated by the company-users reseed (org_id 6fb516c1→96f109a7); the same 22 addresses (same ids) were re-seeded onto the new org from the 20260423 snapshot, so the per-address TECHFLOW_ADDR_* ids and counts below still resolve live. VCST-4710 OQ-5 seed 2026-04-23. 20 new addresses (10 US, 5 CA, 5 UK) plus 2 pre-existing. Unblocks SF-004/006/007/009/010/012 (list/search/facet/sort) and GQ-003/004/005 (currentOrganizationAddresses). Full per-address IDs in test-data/addresses/_seed-results-techflow-20260423.json. Known caveat: platform CustomerAddress schema has no isFavorite field — storefront MemberAddressType returns isFavorite=false for all 20 after seed; toggle favorite via storefront UI if needed."
   },
   "TECHFLOW_ADDR_US_NEW_YORK": {
     "_inline": true,
     "org_id": "96f109a7-9010-4691-b6a1-bef25cca3d04",
-    "platform_id": "79a1e94d-ae00-4214-bb6c-3440b5c702e8",
     "city": "New York",
     "regionCode": "NY",
     "countryCode": "US",
@@ -2229,7 +2283,6 @@
   "TECHFLOW_ADDR_CA_TORONTO": {
     "_inline": true,
     "org_id": "96f109a7-9010-4691-b6a1-bef25cca3d04",
-    "platform_id": "61eedc5f-5b01-4a31-8633-79b1235ca8e4",
     "city": "Toronto",
     "regionCode": "ON",
     "countryCode": "CA",
@@ -2241,7 +2294,6 @@
   "TECHFLOW_ADDR_UK_LONDON": {
     "_inline": true,
     "org_id": "96f109a7-9010-4691-b6a1-bef25cca3d04",
-    "platform_id": "dbcb94fa-e085-4fe7-8cea-90ddee015a62",
     "city": "London",
     "regionCode": "ENG",
     "countryCode": "GB",
@@ -2386,16 +2438,12 @@
     "lastPageIndex": 102,
     "lastPageIndex_convention": "1-based; position N (1..totalCount). For 0-based array index use lastPageIndex - 1 = 101.",
     "pageSize": 50,
-    "location50Id": "7227b3d1-99fa-46e5-a2b2-371a72b8431d",
     "location50Name": "Metropolitan Opera House",
-    "location51Id": "a38178ee-0312-466c-80ae-0c9399e78e59",
     "location51Name": "Apollo Theater",
-    "lastLocationId": "8de12f56-15f3-46ba-8bca-06c3be3ba5b5",
     "lastLocationName": "Billund, Lego House",
     "indexedSearchEnabled": true,
     "storeId": "B2B-store",
     "testSku": "ALCOE2300",
-    "testProductId": "2645e50b-baf1-43b9-99f6-7f525f4025f8",
     "testProductName": "Dry Erase Blank Playing Card Reusable Blank Cards Board Game Cards Study Guide & Note Cards Word or Math Training Teaching Aids",
     "testProductCatalogId": "fc596540864a41bf8ab78734ee7353a3",
     "testProductAvailableQuantity_at_capture": 985,
@@ -2415,8 +2463,8 @@
     "testSku": "YOC-85609878",
     "testSlug": "/products-with-options/wedding-cakes/sections-with-conditions-wedding-cake",
     "testSlug_resolvedAt": "2026-05-14T11:00Z against FRONT_URL=https://vcst-qa-storefront.govirto.com via /search?q=YOC-85609878 → first card href",
-    "source": "user-provided 2026-05-14 for layout-stability suite (048b) Configurable PDP entry in critical-ui-scope.md Pages matrix",
-    "notes": "Configurable product fixture for layout-stability tests. Must have at least one configurable section (text input, dropdown, or option chooser visible on PDP). Used by Configurable PDP page row in critical-ui-scope.md."
+    "source": "user-provided 2026-05-14 for the Configurable PDP entry in critical-ui-scope.md Pages matrix (originally for layout-stability suite 048b, removed 2026-07-25)",
+    "notes": "Configurable product fixture for layout-stability audits. Must have at least one configurable section (text input, dropdown, or option chooser visible on PDP). Consumed by the Configurable PDP page row in critical-ui-scope.md and by /qa-design; no regression suite currently uses it."
   },
   "STRESS": {
     "_inline": true,
@@ -2426,7 +2474,7 @@
     "longTitleText": "Christmas paper straws, striped dot drink straws, decorative straws with Christmas tree, star, snowflake, gift jar pattern. Christmas party supplies, 22cm-6mm, pack of 500 pieces.",
     "longTitleSource": "live capture 2026-05-14 on vcst-qa B2B-store (storefront-selectors.md Section 8)",
     "longTitleSearchQuery": "Christmas paper straws",
-    "notes": "Stress-test fixtures for layout-stability suite (048b). longTitleSku resolves to a real in-stock product with a 179-char title — use to trigger BL-UI-004 (content boundary) overflow tests without DOM injection. Re-verify SKU exists if vcst catalog is reseeded."
+    "notes": "Stress-test fixtures for layout-stability audits (originally suite 048b, removed 2026-07-25; now consumed by critical-ui-scope.md audit protocols and /qa-design). longTitleSku resolves to a real in-stock product with a 179-char title — use to trigger BL-UI-004 (content boundary) overflow tests without DOM injection. Re-verify SKU exists if vcst catalog is reseeded."
   },
   "IMPERSONATION_ADMIN": {
     "file": "b2b/users",
@@ -2445,12 +2493,10 @@
   "CFG_FILE_HOODIE": {
     "_inline": true,
     "productAlias": "CFG-004",
-    "productId": "a04bbb3c-c3a0-4ab0-9b03-4e69e0ce5556",
     "productName": "Hoodie Base with Only File non required",
     "slug": "physical",
     "url": "/products-with-options/configurable-caps-shirts/physical",
     "fullUrl_template": "{{FRONT_URL}}/products-with-options/configurable-caps-shirts/physical",
-    "fileSectionId": "8b7559d7-873b-4291-98e0-f64a45edc7e2",
     "fileSectionName": "Only File non required",
     "fileSectionType": "File",
     "fileSectionIsRequired": false,
@@ -2485,7 +2531,6 @@
   "ADMIN_DEFAULT": {
     "_inline": true,
     "userName": "admin",
-    "userId": "1eb2fa8ac6574541afdb525833dadb46",
     "memberId": null,
     "email": "admin@vc-demostore.com",
     "email_env": "ADMIN",
@@ -2534,16 +2579,13 @@
   "CFG_VARIATION_CAKE": {
     "_inline": true,
     "_status": "weak-match-20260518",
-    "productId": "e0472ee1-bceb-4680-b913-fe94bded5420",
     "code": "THT-36341598",
     "productName": "Configuration: Cake Vanilla White + Variations",
     "slug": "products-with-options/wedding-cakes/cake-vanilla-white-variations",
     "storefrontUrl": "https://vcst-qa-storefront.govirto.com/products-with-options/wedding-cakes/cake-vanilla-white-variations",
     "categoryPath": "Products with Options > Wedding Cakes",
-    "variationSectionId": "66b3a9b5-5701-4146-8817-1ecc1507ed24",
     "variationSectionName": "Variation section 1",
     "variationSectionIsRequired": false,
-    "textSectionId": "9c3889cc-30a3-4eb9-9e06-c3ae26060a89",
     "textSectionName": "Text section 2",
     "textSectionIsRequired": false,
     "productVariations": [
@@ -2560,10 +2602,8 @@
         "price": 200
       }
     ],
-    "var1Id": "c56a12c0-548f-492a-8a8e-05e1a67376b5",
     "var1Code": "UWJ-83467294",
     "var1Price": 120,
-    "var2Id": "116a85f5-8023-430f-b919-58cadede3e26",
     "var2Code": "VDY-39627589",
     "var2Price": 200,
     "basePrice": 100,
@@ -2578,11 +2618,9 @@
   },
   "CFG_REQUIRED_FILE_HOODIE": {
     "_inline": true,
-    "productId": "85b6f077-d59f-4a8f-8510-9920b9d64ee1",
     "code": "OSW-31158373",
     "productName": "Hoodie Base product with only File req",
     "slug": "products-with-options/configurable-caps-shirts/physical-1703",
-    "fileSectionId": "c356265f-2bdf-4afd-a820-105ead721465",
     "fileSectionName": "only File req",
     "fileSectionType": "File",
     "fileSectionIsRequired": true,
@@ -2601,7 +2639,6 @@
   },
   "CFG_OFFROAD_BIKE": {
     "_inline": true,
-    "productId": "958d0762-404c-4a6f-a45a-46ed4943f5f0",
     "code": "INN-69077289",
     "productName": "Off-Road Bike. Configurable product",
     "slug": "products-with-options/configurations/off-road-bike",
@@ -2640,7 +2677,6 @@
   },
   "CFG_WEDDING_CAKE_CONDITIONS": {
     "_inline": true,
-    "productId": "f4f27033-d688-4d22-ade7-5106f4748add",
     "code": "YOC-85609878",
     "productName": "Sections with conditions Wedding cake",
     "slug": "products-with-options/wedding-cakes/sections-with-conditions-wedding-cake",
@@ -2866,8 +2902,6 @@
     "group": "VIP",
     "account_type": "Customer",
     "store_id": "B2B-store",
-    "memberId": "31399071-7589-42a8-9013-75f805dfd48b",
-    "securityAccountId": "5a216728-c49f-4c4b-b611-227757f071c1",
     "fields": {
       "email": "email",
       "group": "group",
@@ -2891,16 +2925,12 @@
   },
   "MULTI_ORG_TF_BR": {
     "_inline": true,
-    "id": "86b8595a-3313-4a06-8752-38e8cd73b613",
-    "userId": "7174c560-d6e6-428a-9c4e-f8078ab754b0",
     "email": "agent-test-multiorg-20260615@yopmail.com",
     "password": "{{DEFAULT_TEST_PASSWORD}}",
     "org_techflow_id": "96f109a7-9010-4691-b6a1-bef25cca3d04",
     "org_buildright_id": "23525b44-f0d0-43a4-b45e-b162080a4d29",
     "techflow_role": "org-maintainer",
     "buildright_role": "org-employee",
-    "techflow_membership_id": "0e3432270f2e409a8d2d05de3c4c1768",
-    "buildright_membership_id": "3a09bf010b634e9594da9f6ad129b7f6",
     "fields": {
       "id": "id",
       "userId": "userId",
@@ -2951,20 +2981,21 @@
     "_notes": "Active B2B virtual catalog root for storefront product queries. Verified 2026-05-18 via store(storeId:\"B2B-store\") { catalogId }. The 2026-04-30 migration to 9238c387-d779-40cb-b27d-5496a670a924 was rolled back by the 2026-05-15 catalog restore. Use @td(VIRTUAL_CATALOG_B2B.id) inside GraphQL filter strings: filter: \"category.subtree:@td(VIRTUAL_CATALOG_B2B.id) price.USD:(0 TO)\". If B2B-store rebinds again, only this one value needs updating."
   },
   "BUYABLE_PRICED_PRODUCT": {
-    "_inline": true,
-    "id": "0b6297e8-d100-4419-ac54-8bf240777271",
-    "name": "Animal Crossing New Horizons (Nintendo Switch) — STD-001",
-    "sku": "ALCE0128",
-    "fields": {
-      "id": "id",
-      "name": "name",
-      "sku": "sku"
+    "file": "products/standard",
+    "filter": {
+      "product_id": "STD-001"
     },
-    "_notes": "Verified cart-buyable B2B-mixed fixture for cart/checkout/xCart tests — adds to cart cleanly (GQL-MC-001 PASS, 6/6, 2026-06-16). Same product as BUYABLE_NO_MIN_QTY (STD-001). IMPORTANT: cart buyability comes from the product being properly PLACED + INDEXED in the B2B-mixed virtual catalog (fc596540…), NOT from a pricelist-API price — `/api/pricing/evaluate` returns [] for this product yet the cart accepts it, while a product with a pricelist-API price but no B2B-mixed placement (e.g. Canon MF232W 08c33cfc) is rejected with PRODUCT_PRICE_INVALID. So pick fixtures the cart actually accepts (mirror BUYABLE_NO_MIN_QTY's catalog placement), not ones that merely resolve a price. See project_vcstqa_cart_price_invalid_blocker."
+    "fields": {
+      "id": "product_id_guid",
+      "name": "product_name",
+      "sku": "product_code",
+      "code": "product_code",
+      "slug": "product_slug"
+    },
+    "_notes": "CSV-backed (products/standard STD-001, SKU ALCE0128) — SAME product as BUYABLE_NO_MIN_QTY; the runtime platform GUID lives ONLY in aliases.<env>.json (written per env by seed:products → captureDiscoveredFixtures → syncEnvAliases('products/standard')), NEVER hardcoded here (golden rule: no runtime GUIDs in committed test-data — VCST no-hardcode policy / feedback_all_envs_own_aliases_no_csv_guids). On an unseeded env .id resolves EMPTY (a clear miss), never a wrong-env GUID. Was previously an _inline alias with a hardcoded vcst GUID (0b6297e8…) — fixed 2026-07-24. IMPORTANT: cart buyability comes from the product being properly PLACED + INDEXED in the B2B-mixed virtual catalog, NOT from a pricelist-API price — `/api/pricing/evaluate` returns [] for this product yet the cart accepts it, while a product with a pricelist-API price but no catalog placement (e.g. Canon MF232W) is rejected with PRODUCT_PRICE_INVALID. Pick fixtures the cart actually accepts (mirror BUYABLE_NO_MIN_QTY's catalog placement), not ones that merely resolve a price. See project_vcstqa_cart_price_invalid_blocker."
   },
   "BUYABLE_SIBLING_B2B": {
     "_inline": true,
-    "id": "eae298de-0997-44d2-8b35-88e5512dbbe2",
     "name": "ASUS ROG 6D/6D Ultimate Smartphone",
     "fields": {
       "id": "id",
@@ -3016,19 +3047,14 @@
   },
   "LOCKOUT_TEST_USERS": {
     "_inline": true,
-    "sf_id": "71b4ca11-abd3-4450-a514-67a1dbc99c3d",
     "sf_login": "AGENT-TEST-lockout-sf@test.virtocommerce.com",
     "sf_type": "Customer",
-    "admin_id": "6e9987d1-5ce7-43f3-a9a5-a829be1d4472",
     "admin_login": "AGENT-TEST-lockout-admin@test.virtocommerce.com",
     "admin_type": "Administrator",
-    "unlock_id": "af55646a-32fc-42be-a8ab-ac1692eedc8a",
     "unlock_login": "AGENT-TEST-lockout-unlock@test.virtocommerce.com",
     "unlock_type": "Administrator",
-    "manager_id": "44a2978b-1c71-4b61-b882-195c48731ebc",
     "manager_login": "AGENT-TEST-manager-lockout@test.virtocommerce.com",
     "manager_type": "Manager",
-    "target_id": "1d90a31b-31d7-4c0e-aa8d-fba1cbbe9f10",
     "target_login": "AGENT-TEST-lockout-target@test.virtocommerce.com",
     "target_type": "Administrator",
     "fields": {
@@ -3052,11 +3078,8 @@
   },
   "SEED_20260529_OOS": {
     "_inline": true,
-    "id": "3c2b9e0c-2a1d-4757-96db-a6905efbfb9a",
     "sku": "OOS-PRODUCT-001",
     "name": "SEED-20260529-Cisco Meraki MR46 Access Point [OUT OF STOCK]",
-    "catalog_id": "33421487-1d4c-4f22-b9e9-0df86b7ec26b",
-    "price_list_id": "0288950e-001c-4bf5-ab29-c9cd98397daa",
     "fields": {
       "id": "id",
       "sku": "sku",
@@ -3068,11 +3091,8 @@
   },
   "SEED_20260529_TIER_PRICED": {
     "_inline": true,
-    "id": "c20335d0-4894-45e8-adcf-5728333484a8",
     "sku": "CISCO-SW24-001",
     "name": "SEED-20260529-Cisco Catalyst 24-Port Managed Switch",
-    "catalog_id": "33421487-1d4c-4f22-b9e9-0df86b7ec26b",
-    "price_list_id": "0288950e-001c-4bf5-ab29-c9cd98397daa",
     "fields": {
       "id": "id",
       "sku": "sku",
@@ -3084,7 +3104,6 @@
   },
   "SEED_20260529_PL_USD": {
     "_inline": true,
-    "id": "0288950e-001c-4bf5-ab29-c9cd98397daa",
     "name": "SEED-20260529-B2B Standard USD",
     "currency": "USD",
     "fields": {
@@ -3096,7 +3115,6 @@
   },
   "SEED_20260529_PL_EUR": {
     "_inline": true,
-    "id": "444d5682-0c7e-4754-a85e-2667fd00bab7",
     "name": "SEED-20260529-B2B Standard EUR",
     "currency": "EUR",
     "fields": {
@@ -3108,13 +3126,9 @@
   },
   "SEED_20260529_VARIATION_PARENT": {
     "_inline": true,
-    "id": "0bbabbef-a14a-44a8-9890-7df0e814921f",
     "sku": "LOGI-MX-001",
     "name": "SEED-20260529-Logitech MX Master 3S Wireless Mouse",
-    "catalog_id": "33421487-1d4c-4f22-b9e9-0df86b7ec26b",
-    "variation_gray_id": "78543a7a-5cbc-4819-84a4-4bf927ce73b3",
     "variation_gray_sku": "LOGI-MX-001-GY",
-    "variation_white_id": "2cf1b2ae-68e0-40c2-ae87-f95d55268caa",
     "variation_white_sku": "LOGI-MX-001-WH",
     "fields": {
       "id": "id",
@@ -3624,8 +3638,6 @@
     "email": "AGENT-TEST-wholesale@test.virtocommerce.com",
     "email_env": "LOYALTY_WHOLESALE_USER_EMAIL",
     "password_env": "LOYALTY_WHOLESALE_USER_PASSWORD",
-    "memberId": "47db2112-34a7-4fc1-9783-95523284ae10",
-    "securityAccountId": "3aaada1a-6c1b-417e-8cb3-d074258016a3",
     "group": "Wholesaler",
     "account_type": "Customer",
     "store_id": "B2B-store",
@@ -3745,6 +3757,13 @@
     "name": "AGENT-TEST-SR-Owner-Acme",
     "phone": "+1-206-555-0142"
   },
+  "ORG_REP_ONLY": {
+    "_inline": true,
+    "_notes": "Rep-only served org: SR_REP_PRIMARY is its ONLY member (no buyer contacts). Backs the sendCustomerCommunication initiator-exclusion boundary (commit 6d918d82) — a served org whose only member is the sending rep yields 0 effective recipients so the mutation returns false. Seeded by scripts/seed-data/sales-rep/seed-rep-only-org.mjs (idempotent, teardown-symmetric). Business key = the stable name below; the runtime platform GUID (id/platform_id) lives ONLY in aliases.<env>.json, written by the seeder — never a GUID in this committed file.",
+    "name": "AGENT-TEST-Org-RepOnly-Primary",
+    "id": "",
+    "platform_id": ""
+  },
   "SR_ADMIN_CUSTOMER_ONLY": {
     "file": "sales-rep/admin-users",
     "filter": {
@@ -3849,6 +3868,47 @@
     "excluded_permission": "catalog:categories:link",
     "user_type": "Manager"
   },
+  "RESTRICTED_ADMIN_SALESREP_READONLY": {
+    "_inline": true,
+    "_comment": "Restricted back-office (Manager) account for the Sales Rep admin RBAC verification SR-ADM-023 / candidate BL-SREP-003: a read-only Sales Rep admin who can OPEN the embedded Sales Rep back-office app and VIEW reps but CANNOT mutate them. The Sales Rep Admin app gates on the CUSTOMER module's member perms (verified in vc-module-sales-rep dev, useSalesRepPermissions), NOT on sales-rep:access. Holds customer:read (the access/read gate) and EXCLUDES all six mutate perms — customer:create/update/delete (the rep member) + platform:security:create/update/delete (the rep's login account). isAdministrator=false so the gate applies (an admin bypasses every check). Pairs with RESTRICTED_CMS_ADMIN as the no-access negative control (it lacks customer:read entirely). email is an env-invariant AGENT-TEST business key; the PASSWORD is a {{RESTRICTED_SALESREP_ADMIN_PASSWORD}} secret from .env.local (never committed). Runtime platform_id/user_id/role_id resolve from aliases.<env>.json (written by scripts/seed-data/platform/seed-backoffice-rbac.mjs — npm run seed:rbac). Single source of truth: scripts/seed-data/platform/backoffice-rbac-specs.mjs; drift-guard: npm run td:validate:rbac; teardown: npm run seed:rbac:teardown.",
+    "email": "AGENT-TEST-restricted-salesrep@test.virtocommerce.com",
+    "login": "AGENT-TEST-restricted-salesrep@test.virtocommerce.com",
+    "password_var": "RESTRICTED_SALESREP_ADMIN_PASSWORD",
+    "role": "AGENT-TEST-SalesRep-ReadOnly",
+    "excluded_permission": "customer:update",
+    "user_type": "Manager"
+  },
+  "RESTRICTED_ADMIN_SALESREP_ACCOUNTOPS": {
+    "_inline": true,
+    "_comment": "Restricted back-office (Manager) account isolating the ACCOUNT-OPS class of the SalesRepController permission matrix (api/sales-rep, multiple [Authorize] = AND). Holds customer:read + platform:security:update so account-ops (block / unblock / set-password, gated on platform:security:update ONLY) SUCCEED, but EXCLUDES customer:update (+ customer:create/delete + platform:security:create/delete) so entity Update — which needs BOTH customer:update AND platform:security:update — returns 403. Representative boundary = customer:update. isAdministrator=false so the gate applies. email is an env-invariant AGENT-TEST business key; PASSWORD is {{RESTRICTED_SALESREP_ADMIN_PASSWORD}} from .env.local (never committed). Runtime platform_id/user_id/role_id resolve from aliases.<env>.json (npm run seed:rbac). Single source of truth: scripts/seed-data/platform/backoffice-rbac-specs.mjs; drift-guard: npm run td:validate:rbac; teardown: npm run seed:rbac:teardown.",
+    "email": "AGENT-TEST-salesrep-accountops@test.virtocommerce.com",
+    "login": "AGENT-TEST-salesrep-accountops@test.virtocommerce.com",
+    "password_var": "RESTRICTED_SALESREP_ADMIN_PASSWORD",
+    "role": "AGENT-TEST-SalesRep-AccountOps",
+    "excluded_permission": "customer:update",
+    "user_type": "Manager"
+  },
+  "RESTRICTED_ADMIN_SALESREP_MEMBERONLY": {
+    "_inline": true,
+    "_comment": "Restricted back-office (Manager) account proving the SalesRepController Update AND-gate from the MEMBER side (api/sales-rep). Holds customer:read + customer:update but EXCLUDES platform:security:update (+ customer:create/delete + platform:security:create/delete), so entity Update STILL returns 403 (it needs the account side too) and account-ops (block) returns 403. Complements ACCOUNTOPS — together they prove neither the member perm nor the account perm alone is sufficient. Representative boundary = platform:security:update. isAdministrator=false so the gate applies. email is an env-invariant AGENT-TEST business key; PASSWORD is {{RESTRICTED_SALESREP_ADMIN_PASSWORD}} from .env.local (never committed). Runtime platform_id/user_id/role_id resolve from aliases.<env>.json (npm run seed:rbac). Single source of truth: scripts/seed-data/platform/backoffice-rbac-specs.mjs; drift-guard: npm run td:validate:rbac; teardown: npm run seed:rbac:teardown.",
+    "email": "AGENT-TEST-salesrep-memberonly@test.virtocommerce.com",
+    "login": "AGENT-TEST-salesrep-memberonly@test.virtocommerce.com",
+    "password_var": "RESTRICTED_SALESREP_ADMIN_PASSWORD",
+    "role": "AGENT-TEST-SalesRep-MemberOnly",
+    "excluded_permission": "platform:security:update",
+    "user_type": "Manager"
+  },
+  "RESTRICTED_ADMIN_SALESREP_FULL": {
+    "_inline": true,
+    "_comment": "Restricted back-office (Manager) account — the permissioned NON-admin POSITIVE CONTROL for the SalesRepController permission matrix (api/sales-rep). Holds the FULL CRUD + account-ops perm set (customer:read/create/update/delete + platform:security:create/update/delete) yet is isAdministrator=false, so it exercises the REAL [Authorize] gate rather than the admin bypass: a properly-permissioned non-admin can create/update/delete a rep and run account-ops. No boundary permission (excluded_permission: null); the load-bearing negative is is_administrator=false. email is an env-invariant AGENT-TEST business key; PASSWORD is {{RESTRICTED_SALESREP_ADMIN_PASSWORD}} from .env.local (never committed). Runtime platform_id/user_id/role_id resolve from aliases.<env>.json (npm run seed:rbac). Single source of truth: scripts/seed-data/platform/backoffice-rbac-specs.mjs; drift-guard: npm run td:validate:rbac; teardown: npm run seed:rbac:teardown.",
+    "email": "AGENT-TEST-salesrep-full@test.virtocommerce.com",
+    "login": "AGENT-TEST-salesrep-full@test.virtocommerce.com",
+    "password_var": "RESTRICTED_SALESREP_ADMIN_PASSWORD",
+    "role": "AGENT-TEST-SalesRep-Full",
+    "excluded_permission": null,
+    "is_administrator": false,
+    "user_type": "Manager"
+  },
   "PB_HOMEPAGE": {
     "_inline": true,
     "_comment": "Canonical PageBuilder page PAGE-1 (test-data/cms/pagebuilder-pages.md). Reconciled to Published @ /qa-homepage-spring-sale by scripts/seed-data/cms/seed-pagebuilder-pages.mjs (npm run seed:cms-pages). Runtime group_id in aliases.<env>.json. Suites 059/060 CMS-027/029/031/078-085.",
@@ -3896,5 +3956,13 @@
     "permalink": "/qa-partner-portal-support",
     "culture": "en-US",
     "expect_status": "Published"
+  },
+  "SAMPLE_TRACKING_NUMBER": {
+    "_inline": true,
+    "value": "AGENT-TEST-TRK-CHK024",
+    "fields": {
+      "value": "value"
+    },
+    "_notes": "Deterministic tracking-number INPUT typed into Admin > Orders > Shipments (suite 014 CHK-024). Not a lookup of existing data — a generated input value, so it is env-invariant and lives in the committed base (no GUID, DV-021 clean). AGENT-TEST- prefix so /qa-seed-data teardown sweeps anything created with it."
   }
 }

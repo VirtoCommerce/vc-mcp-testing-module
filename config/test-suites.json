@@ -4,7 +4,7 @@
     "version": "3.0",
     "description": "Regression test suite manifest for parallel orchestration with module-aligned directories under Frontend/Backend layers",
     "generated": "2026-07-17",
-    "totalSuites": 119,
+    "totalSuites": 120,
     "csvFormat": "Enriched Agent-Native CSV (ID, Title, Section, Priority, Business_Rule, Edge_Case_Refs, Preconditions, Test_Data, Steps, Assertions, Cross_Layer_Checks, Failure_Signals, Cleanup, References, Automation_Status)",
     "domains": [
       "purchase-flow",
@@ -371,7 +371,7 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 95,
+      "testCount": 98,
       "estimatedMinutes": 65,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -669,8 +669,8 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 44,
-      "estimatedMinutes": 34,
+      "testCount": 52,
+      "estimatedMinutes": 41,
       "agent": "qa-frontend-expert",
       "tags": [
         "cart",
@@ -690,8 +690,8 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 32,
-      "estimatedMinutes": 22,
+      "testCount": 34,
+      "estimatedMinutes": 23,
       "agent": "qa-frontend-expert",
       "tags": [
         "cart",
@@ -709,8 +709,8 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 17,
-      "estimatedMinutes": 12,
+      "testCount": 18,
+      "estimatedMinutes": 13,
       "agent": "qa-frontend-expert",
       "tags": [
         "cart",
@@ -1144,18 +1144,19 @@
       "customerApplicability": "universal"
     },
     {
-      "id": "048b",
-      "name": "Layout Stability",
-      "file": "regression/suites/Frontend/cross-cutting/048b-layout-stability.csv",
+      "id": "048c",
+      "name": "Layout Stability (runner-native)",
+      "file": "regression/suites/Frontend/cross-cutting/048c-layout-stability.csv",
       "domain": "cross-cutting",
       "layer": "frontend",
       "concern": "non-functional",
       "priority": "P1",
-      "testCount": 52,
-      "estimatedMinutes": 73,
-      "agent": "ui-ux-expert",
-      "preferredBrowser": "playwright-chrome",
-      "browserRequirementReason": "PerformanceObserver layout-shift entries + getBoundingClientRect measurements work most reliably in Chromium; uses scripts/lib/measure-layout.ts snippets via browser_evaluate. Selectors verified live against vcst-qa B2B-store (see .claude/knowledge/automation/storefront-selectors.md). Scope (8 components, 9 pages) enforced by .claude/knowledge/oracles/critical-ui-scope.md and npm run scope:validate.",
+      "testCount": 29,
+      "estimatedMinutes": 3,
+      "agent": "none",
+      "runner": "layout-runner",
+      "runnerCommand": "npm run layout:run",
+      "browserRequirementReason": "Executed deterministically by scripts/layout/layout-runner.ts (Playwright/Chromium) — NOT by a browser agent. Fresh BrowserContext per case, CLS observer installed pre-paint via addInitScript, CDP network throttling, viewport declared per case. Thresholds derive from scripts/lib/measure-layout.ts (npm run tokens:sync).",
       "tags": [
         "layout",
         "cls",
@@ -1163,14 +1164,10 @@
         "alignment",
         "overflow",
         "touch-targets",
-        "fouc",
-        "skeleton",
-        "font-swap",
-        "bopis-modal",
-        "configurable-pdp",
         "critical-ui-scope",
         "ui-ux",
-        "non-functional"
+        "non-functional",
+        "runner-native"
       ],
       "customerApplicability": "universal"
     },
@@ -1283,7 +1280,7 @@
       "layer": "backend",
       "concern": "api",
       "priority": "P1",
-      "testCount": 30,
+      "testCount": 31,
       "estimatedMinutes": 20,
       "agent": "qa-backend-expert",
       "tags": [
@@ -1525,8 +1522,8 @@
       "layer": "backend",
       "concern": "api",
       "priority": "P1",
-      "testCount": 41,
-      "estimatedMinutes": 102,
+      "testCount": 98,
+      "estimatedMinutes": 245,
       "agent": "qa-backend-expert",
       "tags": [
         "graphql",
@@ -2581,8 +2578,8 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 30,
-      "estimatedMinutes": 60,
+      "testCount": 42,
+      "estimatedMinutes": 84,
       "agent": "qa-frontend-expert",
       "tags": [
         "sales-rep",
@@ -2627,8 +2624,8 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 21,
-      "estimatedMinutes": 55,
+      "testCount": 27,
+      "estimatedMinutes": 71,
       "agent": "qa-frontend-expert",
       "tags": [
         "sales-rep",
@@ -2664,6 +2661,31 @@
       "requiresModules": [
         "sales-rep"
       ],
+      "customerApplicability": "reference"
+    },
+    {
+      "id": "092",
+      "name": "Sales Rep — Admin / VC-Shell App (rep management)",
+      "file": "regression/suites/Backend/sales-rep/092-sales-rep-admin.csv",
+      "domain": "sales-rep",
+      "layer": "backend",
+      "concern": "admin",
+      "priority": "P1",
+      "testCount": 18,
+      "estimatedMinutes": 70,
+      "agent": "qa-backend-expert",
+      "tags": [
+        "sales-rep",
+        "admin",
+        "vc-shell",
+        "permissions",
+        "crud",
+        "vcptcore-only"
+      ],
+      "requiresModules": [
+        "sales-rep"
+      ],
+      "env": "vcptcore",
       "customerApplicability": "reference"
     }
   ],
@@ -2773,11 +2795,6 @@
         "tag": "configurable-products"
       }
     },
-    "layout-stability": {
-      "include": [
-        "048b"
-      ]
-    },
     "store-asset-url": {
       "include": [
         "050n",
@@ -2802,7 +2819,8 @@
         "layer": "backend"
       },
       "exclude": [
-        "050m"
+        "050m",
+        "092"
       ]
     },
     "sprint": {
@@ -2914,7 +2932,10 @@
     "concern:admin": {
       "where": {
         "concern": "admin"
-      }
+      },
+      "exclude": [
+        "092"
+      ]
     },
     "loyalty": {
       "include": [
@@ -2930,6 +2951,11 @@
         "086",
         "087",
         "088"
+      ]
+    },
+    "layout-stability": {
+      "include": [
+        "048c"
       ]
     }
   }

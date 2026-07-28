@@ -24,12 +24,14 @@
 import {
   assertSafeTarget, auth, api, log, verbose, loadCsv, loadAliases,
   writeEnvAliasOverride, syncEnvAliases, csvBool, DRY_RUN, TEARDOWN, ONLY, STORE_ID, verifyRemoved,
-  discoverCatalogProducts,
+  discoverCatalogProducts, resetSecurityPassword,
 } from '../../lib/seed-common.mjs';
 
 const OWNER_NAME = 'AGENT-TEST-SR-Owner-Acme';
 const OWNER_PHONE = '+1-206-555-0142';
 const REP_PASSWORD = process.env.SR_REP_PASSWORD || process.env.TEST_USER_PASSWORD || 'Password1!';
+// Restricted admin (Manager) users for the 092 admin-suite permission-negative cases.
+const ADMIN_USER_PASSWORD = process.env.SR_ADMIN_PASSWORD || REP_PASSWORD;
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -171,6 +173,13 @@ async function ensureRep(row, orgs, roleId) {
   if (existing) {
     rep = await api('GET', `/api/sales-rep/${existing.id}`);
     log(`Rep exists: ${row.rep_key} (${rep.id})`);
+    // Self-heal credential drift: a rep account created BEFORE its password var
+    // (SR_REP_PASSWORD / TEST_USER_PASSWORD) was set still authenticates only with the
+    // old value, and the module's create-only account path never resets it — so a headless
+    // runner using @td() + the registry password 400s invalid_grant. Force-set the password
+    // to the current REP_PASSWORD on every reseed (idempotent; scoped to these AGENT-TEST-SR
+    // accounts). A newly-created rep already gets REP_PASSWORD at create, so only reuse needs it.
+    await resetSecurityPassword(api, row.email, REP_PASSWORD);
   } else {
     let served;
     if ((row.served_orgs || '').startsWith('PAGING:')) {
@@ -203,6 +212,43 @@ async function ensureRep(row, orgs, roleId) {
     }
   }
   return { contactId: rep?.id, userId: rep?.userId, lockedMembershipId };
+}
+
+// ---- phase 3b: restricted admin (Manager) users for suite 092 --------------
+// Permission-negative fixtures: a Manager with customer:* but NO platform:security:* (SR-ADM-007/014),
+// and a Manager with catalog:read but NO customer:read (SR-ADM-016). isAdministrator MUST be false or
+// the role restriction is meaningless. Idempotent: look up by role name / user email before create.
+
+async function ensureRole(roleName, permissions) {
+  const search = await api('POST', '/api/platform/security/roles/search', { keyword: roleName, take: 20 }, { expectStatus: [200, 201] });
+  const existing = (search?.results || search?.roles || []).find((r) => r.name === roleName);
+  if (existing?.id) { verbose(`role exists: ${roleName} (${existing.id})`); return existing; }
+  const body = { name: roleName, permissions: permissions.map((p) => ({ name: p, assignedScopes: [] })) };
+  await api('PUT', '/api/platform/security/roles', body, { expectStatus: [200, 201, 204] });
+  const again = await api('POST', '/api/platform/security/roles/search', { keyword: roleName, take: 20 }, { expectStatus: [200, 201] });
+  const created = (again?.results || again?.roles || []).find((r) => r.name === roleName);
+  log(`Role created: ${roleName} (${created?.id}) [${permissions.join(', ')}]`);
+  return created;
+}
+
+async function ensureAdminUser(row) {
+  const perms = (row.permissions || '').split(';').map((s) => s.trim()).filter(Boolean);
+  const role = await ensureRole(row.role_name, perms);
+  const existing = await api('GET', `/api/platform/security/users/${encodeURIComponent(row.user_name)}`, null, { expectStatus: [200, 404] });
+  if (existing?.id) {
+    log(`Admin user exists: ${row.user_key} (${row.email})`);
+    return existing.id;
+  }
+  const body = {
+    userName: row.user_name, email: row.email, password: ADMIN_USER_PASSWORD,
+    userType: 'Manager', isAdministrator: false, emailConfirmed: true,
+    roles: role ? [role] : [],
+  };
+  const res = await api('POST', '/api/platform/security/users/create', body, { expectStatus: [200, 201] });
+  if (res && res.succeeded === false) throw new Error(`user create failed for ${row.email}: ${JSON.stringify(res.errors || res)}`);
+  log(`Admin user created: ${row.user_key} (${row.email}) role=${row.role_name}`);
+  const u = await api('GET', `/api/platform/security/users/${encodeURIComponent(row.email)}`, null, { expectStatus: [200, 404] });
+  return u?.id || '';
 }
 
 // ---- phase 4: orders -------------------------------------------------------
@@ -328,6 +374,14 @@ async function teardown(orgs) {
     const m = await findMemberByName(name);
     if (m?.id) { await api('DELETE', `/api/members?ids=${m.id}`, null, { expectStatus: [200, 204] }); log(`  deleted paging org ${name}`); }
   }
+  // Restricted admin (Manager) users + their roles (suite 092 fixtures)
+  for (const row of loadCsv('test-data/sales-rep/admin-users.csv')) {
+    const u = await api('GET', `/api/platform/security/users/${encodeURIComponent(row.email)}`, null, { expectStatus: [200, 404] });
+    if (u?.id) { await api('DELETE', `/api/platform/security/users?names=${encodeURIComponent(row.user_name)}`, null, { expectStatus: [200, 204] }); log(`  deleted admin user ${row.user_key}`); }
+    const search = await api('POST', '/api/platform/security/roles/search', { keyword: row.role_name, take: 20 }, { expectStatus: [200, 201] });
+    const role = (search?.results || search?.roles || []).find((r) => r.name === row.role_name);
+    if (role?.id) { await api('DELETE', `/api/platform/security/roles?ids=${role.id}`, null, { expectStatus: [200, 204] }); log(`  deleted role ${row.role_name}`); }
+  }
   // Owner contact + ACME de-enrichment (only the owner link)
   const owner = await findMemberByName(OWNER_NAME);
   if (owner?.id) {
@@ -367,6 +421,13 @@ async function main() {
     const { contactId, userId, lockedMembershipId } = await ensureRep(row, orgs, roleId);
     repWriteback[row.rep_key] = { contact_id: contactId || '', user_id: userId || '', membership_locked_id: lockedMembershipId || '' };
     if (row.rep_key === 'SR_REP_PRIMARY') primaryRepEmail = row.email;
+  }
+
+  // Phase 3b — restricted admin (Manager) users for suite 092 permission-negatives
+  const adminUsers = loadCsv('test-data/sales-rep/admin-users.csv').filter((r) => csvBool(r.seeded, true) && (!ONLY || r.user_key === ONLY));
+  for (const row of adminUsers) {
+    try { await ensureAdminUser(row); }
+    catch (e) { log(`WARN: admin user ${row.user_key} not seeded (${String(e.message).slice(0, 160)})`); }
   }
 
   // Phase 4 — orders. salesRepOrders/lastOrder attribute an order to a rep by

@@ -45,7 +45,7 @@ If `ENV_RISK=production`, add a prominent warning:
 
 ### 2. Environment Variables
 
-Run `npm run env:check` to verify required variables are set. Source of truth for the schema: **`manifest.json` `envSchema`** — the customer should consult that for what's required.
+Run `npm run env:check` to verify required variables are set. Source of truth for the schema: **`config.js`** (the layered env loader) — the customer should consult that for what's required.
 
 Layered loader order (later overrides earlier):
 1. `.env.defaults` — plugin-supplied constants (sandbox cards, Builder.io public URL). Same for every customer.
@@ -193,6 +193,20 @@ Customer secrets  : 8/8 from .env.local (via _QA suffix promotion)
 ### Verdict: READY
 (or NOT READY: list specific blockers + remediation hints)
 ```
+
+**Signal completion (self-diagnostics — the LAST action).** After the readiness table above (whether
+the verdict is READY or NOT READY — both are a completed run), run this once (best-effort, silent,
+never blocks):
+
+```bash
+node "$pluginRoot/hooks/session-telemetry.mjs" complete --skill "qa-env-check"
+```
+
+So the vc-fix self-diagnostics collector prints its one-line clean/health status **exactly once**
+after the run. `$pluginRoot` = the active install path — reuse if already resolved (check 6, Azure),
+else `claude plugin list --json` (see [`knowledge/execution/plugin-root.md`](../knowledge/execution/plugin-root.md)).
+Details: [`knowledge/diagnostics/skill-expectations.md`](../knowledge/diagnostics/skill-expectations.md)
+§Signal completion.
 
 ---
 
