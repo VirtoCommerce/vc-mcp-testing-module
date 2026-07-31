@@ -14,9 +14,18 @@ name: Test-Case Staleness Audit
 # lives in the CSV row it describes, so there is no scheduler state to drift and a
 # skipped day simply leaves that suite at the head of the queue.
 #
-# NOTE: the schedule is intentionally commented out (same posture as the other four
-# workflows). Enable it after 2-3 successful workflow_dispatch runs have been
-# reviewed end-to-end.
+# SCHEDULE IS ENABLED (Mon-Fri 05:00 UTC) — note this differs from the other four
+# workflows in this repo, whose `schedule:` blocks are all commented out.
+#
+# Two things to know if a run misbehaves:
+#   1. A scheduled trigger only fires from the DEFAULT branch (`main`). The cron
+#      does nothing until this file is merged there.
+#   2. Required secrets: ANTHROPIC_API_KEY and AUTOFIX_GITHUB_TOKEN (a PAT — a PR
+#      authored by the default GITHUB_TOKEN does not trigger downstream checks).
+#      Missing either fails the job early rather than producing a bad PR.
+#
+# To pause the rotation without reverting anything, re-comment the `schedule:`
+# block below; `workflow_dispatch` keeps working for one-off audits.
 
 on:
   workflow_dispatch:
@@ -49,9 +58,9 @@ on:
         required: false
         default: false
         type: boolean
-  # One suite per weekday. Commented out until the flow is validated by hand.
-  # schedule:
-  #   - cron: '0 5 * * 1-5'  # Mon-Fri 05:00 UTC
+  # One suite per weekday.
+  schedule:
+    - cron: '0 5 * * 1-5'  # Mon-Fri 05:00 UTC
 
 concurrency:
   # Never two audits at once: both would branch from the same base and the second
