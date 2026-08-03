@@ -157,8 +157,16 @@ export function trends(entries: RunEntry[]): SuiteTrend[] {
   return out;
 }
 
-type GateType = "smoke" | "sprint" | "release" | "hotfix";
-type Verdict = "PASS" | "FAIL" | "APPROVED" | "APPROVED WITH CONDITIONS" | "BLOCKED";
+type GateType = "smoke" | "sprint" | "release" | "hotfix" | "feature";
+type Verdict =
+  | "PASS"
+  | "FAIL"
+  | "APPROVED"
+  | "APPROVED WITH CONDITIONS"
+  | "BLOCKED"
+  | "GO"
+  | "CONDITIONAL GO"
+  | "NO-GO";
 
 export interface GateResult {
   gate: GateType;
@@ -193,6 +201,25 @@ export function evaluateGate(
       verdict = "BLOCKED";
       if (pr < 95) reasons.push(`affected-area pass rate ${pr}% < 95%`);
       if (p0Bugs > 0) reasons.push(`${p0Bugs} open P0 bug(s) in hotfix area`);
+    }
+  } else if (gate === "feature") {
+    // Feature Release Gate (quality-gates.md §1a) — per-feature GO / CONDITIONAL GO / NO-GO.
+    // pr = change-scoped (Artifact-C) regression pass rate; p0/p1 = open IN-SCOPE bug counts.
+    // This computes ONLY the pass-rate + bug-count math; the qualitative §1a criteria (AC coverage,
+    // BL-* preserved, NFRs, smoke, /qa-test verdict, security) stay agent-judged and are combined by the
+    // Step-6h verifier. GO floor 95%, conditional band 93-95%, any open P0 or <93% => NO-GO.
+    if (p0Bugs > 0) {
+      verdict = "NO-GO";
+      reasons.push(`${p0Bugs} open in-scope P0 bug(s) (non-negotiable)`);
+    } else if (pr < 93) {
+      verdict = "NO-GO";
+      reasons.push(`change-scoped regression ${pr}% < 93% floor`);
+    } else if (pr >= 95 && p1Bugs === 0) {
+      verdict = "GO";
+    } else {
+      verdict = "CONDITIONAL GO";
+      if (pr < 95) reasons.push(`regression ${pr}% in conditional band (93-94.99%) — risk acceptance required`);
+      if (p1Bugs > 0) reasons.push(`${p1Bugs} open in-scope P1 bug(s) — documented workaround + risk acceptance required`);
     }
   } else {
     // sprint / release share the same shape, different thresholds.
@@ -271,7 +298,9 @@ function main(): void {
   const trend = trends(entries);
   const gate = args.gate ? evaluateGate(args.gate, agg, args.p0Bugs, args.p1Bugs) : null;
 
-  const blocking = gate ? gate.verdict === "BLOCKED" || gate.verdict === "FAIL" : false;
+  const blocking = gate
+    ? gate.verdict === "BLOCKED" || gate.verdict === "FAIL" || gate.verdict === "NO-GO"
+    : false;
 
   if (args.json) {
     console.log(JSON.stringify({ source: args.history, entries: entries.length, aggregate: agg, trends: trend, gate }, null, 2));

@@ -39,6 +39,14 @@ deployment.
 bug list for the feature, and the change-scoped regression result (the Artifact-C suite selection from the
 `/qa-test` run). **Owner:** `qa-lead-orchestrator` (this is its go/no-go call).
 
+**Independently ratified at `/qa-test` Step 6h.** This gate is not self-certified by the run that produced
+the inputs: a **fresh `qa-lead-orchestrator` verifier instance** (§Verifier Mode) re-evaluates the criteria
+below from the raw inputs and may **downgrade** the GO/NO-GO. The pass-rate + bug-count math has a
+deterministic core — `npx tsx scripts/regression/compute-metrics.ts --gate feature --p0-bugs N --p1-bugs N`
+returns **GO / CONDITIONAL GO / NO-GO** (GO floor 95%, conditional 93–95%, any open P0 or <93% ⇒ NO-GO;
+exits non-zero on NO-GO). The qualitative criteria (AC coverage, `BL-*`, NFRs, smoke, `/qa-test` verdict,
+security) stay agent-judged and are combined with that math by the verifier.
+
 | Criterion | Threshold | Source |
 |-----------|-----------|--------|
 | `/qa-test` verdict | **PASS** or **PASS WITH NOTES** | `/qa-test` Step 6e |
@@ -98,11 +106,11 @@ Evaluated before sprint release to staging or production. Covers sprint-scoped t
 
 ## 3. Full Release Gate
 
-Evaluated before production release. Covers all 36 regression suites (15 frontend + 21 backend).
+Evaluated before production release. Covers all 119 regression suites (54 frontend + 65 backend).
 
 | Criterion | Threshold | Measurement |
 |-----------|-----------|-------------|
-| Overall pass rate | >=98% | Combined pass rate across all 99 suites |
+| Overall pass rate | >=98% | Combined pass rate across all 119 suites |
 | Open P0 bugs | 0 | No unresolved critical bugs across entire platform |
 | Open P1 bugs | <3 | Each with documented workaround and target fix date |
 | Performance baselines | Within 10% of baseline | Core Web Vitals (LCP, FID, CLS) measured via Suite 11 |
@@ -117,7 +125,7 @@ Evaluated before production release. Covers all 36 regression suites (15 fronten
 - **BLOCKED** — Pass rate below 96% OR any P0 bug open OR 3+ P1 bugs without workarounds OR any critical security finding OR data integrity issue.
 
 **Notes:**
-- Full release gate requires execution of all 99 suites. Partial execution does not satisfy the gate.
+- Full release gate requires execution of all 119 suites. Partial execution does not satisfy the gate.
 - Cross-browser failures in a single browser may qualify for CONDITIONS if the other two browsers pass and the failing browser has a known platform issue.
 - Exploratory testing sessions must cover at least: checkout flow, payment processing, and catalog search.
 
@@ -139,7 +147,7 @@ Evaluated before emergency hotfix deployments. Scoped to the hotfix area only.
 - **BLOCKED** — Any criterion not met. Hotfix must be revised.
 
 **Notes:**
-- Hotfix gate does not require full regression (99 suites). Only the affected area plus smoke.
+- Hotfix gate does not require full regression (119 suites). Only the affected area plus smoke.
 - If the hotfix touches payment (Suites 04, 06), checkout, or security (Suite 08), those suites must also pass.
 - Hotfix deployments still require smoke gate (Section 1) to pass after the fix is applied.
 

@@ -20,6 +20,33 @@ Analyze scope, dispatch specialist agents, collect results, and produce a verdic
 
 ## Pipeline: Gather Context · Story · Test Model → Plan → Write·Review·Provision → Execute → Explore → Report
 
+Every step runs the same contract: **DOER → GATE → INDEPENDENT VERIFIER**.
+
+## Quality-gate model — every step is gated + independently verified
+
+`/qa-test` is a gated lifecycle: each step has an explicit **Gate (pass criteria)** and its output is
+checked by an **independent verifier** — a **fresh `qa-lead-orchestrator` instance in verifier mode**
+(`.claude/agents/qa-lead-orchestrator.md` §Verifier Mode), **not** the inline orchestrator running this
+pipeline and **never the step's own doer**. The verifier re-derives the evidence from source (re-runs the
+deterministic core, re-reads the artifact, re-opens the evidence, or delegates a live re-check to a
+specialist on a **different browser lane**) — it never APPROVEs on the doer's summary. Bias: **when in
+doubt, REJECT.**
+
+- **This does not violate "run inline, don't delegate the orchestration"** (below): the verifier is a
+  **scoped single-gate check**, dispatched per step and returning `APPROVE|REJECT`. You are not handing off
+  the pipeline — you keep orchestrating; you just add an independent gate between steps.
+- **The REJECT loop is: reject → reason + fix → wait → re-verify.** On `REJECT` the verifier returns
+  `REASONS` + a concrete `FIX`; you hand that back to the **step's doer** (never to the verifier), the doer
+  applies the fix, and the verifier **re-verifies from scratch** on the corrected artifact. **≤2 iterations**;
+  still not APPROVE → **STOP** for a human (a persistent REJECT never silently proceeds).
+- **Skip a verifier pass only** for a trivial step on a P2/P3 (note the skip in one line); a P0/P1 or any
+  revenue-flow step is always verified.
+- **Gate ladder at a glance:** Step 1 → *Test Model complete* · Step 3 → *Artifacts reviewed + data seeded*
+  · Step 4 → *Execution evidenced* · Step 5 → *Risk areas explored* · Step 6d–6e → *Triage + verdict sound*
+  · Step 6h → *Feature Release Gate ratified* · Step 6i → *Promotion evidence grounded* (only when new cases
+  were authored). Human stays terminal (TESTED/REOPEN + a GO/NO-GO recommendation; never
+  auto-ship/merge/fix).
+
 ### Step 1 — Gather Context, Story & Test Model
 
 **One step, five sub-parts, listed in execution order** — each consumes the one before it, so don't
@@ -145,6 +172,12 @@ Agents to dispatch: [list]
 The test model is the single artifact handed to `test-management-specialist` in Step 3 (checklist/case
 authoring) and reconciled against live behavior in Step 6b.
 
+**Gate (Test Model complete):** ticket **type classified**; ACs decomposed to **atomic conditions** (story
+ACs + gap-ACs); **BL/ECL/domains** identified; **risk areas** present. **Independent verification:** a fresh
+`qa-lead` verifier independently re-decomposes the ticket/PR ACs from source and REJECTs if any atomic
+condition or `ba-system-analyzer` risk area is missing from the model → doer (Step 1) adds it → re-verify.
+(Step 1d's *story* review stays advisory; this gate is on the *model's completeness*, not AC quality.)
+
 ---
 
 ### Step 2 — Plan
@@ -187,11 +220,32 @@ failure in the Test Model becomes a mandatory verification point here, alongside
 - UI/component change → add `ui-ux-expert`
 - P0 ticket or critical revenue flow → add `qa-testing-expert` for cross-browser verification
 
+**Gate (Plan grounded):** every affected domain has its `BL-*`/`ECL-*`/`E2E-*` loaded and an agent routed.
+**Independent verification:** light — folded into the Step 3 verifier pass, which REJECTs if a P0/P1
+domain's `BL-*` mapping came back empty (a plan that gates nothing). Skip a standalone verifier pass here.
+
 ---
 
 ### Step 3 — Write, Review & Provision (test-management-specialist)
 
 **Always** dispatch `test-management-specialist` to produce the test artifacts, review/auto-fix them, and provision any test data before execution. This step must complete before Step 4.
+
+**This step runs the same author → review → auto-fix → provision mechanism as `/qa-test-lifecycle`
+Phases 3–4 — the owning skills are the single source of truth, and neither command restates them.** Read
+them; do not re-derive them from this file:
+
+| Concern | Owner (read it) | Never restate here |
+|---|---|---|
+| Case authoring contract, 15-column schema, `Automation_Status` enum | `/qa-test-cases-generator` + `.claude/skills/qa-test-cases-generator/test-case-template.md` | column list, enum values |
+| Review dimensions, check codes, severities, auto-fix matrix | `.claude/skills/qa-review-tests/SKILL.md` + `review-criteria.md` | the dimension list, a code's severity |
+| Behavior-rewrite evidence bar (docs + live + source) | `.claude/skills/qa-review-tests/triangulation-criteria.md` | the evidence bar |
+| Test-data design + provisioning | `/qa-generate-data` → `/qa-seed-data` (`test-data-engineer`) | fixture/alias rules |
+| Write-scope ceiling + revert-on-regression | `.claude/commands/qa-test-lifecycle.md` §Phase 4b | the ceiling table |
+
+Two things differ from a lifecycle run, and only two: **where the rows land** (here: a *run-scoped*
+`reports/tickets/{SPRINT}/VCST-XXXX/test-cases.csv`, not `regression/suites/`) and **who may promote**
+(never this command — `/qa-test-lifecycle` Phase 6P, see 6i/6j). Everything else is the same job under the
+same rules, so a divergence between the two is a bug in whichever file drifted.
 
 The specialist follows the **`/qa-plan` methodology scoped to this ticket** — consult `e2e-scenario-catalog.md` for the `E2E-*` scenarios identified in Step 2 and inherit their regression-suite mappings — but the **output is the lightweight scoped in-context testing checklist below (terminal-only, no file per `.claude/rules/reports.md` §1), NOT a full `/qa-plan` test plan / RTM / TestRail CSV.** Use the catalog for scenario coverage and suite traceability; do not run the full test-planning ceremony (SBTM/test-design/peer-review/Draft→Reviewed promotion) here — Step 5 owns exploratory, and full case authoring belongs to a standalone `/qa-plan` run.
 
@@ -202,11 +256,22 @@ The specialist produces **three hand-off artifacts**, then reviews/auto-fixes th
 **Artifact A — Test cases / scenarios (ticket-type-driven).**
 - **New feature / Story** (Test Model `Type`) → **author new** enriched-CSV test cases (and, for a multi-screen journey, `E2E-*`-style scenarios) via `/qa-test-cases-generator` methodology. Derive them from the `1d` AC conditions (story + gap-ACs), the `E2E-*` scenarios, `BL-*` invariants, `ECL-*` patterns, and domain checklists. Write to `reports/tickets/{SPRINT}/VCST-XXXX/test-cases.csv` — category 2 (Test cases), the one file this step persists.
 - **Bug fix / enhancement with existing coverage** → **map to existing** suite cases (start from the `E2E-*` → suite mappings from Step 2); author **only the gaps** (conditions/risk areas no existing case covers) as new cases in the same `test-cases.csv`.
+- **Write the CSV with the deterministic appender, not by hand** —
+  `npx tsx scripts/test-cases/append-test-cases-to-suite.ts <test-cases.csv> --rows <new-rows.csv> --dry-run`
+  (drop `--dry-run` on a clean pass). It enforces the 15-column schema, ID format + uniqueness, the
+  `Priority`/`Automation_Status` enums, and the boundary newline a hand-rolled append silently corrupts
+  (`feedback_csv_append_newline_corruption`). Same writer `/qa-test-lifecycle` 6P uses later, so a promoted
+  case is a straight re-append rather than a reformat.
 - **This CSV is run-scoped, not durable coverage.** Nothing in the manifest-driven runner reads
   `reports/tickets/**` — a case that stays there never executes again after this run. Promoting cases
   worth keeping into `regression/suites/<layer>/<module>/` + a `config/test-suites.json` entry is
-  **`/qa-test-lifecycle`'s** job, not this command's. When Step 3 authors new cases, say so and name the
-  promotion follow-up in 6i; record the count in `summary.json` so it isn't silently lost.
+  **`/qa-test-lifecycle` Phase 6P's** job, not this command's. When Step 3 authors new cases, say so and
+  name the promotion follow-up in 6j; record the count in `summary.json` so it isn't silently lost.
+- **Author them `Automation_Status = Draft` — that is required, not a placeholder.** `Draft → Reviewed`
+  needs every assertion grounded with no `{HYPOTHESIS}` **and** a `--verify` pass emitting `{OBSERVED}`,
+  which needs a live browser only Step 4 can supply. Authoring `Reviewed` here would bypass the promotion
+  gate; a deliberate `{HYPOTHESIS}` (a genuinely unknown expected value, phrased as a question) is legal
+  **only** at `Draft`. 6i harvests Step 4's evidence to lift them.
 
 **Artifact B — Testing checklist (always).** A lightweight checklist scoped to the ticket/PR:
 - Map **each atomic condition** from the `1d` AC table (story ACs + gap-ACs) to a case (new or existing).
@@ -216,11 +281,21 @@ The specialist produces **three hand-off artifacts**, then reviews/auto-fixes th
 
 **Artifact C — Regression suite selection (a `/qa-regression` scope, not agent homework).** Determine **which existing regression suites** should run alongside the ticket cases, so the touched surface is checked for regressions. Derive from: the `E2E-*` → suite mappings (Step 2), the Test Model's affected domains + `1c` affected modules/flows, and the `config/test-suites.json` selection groups. Output the concrete suite ID list (e.g. `028,029,030` or a named group like `cart`) with a one-line rationale per suite; scope it to the change — never the full 119-suite set. **Artifact C is a selection, not an execution instruction:** Step 4 runs it as its own `/qa-regression <ids>` run (which owns suite→agent assignment, the 3-lane browser pool, retries, and the run report). Never fold suite IDs into a ticket agent's prompt — a ticket agent running 3 full suites inline violates one-agent-per-suite, the batch-of-3 pool, and the long-runner reliability cap (`feedback_long_runner_sessions_unreliable`).
 
-**Review & auto-fix the authored cases.** Any case **newly authored** in Artifact A is run through `/qa-review-tests file <path> --fix` (11-dimension quality gate — structure, determinism, data validity, BL/ECL coverage, assertion grounding, …) and the confirmed fixes auto-applied to `test-cases.csv` **before** the cases go to execution. Cases only *mapped* to existing suites are already reviewed — skip. A case that can't pass review (ungrounded assertion, unresolvable data) is flagged, not shipped to Step 4.
+**Review & auto-fix the authored cases.** Any case **newly authored** in Artifact A is run through `/qa-review-tests file <path> --fix` — the skill owns the dimension set, codes and severities; don't restate them. Start with the deterministic core (`npm run suites:review -- <csv>`, plus `npm run graphql:lint-labels -- <csv>` for GraphQL cases) and spend LLM effort only on the judgment rules it can't decide. Confirmed fixes are auto-applied to `test-cases.csv` **before** the cases go to execution, under `/qa-test-lifecycle` §Phase 4b's write-scope ceiling and its **revert-on-regression** rule: after fixing, re-run `suites:review -- <csv> --fail-on=High` + `npm run td:validate`, and **an auto-fix that introduces a new Blocker/Critical is reverted, not shipped**. Cases only *mapped* to existing suites are already reviewed — skip. A case that can't pass review (ungrounded assertion, unresolvable data) is flagged, not shipped to Step 4.
 
 **Provision test data (only if the cases need it).** If Artifact A's cases assert against entities not already covered by an existing `@td()` fixture, delegate to **`test-data-engineer`**: design the cross-entity combinations via `/qa-generate-data <feature>` (authors the gap fixtures + `@td()` aliases + any seed script), then **seed them** via `/qa-seed-data <domain>` against the test env, ending on a green `td:validate` gate. Reuse existing fixtures wherever they cover a case — author/seed only the gaps. When every case resolves against existing `@td()`/`{{VAR}}` data, **skip** with a one-line note. This must complete (data confirmed seeded) before hand-off, so execution isn't blocked on missing data.
 
 **Output / hand-off:** keep the checklist (B) and regression suite selection (C) in your working context; the reviewed test cases (A) persist to `test-cases.csv`; the seeded test data lives in the env + `aliases.<env>.json`. Pass the cases, checklist, and `@td()` aliases into the Step 4 agent prompts, and the suite list into the Step 4 `/qa-regression` run. Per `.claude/rules/reports.md` §1, B and C are terminal-only (no `testing-checklist.md` file). This step must complete before Step 4.
+
+**Gate (Artifacts reviewed + data seeded):** new cases pass the 11-dimension `/qa-review-tests` (0 blocker /
+0 critical); **every atomic condition + risk area maps to a case or checklist item**; required data seeded
+to a **green `td:validate`**. **Independent verification (the load-bearing check — author cannot certify
+its own coverage):** a fresh `qa-lead` verifier **re-runs `npm run suites:review`** on `test-cases.csv`
+itself and **re-runs `npm run td:validate`** (not the author's word), then re-reads the Test Model and
+confirms each atomic condition has a covering case. REJECT on any blocker/critical or any uncovered
+condition/risk area → return REASONS + FIX (name the case ID / missing condition) → `test-management-specialist`
+(+ `test-data-engineer` for data) fixes → re-verify. This gate is a **hard STOP** — do not dispatch Step 4
+until it APPROVEs.
 
 ---
 
@@ -317,6 +392,15 @@ per .claude/rules/reports.md §1 do NOT write a test-execution-report.md file; t
 your results into the single Step 6 report.
 ```
 
+**Gate (Execution evidenced):** every atomic condition carries **PASS or FAIL evidence** (screenshots for
+critical flows, console/network/trace for failures); the `/qa-regression` track produced a **RUN_ID + pass
+rate**. **Independent verification:** a fresh `qa-lead` verifier **re-opens the evidence** (screenshots /
+traces / the regression `summary.json`) and rejects any "PASS" with **no artifact** ("all passed" without
+evidence is not a pass); it **re-runs one critical/revenue case** by delegating to a specialist on a
+**different browser lane** than the doer used, and confirms the RUN_ID's pass rate against
+`compute-metrics.ts`. REJECT on any unevidenced PASS or an uncovered condition → REASONS + FIX → the
+execution agent re-captures / re-runs → re-verify.
+
 ---
 
 ### Step 5 — Explore (SBTM)
@@ -354,6 +438,12 @@ After all execution agents return, run a **targeted exploratory session** using 
    ```
 
 3. **If `qa-testing-expert` was already dispatched** in Step 4 for cross-browser verification, include the exploratory charter as an additional task in the same agent prompt instead of dispatching twice. **Know the trade-off you are making:** folding it in means exploration runs *concurrently with* execution, so the charter cannot be steered by what execution surfaced — the charter is then seeded from the Test Model risk areas alone. That is the accepted cost of not burning a second browser slot (this case is the norm for P0/P1, where `qa-testing-expert` is already dispatched). When execution surfaces something the charter should have chased, note it as a follow-up charter rather than re-dispatching mid-run — **unless** the finding is a P0/P1 in a critical revenue flow, which warrants a second targeted session once a browser slot frees up.
+
+**Gate (Risk areas explored):** the SBTM charter ran and **each Test-Model risk area was probed**; findings
+classified (Bug / Question / Observation / Risk). **Independent verification:** a fresh `qa-lead` verifier
+confirms the charter actually **touched every mandated risk area** (`ba-system-analyzer` `VC-*` pain points),
+not just the happy path; REJECT if a mandated risk area was skipped → the exploratory agent runs the missed
+area → re-verify. Mandatory for P0/P1; on a P2/P3 with exploratory skipped, note the skip (no verifier pass).
 
 ---
 
@@ -420,6 +510,14 @@ Output of 6d: every finding carrying `class` + `provenance` + `severity` + `dupl
 | **PASS WITH NOTES** | All conditions met & reconciled, only minor P2/P3 or **OUT-OF-SCOPE incidental** bugs tracked as their own tickets, exploratory observations logged, only NEEDS_REVIEW/NOISE/KNOWN_ISSUE in the log window |
 | **FAIL** | Any AC condition not met, any AC confirmed DRIFT/CONTRADICTS live (6b), any `BL-*` rule violated, an **IN-SCOPE P0/P1 bug** (6d), or a HIGH-confidence `REAL_BUG` correlated to the test window (6a). *A PRE-EXISTING or OUT-OF-SCOPE incidental bug does not fail this ticket — it's filed/linked separately (the exception: an out-of-scope **P0 revenue-flow break**, surfaced for a human call).* |
 | **BLOCKED** | Environment down, missing test data, unresolved dependency |
+
+**Gate (Triage + verdict sound):** every finding classified + **provenance** (pre-existing / in-scope /
+out-of-scope) + severity + deduped (6d); the verdict follows the table from the reconciled evidence.
+**Independent verification (before 6f files anything):** a fresh `qa-lead` verifier **re-classifies a sample
+of the findings** — confirming each **IN-SCOPE** call via a live repro delegated to a specialist on a
+**different browser lane**, and confirming the dedup — then ratifies the verdict. REJECT if a real bug was
+mislabeled a test-defect, an in-scope P0/P1 was under-graded, or the verdict doesn't follow from the
+evidence → REASONS + FIX → re-triage → re-verify. Only an APPROVEd triage proceeds to 6f (filing).
 
 **6f. File bugs & transition the tracker (with confirmation):**
 
@@ -489,6 +587,11 @@ Write `reports/tickets/{SPRINT}/VCST-XXXX/summary.json`:
   "failed": 0,
   "blocked": 0,
   "new_cases_authored": 0,
+  "promotion": {
+    "eligible": [],
+    "blocked": [{ "case": "TC-ID", "reason": "unresolved {HYPOTHESIS} — <what stayed unknown>" }],
+    "verify_pass_run": false
+  },
   "regression": {
     "suites": [],
     "run_id": null,
@@ -527,7 +630,62 @@ clean, smoke PASS); a FAIL/BLOCKED is an automatic **NO-GO**. State which it is 
 GO, the blocking criteria. If the Artifact-C regression run was deferred or skipped, say so — the gate
 cannot be evaluated on a null pass rate.
 
-**6i. Close the loop — next steps.** `/qa-test` verifies and reports; it never fixes. Name the close-out
+**Gate (Feature Release Gate ratified) — the final independent gate:** the §1a criteria yield GO /
+CONDITIONAL GO / NO-GO. **Independent verification:** a fresh `qa-lead` verifier **re-evaluates §1a from the
+raw inputs** — the 6e verdict, the `reports/bugs/` open-P0/P1 ledger, the regression pass rate via
+`npx tsx scripts/regression/compute-metrics.ts --gate feature --p0-bugs N --p1-bugs N`, and the smoke
+result — and ratifies or **downgrades** the recommendation. REJECT (downgrade) if any §1a criterion isn't
+actually met by the raw inputs → the recommendation is corrected before it reaches the user. This is a
+**recommendation only** — a human still decides release; `/qa-test` never ships.
+
+**6i. Harvest promotion evidence (only when Step 3 authored new cases).**
+
+Step 3 authored the ticket cases as `Automation_Status = Draft`, and that is **mandatory, not provisional**.
+Promotion to `Reviewed` requires every assertion grounded with **no `{HYPOTHESIS}`** plus a **`--verify` pass
+that upgrades assertions to `{OBSERVED}`** (`.claude/agents/qa-lead-orchestrator.md` §Promotion criteria),
+and `--verify` is the **only** step permitted to emit `{OBSERVED}`
+(`.claude/skills/qa-review-tests/review-criteria.md` Dimension 10). `--verify` needs a live browser — which
+**only Step 4 supplies**. So the ordering is forced in both directions: a run that promotes *before*
+executing breaks the promotion gate, and a run that executes *without harvesting* throws its own evidence
+away — `/qa-test-lifecycle` then finds the cases still `{HYPOTHESIS}`-tagged and correctly refuses them,
+silently converting new coverage into a one-shot.
+
+**Step 4's execution IS the `--verify` evidence. Harvest it before handing off:**
+
+1. Run `/qa-review-tests file reports/tickets/{SPRINT}/VCST-XXXX/test-cases.csv --verify --fix` so every
+   assertion this run observed live is rewritten `{HYPOTHESIS}` / unconfirmed-`{SPEC}` → `{OBSERVED}`. A
+   behavior the run **refuted** surfaces as ENV-008 — never as `{OBSERVED}`.
+2. **Resolve each remaining `{HYPOTHESIS}`** by recording the value the case was asking about (e.g. which
+   error code wins when two blocking predicates apply). One that stayed genuinely unknown must be
+   **reworded as a question** and keeps its case at `Draft` — never invent a value to clear the gate.
+3. **Classify every new case**: *promotion-eligible* (0 Blocker / 0 Critical, all assertions grounded,
+   executed with evidence) vs *blocked*, each blocked one carrying its concrete reason — an unresolved
+   `{HYPOTHESIS}`, a FAIL whose expected value is still in doubt, or a condition that never ran.
+4. Record the result in `summary.json` `promotion` (6g). This is a **hand-off record, not a substitute for
+   the promoter's own gate** — `/qa-test-lifecycle` **Phase 6P** re-derives eligibility from the CSV itself
+   (G10: zero GRD-001 Blocker/High, 0 ENV-008, green `td:validate`, then human approval) and will demote an
+   "eligible" case that fails re-derivation. It must keep doing so: a promoter that trusted this block would
+   let the author certify its own gate. The block exists so the follow-up starts from a known state and so a
+   skipped promotion is visible later, never so the gate can be short-circuited.
+
+**`/qa-test` never promotes.** Only `qa-lead-orchestrator` or the user may promote `Draft → Reviewed`, and
+`test-management-specialist` never self-promotes (§Promotion scope). This sub-step *prepares* promotion;
+**`/qa-test-lifecycle` Phase 6P** performs it (pointed to in 6j). A Dimension-11 CONFIRMED does not promote
+`Automation_Status` either — it supplies evidence only.
+
+**Gate (Promotion evidence grounded):** every `{OBSERVED}` upgrade traces to a real artifact from this
+run's execution; every surviving `{HYPOTHESIS}` is either resolved with the observed value or reworded as a
+question; the eligible/blocked split matches the review output. **Independent verification — this one is
+not optional, because an `{OBSERVED}` tag is a claim that a behavior was seen live, and a doer upgrading
+its own tags is exactly the hallucination Dimension 10 exists to catch:** a fresh `qa-lead` verifier
+**re-runs `npm run suites:review`** on the CSV and, for a sample of the upgraded assertions, **re-opens the
+Step-4 evidence** (screenshot / trace / recorded response) that supposedly grounds each one. REJECT any
+`{OBSERVED}` with no traceable artifact, any `{HYPOTHESIS}` cleared by an invented value, and any case
+marked eligible while still carrying a Blocker/Critical → REASONS + FIX → the doer re-harvests →
+re-verify. An ungrounded `{OBSERVED}` is worse than a `Draft` case: it promotes a fabricated expectation
+into permanent regression coverage, where it will fail confusingly for years.
+
+**6j. Close the loop — next steps.** `/qa-test` verifies and reports; it never fixes. Name the close-out
 paths so nothing stalls:
 
 - **PASS / PASS WITH NOTES** → ticket at TESTED; hand to the **Feature Release Gate** (6h) for the team
@@ -541,9 +699,21 @@ paths so nothing stalls:
   top; no partial credit.
 - **New cases authored (`new_cases_authored` > 0)** → the cases live in the run-scoped
   `reports/tickets/{SPRINT}/VCST-XXXX/test-cases.csv` and **no runner will ever pick them up there**.
-  State the promotion follow-up: **`/qa-test-lifecycle VCST-XXXX`** to fold the keepers into
-  `regression/suites/` + a `config/test-suites.json` entry. Skipping it silently converts new coverage
-  into a one-shot.
+  6i has already harvested this run's live evidence and split them into promotion-eligible vs blocked, so
+  state the follow-up concretely:
+
+  ```bash
+  /qa-test-lifecycle VCST-XXXX --promote-only
+  ```
+
+  That is **`/qa-test-lifecycle` Phase 6P** (`.claude/commands/qa-test-lifecycle.md` §6P) — it globs
+  `reports/tickets/*/VCST-XXXX/test-cases.csv` across all sprints, re-derives eligibility, and on approval
+  appends the eligible cases into `regression/suites/<layer>/<module>/` via `suites:append` + `suites:sync`,
+  flipping them `Draft → Reviewed`; each blocked case stays `Draft` in the ticket folder with its 6i reason.
+  Drop `--promote-only` if the suites also need a sync/gap pass. Name the counts and the blocked reasons in
+  the report. **6P re-derives eligibility from the CSV and still requires human approval** — 6i pre-approves
+  nothing (a hand-off record the promoter trusted would be the author certifying its own gate); it only
+  means the follow-up isn't starting from zero. Skipping it converts new coverage into a one-shot.
 
 These are pointers, not auto-triggers — `/qa-test` stops here and states the next commands; a human (or a
 separate run) owns each follow-up.
@@ -552,6 +722,19 @@ separate run) owns each follow-up.
 
 ## Rules
 
+- **Every step is `DOER → GATE → INDEPENDENT VERIFIER`** (see §Quality-gate model). The verifier is a
+  **fresh `qa-lead-orchestrator` instance in verifier mode** (`.claude/agents/qa-lead-orchestrator.md`
+  §Verifier Mode) — **never** the inline orchestrator running this pipeline and **never the step's own
+  doer**. It re-derives evidence from source (re-runs `suites:review`/`td:validate`/`compute-metrics`,
+  re-reads the artifact, re-opens the evidence, or delegates a live re-check to a specialist on a
+  **different browser lane**), never APPROVEs on the doer's summary, and biases **when-in-doubt-REJECT**.
+- **The verifier REJECT loop: reject → REASONS + FIX → wait for the doer's fix → re-verify from scratch.**
+  `≤2` iterations; a persistent REJECT is a **STOP for a human**, never a silent proceed. The FIX and the
+  re-verify go to the **step's doer**, not the verifier. Step 3's and Step 6d's gates are hard STOPs
+  (don't dispatch Step 4 / don't file at 6f until APPROVE). Skip a verifier pass only for a trivial P2/P3
+  step (note the skip); P0/P1 and revenue-flow steps are always verified.
+- Dispatching a scoped verifier is **not** delegating the orchestration — you keep running `/qa-test`
+  inline; the verifier only rules on one gate and returns `APPROVE|REJECT`.
 - Follow `.claude/skills/qa-evidence/output-paths.md` for artifact output paths and naming conventions
 - Follow `.claude/templates/agent-dispatch.md` for dispatch conventions, browser fallback, error handling, and JIRA transitions
 - **Reference every in-repo file by its real path from the repo root** — `.claude/skills/…`, `.claude/knowledge/…`, `.claude/rules/…`, `.claude/agents/…`, `ci/…`. The bare `skills/…` / `knowledge/…` form is a leftover from when this surface was a plugin and does not resolve today; it is especially harmful inside a sub-agent prompt, where the agent simply fails to read the policy it was told to follow
@@ -565,9 +748,11 @@ separate run) owns each follow-up.
 - Steps 2–3 reuse the `/qa-plan` scenario catalog (`.claude/skills/qa-plan/e2e-scenario-catalog.md`) for `E2E-*` scenario coverage + regression-suite traceability, but produce a scoped in-context testing checklist — **not** a full `/qa-plan` test plan / RTM / TestRail CSV. Full case authoring + peer-review promotion belongs to a standalone `/qa-plan` run, not `/qa-test`
 - `test-management-specialist` (Step 3) produces **three hand-off artifacts** — (A) test cases/scenarios (author new for a New feature/Story; map-to-existing + gap-author for a bug/enhancement), (B) a scoped testing checklist, (C) a change-scoped regression **selection** — then **reviews & auto-fixes** any newly authored cases via `/qa-review-tests --fix`, and (only if the cases need data not already in an `@td()` fixture) delegates to `test-data-engineer` to **design + seed** it via `/qa-generate-data` → `/qa-seed-data` (green `td:validate` gate). All of this must complete — cases reviewed, data confirmed seeded — before Step 4
 - **Artifact C runs as its own `/qa-regression <ids>` run, never inside a ticket agent's prompt.** `/qa-regression` owns suite→agent assignment, the 3-lane browser pool, retries/fallback, and the run report; folding suites into a ticket agent breaks one-agent-per-suite, the batch-of-3 pool, and the long-runner reliability cap. Both tracks share the max-3-browser cap — if ticket agents + regression lanes exceed 3, run the ticket cases first (they own the verdict) and regression after. Capture the `RUN_ID` + pass rate: it is the 6h gate's input and a `summary.json` field
-- **New cases authored in Step 3 are run-scoped, not durable coverage.** Nothing reads `reports/tickets/**`; promotion into `regression/suites/` + `config/test-suites.json` belongs to `/qa-test-lifecycle` and is stated as a 6i follow-up, with the count recorded in `summary.json`
+- **Step 3 runs the same mechanism as `/qa-test-lifecycle` Phases 3–4, and the skills own it.** `/qa-test-cases-generator` + `test-case-template.md` own the authoring contract + the `Automation_Status` enum; `/qa-review-tests` owns the dimensions/codes/severities/auto-fix matrix (and `triangulation-criteria.md` the behavior-rewrite evidence bar); `/qa-generate-data` → `/qa-seed-data` own data prep; `/qa-test-lifecycle` §Phase 4b owns the write-scope ceiling + revert-on-regression rule. **Never restate a dimension, code, severity, column or enum value here** — reference it. Only two things differ between the two commands: where the rows land (run-scoped ticket CSV vs `regression/suites/`) and who may promote (6P only)
+- **New cases authored in Step 3 are run-scoped, not durable coverage.** Nothing reads `reports/tickets/**`; promotion into `regression/suites/` + `config/test-suites.json` is **`/qa-test-lifecycle` Phase 6P**, prepared by 6i and stated as a 6j follow-up (`/qa-test-lifecycle VCST-XXXX --promote-only`), with the counts recorded in `summary.json`. Both the run-scoped CSV (Step 3) and the promoted rows (6P) are written by the same deterministic appender, `scripts/test-cases/append-test-cases-to-suite.ts` — never a hand-rolled append
+- **Promotion is execute-then-promote, and the order is forced by the gate itself.** Cases are authored `Draft` (Step 3) → executed as `Draft` (Step 4) → **6i harvests that execution as the `--verify` evidence** that upgrades assertions to `{OBSERVED}` and resolves each `{HYPOTHESIS}` → `/qa-test-lifecycle` **Phase 6P** promotes only the eligible ones, re-deriving that eligibility itself. `--verify` is the sole emitter of `{OBSERVED}` and needs a browser, so promoting before execution is impossible and executing without harvesting silently strands the coverage. **`/qa-test` prepares promotion but never promotes** — only `qa-lead-orchestrator` or the user may, and `test-management-specialist` never self-promotes. The `Automation_Status = Draft` escalation trigger targets a `/qa-regression` run consuming promoted suite cases, **not** a ticket-scoped run whose cases were reviewed in the same turn
 - Step 6 order is load-bearing: **6d triage runs before 6e verdict**, because PASS/FAIL are expressed in terms of a finding's provenance (PRE-EXISTING → link, don't re-file · IN-SCOPE → fails this ticket · OUT-OF-SCOPE incidental → own ticket, doesn't fail this one), which only exists after triage. 6d classifies + assigns provenance/severity + dedups and files **nothing**; 6f files (with confirmation) and transitions. A test-defect routes to `/qa-review-tests --fix`, not a ticket. Only an **in-scope** P0/P1 (or an out-of-scope P0 revenue break) fails the verdict
-- `/qa-test` closes the loop by **pointer, not auto-trigger** (6i): FAIL/REOPEN → `/qa-fix VCST-XXXX` → human merge/deploy → `/qa-verify-fix VCST-XXXX` (RED→GREEN re-test); BLOCKED → resolve blocker → re-run `/qa-test`; new cases → `/qa-test-lifecycle` to promote them. It states the next command and stops — it never fixes or auto-invokes `/qa-fix`
+- `/qa-test` closes the loop by **pointer, not auto-trigger** (6j): FAIL/REOPEN → `/qa-fix VCST-XXXX` → human merge/deploy → `/qa-verify-fix VCST-XXXX` (RED→GREEN re-test); BLOCKED → resolve blocker → re-run `/qa-test`; new cases → `/qa-test-lifecycle` to promote the 6i-eligible ones. It states the next command and stops — it never fixes or auto-invokes `/qa-fix`
 - Ticket status tracks the run: Step 4 moves it into the in-testing status (status-only, **no confirmation** — it is the direct consequence of invoking `/qa-test`, changes no content, and is a hard Jira precondition for closing), 6f closes it to TESTED / REOPEN (**with confirmation** — it asserts an outcome). **Step 4's hop is JIRA-only** (`tracker.kind = jira`); Azure Boards sets `System.State` directly via `stateMap`, so it has no such precondition and Step 4 is skipped. Discover Jira transitions live; the transition name need not match the target status (VC-internal VCST: `On QA` → `Testing`)
 - Never use WebKit — not supported on Windows
 - Never assign two agents to the same browser server simultaneously
