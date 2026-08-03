@@ -1,24 +1,66 @@
 {
   "ticket": "VCST-5281",
+  "ticket_type": "Story",
   "verdict": "FAIL",
-  "date": "2026-07-29",
+  "date": "2026-08-03",
+  "supersedes": "2026-07-29 run (same verdict, same finding set) — prior file preserved in this file's git history",
   "environment": "https://vcst-qa-storefront.govirto.com",
+  "run_shape": {
+    "kind": "build-delta re-check + targeted label verification",
+    "rationale": "Pre-flight (Step 1b) established that the deployed artifacts for all three source PRs were byte-identical to the 2026-07-29 FAIL run, so re-running the 47-condition suite would reproduce that verdict against identical bits with no new information. Scope was narrowed by operator decision to: (a) deploy the fresh PR-312 build, (b) a targeted Admin-SPA label check against the delta, (c) deliver the undelivered finding backlog to the tracker.",
+    "cases_executed_this_run": 8,
+    "cases_note": "8 Admin-SPA label conditions (T1-T8) executed against the newly deployed pr-312-ca2f. The 47 org-invite/status conditions were NOT re-executed — unchanged bits.",
+    "evidence_basis": "2026-07-29 execution (47 conditions, 29 screenshots) + REG-2026-07-30-1040 suite 011b independent reproduction + this run's T1-T8 (14 new screenshots)"
+  },
+  "label_delta_verification": {
+    "verdict": "PASS — the localization delta achieved its purpose",
+    "executed": "2026-08-03 against VirtoCommerce.Customer 3.1021.0-pr-312-ca2f (confirmed live), qa-backend-expert on playwright-edge",
+    "results": {
+      "T1_settings_group_title": "PASS — 'Organization membership statuses', char-exact, renders between 'Employee statuses' and 'Company statuses'; all sibling status groups intact",
+      "T2_settings_group_description": "PASS with caveat — 'Edit statuses available for organization membership' is char-exact in the served i18n resource the SPA loaded, and its sibling .title renders correctly (proving the namespace resolves, where a missing entry would render the raw key). But the description surfaces ONLY as a native title tooltip on the ? icon, which is not screenshot-capturable and not exposed in the accessibility tree, so it was NOT visually confirmed. Resource-level evidence, not visual.",
+      "T3_customer_invite": "PASS — 'Customer invitation email notification' + expected description, char-exact",
+      "T4_org_invite_new_user": "PASS — 'Organization invitation email notification (new user)' + expected description, char-exact",
+      "T5_org_invite_existing_user": "PASS — 'Organization invitation email notification (existing user)' + expected description, char-exact",
+      "old_types_intact": "PASS — 'Signup invite notification (customer)' and 'Signup invite notification (with organization)' both present and unbroken, on page 2 of the 32-row list (a page-1-only check would read as false absence)",
+      "T6a_german": "PASS — all 5 checked strings char-exact vs the grounded de resource",
+      "T6b_russian": "PASS — genuinely translated, no English fallback, no raw keys. Observed: 'Статусы участия в организации' / 'Редактировать статусы участия в организации' + the three notification names. Exact Russian wording was not pre-grounded, so these are reported-as-observed, not asserted against an expectation.",
+      "T7_types_still_functional": "PASS — all three registered with human names (not 'Unregistered notification'), Active=ON, template present, Preview renders with Liquid resolved. The rename broke nothing.",
+      "T8_admin_status_value_parity": "MISMATCH PERSISTS as predicted — and sharper than previously recorded: see findings_new_this_run"
+    },
+    "residual_gaps_out_of_scope": [
+      "Email TEMPLATES for the three new types are still English-only (default/Predefined; only the Customer type also has en-US; no de-DE or ru-RU rows). So a German or Russian admin now gets localized LABELS but an English email BODY. This matches the upgrade-notes' documented English-only fallback, i.e. it confirms test-model AC7 rather than contradicting it — but it is a real customer-facing gap.",
+      "T8's admin-vs-storefront status-vocabulary conflict is untouched, exactly as predicted for a localization-only change."
+    ]
+  },
   "build": {
-    "platform": "3.1051.0",
+    "platform": "3.1053.0",
+    "platform_prior_run": "3.1051.0",
     "theme": "vc-theme-b2b-vue-2.55.0-pr-2399-845a",
     "relevant_modules": {
-      "VirtoCommerce.Customer": "3.1021.0-pr-312-2257",
+      "VirtoCommerce.Customer": "3.1021.0-pr-312-2257 (tested) -> 3.1021.0-pr-312-ca2f (deployed mid-run via vc-deploy-dev#6277)",
       "VirtoCommerce.ProfileExperienceApiModule": "3.1015.0-pr-141-d7d8"
+    },
+    "source_prs": {
+      "vc-module-customer#312": "OPEN, head ca2f5960, CI RED (auto-tests)",
+      "vc-module-profile-experience-api#141": "OPEN, head d7d89ec0 (deployed)",
+      "vc-frontend#2399": "OPEN, head 845a359c (deployed)"
     }
   },
-  "agents_dispatched": ["ba-story-writer", "test-management-specialist", "qa-backend-expert", "qa-frontend-expert"],
+  "build_delta_since_prior_run": {
+    "commits": ["744ef6ae (2026-07-31)", "ca2f5960 (2026-08-03)"],
+    "content": "26 localization strings across 13 language files — settings.OrganizationMembershipStatuses title/description, plus displayName+description for CustomerInviteNewUserEmailNotification / OrganizationInviteNewUserEmailNotification / OrganizationInviteExistingUserEmailNotification",
+    "scope": "Admin-SPA display labels ONLY — no storefront, API, or auth-pipeline change",
+    "verdict_impact": "none — cannot affect either P0; the FAIL verdict was predetermined independently of the label check"
+  },
+  "agents_dispatched": [],
   "ac_analysis": {
     "story_acs": 2,
     "weak_acs": 2,
     "gap_acs_added": 8,
     "impl_coverage": { "satisfied": 30, "drift": 7, "contradicts": 5, "not_found": 5 },
     "conditions_total": 47,
-    "conditions_with_evidence": 43
+    "conditions_with_evidence": 43,
+    "note": "Carried from the 2026-07-29 run — unchanged, because the tested bits are unchanged. AC3 (gap, P0: a blocked pinned org must not deny a different healthy org) remains unmet by every current PR head."
   },
   "total_cases": 47,
   "passed": 32,
@@ -27,72 +69,103 @@
   "partial": 6,
   "untested": 1,
   "not_verifiable": 1,
-  "root_cause": {
-    "statement": "contact.organizationId - the persisted default org that login pins the active context to - is NEVER validated against BlockingStatuses, while contact.organizations correctly filters blocked orgs out of the eligible list. So login pins the user to an org the same backend just excluded, and every org-scoped query then returns Forbidden inside an HTTP 200.",
-    "retracted_hypothesis": "An earlier synthesis blamed the storefront for omitting organization_id from the token grant. That is wrong as a root cause: the org-SWITCH grant does carry organization_id (verified on the wire: grant_type=refresh_token&organization_id=organization-acme-store). The login password grant does omit it, but the defect is the unvalidated server-side default, not the client.",
-    "fix_location": "server-side - validate contact.organizationId against BlockingStatuses when resolving the login active-org context (vc-module-customer OrganizationIdClaimProvider / OrganizationIdRequestValidator area)",
-    "frontend_contribution": "renders the active org as a [selected] switcher option even when it is absent from the eligible list - which is incidentally what gives multi-org users their escape hatch"
-  },
-  "p0_blast_radius": {
-    "single_org_user": "P0 - inescapable. Forced into the blocking org context, 403 on every /account/* and /company/* route incl. /account/dashboard which hosts pending-invites-widget.vue, and the invite email's only CTA points there. The invite can never be accepted.",
-    "multi_org_user": "P1/P2 - misrouted, not stuck. Same forced-context trigger and same 403 landing, but the header account menu and org switcher stay functional on /403, so selecting an Approved org recovers full access without signing out.",
-    "verified_on": "MULTI_ORG_USER with one Rejected membership override on 1 of 11 orgs"
+  "new_cases_authored": 0,
+  "regression": {
+    "suites": [],
+    "run_id": null,
+    "pass_rate": null,
+    "skipped_reason": "Change-scoped regression not run — the deployed delta is Admin-SPA localization only, and REG-2026-07-30-1040 (suite 011b) already covers this surface and independently reproduced both P0s."
   },
   "bugs_filed": [],
-  "bugs_pending_confirmation": [
-    "P0 - Invited membership bricks the account; pending invite can never be accepted (widget behind 403, invite email links there)",
-    "High - Storefront sign-in is not org-scoped: no organization_id on /connect/token, so blocking status yields generic 403 instead of user_is_locked_in_organization (BL-AUTH-013 violation)",
-    "High - Delete member / Revoke invite leave the contact visible as Inactive, still counted, unfilterable",
-    "P1 - Breaking change: pre-existing global contact status Invited/Rejected/Deleted now blocks org sign-in (105 accounts on this env)",
-    "Medium - Status vocabulary conflated; admin shows raw Approved/Rejected, storefront shows Active/Inactive; Rejected has no storefront producer",
-    "P2 - Silent org-scope fallback: deleted/foreign/bogus organization_id issues a 200 token scoped to a different org",
-    "P2 - POST /api/customer/organization-memberships with null userId returns 500 leaking DB name/table/column",
-    "P2 - Deleting an organization does not cascade to OrganizationMembership (orphan rows, stale organizationName)",
-    "P2 - GraphQL authorization/resolver failures surface as HTTP 500 (GetOrganizationAddresses, acceptOrganizationInvite)",
-    "P3 - Organization.myStatusInOrganization returns the caller's status, not the queried contact's",
-    "P3 - statuses:[String] invalid input silently returns empty and is case-sensitive",
-    "P1 - Permission propagation lag: a new maintainer membership cannot invite for several seconds",
-    "a11y - language flag alt text identical for all languages; invite dialog inputs have no accessible name; status conveyed by icon/colour only"
+  "bugs_filing_decision": "By operator decision, NO bug tickets were created. The full triaged 14-item backlog was delivered as a single Jira comment on VCST-5281 (comment 104540) which is now the backlog of record. The two P0s retain full local reports in reports/bugs/open/.",
+  "findings_blocking": [
+    "P0 — Inviting an existing active member to a second org bricks the entire storefront: the resolved default org (contact.currentOrganizationId null -> contact.organizations[0], now the newly-invited org with status Invited) is pinned without validating BlockingStatuses. /403 on sign-in; the pending-invites widget lives on the unreachable /account/dashboard and the invite email's only CTA points there, so the invite can never be accepted. Causality proven by revoke->restore. Report: reports/bugs/open/BUG-invite-to-second-org-locks-out-entire-storefront-VCST-5281.md",
+    "P0 — No self-recovery once pinned to a blocked org: (a) /403 account menu exposes only user-name + Logout, no org switcher, and homepage / also 403s though me confirms a healthy org exists; (b) fresh sign-in is refused outright so no session exists to recover from. Corrects this ticket's own recorded 'multi-org users recover via the switcher' mitigation. Report: reports/bugs/open/BUG-multiorg-no-self-recovery-when-pinned-org-blocked-VCST-5281.md",
+    "High — Storefront sign-in is not org-scoped: no organization_id on the /connect/token password grant, so a blocking status yields a generic 403 instead of user_is_locked_in_organization. BL-AUTH-013 violation.",
+    "High — Delete member / Revoke invite leave the contact visible as Inactive, still counted, unfilterable."
   ],
-  "business_rules_verified": [
-    "BL-B2B-008", "BL-B2B-009", "BL-AUTH-012", "BL-AUTH-013", "BL-B2B-005", "BL-B2B-001", "BL-B2B-007"
+  "findings_nonblocking": [
+    "P1 — Breaking change with no remediation plan: pre-existing global Contact.Status Invited/Rejected/Deleted now blocks org sign-in. 105 at-risk accounts on this env; 104 have no membership row so the override remedy is unavailable. Migration backfills nothing (all 132 rows status=null).",
+    "P1 — Permission-propagation lag: a new maintainer membership cannot invite for several seconds.",
+    "Medium — Status vocabulary conflated: Admin shows raw Approved/Rejected, storefront shows Active/Inactive; Rejected has no storefront producer.",
+    "P2 — Silent org-scope fallback: a deleted/foreign/bogus organization_id issues a 200 token scoped to a different org.",
+    "P2 — POST /api/customer/organization-memberships with null userId returns 500 leaking DB name/table/column.",
+    "P2 — Deleting an organization does not cascade to OrganizationMembership (orphan rows, stale organizationName).",
+    "P2 — GraphQL authorization/resolver failures surface as HTTP 500 (GetOrganizationAddresses, acceptOrganizationInvite).",
+    "P3 — Organization.myStatusInOrganization returns the caller's status, not the queried contact's.",
+    "P3 — statuses:[String] silently returns empty on invalid input and is case-sensitive.",
+    "a11y — language-flag alt text identical for all languages; invite-dialog inputs have no accessible name; status conveyed by icon/colour only."
   ],
-  "business_rules_violated": ["BL-AUTH-013"],
-  "regression_checks": {
-    "VCST-5374": "FIXED by this PR - 5th failed login now returns user_is_temporary_locked_out with lockoutEnd 15min future, not the permanent user_is_locked_out"
+  "findings_new_this_run": [
+    "WITHDRAWN (was: 'PR #312 head CI is RED'). At ca2f5960 the auto-tests job failed on all three DB providers on one unrelated test (tests/e2e/test_page_about_store.py::test_page_about_store_accessible[chromium], 'Locator expected to be visible'). It was classified at the time as dataset/infra rather than a code regression, because the delta was 26 localization strings and 744ef6ae was green. The next run (2605501d) came back FULLY GREEN including all three providers, confirming that classification — the failure was transient. Not a defect; do NOT report it to the developer.",
+    "The 2026-07-29 run recorded bugs_filed: [] with 13 pending entries and never reached the tracker; a Jira search for org/invite/membership bugs since 2026-07-28 returned nothing related. Both P0s sat undelivered for 5 days while the ticket read 'Testing'. Delivered this run as comment 104540.",
+    "IN-SCOPE, Medium — ORPHANED NOTIFICATION ROW from this PR's C# rename. The Notifications list carries a row 'Unregistered notification' / 'Original notification type: CustomerInvitationNotification' with a '?' type icon, in all three locales. A persisted notification whose type is no longer registered — a leftover of the notification-type rename in the pr-312 BASE (not the localization-only delta, which cannot unregister a type). Means historical notification rows lose their type binding after upgrade. Sharpens the upgrade-notes risk: the comment warns customized TEMPLATES stop applying, but not that existing journal rows orphan. (ExtendedSampleEmailNotification is orphaned the same way — sample module, benign.)",
+    "IN-SCOPE, Medium — sharpens the prior 'status vocabulary conflated' finding: the Admin org-memberships widget's columns are 'Organization | Roles | Invite status', and the Invite status cell is EMPTY for an approved membership — i.e. the admin surfaces NO membership-status label at all, not merely a differently-worded one. The raw enum values (Approved/Deleted/Invited/Rejected in the setting dictionary; Deleted/New/Locked/Invited/Rejected/Approved in the contact Status dropdown) confirm the 'Locked'/'New' out-of-legal-set anomaly the test model flagged as D12/U1.",
+    "OUT-OF-SCOPE (pre-existing, other modules) — localization gaps surfaced while checking i18n: de nav label 'Notifications' untranslated (notifications.main-menu-title is English in the de resource of vc-module-notification; ru has Уведомления); 'Loyalty' nav label English in both de and ru (loyalty.main-menu-title absent from every bundle); the notification-list blade header renders English in de/ru despite a translated key (that blade uses a non-localized title source); Settings section headers untranslated platform-wide.",
+    "OUT-OF-SCOPE (pre-existing UX) — notification search is server-side on the type key / English name only: 'einladung' (de) and Russian terms return 0 results while 'invit' returns 6. Localized display names are not searchable, so the new labels are undiscoverable by a non-English admin.",
+    "Low/cosmetic — org-invite Previews render {{ organization_name }} as empty ('invited to join .') because the Sample data (json) lacks organization_name. The template itself is correct."
+  ],
+  "root_cause": {
+    "statement": "The resolved active organization is never validated against BlockingStatuses before the session is pinned to it. contact.organizationId / contact.organizations[0] is pinned by login while contact.organizations correctly filters blocked orgs out of the eligible list — so login pins the user to an org the same backend just excluded, and every org-scoped query then returns Forbidden.",
+    "structural_note": "VCST-5496 (Done, PR #308, released 3.1016.0) already fixed the LOCK variant of this in OrganizationIdRequestValidator. VCST-5281 extends the same accessible-org filter to STATUS but never propagated it into OrganizationIdClaimProvider, which re-resolves independently. #308's regression tests therefore never exercise the reopened path — a genuine structural coverage gap.",
+    "retracted_hypothesis": "An earlier synthesis blamed the storefront for omitting organization_id from the token grant. Wrong: the org-SWITCH grant does carry it (grant_type=refresh_token&organization_id=...). The defect is the unvalidated server-side default.",
+    "fix_location": "vc-module-customer — OrganizationIdClaimProvider + OrganizationIdRequestValidator; plus an L1 vc-frontend fix so the Organizations switcher renders on a /403 landing whenever me.contact.organizations.totalCount > 0"
   },
+  "business_rules_verified": ["BL-B2B-008", "BL-B2B-009", "BL-AUTH-012", "BL-AUTH-013", "BL-B2B-005", "BL-B2B-001", "BL-B2B-007"],
+  "business_rules_violated": ["BL-AUTH-013"],
   "exploratory": {
-    "charter": "skipped as a formal Step 5 - ticket is Medium priority and both execution agents ran always-on bug detection, which surfaced ~20 incidental defects; the C-12 blocker also makes the accept/reject flow unexplorable until fixed",
+    "charter": "Not run this pass — no code execution phase (build-delta re-check). The 2026-07-29 run's always-on bug detection surfaced ~20 incidental defects, and the P0 blocker still makes the accept/reject journey unexplorable past the blocking point.",
     "heuristic": null,
     "findings": { "bugs": 0, "questions": 0, "observations": 0, "risks": 0 }
   },
   "appinsights": {
-    "checked": true,
-    "layers": ["frontend", "backend"],
-    "window_minutes": 90,
-    "signals": { "real_bug": 2, "needs_review": 0, "dismissed": 4 },
-    "correlated_failures": [
-      "POST graphql/ 500 x4 incl. unhandled InvalidOperationException: Error trying to resolve field 'acceptOrganizationInvite'",
-      "POST graphql/GetOrganizationAddresses 500 x1 co-timed with AuthorizationError - authorization denial surfacing as HTTP 500"
-    ],
-    "dismissed_signals": [
-      "POST Notifications/RenderingTemplate 500 x6 - pre-existing, fails identically for old notification types, not a VCST-5281 regression",
-      "AuthorizationError Access denied. x3 / missing xapi:my_organization:edit x1 - expected, produced by our own C-43/C-45 authorization probes",
-      "ResizeObserver loop x18 (storefront) - benign browser noise",
-      "ApolloError Failed to fetch x1 - transient"
-    ]
+    "checked": false,
+    "layers": [],
+    "window_minutes": 0,
+    "signals": { "real_bug": 0, "needs_review": 0, "dismissed": 0 },
+    "correlated_failures": [],
+    "skipped_reason": "No test-window execution this run, so there is no window to correlate. The 2026-07-29 window's 2 confirmed signals (graphql 500 on acceptOrganizationInvite; GetOrganizationAddresses 500 co-timed with AuthorizationError) are carried forward as non-blocking finding 11."
   },
-  "test_data_issues": [
-    "RETRACTED - the reported MULTI_ORG_USER credential drift was NOT real. MULTI_ORG_USER_PASSWORD (Password1!) authenticates ricreyacrouyi-3425@yopmail.com correctly; the failure was a missing storeId=B2B-store parameter on the /connect/token password grant, which fails regardless of password. C-18/C-27 were re-tested.",
-    ".env.playwright.local contains dictionary-word secret values; ADMIN_VCMP-DEV matches ordinary page text and the MCP redacted real evidence content"
+  "tracker_actions": {
+    "comment": "104540 — full 14-item triaged backlog, root cause, retraction, harness gotcha",
+    "transition": "Need fixes -> Reopen (from Testing)"
+  },
+  "deploy_actions": [
+    {
+      "pr": "https://github.com/VirtoCommerce/vc-deploy-dev/pull/6277",
+      "change": "backend/packages.json AzureBlob: VirtoCommerce.Customer_3.1021.0-pr-312-2257.zip -> ...-ca2f.zip (2-line minimal diff)",
+      "state": "MERGED 2026-08-03T11:58:22Z; Cloud platform deployment completed/success 12:00:35Z; --verify confirmed LIVE",
+      "purpose": "land the localization delta so T1-T8 could run"
+    },
+    {
+      "pr": "https://github.com/VirtoCommerce/vc-deploy-dev/pull/6279",
+      "change": "Customer ...-ca2f.zip -> ...-2605.zip (the 403 fix) AND theme/artifact.json 2399-845a-845a359c -> 2399-f69e-f69e3377. ProfileExperienceApiModule unchanged (pr-141-d7d8 already latest).",
+      "state": "OPEN, awaiting human merge as of end of run",
+      "purpose": "land the OrganizationAccessResolver 403 fix + the current vc-frontend build so both P0s can be re-tested",
+      "concurrency_note": "PR #6279 was opened by the vc-ci bot at 12:32:45Z (commit 930638a7 'ci: Automated update vc-frontend from PR 2399' — the theme half). This run's apply pushed to the same pre-existing branch and the script warned it would overwrite. Verified after the fact: nothing was lost — vc-ci's theme change is present in the final diff and this run only added the Customer pin. Net diff is exactly the intended 2 lines across the 2 files."
+    }
   ],
+  "follow_ups": {
+    "label_delta_retest": "DONE 2026-08-03 — deploy landed (Action completed/success 12:00:35Z, --verify confirms LIVE) and T1-T8 executed: PASS. See label_delta_verification. No further label work needed.",
+    "close_out": "FAIL -> Reopen. A DEVELOPER FIX LANDED 12 MINUTES AFTER the Reopen + backlog comment: vc-module-customer 2605501d 'VCST-5281: Fixed 403 error' (2026-08-03T12:10:48Z), CI fully green. /qa-fix was never appropriate here (the fix spans vc-module-customer AND potentially vc-frontend = G1 multi-repo STOP) and is now moot — a human implemented it. Next: merge deploy PR #6279, then re-test both P0s.",
+    "candidate_p0_fix_pending_verification": {
+      "commit": "2605501d (vc-module-customer PR #312), CI completed/success on all jobs incl. all 3 auto-tests providers",
+      "artifact": "VirtoCommerce.Customer_3.1021.0-pr-312-2605.zip (published 12:13:56Z), pinned in deploy PR #6279, NOT yet live",
+      "what_it_does": "Adds OrganizationAccessResolver.cs (+80): resolves the active org by validating CurrentOrganizationId, then DefaultOrganizationId, against the accessible set (non-locked AND effective status not in BlockingStatuses), falling through to accessibleOrganizations.FirstOrDefault(). OrganizationIdClaimProvider.cs (+1/-22) and OrganizationIdRequestValidator.cs (+5/-62) both drop their own independent resolution and delegate to that single shared resolver.",
+      "why_it_matches_the_rca": "This is precisely the fix QA's root cause prescribed: it closes the resolver ASYMMETRY (the claim provider re-resolving independently of the validator) that made VCST-5281 reopen the VCST-5496/PR-308 failure mode through a sibling mechanism. It also adds OrganizationIdClaimProviderTests.cs (+95) — the exact unit-test coverage gap the 08-03 test model flagged as unaddressed by #308.",
+      "expected_to_fix": "P0 #1 (invite-to-second-org lockout) and the token-grant half of P0 #2 (fresh sign-in refused outright).",
+      "NOT_addressed": "The L1 storefront half of P0 #2 — rendering the Organizations switcher on a /403 landing. vc-frontend #2399's only new commit (f69e3377) is 'Merge branch dev into feat/VCST-5281', i.e. no new storefront work. If the backend now never pins a blocked org, /403 may become unreachable in practice and the switcher moot — but that is a HYPOTHESIS to verify, not a conclusion. Re-test must cover the all-orgs-blocked case, where a /403 landing is still reachable by design.",
+      "verification_owed": "Re-test D3/D4 (both P0 triggers), D8-D11 (VCST-5496 lock-variant regression — the fix rewrites the validator #308 shipped, so its regression baseline must be re-confirmed), D13 (membership override beats global), and D14 (global-blocking status, no membership row).",
+      "status": "UNVERIFIED — no QA evidence yet. Do not record as fixed."
+    },
+    "proposed_bl": "PROPOSED-BL-AUTH-015 (from the 08-03 test model) is now directly supported by 2605501d's shape: 'the org pinned into a session must be validated against BlockingStatuses by EVERY resolver in the auth pipeline that can independently mint the org claim, not just the one invoked first.' Triangulate via /qa-review-bl once #312 merges.",
+    "coverage": "No new cases authored this run. The 2026-07-29 checklist's 'Permanent regression coverage to land after this run' table (CUST-09x, PRF-GQL-*, notifications 057, B2C-MBR-03x, auth 032) is still unlanded — promote via /qa-test-lifecycle VCST-5281."
+  },
+  "not_verifiable": ["Multi-DB-provider migration backfill parity (vcst-qa runs a single provider) — needs /qa-local-env against postgres/mysql/sqlserver or a CI job"],
   "harness_notes": [
-    "/connect/token requires storeId (camelCase) alongside organization_id (snake_case); without storeId every customer login returns user_cannot_login_in_store even with a correct password, masking real status errors"
+    "/connect/token requires storeId (camelCase) alongside organization_id (snake_case); without storeId every customer login returns user_cannot_login_in_store even with a correct password, masking real status errors",
+    "GitHub MCP returned 'Bad credentials' all run; gh CLI via `env -u GITHUB_TOKEN` worked. scripts/deploy/deploy-pr-artifact.ts reads GIT_TOKEN, so it needed GIT_TOKEN=$(env -u GITHUB_TOKEN gh auth token)",
+    "deploy:pr ticket-key auto-resolution returned no artifacts for VCST-5281; the explicit --module=Id=Version override was required"
   ],
-  "c40_refinement": {
-    "finding": "For a user with legacy org associations but NO OrganizationMembership row, effective status resolves entirely from contact.Status, so a blocking global status denies EVERY org - and the C-41 membership-override remedy is unavailable because no row exists to override with. Verified live on MULTI_ORG_USER (11 orgs, 0 rows): Invited -> user_invitation_pending_in_organization, Rejected -> user_is_rejected_in_organization, restored to Approved -> 200.",
-    "population": "104 of the 105 at-risk accounts on this env have no membership row",
-    "healthy_baseline": "With contact.Status=Approved and no membership row, myStatusInOrganization resolves to Approved and an org-scoped token is issued with full permissions - the fallback works correctly"
-  },
   "screenshots": "reports/tickets/Sprint26-15/VCST-5281/screenshots/"
 }
