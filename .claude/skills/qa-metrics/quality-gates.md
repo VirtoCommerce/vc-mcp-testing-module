@@ -27,6 +27,51 @@ The minimum bar before any deployment. Evaluated against Suite 01 (Smoke Tests, 
 
 ---
 
+## 1a. Feature Release Gate — per-feature GO / NO-GO
+
+**The global "can we release this feature?" decision.** Scoped to **one story/feature** (not a whole
+sprint), this is the gate a team applies to answer *should this ship or not*. In scope order it sits
+between the Smoke gate (§1) and the Sprint Release gate (§2): Smoke proves the platform still boots, this
+gate proves **one feature** is done and safe, the Sprint/Full gates aggregate many such features for a
+deployment.
+
+**Inputs it consumes (does not re-run):** the `/qa-test VCST-XXXX` verdict + AC reconciliation, the open
+bug list for the feature, and the change-scoped regression result (the Artifact-C suite selection from the
+`/qa-test` run). **Owner:** `qa-lead-orchestrator` (this is its go/no-go call).
+
+| Criterion | Threshold | Source |
+|-----------|-----------|--------|
+| `/qa-test` verdict | **PASS** or **PASS WITH NOTES** | `/qa-test` Step 6e |
+| Acceptance criteria | 100% verified — every atomic condition (story ACs + gap-ACs) carries PASS evidence, all reconciled SATISFIED-live | `/qa-test` Step 6b/6c |
+| `BL-*` invariants for the domain | Verified, none violated | `business-logic.md` |
+| Open P0 bugs in the feature | 0 | `reports/bugs/` |
+| Open P1 bugs in the feature | 0, or deferred with documented workaround + risk acceptance | `reports/bugs/` |
+| Change-scoped regression | ≥95% pass on the Artifact-C suites for the touched surface | `/qa-regression` result |
+| Exploratory session | Completed (mandatory P0/P1 + critical revenue flows) | `/qa-test` Step 5 |
+| NFRs on the touched surface (as applicable) | No new a11y / performance / security violations introduced | `/qa-accessibility`, perf, security suites |
+| Smoke gate (§1) | PASS — the feature doesn't break a P0 flow | Suite 042/078 |
+
+**Verdict:**
+- **GO** — all criteria met. The feature is releasable.
+- **CONDITIONAL GO** — `/qa-test` is PASS WITH NOTES **and** the only misses are P1s with a documented
+  workaround + risk acceptance signed by the product owner + a monitoring plan; regression within 2% of
+  the 95% floor (≥93%). Resolve conditions within 5 business days and re-check.
+- **NO-GO** — any open P0 bug, any AC unmet or confirmed DRIFT/CONTRADICTS live, any `BL-*` violated,
+  change-scoped regression <93%, a new security finding, or a `/qa-test` FAIL/BLOCKED.
+
+**Notes:**
+- This gate never *lowers* the bar below the `/qa-test` verdict — a `/qa-test` FAIL/BLOCKED is an
+  automatic **NO-GO**; the gate only *adds* the team-level release criteria (open-bug ledger, scoped
+  regression, NFRs, smoke) on top of a green story run.
+- A **NO-GO is a success, not a failure** (mirrors the story ladder / bug-fix ladder): it correctly holds
+  an unfinished or unsafe feature. Record the blocking criteria + owners; do not ship on schedule
+  pressure.
+- The GO/NO-GO decision + evidence links are recorded in the per-ticket QA report
+  (`reports/tickets/<Sprint>/<TICKET>/`, category 6 per `.claude/rules/reports.md`), not a new artifact
+  type.
+
+---
+
 ## 2. Sprint Release Gate
 
 Evaluated before sprint release to staging or production. Covers sprint-scoped test suites plus affected regression suites.
@@ -177,20 +222,20 @@ Conditions that trigger an automatic rollback of a deployment.
 
 ## 8. Gate Comparison Table
 
-| Criterion | Smoke | Sprint Release | Full Release | Hotfix |
-|-----------|-------|----------------|--------------|--------|
-| P0 Pass Rate | 100% | 100% | 100% | 100% |
-| Overall Pass Rate | N/A (12 tests only) | >=95% | >=98% | >=95% (affected suites) |
-| Open P0 Bugs | 0 | 0 | 0 | 0 |
-| Open P1 Bugs | N/A | 0 (or deferred with risk acceptance) | <3 with documented workaround | 0 for hotfix area |
-| Cross-Browser Testing | No | Smoke suite only | Full (Chrome + Edge + Firefox) | Smoke suite only |
-| Performance Check | No | Spot check | Full baseline comparison | Spot check |
-| Security Scan | No | Changed areas only | Full scan (Suite 08) | Changed areas only |
-| Exploratory Testing | No | Optional | Required (2+ sessions) | No |
-| Accessibility Check | No | No | Required (Suite 09) | No |
-| Scope | Suite 01 (12 P0 tests) | Sprint tickets + affected suites | All 99 suites | Hotfix area + smoke |
-| Typical Duration | ~15 minutes | 4-8 hours | Full day or more | 1-2 hours |
-| Verdict Options | PASS / FAIL | APPROVED / CONDITIONS / BLOCKED | APPROVED / CONDITIONS / BLOCKED | APPROVED / BLOCKED |
+| Criterion | Smoke | Feature | Sprint Release | Full Release | Hotfix |
+|-----------|-------|---------|----------------|--------------|--------|
+| P0 Pass Rate | 100% | 100% | 100% | 100% | 100% |
+| Overall Pass Rate | N/A (12 tests only) | >=95% (change-scoped suites) | >=95% | >=98% | >=95% (affected suites) |
+| Open P0 Bugs | 0 | 0 | 0 | 0 | 0 |
+| Open P1 Bugs | N/A | 0 (or deferred w/ risk acceptance) | 0 (or deferred with risk acceptance) | <3 with documented workaround | 0 for hotfix area |
+| Cross-Browser Testing | No | If UI-facing | Smoke suite only | Full (Chrome + Edge + Firefox) | Smoke suite only |
+| Performance Check | No | If touched | Spot check | Full baseline comparison | Spot check |
+| Security Scan | No | If touched | Changed areas only | Full scan (Suite 08) | Changed areas only |
+| Exploratory Testing | No | Required (P0/P1) | Optional | Required (2+ sessions) | No |
+| Accessibility Check | No | If UI-facing | No | Required (Suite 09) | No |
+| Scope | Suite 01 (12 P0 tests) | One story/feature + its change-scoped suites | Sprint tickets + affected suites | All regression suites | Hotfix area + smoke |
+| Typical Duration | ~15 minutes | 30 min - 2 hours | 4-8 hours | Full day or more | 1-2 hours |
+| Verdict Options | PASS / FAIL | GO / CONDITIONAL GO / NO-GO | APPROVED / CONDITIONS / BLOCKED | APPROVED / CONDITIONS / BLOCKED | APPROVED / BLOCKED |
 
 ---
 

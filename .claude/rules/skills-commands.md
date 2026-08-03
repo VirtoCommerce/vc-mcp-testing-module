@@ -4,6 +4,8 @@
 
 All commands have YAML frontmatter with `description`, `argument-hint`, and invocation control. Commands with side effects use `disable-model-invocation: true` to prevent accidental auto-triggering.
 
+**29 live commands = 29 `commands/*.md` files.** The table below has 30 rows: the extra one is the struck-through `/qa-sync-tests` **tombstone**, kept deliberately so an old reference resolves to its replacement — it has no command file and invoking it does nothing.
+
 | Command | Arguments | Auto-invoke | Purpose |
 |---------|-----------|-------------|---------|
 | `/qa-onboarding` | `[env name \| smoke \| tour \| troubleshoot]` | No | Customer onboarding flow: post-install handoff that walks a new user from "plugin installed" to "green smoke run + first bug filed". Use after `npm run plugin:install`. |
@@ -33,12 +35,15 @@ All commands have YAML frontmatter with `description`, `argument-hint`, and invo
 | `/qa-review-bl` | `all \| domain <name> \| BL-<ID> \| diff [--dry-run]` | No | Triangulate each BL invariant against **docs + live + source code**, **auto-apply confirmed changes** to `business-logic.md` (gated by a 3-source evidence bar, not human approval; body-only, env-agnostic), and reconcile test-case `Business_Rule` coverage. Unconfirmed/contradictory/retire → `reports/ba/bl-proposals-<date>.md`; audit trail `reports/knowledge/BL-AUDIT-<date>.md`. Delegates triangulation to `ba-system-analyzer` + live axis to `qa-testing-expert`. Deterministic core: `scripts/knowledge/lint-bl.ts` (`bl:lint` / `bl:audit:collect`). Backed by the `/qa-review-bl` skill. |
 | `/ba-analyze` | `[full\|flows\|api\|docs\|stories\|ui\|module <name>]` | No | Business analysis with GitHub search + live UI (full/flows/api/docs/stories/ui/module) |
 | `/ba-stories` | `feature name \| VCST-XXXX` | No | Generate Agile user stories with BDD acceptance criteria |
+| `/code-review-full` | `[branch \| commit SHA \| PR number/URL \| file path(s)]` (defaults to current branch / staged / HEAD diff) | No | Comprehensive code review of a diff: 9 parallel review agents (tests, lint, quality, security, style, test quality, performance, deps/deployment, simplification) + a synthesized verdict. Reviews **this repo's own** code — not a QA flow against the VC platform. |
 | `/project-init` | `(no args — interactive) \| --check` | No | **Onboard this plugin onto a deployment.** Install deps; choose native-platform vs CLIENT project; pick bug tracker (Jira/Azure Boards) + code host (GitHub/Azure Repos); capture test-env URL + browser-login/token auth (never passwords); discover the client/platform repo split; write `project-profile.json` + `.mcp.json`; verify access. The profile is what makes `/qa-fix` route each bug to the **right repo** (client custom code vs native VirtoCommerce platform) and the **right tracker**. Backed by the `/project-init` skill. |
 | `/vc-self-check` | `[latest \| <session-id>] \| deliver` | No | **Self-diagnose the plugin** from this session's telemetry. Tier B of the self-diagnostics subsystem: reads the passive collector's jsonl (`hooks/session-telemetry.mjs` → `<outputRoot>/.vc-fix/diagnostics/<session_id>.jsonl`) + the transcript + the oracle `knowledge/diagnostics/skill-expectations.md`, and emits a per-skill verdict (OK/DEGRADED/BROKEN) + severity (S0–S3) + evidence + root-cause hypothesis + proposed fix, into a LOCAL `DIAG-*.md`. Never modifies the install, never files a ticket, never sends anything (the `deliver` sub-step does a scrubbed, consent-gated PR/issue to VirtoCommerce). Model-invocable: the `Stop` hook auto-runs it **silently via a tail-trigger** (`{decision:"block"}`, no Yes/No modal) when the Tier-1 classifier flagged ≥1 span (`failed`/`degraded`/`silent_suspect`) or a `/vc-feedback` 👎 was recorded (opt out `VC_FIX_DIAG_CONSENT=off`); recursion/re-nag is blocked by the `selfCheckSeen` guard + per-signature span dedup (not by `disable-model-invocation`). Backed by the `/vc-self-check` skill. |
 
-## Skills (36) — `skills/` (grouped by category)
+## Skills (38) — `skills/` (grouped by category)
 
-Skills are slash commands with supporting reference files, organized into 4 category directories. Each skill has a `SKILL.md` with `[Category]` tag in the description. See `skills/README.md` for full reference. (A separate top-level `run-vc-mcp-testing-module` skill builds/smoke-tests this repo's own tooling and is not part of the categorized QA set.)
+**38 skills = 38 `skills/<name>/SKILL.md` files**, grouped below as 1 VC-knowledge + 12 testing + 16 QA-methodology + 6 development + 3 root-level. The grouping is **documentation-only** — the directories are flat (`skills/<name>/`, one level, no category subfolders), and a skill's category comes from the `[Category]` tag in its `SKILL.md` description. `qa-local-env` is listed under Testing here but carries no tag in its own file.
+
+Skills are slash commands with supporting reference files. Each skill has a `SKILL.md` with `[Category]` tag in the description. See `skills/README.md` for full reference. (A separate top-level `run-vc-mcp-testing-module` skill builds/smoke-tests this repo's own tooling and is not part of the categorized QA set.)
 
 **`vc-knowledge/` — Virto Commerce Knowledge (1) — auto-invocable:**
 
