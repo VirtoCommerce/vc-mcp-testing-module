@@ -512,7 +512,7 @@ The orchestrator (you) evaluates all phases:
 | G9: Sync | All STALE cases updated, all BROKEN addressed | Yes (if synced) |
 | G10: Assertion Grounding | **0 GRD-001 Blocker/High** + 0 ENV-008. Provenance is **opt-in per case**: a fully-untagged *legacy* case is Informational only (it does not fail this gate), but once a case is **provenance-adopted** (any assertion tagged — i.e. everything Phase 3 generated or Phase 2/4 touched) an untagged sibling is **High** and a `{HYPOTHESIS}` in a past-`Draft` case is a **Blocker** | Yes |
 | G11: Technique Coverage | No feature group (≥3 cases) missing the positive + negative + boundary mix (TC-001) | Recommended |
-| G12: Promotion Integrity | **Only when 6P promotes.** Every promoted ID is globally unique (0 collisions); `suites:append --dry-run` clean; `npm run suites:lint` green after `suites:sync`; no case promoted that G10 didn't clear | Yes (if promoting) |
+| G12: Promotion Integrity | **Only when 6P promotes.** No **incoming** ID collides with any case under `regression/suites/` — proven by `append-test-cases-to-suite.ts --check-global-ids --dry-run` exiting 0, **not** by a plain dry-run (which only checks the target suite); `npm run suites:lint` green after `suites:sync`; the target suite's `suites:review` no worse than before the append; no case promoted that G10 didn't clear. *(Scope note: this gate governs what 6P **adds**. It does not require the ~224 pre-existing cross-suite duplicate IDs to be fixed first.)* | Yes (if promoting) |
 
 **G10 is the promotion gate, not a nice-to-have.** Per the skill's promotion rule + `test-case-template.md`
 §Automation_Status, a case moves `Draft → Reviewed` only when (a) the review verdict is ≥ PASS WITH
@@ -531,8 +531,16 @@ itself.** A gate-green run means *eligible for promotion*, not promoted.
 
 #### 6P. PROMOTE — fold `/qa-test`'s run-scoped cases into durable coverage
 
-**Runs when** Phase 1 resolved a `promotionSource` **and** the verdict is APPROVED / APPROVED WITH
-WARNINGS. **No-op** when there is no `promotionSource`. **Never runs** under `--ci` or `--report-only`.
+**Runs when** Phase 1 resolved a `promotionSource` **and** step 1 below re-derives G10 clean. **No-op**
+when there is no `promotionSource`. **Never runs** under `--ci` or `--report-only`.
+
+**Precondition, stated precisely — 6P does NOT require an APPROVED pipeline verdict.** It requires the
+**G10 re-derivation in step 1 to come back clean for the cases being promoted**, plus the step-2 approval.
+The distinction matters because `--promote-only` skips Phases 2–5 and therefore produces no
+APPROVED/NEEDS-FIXES verdict at all: gating 6P on that verdict would make the documented hand-off command
+(`/qa-test-lifecycle VCST-XXXX --promote-only`, `.claude/commands/qa-test.md` 6j) a silent no-op. On a
+**full** run the pipeline verdict still applies as a second condition — NEEDS FIXES / BLOCKED means the
+suites in scope are not in a state to receive new cases, so do not promote into them.
 
 The problem this closes: `/qa-test` authors ticket cases into `reports/tickets/{SPRINT}/VCST-XXXX/test-cases.csv`,
 and **nothing in the manifest-driven runner reads `reports/tickets/**`** — a case left there executes once,
@@ -574,14 +582,25 @@ stays in the ticket folder and is reported.
 rows into one ~29-field record (`feedback_csv_append_newline_corruption`):
 
 ```bash
-npx tsx scripts/test-cases/append-test-cases-to-suite.ts <target-suite.csv> --rows <approved-rows.csv> --dry-run
+npx tsx scripts/test-cases/append-test-cases-to-suite.ts <target-suite.csv> --rows <approved-rows.csv> --check-global-ids --dry-run
 ```
 
 Dry-run first; only on a clean dry-run drop `--dry-run`. The appender validates the 15-column schema,
-ID format + uniqueness, the `Priority`/`Automation_Status` enums, and Title+Section duplicates against the
-target, and round-trip verifies the appended block. **Case IDs must be globally unique**
-(`reference_case_ids_must_be_globally_unique`) — a collision overwrites another suite's failure evidence,
-so **re-ID the incoming case** (never renumber the existing one, never reuse a retired ID).
+ID format, the `Priority`/`Automation_Status` enums, Title+Section duplicates against the target, and
+round-trip verifies the appended block.
+
+**`--check-global-ids` is mandatory here and is not the default.** Without it the appender enforces ID
+uniqueness **only within the target suite** — it cannot see an ID that already lives in a *different*
+suite, and that is exactly the collision that overwrites the other suite's per-case failure evidence
+(`reference_case_ids_must_be_globally_unique`). The flag scans every CSV under `regression/suites/` and
+rejects a colliding **incoming** ID. On a collision, **re-ID the incoming case** — never renumber the
+existing one, never reuse a retired ID.
+
+> It is opt-in rather than on-by-default because the committed corpus already carries **~224 IDs that
+> appear in more than one suite** (legacy debt — e.g. `CAT-001` sits in both `051-catalog-admin-products`
+> and `001-catalog-navigation`). Checking the corpus against itself would fail every append on
+> pre-existing debt instead of on the caller's own rows. Cleaning that debt is a separate task; 6P's job
+> is only to stop **adding** to it.
 
 The `Automation_Status` flip `Draft → Reviewed` happens **in the rows being appended** — that flip *is* the
 promotion. Stamp `References` with `Promoted: VCST-XXXX → <suite id> (YYYY-MM-DD)`, appending; never
@@ -938,12 +957,14 @@ Output: per-case verification:
   is only **where the rows land** — `/qa-test` writes a run-scoped ticket CSV, this pipeline writes durable
   `regression/suites/` coverage — and **who may promote** (only here, 6P).
 - **Never hand-roll a CSV append** — `regression/suites/` writes go through
-  `npx tsx scripts/test-cases/append-test-cases-to-suite.ts` (dry-run first), then `npm run suites:sync` +
-  `npm run suites:lint`. A missing boundary newline merges two 15-column rows into one broken record
-  (`feedback_csv_append_newline_corruption`), and a manifest left unsynced means the suite runs with a
-  stale `testCount`.
-- **Case IDs are globally unique** — re-ID an incoming promoted case on collision; never renumber the
-  existing case and never reuse a retired ID (a collision overwrites another suite's failure evidence).
+  `npx tsx scripts/test-cases/append-test-cases-to-suite.ts --check-global-ids` (dry-run first), then
+  `npm run suites:sync` + `npm run suites:lint`. A missing boundary newline merges two 15-column rows into
+  one broken record (`feedback_csv_append_newline_corruption`), and a manifest left unsynced means the
+  suite runs with a stale `testCount`.
+- **An incoming case ID must collide with nothing under `regression/suites/`** — and a plain append run
+  does **not** prove that: without `--check-global-ids` the appender only checks the target suite, so a
+  cross-suite collision (which overwrites the other suite's failure evidence) passes silently. Re-ID the
+  incoming case on collision; never renumber the existing one, never reuse a retired ID.
 - **Never delete test cases without user confirmation** — prefer deprecation (`Automation_Status: Deprecated`) over removal
 - **Preserve case IDs** — never renumber or reuse IDs. Deprecated cases keep their IDs.
 - **Context7 is mandatory** — always query `/virtocommerce/vc-docs` for current module behavior before updating or generating cases

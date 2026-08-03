@@ -242,7 +242,10 @@ the doer's output artifact and where it lives.
 
 **How you re-derive (never trust the doer's summary):**
 - **Re-run the deterministic core** where one exists — `npm run suites:review` (test-case lint / 11-dim),
-  `npm run td:validate` (+ `td:reconcile`), `npx tsx scripts/regression/compute-metrics.ts --gate feature`.
+  `npm run td:validate` (+ `td:reconcile`),
+  `npx tsx scripts/regression/compute-metrics.ts --gate feature --run-id <RUN_ID>` (the `--run-id` is
+  required — unscoped it returns the whole-history pass rate, not this change's; exit `2` = CANNOT
+  EVALUATE, which is **not** a failing rate).
   The script is the neutral evidence-gatherer the doer cannot fudge.
 - **Re-read the source artifact yourself** — the `test-cases.csv`, the `summary.json`, the AC table, the
   `reports/bugs/` ledger — and recompute the gate's claim (e.g. "every atomic condition has a covering

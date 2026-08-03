@@ -42,10 +42,27 @@ bug list for the feature, and the change-scoped regression result (the Artifact-
 **Independently ratified at `/qa-test` Step 6h.** This gate is not self-certified by the run that produced
 the inputs: a **fresh `qa-lead-orchestrator` verifier instance** (§Verifier Mode) re-evaluates the criteria
 below from the raw inputs and may **downgrade** the GO/NO-GO. The pass-rate + bug-count math has a
-deterministic core — `npx tsx scripts/regression/compute-metrics.ts --gate feature --p0-bugs N --p1-bugs N`
-returns **GO / CONDITIONAL GO / NO-GO** (GO floor 95%, conditional 93–95%, any open P0 or <93% ⇒ NO-GO;
-exits non-zero on NO-GO). The qualitative criteria (AC coverage, `BL-*`, NFRs, smoke, `/qa-test` verdict,
-security) stay agent-judged and are combined with that math by the verifier.
+deterministic core:
+
+```bash
+npx tsx scripts/regression/compute-metrics.ts --gate feature --run-id <RUN_ID> --p0-bugs N --p1-bugs N
+```
+
+It returns **GO / CONDITIONAL GO / NO-GO** (GO floor 95%, conditional 93–95%, any open P0 or <93% ⇒ NO-GO).
+
+**The `--run-id` is required, and that is the whole point.** This criterion is the *change-scoped*
+(Artifact-C) pass rate — `summary.json` `regression.run_id`. Unscoped, the script aggregates the entire
+90-day rolling history and returns a number identical for every feature (e.g. 82.86% repo-wide vs 68% for
+one specific run), so it now **refuses to evaluate without a scope** instead of answering the wrong
+question. Use `--suites <ids>` when the run wasn't recorded under a single id.
+
+**Exit codes carry meaning: `0` evaluated / not blocking · `1` NO-GO (or bad arguments) · `2` CANNOT
+EVALUATE.** A `2` means no run entries matched the scope — the regression was deferred, skipped, or never
+recorded. Report the gate as **NOT EVALUATED**; it is *not* a 0% pass rate and must never be reported as a
+regression failure (§1a cannot be evaluated on a missing pass rate).
+
+The qualitative criteria (AC coverage, `BL-*`, NFRs, smoke, `/qa-test` verdict, security) stay agent-judged
+and are combined with that math by the verifier.
 
 | Criterion | Threshold | Source |
 |-----------|-----------|--------|

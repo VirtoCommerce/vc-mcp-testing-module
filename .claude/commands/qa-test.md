@@ -257,11 +257,14 @@ The specialist produces **three hand-off artifacts**, then reviews/auto-fixes th
 - **New feature / Story** (Test Model `Type`) → **author new** enriched-CSV test cases (and, for a multi-screen journey, `E2E-*`-style scenarios) via `/qa-test-cases-generator` methodology. Derive them from the `1d` AC conditions (story + gap-ACs), the `E2E-*` scenarios, `BL-*` invariants, `ECL-*` patterns, and domain checklists. Write to `reports/tickets/{SPRINT}/VCST-XXXX/test-cases.csv` — category 2 (Test cases), the one file this step persists.
 - **Bug fix / enhancement with existing coverage** → **map to existing** suite cases (start from the `E2E-*` → suite mappings from Step 2); author **only the gaps** (conditions/risk areas no existing case covers) as new cases in the same `test-cases.csv`.
 - **Write the CSV with the deterministic appender, not by hand** —
-  `npx tsx scripts/test-cases/append-test-cases-to-suite.ts <test-cases.csv> --rows <new-rows.csv> --dry-run`
-  (drop `--dry-run` on a clean pass). It enforces the 15-column schema, ID format + uniqueness, the
+  `npx tsx scripts/test-cases/append-test-cases-to-suite.ts <test-cases.csv> --rows <new-rows.csv> --check-global-ids --dry-run`
+  (drop `--dry-run` on a clean pass). It enforces the 15-column schema, ID format, the
   `Priority`/`Automation_Status` enums, and the boundary newline a hand-rolled append silently corrupts
   (`feedback_csv_append_newline_corruption`). Same writer `/qa-test-lifecycle` 6P uses later, so a promoted
-  case is a straight re-append rather than a reformat.
+  case is a straight re-append rather than a reformat. Pass `--check-global-ids` **here too**: it rejects a
+  case ID that already exists anywhere under `regression/suites/`, and catching that at authoring time is
+  far cheaper than at 6P, where the case is otherwise promotion-blocked and has to be re-IDed after the
+  fact.
 - **This CSV is run-scoped, not durable coverage.** Nothing in the manifest-driven runner reads
   `reports/tickets/**` — a case that stays there never executes again after this run. Promoting cases
   worth keeping into `regression/suites/<layer>/<module>/` + a `config/test-suites.json` entry is
@@ -633,7 +636,10 @@ cannot be evaluated on a null pass rate.
 **Gate (Feature Release Gate ratified) — the final independent gate:** the §1a criteria yield GO /
 CONDITIONAL GO / NO-GO. **Independent verification:** a fresh `qa-lead` verifier **re-evaluates §1a from the
 raw inputs** — the 6e verdict, the `reports/bugs/` open-P0/P1 ledger, the regression pass rate via
-`npx tsx scripts/regression/compute-metrics.ts --gate feature --p0-bugs N --p1-bugs N`, and the smoke
+`npx tsx scripts/regression/compute-metrics.ts --gate feature --run-id <6g regression.run_id> --p0-bugs N --p1-bugs N`
+(the `--run-id` is **required** — this gate is defined on the change-scoped Artifact-C run, and the command
+refuses to run unscoped rather than silently returning the whole-history pass rate; `--suites <ids>` is the
+fallback when the run wasn't recorded under a single id), and the smoke
 result — and ratifies or **downgrades** the recommendation. REJECT (downgrade) if any §1a criterion isn't
 actually met by the raw inputs → the recommendation is corrected before it reaches the user. This is a
 **recommendation only** — a human still decides release; `/qa-test` never ships.

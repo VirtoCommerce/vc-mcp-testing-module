@@ -121,7 +121,7 @@ sequenceDiagram
 
     alt PASS / PASS WITH NOTES
         Orch->>Gate: 6h Feed verdict + regression pass rate + release criteria
-        Gate->>V: Ratify GO/NO-GO (re-run compute-metrics --gate feature + re-check ledger)
+        Gate->>V: Ratify GO/NO-GO (compute-metrics --gate feature --run-id RUN_ID + re-check ledger)
         V-->>Gate: APPROVE or downgrade
         Gate-->>User: GO / CONDITIONAL GO / NO-GO (independently ratified)
     else FAIL, REOPEN  (pointer, not auto-trigger)
@@ -320,7 +320,7 @@ flowchart TB
 | **4** Execution | every condition has PASS/FAIL evidence; regression `RUN_ID`+rate exist | V re-opens evidence; re-runs 1 case on a diff lane | required (P0/P1) |
 | **5** Explore | charter ran; every risk area probed; findings classified | V confirms every risk area touched | required (P0/P1) |
 | **6d/6e** Triage + verdict | each finding classified + provenance + severity + deduped; verdict follows table | V re-classifies a sample via live repro (diff lane) | **HARD STOP before 6f** |
-| **6h** Release gate | §1a criteria → GO/CONDITIONAL/NO-GO | V re-evaluates `compute-metrics.ts --gate feature` + open-bug ledger | ratify/downgrade |
+| **6h** Release gate | §1a criteria → GO/CONDITIONAL/NO-GO | V re-evaluates `compute-metrics.ts --gate feature --run-id <RUN_ID>` (scope required; exit 2 = CANNOT EVALUATE, not a failure) + open-bug ledger | ratify/downgrade |
 | **6i** Promotion evidence *(only if new cases authored)* | every `{OBSERVED}` traces to a real Step-4 artifact; every surviving `{HYPOTHESIS}` resolved or reworded as a question; eligible/blocked split matches the review | V **re-runs** `suites:review` + re-opens the evidence behind a sample of the upgrades | required (never skipped) |
 | **6P** Promotion *(in `/qa-test-lifecycle`)* | G10 re-derived from the CSV + human approval; G12 integrity (unique IDs, clean `suites:append` dry-run, `suites:lint` green) | V re-runs `suites:review` on the **target** suite + `suites:lint` | **HARD STOP** — REJECT reverts the append |
 

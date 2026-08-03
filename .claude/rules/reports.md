@@ -6,9 +6,9 @@
 
 | # | Category | Path | When |
 |---|----------|------|------|
-| 1 | Bug report | `reports/bugs/` | A confirmed defect with reproducible STR |
+| 1 | Bug report | `reports/bugs/open/` or `reports/bugs/fixed/` — **exactly one, never both** | A confirmed defect with reproducible STR. `/qa-verify-fix` **moves** `open/` → `fixed/` on a VERIFIED verdict (adding a `## Resolution` block) — it is a move, not a copy. A file present in both directories is a defect: the stale `open/` copy makes a fixed bug look outstanding and gets counted twice by any open-bug scan, including the Feature Release Gate's "0 open P0" criterion. When you find one, delete the `open/` copy |
 | 2 | Test cases | `regression/suites/` (CSV) | Adding/updating test coverage |
-| 3 | BA report | `reports/ba/` | `/ba-analyze` deliverables |
+| 3 | BA report | `reports/ba/` — optionally in a **domain subfolder** (the established convention: `Configurable products/`, `Organization roles/`, `Page Builder (CMS)/`, `Sales-rep/`…; spaces are fine, quote the path in shell) | `/ba-analyze` deliverables, `bl-proposals-<date>.md`, and **standalone test-design models** (a `test-model-<TICKET>-<date>.md` that reduces a feature's condition space to a defensible matrix). A test-design model is a durable BA deliverable and is **not** what the `/qa-test` terminal-only rule below forbids — that rule scopes to `/qa-test`'s *in-run* step artifacts (its own Test Model lives in working context for the duration of one run) |
 | 4 | Regression summary | `reports/regression/REG-*/` | One consolidated report per run |
 | 5 | Monitoring summary | `reports/monitoring/MONITOR-*/` | One consolidated report per `/qa-monitoring` (App Insights) run |
 | 6 | Per-ticket QA report | `reports/tickets/<Sprint>/<TICKET>/` (or `reports/tickets/<TICKET>/`) | A ticket-scoped audit that has its own standalone value beyond the run that produced it — `/qa-verify-fix`, or a ticket-scoped `/qa-design`/`/qa-accessibility`/`/qa-storybook` run. **Not** `/qa-test` — see the terminal-only carve-out below |
@@ -18,6 +18,15 @@
 | 10 | Performance investigation report | `reports/performance/{topic}-investigation-<date>.md` | A standalone performance investigation with findings worth keeping past the session that produced them |
 
 **Per-ticket folders may hold more than one file** (e.g. a storybook/a11y/bundle-size audit alongside `/qa-verify-fix`'s own report) because each covers a distinct check run against the same ticket — that is not the same failure as splitting one report across files. Each individual file still obeys its own cap below; don't open a new file for a check that fits inside an existing one in the same folder.
+
+**Two structured per-ticket artifacts are allowed alongside the narrative report, and are NOT counted against its line cap** — both are written by `/qa-verify-fix` (`.claude/commands/qa-verify-fix.md`), which is their contract; this rule exists so the policy and that command agree:
+
+| Artifact | What it is | Rules |
+|---|---|---|
+| `verification-summary.json` | Small structured verdict record (ticket, verdict, build, deployment, evidence paths) — the `/qa-verify-fix` analogue of `/qa-test`'s `summary.json` | Structured only, no narrative prose. It does not replace the `verification-report.md` narrative (category 6) — write both |
+| `evidence.html` | The RED→GREEN evidence page linked from the tracker comment | **Reference the sibling screenshots (`<img src="screenshots/NAME.png">`) — never inline them as `data:` base64 in the committed copy.** A single inlined PNG cost 124 KB on one 124 000-char line, duplicating a PNG already tracked in the same folder byte-for-byte and making the diff unreviewable. Keep the committed page **under ~40 KB**. Base64 self-containment is required only for the *published* Artifact variant, which is never committed |
+
+Line caps in §2 apply to **narrative** files. A generated evidence page is exempt from the line cap but bound by the size + no-inlined-image rules above.
 
 **Do NOT create files for:** per-suite intermediate JSON, coverage working files, standalone screenshot dumps, progress/status markdown, debug logs, investigation notes, per-step screenshots, side-by-side comparisons against prior runs, or anything labeled "draft"/"WIP"/"context". Return those via SendMessage. Evidence screenshots go **inline** in the bug report (not as separate `.md`).
 
@@ -138,6 +147,7 @@ Failure traces (real FAIL only):
 Reports:
   Bug:           BUG-{Short-Description}.md
   Ticket check:  {check-type}-report.md  (inside reports/tickets/<Sprint>/<TICKET>/ — /qa-verify-fix, /qa-design, /qa-storybook, etc.; NOT /qa-test, see below)
+  Verify-fix:    verification-report.md + verification-summary.json + evidence.html  (the /qa-verify-fix triple, same folder)
   BL audit:      BL-AUDIT-YYYY-MM-DD.md  (inside reports/knowledge/)
   Exploratory:   SBTM-{charter}-YYYY-MM-DD.md  (inside reports/exploratory/)
   Coverage:      coverage-generation-report.md  (inside reports/coverage/COV-YYYY-MM-DD-HHMM/)
