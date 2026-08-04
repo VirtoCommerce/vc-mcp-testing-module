@@ -11,7 +11,10 @@ not one. The config entry holds a call to the launcher instead of a credential:
 
 At launch, `vc-secrets` reads that server's declaration, resolves the secrets it names from the OS
 credential store (or Azure Key Vault), injects them into **that child process only**, and stays as
-its parent to forward stdio and kill the tree on exit. No token in `.mcp.json`, in `~/.claude.json`,
+its parent to forward stdio and kill the tree on exit. "That child only" is about the resolved
+secrets — the child otherwise inherits your ambient environment, as any spawned process does, so a
+credential already exported in your shell reaches it too. Moving those into declarations is what
+removes them. No token in `.mcp.json`, in `~/.claude.json`,
 in a settings `env` block, or in a `.env` file.
 
 What it does not do: there is deliberately **no command that prints a secret value**, and no verb that

@@ -1338,3 +1338,45 @@ test("the probe runs at all — its own imports resolve", () => {
     assert.ok(!/ReferenceError|is not defined/.test(r.stderr), `probe failed to run:\n${r.stderr}`);
     assert.match(r.stderr + r.stdout, /usage: node vc-secrets-probe\.mjs/);
 });
+
+// ── regressions from the Codex review ─────────────────────────────────────────────────────────────
+
+test("keychain write: migrate gets a non-interactive shape, set keeps the prompt", () => {
+    // With no value the prompt is right: `set` has a human at the TTY and the plaintext never passes
+    // through this process. With a value it must NOT prompt — migrate holds a value the user cannot
+    // retype, and the interactive shape asked for one anyway and stored whatever was typed as a
+    // successful migration.
+    const key = `${m.KEY_PREFIX}:demo:tok`;
+    const prompting = m.buildLocalWrite("keychain", key, { USER: "u" });
+    assert.equal(prompting.interactive, true);
+    assert.ok(!prompting.args.includes("secret-value"));
+
+    const copying = m.buildLocalWrite("keychain", key, { USER: "u" }, { value: "secret-value" });
+    assert.ok(!copying.interactive, "a copy must not wait for a human");
+    assert.equal(copying.args.at(-1), "secret-value");
+});
+
+test("a gpg read preserves a trailing newline the stored value really contains", async () => {
+    // gpg --decrypt emits the stored bytes. Stripping there rewrote the value during migrate, which
+    // reads and then writes: "token\n" would be migrated as "token".
+    const binDir = stubBinary("gpg", '#!/bin/sh\nprintf "token\\n"\n');
+    const saved = process.env.PATH;
+    process.env.PATH = `${binDir}:${saved}`;
+    try {
+        const spec = m.buildLocalRead("gpg", `${m.KEY_PREFIX}:demo:tok`, { XDG_CONFIG_HOME: "/tmp" });
+        assert.equal(spec.keepTrailingNewline, true);
+        assert.equal(await m.runTool(spec), "token\n");
+    } finally {
+        process.env.PATH = saved;
+    }
+});
+
+test("a double quote in command/args/vault/secret is refused — it would break argv quoting on Windows", () => {
+    const q = 'x" & whoami & rem "';
+    assert.throws(() => m.loadConfig(projectPaths({
+        secrets: {}, servers: { s: { command: "x", args: [q], env: {} } } })), /double quote/);
+    assert.throws(() => m.loadConfig(projectPaths({
+        secrets: {}, servers: { s: { command: q, args: [], env: {} } } })), /double quote/);
+    assert.throws(() => m.loadConfig(projectPaths({
+        secrets: { kv: { backend: "keyvault", vault: q, secret: "s" } }, servers: {} })), /double quote/);
+});

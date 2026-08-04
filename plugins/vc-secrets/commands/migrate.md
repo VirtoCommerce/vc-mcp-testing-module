@@ -45,7 +45,9 @@ answer is about the shell, not about the stored secrets.
 | `cannot tell whether it is already migrated, refusing to touch it` | the store answered neither "here it is" nor "absent" — a cold gpg agent, a timeout, a wrong recipient. Nothing was written, deliberately: the alternative is overwriting a current value with a stale one. Fix the store (`unlock`, or check the backend) and re-run |
 | `migration failed` | the write itself failed; the old entry is untouched |
 
-The run exits non-zero if any secret failed or could not be judged. Idempotent, so re-running is safe. The legacy `mcpw:<name>` entry (or `~/.config/mcpw/secrets/<name>.gpg`) is left in place: nothing reads
+The run exits non-zero if any secret failed or could not be judged. Idempotent, so re-running is safe —
+but do not run it alongside a `set` of the same secret: it decides "already migrated?" and then writes,
+so a value stored in between would be overwritten with the older one. The legacy `mcpw:<name>` entry (or `~/.config/mcpw/secrets/<name>.gpg`) is left in place: nothing reads
 it, and deleting it would add a second way to fail. Remove it by hand later if you want the store tidy.
 
 ## Report

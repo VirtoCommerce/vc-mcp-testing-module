@@ -152,6 +152,15 @@ function validateLaunchables(label, map) {
         if (!srv.args.every((a) => typeof a === "string")) {
             throw new VcSecretsError(`${label} "${name}": every args element must be a string`);
         }
+        // On Windows a .cmd/.bat shim is run through `cmd.exe /d /s /c "…"` with verbatim arguments, and
+        // that line is built by wrapping each element in quotes. An embedded quote would close it and let
+        // the rest be read as cmd syntax. Nothing legitimate needs one here, so it is refused at the
+        // declaration rather than escaped at the seam.
+        for (const value of [srv.command, ...srv.args]) {
+            if (value.includes('"')) {
+                throw new VcSecretsError(`${label} "${name}": a double quote in "command"/"args" is not allowed (it would break argument quoting on Windows)`);
+            }
+        }
         if (!Object.values(srv.env).every((v) => typeof v === "string")) {
             throw new VcSecretsError(`${label} "${name}": every env value must be a string`);
         }
@@ -214,6 +223,13 @@ function parseConfigFile(file, warnings) {
         }
         if (decl.backend === "keyvault" && (!decl.vault || !decl.secret)) {
             throw new VcSecretsError(`secret "${name}": keyvault backend requires "vault" and "secret"`);
+        }
+        // These two reach `az` as arguments, and on Windows `az` is a .cmd shim — see the quoting note in
+        // validateLaunchables. Azure names cannot contain a quote anyway.
+        for (const field of ["vault", "secret"]) {
+            if (typeof decl[field] === "string" && decl[field].includes('"')) {
+                throw new VcSecretsError(`secret "${name}": a double quote in "${field}" is not allowed`);
+            }
         }
     }
     validateLaunchables("server", cfg.servers);
@@ -531,10 +547,10 @@ function buildLocalRead(backend, key, env = process.env) {
     // which the 10s kill timer would otherwise interrupt mid-typing. Interactive unlock (cmdUnlock)
     // builds its own args without this flag — that is the only place pinentry may appear.
     return { cmd: "gpg", args: ["--quiet", "--batch", "--pinentry-mode", "cancel", "--decrypt", keyToPath(key, env)],
-        timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: true };
+        timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: true, keepTrailingNewline: true };
 }
 
-function buildLocalWrite(backend, key, env = process.env, { tmp = false } = {}) {
+function buildLocalWrite(backend, key, env = process.env, { tmp = false, value = undefined } = {}) {
     if (!KEY_RE.test(key)) {
         throw new VcSecretsError(`invalid secret key "${key}" — expected vc-secrets:<scope>:<name>`);
     }
@@ -543,10 +559,19 @@ function buildLocalWrite(backend, key, env = process.env, { tmp = false } = {}) 
             extraEnv: { VC_SECRETS_NAME: key }, stdinData: VALUE_ON_STDIN, timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: false };
     }
     if (backend === "keychain") {
-        // -w with no value → security prompts on the TTY itself (vc-secrets set runs interactively);
-        // no timeout — a human is typing
-        return { cmd: "security", args: ["add-generic-password", "-U", "-a", env.USER || os.userInfo().username, "-s", key, "-w"],
-            interactive: true, timeoutMs: null, captureStdout: false };
+        // Two shapes, and the difference is load-bearing. `set`: `-w` with no value makes security prompt
+        // on the TTY, so the plaintext never passes through this process at all. `migrate`: there IS no
+        // value to type — the point is to copy one the user cannot read — and `security` has no stdin
+        // path, so the value goes in argv. That is briefly visible in the process list of this machine,
+        // which is the lesser evil: the interactive shape asked the human for a value they do not have
+        // and stored whatever they typed as a successful migration.
+        if (value === undefined) {
+            return { cmd: "security", args: ["add-generic-password", "-U", "-a", env.USER || os.userInfo().username, "-s", key, "-w"],
+                interactive: true, timeoutMs: null, captureStdout: false };
+        }
+
+        return { cmd: "security", args: ["add-generic-password", "-U", "-a", env.USER || os.userInfo().username, "-s", key, "-w", value],
+            timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: false };
     }
     const recipientArgs = env.VC_SECRETS_GPG_RECIPIENT
         ? ["--recipient", env.VC_SECRETS_GPG_RECIPIENT, "--trust-model", "always"]
@@ -654,7 +679,10 @@ function runTool(spec, { stdinValue, redactValues = [] } = {}) {
                 reject(err);
                 return;
             }
-            resolve(stdout.replace(/\r?\n$/, ""));
+            // gpg --decrypt emits exactly the stored bytes, so stripping there would silently change a
+            // value that really ends in a newline — fatal for migrate, which reads and then rewrites.
+            // security -w and the PowerShell reader add their own line ending, so those keep the strip.
+            resolve(spec.keepTrailingNewline ? stdout : stdout.replace(/\r?\n$/, ""));
         });
     });
 }
@@ -870,7 +898,7 @@ async function readLegacyLocalValue(backend, name, env = process.env) {
         }
 
         return await runTool({ cmd: "gpg", args: ["--quiet", "--batch", "--pinentry-mode", "cancel", "--decrypt", legacyPath],
-            timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: true });
+            timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: true, keepTrailingNewline: true });
     }
     const legacyName = `${LEGACY_KEY_PREFIX}:${name}`;
     const spec = backend === "wcm"
@@ -946,7 +974,7 @@ async function cmdMigrate(cfg) {
         }
 
         try {
-            const spec = buildLocalWrite(backend, key, process.env, { tmp: backend === "gpg" });
+            const spec = buildLocalWrite(backend, key, process.env, { tmp: backend === "gpg", value: legacyValue });
             await writeLocalValue(backend, key, spec, legacyValue, process.env);
             migrated += 1;
             lines.push(`${name}: migrated`);

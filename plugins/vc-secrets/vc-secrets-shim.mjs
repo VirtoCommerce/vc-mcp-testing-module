@@ -44,15 +44,24 @@ if (registry.version !== REGISTRY_SCHEMA) {
     fs.writeSync(2, `vc-secrets: ${registryPath} is schema version ${registry.version}, this shim was written for ${REGISTRY_SCHEMA} — continuing, but update the plugin\n`);
 }
 
-const records = registry.plugins?.[PLUGIN_KEY];
-if (!Array.isArray(records) || records.length === 0) {
+// Drop anything that is not an object before reading fields off it: the file is the client's, and a
+// hostile or truncated shape must produce this function's own message rather than a raw TypeError.
+const records = (Array.isArray(registry.plugins?.[PLUGIN_KEY]) ? registry.plugins[PLUGIN_KEY] : [])
+    .filter((r) => r !== null && typeof r === "object");
+if (records.length === 0) {
     fail(`plugin ${PLUGIN_KEY} is not installed — install it from the marketplace, then run /vc-secrets:install`);
 }
 
 // One plugin can be installed several times (per project, plus user scope). Prefer the record whose
 // project contains the current directory.
 const cwd = path.resolve(process.cwd());
-const byProject = records.filter((r) => typeof r.projectPath === "string" && (cwd === path.resolve(r.projectPath) || cwd.startsWith(path.resolve(r.projectPath) + path.sep)));
+const matches = records.filter((r) => typeof r.projectPath === "string"
+    && (cwd === path.resolve(r.projectPath) || cwd.startsWith(path.resolve(r.projectPath) + path.sep)));
+// With nested projects several records match; the NEAREST one owns this directory, so the longest
+// matching projectPath wins before version is consulted. Ranking all matches by version instead would
+// hand a child project its parent's launcher whenever the parent happened to be newer.
+const longest = Math.max(0, ...matches.map((r) => path.resolve(r.projectPath).length));
+const byProject = matches.filter((r) => path.resolve(r.projectPath).length === longest);
 const candidates = byProject.length > 0 ? byProject : records;
 
 // When cwd belongs to none of them — a git worktree or a scratch directory often sits outside every
