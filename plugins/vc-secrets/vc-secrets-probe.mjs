@@ -8,7 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const server = process.argv[2];
 if (!server) {
-    process.stderr.write("usage: node vc-secrets-probe.mjs <server>\n");
+    fs.writeSync(2, "usage: node vc-secrets-probe.mjs <server>\n");
     process.exit(2);
 }
 const child = spawn(process.execPath, [path.join(__dirname, "vc-secrets.mjs"), "run", server],
@@ -19,7 +19,7 @@ child.stdin.on("error", () => {});
 child.stdin.write(JSON.stringify(request) + "\n");
 
 const timer = setTimeout(() => {
-    process.stderr.write(`probe: ${server} -> TIMEOUT (30 s)\n`);
+    fs.writeSync(2, `probe: ${server} -> TIMEOUT (30 s)\n`);
     child.kill("SIGTERM");
     process.exit(1);
 }, 30_000);
@@ -46,13 +46,13 @@ child.stdout.on("data", (chunk) => {
         }
         clearTimeout(timer);
         const ok = Boolean(message.result?.serverInfo);
-        process.stderr.write(`probe: ${server} -> ${ok ? `OK ${message.result.serverInfo.name}` : `FAIL ${line.slice(0, 200)}`}\n`);
+        fs.writeSync(2, `probe: ${server} -> ${ok ? `OK ${message.result.serverInfo.name}` : `FAIL ${line.slice(0, 200)}`}\n`);
         child.kill("SIGTERM");
         process.exit(ok ? 0 : 1);
     }
 });
 child.on("close", () => {
     clearTimeout(timer);
-    process.stderr.write(`probe: ${server} -> server exited before responding\n`);
+    fs.writeSync(2, `probe: ${server} -> server exited before responding\n`);
     process.exit(1);
 });

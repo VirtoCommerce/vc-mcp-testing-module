@@ -1,6 +1,7 @@
 # vc-secrets
 
-An MCP server entry normally holds its credential. This launcher makes it hold a call instead:
+This launcher runs a **declared process** with the secrets that process needs — an MCP server, or a task that is
+not one. The config entry holds a call to the launcher instead of a credential:
 
 ```json
 { "mcpServers": { "github": {

@@ -1,4 +1,4 @@
-// vc-secrets.mjs — MCP secret launcher.
+// vc-secrets.mjs — secrets launcher: runs a declared process (an MCP server, or a task) with its secrets.
 // Resolves the secrets a declared child needs from the OS credential store at launch time and
 // injects them into that one child only. README.md carries the declaration schema, the three
 // declaration homes and their precedence.
@@ -64,12 +64,16 @@ function parseReference(value) {
     return { name: match[1], field: match[2] ?? null };
 }
 
+// A near-miss that really IS a literal — `secrets:` with the plural. Anything starting with exactly
+// `secret:` is NOT a literal: parseReference throws on it, so the launch dies. Reporting those as
+// harmless literals told the operator a launch-breaking value was fine; they now reach the parse below
+// and are reported as the FAIL they are.
 function isTypoReference(value) {
-    if (typeof value !== "string" || REF_RE.test(value)) {
+    if (typeof value !== "string" || REF_RE.test(value) || value.startsWith("secret:")) {
         return false;
     }
 
-    return /^secrets?:/.test(value);
+    return /^secrets?:/i.test(value);
 }
 
 // realpath, not resolve: an aliased .claude — a symlinked home, a bind mount — is one file under two
@@ -972,9 +976,16 @@ function readEnableLists(file) {
 // token that is already dead. Both files are read, and ~/.claude.json carries per-project blocks too.
 function readWiredServers(mcpJsonPath, userJsonPath = null, projectRoot = null, problems = []) {
     const wired = new Set();
+    // Case-insensitive, and across `command` too. The documented entry carries `${VC_SECRETS}` — which
+    // does not contain the lowercase string — so a case-sensitive args-only match failed on exactly the
+    // configuration this plugin tells people to write, leaving `wired` empty and the legacy-token advice
+    // stuck at "still required".
+    const mentionsLauncher = (v) => typeof v === "string" && v.toLowerCase().includes("vc-secrets")
+        || typeof v === "string" && v.toUpperCase().includes("VC_SECRETS");
     const collect = (mcpServers) => {
         for (const [name, entry] of Object.entries(mcpServers ?? {})) {
-            if (Array.isArray(entry?.args) && entry.args.some((a) => typeof a === "string" && a.includes("vc-secrets"))) {
+            const fields = [entry?.command, ...(Array.isArray(entry?.args) ? entry.args : [])];
+            if (fields.some(mentionsLauncher)) {
                 wired.add(name);
             }
         }

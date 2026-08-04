@@ -1,7 +1,6 @@
 ---
 description: "Run the vc-secrets diagnostic and interpret it — which declarations loaded, which secrets resolve, which need migrating, and what to do about each FAIL. Use when a wrapped MCP server shows failed, or after any change to a declaration."
 argument-hint: "[--all]"
-disable-model-invocation: true
 ---
 
 # /vc-secrets:doctor — diagnose the secret path

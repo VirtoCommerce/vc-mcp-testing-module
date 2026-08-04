@@ -1283,3 +1283,47 @@ test("cmdDoctor: a task's name does not mark a same-named server as enabled", ()
         "the same-named task must not make the opt-in server look enabled/consumed");
     assert.ok(!/FAIL secret "kv-secret"/.test(r.stderr));
 });
+
+// ── regressions from the bot review on PR 210 ──────────────────────────────────────────────────────
+
+test("doctorReport: a malformed secret: reference is a FAIL, not a 'treated as a literal' warning", () => {
+    // `secret:ado_pat` (underscore) does not match REF_RE, so parseReference THROWS and the launch dies.
+    // Reporting it as a mistyped literal told the operator a launch-breaking value was harmless.
+    const cfg = {
+        secrets: {}, tasks: {},
+        servers: { s: { command: "x", args: [], env: { T: "secret:ado_pat" }, home: "project" } },
+    };
+    const lines = m.doctorReport(cfg, {
+        env: {}, platform: "linux", enableLists: { enabled: [], disabled: [], envKeys: [] },
+        resolvable: {}, skipped: [], toolsMissing: [], wired: new Set(),
+    });
+    assert.ok(lines.some((l) => l.startsWith("FAIL") && l.includes("secret:ado_pat")), `expected a FAIL, got:\n${lines.join("\n")}`);
+    assert.ok(!lines.some((l) => l.includes("treated as a literal")), "must not be reported as a harmless literal");
+});
+
+test("isTypoReference: only the plural prefix is a literal; a malformed secret: value is not", () => {
+    assert.equal(m.isTypoReference("secrets:ado-pat"), true);
+    assert.equal(m.isTypoReference("secret:ado_pat"), false, "this one throws at launch — it is not a literal");
+    assert.equal(m.isTypoReference("plain"), false);
+});
+
+test("readWiredServers: the DOCUMENTED wiring form is detected", () => {
+    // The README's entry is {command: "node", args: ["${VC_SECRETS}", "run", "x"]}. A case-sensitive
+    // search for "vc-secrets" never matches "${VC_SECRETS}", so the one configuration this plugin tells
+    // people to write looked unwired — and the earlier test passed only because its fixture used a
+    // lowercase literal path nobody is told to write.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-documented-"));
+    tmpDirs.push(dir);
+    const mcpJsonPath = path.join(dir, ".mcp.json");
+    fs.writeFileSync(mcpJsonPath, JSON.stringify({
+        mcpServers: {
+            "via-variable": { command: "node", args: ["${VC_SECRETS}", "run", "via-variable"] },
+            "via-command": { command: "/home/dev/.claude/plugins/data/x/vc-secrets-shim.mjs", args: ["run", "via-command"] },
+            unrelated: { command: "other-mcp", args: ["stdio"] },
+        },
+    }));
+
+    const wired = m.readWiredServers(mcpJsonPath);
+    assert.deepEqual([...wired].sort(), ["via-command", "via-variable"]);
+    assert.ok(!wired.has("unrelated"));
+});

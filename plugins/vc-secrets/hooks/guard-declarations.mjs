@@ -9,7 +9,7 @@
 // Protocol (verified against the running client): the tool call arrives as JSON on stdin with
 // tool_input.file_path; exit 2 with a reason on stderr denies the call, exit 0 allows it.
 
-import { readFileSync } from "node:fs";
+import fs, { readFileSync } from "node:fs";
 
 let input;
 try {
@@ -22,7 +22,7 @@ const filePath = ((input.tool_input || {}).file_path || "").replace(/\\/g, "/");
 
 // Covers all three homes: <repo>/.claude/vc-secrets.json, its .local. sibling, and ~/.claude/vc-secrets.json
 if (/\/\.claude\/vc-secrets(\.local)?\.json$/i.test(filePath)) {
-    process.stderr.write(
+    fs.writeSync(2, 
         "BLOCK: a vc-secrets declaration decides which command receives which secret — change it via a human PR, not an in-session edit. "
         + "(Edit/Write only; this is a speed bump, not a security boundary.)\n"
     );
@@ -32,7 +32,7 @@ if (/\/\.claude\/vc-secrets(\.local)?\.json$/i.test(filePath)) {
 // The shim is what every server launch runs, and — unlike the launcher in the plugin cache — a plugin
 // update never overwrites it, so an edit here survives indefinitely.
 if (/\/plugins\/data\/[^/]+\/vc-secrets-shim\.mjs$/i.test(filePath)) {
-    process.stderr.write(
+    fs.writeSync(2, 
         "BLOCK: the vc-secrets shim is on the path of every server launch — reinstall it with /vc-secrets:install instead of editing it.\n"
     );
     process.exit(2);
