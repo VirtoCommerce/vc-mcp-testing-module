@@ -1380,3 +1380,42 @@ test("a double quote in command/args/vault/secret is refused — it would break 
     assert.throws(() => m.loadConfig(projectPaths({
         secrets: { kv: { backend: "keyvault", vault: q, secret: "s" } }, servers: {} })), /double quote/);
 });
+
+test("install-shim: copies the shim, is idempotent, and prints both variable lines", () => {
+    const script = fileURLToPath(new URL("./scripts/install-shim.mjs", import.meta.url));
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-inst-"));
+    tmpDirs.push(home);
+    const env = { ...process.env, HOME: home, CLAUDE_PLUGIN_DATA: "" };
+
+    const first = spawnSync(process.execPath, [script], { encoding: "utf8", env });
+    assert.equal(first.status, 0, first.stderr);
+    const shim = path.join(home, ".claude", "plugins", "data", "vc-secrets-vc-tools", "vc-secrets-shim.mjs");
+    assert.ok(fs.existsSync(shim), `expected the shim at ${shim}\n${first.stdout}${first.stderr}`);
+    assert.match(first.stdout, /installed/);
+    // Both lines, because they are read by different processes — the settings entry by a wrapped server,
+    // the export by the verbs a human runs in a terminal.
+    assert.match(first.stdout, /"VC_SECRETS"/);
+    assert.match(first.stdout, /export VC_SECRETS=/);
+
+    const second = spawnSync(process.execPath, [script], { encoding: "utf8", env });
+    assert.equal(second.status, 0, second.stderr);
+    assert.match(second.stdout, /already up to date/);
+});
+
+test("install-shim: a CLAUDE_PLUGIN_DATA belonging to another plugin is ignored, with a warning", () => {
+    // Measured, not imagined: run from a session where another plugin's command was active, the variable
+    // pointed at `…/data/codex-openai-codex` and the shim was written into that plugin's directory.
+    const script = fileURLToPath(new URL("./scripts/install-shim.mjs", import.meta.url));
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-inst2-"));
+    tmpDirs.push(home);
+    const foreign = path.join(home, "data", "some-other-plugin");
+    fs.mkdirSync(foreign, { recursive: true });
+
+    const r = spawnSync(process.execPath, [script], {
+        encoding: "utf8", env: { ...process.env, HOME: home, CLAUDE_PLUGIN_DATA: foreign },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /ignoring CLAUDE_PLUGIN_DATA/);
+    assert.ok(!fs.existsSync(path.join(foreign, "vc-secrets-shim.mjs")), "must not write into another plugin's directory");
+    assert.ok(fs.existsSync(path.join(home, ".claude", "plugins", "data", "vc-secrets-vc-tools", "vc-secrets-shim.mjs")));
+});

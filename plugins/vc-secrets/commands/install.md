@@ -1,5 +1,5 @@
 ---
-description: "Put the vc-secrets shim at a stable path and print the one environment variable that points at it. Run once per machine. NOT needed after an ordinary plugin update — the shim resolves the current version by itself."
+description: "Put the vc-secrets shim at a stable path and print the two environment lines that point at it. Run once per machine. NOT needed after an ordinary plugin update — the shim resolves the plugin's current location by itself."
 argument-hint: ""
 disable-model-invocation: true
 ---
@@ -7,49 +7,38 @@ disable-model-invocation: true
 # /vc-secrets:install — make the launcher reachable from a repo
 
 A repo's committed `.mcp.json` cannot name the launcher's real location: plugin files live in a cache
-directory whose path carries the plugin version, so it changes on every update. So the stable path
-holds `vc-secrets-shim.mjs`, which resolves the plugin's current location per launch, and repos
-reference the shim through one variable.
+directory whose path carries the plugin version, so it changes on every update. The stable path holds
+`vc-secrets-shim.mjs`, which resolves the current install per launch, and repos reference the shim
+through one variable.
 
-Install the **shim**, never a copy of the launcher. A copy would keep running an old version after an
-update while the plugin's commands moved on — and the launcher's own version diagnostics would then
-blame the plugin, which would be true of the copy and false of the plugin.
+## Run it
 
-## Steps
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/install-shim.mjs"
+```
 
-1. **Find the stable directory.** `${CLAUDE_PLUGIN_DATA}` is the plugin's own data directory and
-   survives updates, unlike `${CLAUDE_PLUGIN_ROOT}`. If it is not populated in this context, list
-   `~/.claude/plugins/data/` and use the entry belonging to this plugin, creating it if absent. Say
-   which of the two you used. Never write a cache path into any file.
-2. **Copy** `${CLAUDE_PLUGIN_ROOT}/vc-secrets-shim.mjs` there, keeping the filename — the plugin's
-   own guard hook recognizes the shim by that name at that location.
-3. **Print** — do not write — both of the following. A `settings.json` `env` block reaches only
-   processes Claude Code itself starts, but the hand-run verbs (`set`, `unlock`, …) run from a real
-   terminal, where `$VC_SECRETS` is otherwise unset and `node "$VC_SECRETS" set x` would run `node ""`.
-   So print the `env` entry for `~/.claude/settings.json`, for a wrapped server to read:
-   ```json
-   { "env": { "VC_SECRETS": "<absolute path>/vc-secrets-shim.mjs" } }
-   ```
-   and an export line for the developer's shell rc (`~/.bashrc`, `~/.zshrc`, …), for the hand-run verbs
-   to read:
-   ```bash
-   export VC_SECRETS="<absolute path>/vc-secrets-shim.mjs"
-   ```
-   That settings file and that shell rc belong to the developer. A tool that edits someone's global
-   settings or shell rc unasked is a tool nobody trusts twice. Say that MCP servers pick the variable up
-   only after a restart, and the shell rc only in a new shell.
-4. **Verify** by running `node <path>/vc-secrets-shim.mjs doctor` from a shell that can reach the
-   credential store, and reporting the output. With no declaration written yet, the whole output is
-   `FAIL no declaration file found` — that is expected at this point; the next step is writing a
-   declaration, then `set`.
+The script does the three exact things — resolve the stable directory, copy the shim, print the two
+variable lines — so they come out the same on every machine and are covered by tests. It is idempotent:
+a second run reports `already up to date`.
 
-## When this has to be re-run
+It deliberately **prints** rather than writes. `~/.claude/settings.json` and a shell rc belong to the
+developer, and a tool that edits either unasked is a tool nobody trusts twice.
 
-Not after a plugin update: the shim re-resolves the path every launch. Only when the shim's own
-contract changes, and `doctor` says so in as many words. If a repo's `.mcp.json` fails with
-`Missing environment variables: VC_SECRETS`, the variable was never set on this machine — step 3.
+## Then
+
+1. **Relay its output verbatim.** Both variable lines matter, and they are read by different processes:
+   the `settings.json` entry by a wrapped MCP server, the `export` by `set` / `unlock` / `doctor` /
+   `migrate` when a human runs them in a terminal. Say that MCP servers pick the variable up only after
+   a restart, and the shell rc only in a new shell.
+2. **Run the `doctor` command the script prints** and report its output. On a machine with no declaration
+   file yet the whole output is `FAIL no declaration file found` — expected at this point, not a bug
+   report. The next step is writing a declaration, then `set`.
+3. If the script exits non-zero, relay its message and stop. `CLAUDE_PLUGIN_ROOT` unset means this is not
+   a complete plugin install; two candidate data directories means a stale one has to be removed first.
 
 ## Report
 
-The directory you installed to and how you found it, the snippet to add, and the `doctor` output
-verbatim. If a shim already existed there, say whether you replaced it.
+The shim's path, whether it was installed / replaced / already current, the two lines to add, and the
+`doctor` output. If the script warned that it ignored `CLAUDE_PLUGIN_DATA`, pass that on — it means the
+variable pointed at another plugin's directory, which happens when the command runs from a session where
+a different plugin was active.
