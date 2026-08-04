@@ -1,0 +1,22 @@
+{
+  "name": "vc-secrets",
+  "description": "MCP secret launcher. An MCP server entry stores a call to this launcher instead of a credential: the secret is resolved from the OS credential store (Windows Credential Manager / macOS Keychain / gpg) or Azure Key Vault at launch time and injected into that one child process only, so no plaintext token sits in .mcp.json, in ~/.claude.json, in a settings env block or in a .env file. Declarations live in three homes — committed per repo, gitignored per repo, and per user — and carry no secret values, so they are reviewable. Ships no MCP servers of its own: each server is declared by whoever needs it.",
+  "version": "0.1.0",
+  "displayName": "Virto Commerce MCP Secrets",
+  "author": {
+    "name": "Virto Commerce",
+    "email": "support@virtocommerce.com"
+  },
+  "homepage": "https://github.com/VirtoCommerce/vc-mcp-testing-module",
+  "repository": "https://github.com/VirtoCommerce/vc-mcp-testing-module",
+  "license": "TBD-internal",
+  "keywords": [
+    "mcp",
+    "secrets",
+    "credentials",
+    "keychain",
+    "key-vault",
+    "security"
+  ],
+  "defaultEnabled": false
+}
