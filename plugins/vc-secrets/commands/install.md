@@ -29,7 +29,8 @@ blame the plugin, which would be true of the copy and false of the plugin.
    ```
    That file belongs to the developer. A tool that edits someone's global settings unasked is a tool
    nobody trusts twice. Say that MCP servers pick the variable up only after a restart.
-4. **Verify** by running `node <path>/vc-secrets-shim.mjs doctor` unsandboxed and reporting the
+4. **Verify** by running `node <path>/vc-secrets-shim.mjs doctor` from a shell that can reach the
+   credential store, and reporting the
    output. On a machine with nothing stored yet the secrets report as not resolvable — that is
    expected, and the next step is `set`, not a bug report.
 

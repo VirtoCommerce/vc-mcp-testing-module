@@ -11,9 +11,11 @@ argument-hint: "[--all]"
 node "$VC_SECRETS" doctor          # add --all to force-check Key Vault secrets no enabled server consumes
 ```
 
-**Run it unsandboxed.** `doctor` decrypts for real, so a sandboxed shell that cannot reach the
-credential store reports a `FAIL` that says nothing about the actual configuration. If the sandbox
-cannot be lifted, say so and stop — do not report those FAILs as findings.
+**The shell must be able to reach the credential store.** `doctor` decrypts for real, so a restricted
+or sandboxed shell — one that cannot read `~/.gnupg`, the Keychain or Credential Manager — reports a
+`FAIL` on every local secret while saying nothing about the actual configuration. The tell is that
+*all* of them fail at once. If the restriction cannot be lifted, say so and stop rather than reporting
+those FAILs as findings.
 
 ## Reading the output
 

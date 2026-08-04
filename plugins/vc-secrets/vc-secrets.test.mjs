@@ -1327,3 +1327,14 @@ test("readWiredServers: the DOCUMENTED wiring form is detected", () => {
     assert.deepEqual([...wired].sort(), ["via-command", "via-variable"]);
     assert.ok(!wired.has("unrelated"));
 });
+
+test("the probe runs at all — its own imports resolve", () => {
+    // `node --check` proves a file parses; an undefined identifier is not a syntax error. A mechanical
+    // edit replaced process.stderr.write with fs.writeSync here and left `fs` unimported, so every
+    // invocation threw ReferenceError while the file still checked clean. Spawning it is the only
+    // assertion that would have caught that.
+    const probe = fileURLToPath(new URL("./vc-secrets-probe.mjs", import.meta.url));
+    const r = spawnSync(process.execPath, [probe], { encoding: "utf8" });
+    assert.ok(!/ReferenceError|is not defined/.test(r.stderr), `probe failed to run:\n${r.stderr}`);
+    assert.match(r.stderr + r.stdout, /usage: node vc-secrets-probe\.mjs/);
+});

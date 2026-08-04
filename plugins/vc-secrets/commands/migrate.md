@@ -22,8 +22,13 @@ rotation. So the launcher reads the old entry itself and writes the new key, nev
 node "$VC_SECRETS" migrate
 ```
 
-Unsandboxed, in a real terminal — on the gpg backend the agent may need to be unlocked first
-(`node "$VC_SECRETS" unlock`).
+On the gpg backend the agent has to be warm first, so run `node "$VC_SECRETS" unlock` in a terminal
+before this — `migrate` itself never prompts, it reads with pinentry disabled and fails fast on a cold
+agent rather than waiting for a passphrase nobody can type.
+
+If every secret reports as unreadable, check whether the shell can reach your credential store at all
+(a sandboxed or restricted shell cannot read `~/.gnupg`, the Keychain or Credential Manager). That
+answer is about the shell, not about the stored secrets.
 
 ## What it does per secret
 

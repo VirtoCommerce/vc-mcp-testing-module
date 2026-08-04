@@ -1,6 +1,7 @@
 // vc-secrets-probe.mjs — verification aid: initialize-handshake through vc-secrets run.
 // Usage: node vc-secrets-probe.mjs <server>
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 

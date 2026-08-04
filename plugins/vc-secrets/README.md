@@ -189,7 +189,7 @@ Then wire each server with the launcher as its `command`, either by hand in the 
 | Symptom | Meaning |
 |---|---|
 | `decryption failed: Operation cancelled` | gpg agent is cold — `unlock` in a terminal |
-| `FAIL` on every local secret, only under an agent | `doctor` ran sandboxed; rerun it unsandboxed |
+| `FAIL` on every local secret at once | the shell cannot reach the credential store (a sandboxed or restricted one cannot); rerun where it can |
 | `secret "x" is only under the legacy key` | Run `migrate` — the value cannot be re-typed, the store never gives it back |
 | `projectId disagrees` | The project and local files name different ids; they key the same secrets |
 | `schemaVersion N needs a newer vc-secrets` | The declaration is ahead of the installed plugin — update the plugin |
