@@ -23,16 +23,25 @@ blame the plugin, which would be true of the copy and false of the plugin.
    which of the two you used. Never write a cache path into any file.
 2. **Copy** `${CLAUDE_PLUGIN_ROOT}/vc-secrets-shim.mjs` there, keeping the filename — the plugin's
    own guard hook recognizes the shim by that name at that location.
-3. **Print** — do not write — the `env` entry for `~/.claude/settings.json`:
+3. **Print** — do not write — both of the following. A `settings.json` `env` block reaches only
+   processes Claude Code itself starts, but the hand-run verbs (`set`, `unlock`, …) run from a real
+   terminal, where `$VC_SECRETS` is otherwise unset and `node "$VC_SECRETS" set x` would run `node ""`.
+   So print the `env` entry for `~/.claude/settings.json`, for a wrapped server to read:
    ```json
    { "env": { "VC_SECRETS": "<absolute path>/vc-secrets-shim.mjs" } }
    ```
-   That file belongs to the developer. A tool that edits someone's global settings unasked is a tool
-   nobody trusts twice. Say that MCP servers pick the variable up only after a restart.
+   and an export line for the developer's shell rc (`~/.bashrc`, `~/.zshrc`, …), for the hand-run verbs
+   to read:
+   ```bash
+   export VC_SECRETS="<absolute path>/vc-secrets-shim.mjs"
+   ```
+   That settings file and that shell rc belong to the developer. A tool that edits someone's global
+   settings or shell rc unasked is a tool nobody trusts twice. Say that MCP servers pick the variable up
+   only after a restart, and the shell rc only in a new shell.
 4. **Verify** by running `node <path>/vc-secrets-shim.mjs doctor` from a shell that can reach the
-   credential store, and reporting the
-   output. On a machine with nothing stored yet the secrets report as not resolvable — that is
-   expected, and the next step is `set`, not a bug report.
+   credential store, and reporting the output. With no declaration written yet, the whole output is
+   `FAIL no declaration file found` — that is expected at this point; the next step is writing a
+   declaration, then `set`.
 
 ## When this has to be re-run
 

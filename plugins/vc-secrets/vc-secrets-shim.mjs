@@ -55,8 +55,8 @@ const cwd = path.resolve(process.cwd());
 const byProject = records.filter((r) => typeof r.projectPath === "string" && (cwd === path.resolve(r.projectPath) || cwd.startsWith(path.resolve(r.projectPath) + path.sep)));
 const candidates = byProject.length > 0 ? byProject : records;
 
-// When cwd belongs to none of them — a worktree lives outside its module directory by convention, and
-// any scratch directory qualifies — the tiebreak must be the VERSION. `lastUpdated` is refreshed
+// When cwd belongs to none of them — a git worktree or a scratch directory often sits outside every
+// registered project path — the tiebreak must be the VERSION. `lastUpdated` is refreshed
 // independently of any version change, so ordering by it can select an older launcher against newer
 // declarations: exactly the staleness this shim exists to prevent, and silent when it happens.
 const versionKey = (r) => String(r.version ?? "").split(".").map((p) => Number.parseInt(p, 10)).map((n) => (Number.isFinite(n) ? n : -1));

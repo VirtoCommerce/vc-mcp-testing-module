@@ -29,22 +29,24 @@ team's servers, a person for their own.
 |---|---|
 | `/vc-secrets:install` | Put the shim at a stable path and print the one environment variable to set |
 | `/vc-secrets:doctor` | Resolve everything a live server needs and report what is broken |
-| `/vc-secrets:migrate` | One-time: move secrets stored under the pre-plugin key prefix to their namespaced keys |
+| `/vc-secrets:migrate` | One-time: move secrets stored under the pre-plugin flat `mcpw:<name>` credential (or `~/.config/mcpw/secrets/<name>.gpg`) to their namespaced keys |
 
 `install` deliberately installs a **shim**, not a copy of the launcher: plugin files live in a cache
 directory whose path carries the version, so a copy would keep running an old launcher after an
 update while the plugin's commands moved on. The shim resolves the plugin's current location on every
 launch, so an ordinary plugin update needs no reinstall.
 
-From a terminal, everything runs through the shim — `node "$VC_SECRETS" <verb>`:
+From a terminal, everything runs through the shim — `node "$VC_SECRETS" <verb>` — once `VC_SECRETS` is
+exported from your shell rc as well as set in `settings.json`, because the settings entry reaches only
+the processes Claude Code starts:
 
 | Verb | |
 |---|---|
-| `set <name>` | Store one secret. Hidden prompt; the value never appears in argv. |
-| `run <server>` | Resolve and exec that server on stdio. This is what an MCP entry calls. |
+| `set <name>` | Store one secret. Hidden prompt; the value never appears in argv. Only works for a name already declared — it refuses an unknown one. |
+| `run <server>` | Resolve and run that server on stdio, staying as its parent. This is what an MCP entry calls. |
 | `task <name>` | Same, for a declared non-MCP command — a load-test harness, a migration step. |
 | `doctor` | Diagnose. Exits non-zero on any `FAIL`, so it works as a gate. |
-| `unlock` | Warm the gpg agent for the session (gpg backend only). |
+| `unlock` | Warm the gpg agent for the session (gpg backend only) — decrypts whichever of the current or the older stored file exists. No-op on Windows and macOS. |
 | `migrate` | Copy legacy-prefix entries to namespaced keys. Idempotent. |
 
 ## Declarations
@@ -159,14 +161,19 @@ than writing these by hand — it gets the file mode, the atomic replace and the
 
 ## Setup
 
+Every verb reads the declaration, so write one first — `<repo>/.claude/vc-secrets.json` for the team's
+secrets, `~/.claude/vc-secrets.json` for your own. On a fresh machine, skipping this step means every
+verb below throws.
+
 ```bash
+# 0. Write a declaration (see "Declarations" above) before anything else.
 /vc-secrets:install                  # installs the shim, prints the env line to add
-node "$VC_SECRETS" set ado-pat
+node "$VC_SECRETS" set <name>        # <name> must be one of the secrets your declaration lists
 node "$VC_SECRETS" unlock            # gpg backend only, once per session, in a real terminal
 node "$VC_SECRETS" doctor            # expect no FAIL
 ```
 
-`install` prints an `env` entry for `~/.claude/settings.json` setting `VC_SECRETS` to the launcher's
+`install` prints an `env` entry for `~/.claude/settings.json` setting `VC_SECRETS` to the shim's
 stable path. It prints rather than writes: that file is yours, and a tool that edits a developer's
 global settings unasked is a tool nobody trusts twice.
 
@@ -177,7 +184,7 @@ Then wire each server with the launcher as its `command`, either by hand in the 
 
 | Variable | Effect |
 |---|---|
-| `VC_SECRETS` | Where the launcher lives; referenced from `.mcp.json` so no repo hardcodes a plugin path |
+| `VC_SECRETS` | Where the shim lives; referenced from `.mcp.json` so no repo hardcodes a plugin path |
 | `VC_SECRETS_LOCAL_BACKEND` | Override the detected backend (`wcm` / `keychain` / `gpg`). WSL is **not** treated as Windows |
 | `VC_SECRETS_GPG_RECIPIENT` | Encrypt to a specific key instead of your default |
 | `VC_SECRETS_POWERSHELL` | Set to `pwsh` if Constrained Language Mode blocks the in-box PowerShell's `Add-Type` |
@@ -194,7 +201,7 @@ Then wire each server with the launcher as its `command`, either by hand in the 
 | `projectId disagrees` | The project and local files name different ids; they key the same secrets |
 | `schemaVersion N needs a newer vc-secrets` | The declaration is ahead of the installed plugin — update the plugin |
 | `Missing environment variables: VC_SECRETS` | The variable was never set on this machine — run `/vc-secrets:install` |
-| A wrapped server shows failed in `/mcp` | `doctor` first (secret?), then the probe (`vc-secrets-probe.mjs <server>`) for the binary |
+| A wrapped server shows failed in `/mcp` | `doctor` first (secret?), then the probe for the binary: take the `installPath` of `vc-secrets@vc-tools` from `~/.claude/plugins/installed_plugins.json`, then `node <installPath>/vc-secrets-probe.mjs <server>` |
 
 The probe separates "secret not resolvable" from "server binary broken": `doctor` covers the first,
 the probe the second by completing a real `initialize` handshake through `run`.
@@ -203,10 +210,10 @@ the probe the second by completing a real `initialize` handshake through `run`.
 
 The plugin ships a `PreToolUse` hook that denies agent Edit/Write on a declaration file and on the
 shim. A declaration decides which command receives which secret, so it changes through a human PR;
-the shim sits on the path of every launch and no plugin update overwrites it. The hook sees Edit and
-Write only — the same change made through a shell command goes past it — so it is a speed bump that
-surfaces an unexpected edit, not a boundary. Editing those files in your own editor is the intended
-path.
+the shim sits on the path of every launch and no plugin update overwrites it. The hook sees Edit,
+Write, and NotebookEdit only — the same change made through a shell command goes past it — so it is a
+speed bump that surfaces an unexpected edit, not a boundary. Editing those files in your own editor is
+the intended path.
 
 ## Scope of the protection
 
@@ -214,3 +221,9 @@ This removes plaintext-at-rest on the MCP path and shrinks the accidental and pr
 surface. It is **not** a boundary against a deliberately malicious agent running the same backend
 tools itself, editing a declaration, or tampering with `PATH` — inside one OS user account there is
 no such boundary. A real one needs a broker under a separate account.
+
+Two things it does harden regardless: `NODE_OPTIONS`, `LD_PRELOAD`, `LD_AUDIT`, `LD_LIBRARY_PATH`,
+`DYLD_INSERT_LIBRARIES`, and `DYLD_LIBRARY_PATH` are refused as declaration `env` keys and stripped
+from every child the launcher spawns, so a declaration cannot inject code into the process that holds
+a secret. And a backend's stderr is redacted of any resolved value before it is reported, with the
+in-process copy dropped right after the child starts.

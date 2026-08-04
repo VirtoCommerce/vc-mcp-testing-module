@@ -830,18 +830,33 @@ async function cmdUnlock(cfg) {
         // that hands gpg a bogus terminal path instead of leaving the variable unset.
         process.stderr.write("vc-secrets: GPG_TTY is not set — pinentry may fail; add `if [ -t 0 ]; then export GPG_TTY=$(tty); fi` to your shell rc\n");
     }
-    const names = Object.keys(cfg.secrets).filter((n) => cfg.secrets[n].backend === "local"
-        && fs.existsSync(keyToPath(keyFor(n, cfg.secrets[n], cfg))));
-    if (names.length === 0) {
+    // Legacy paths count. `migrate` documents `unlock` as its prerequisite, and before a migration NO
+    // secret exists under a new key — so looking only there left the agent cold, and migrate then failed
+    // on the very run it was supposed to enable. One decrypt warms the agent for all of them; the first
+    // file that exists is enough.
+    const files = [];
+    for (const [name, decl] of Object.entries(cfg.secrets)) {
+        if (decl.backend !== "local") {
+            continue;
+        }
+        const current = keyToPath(keyFor(name, decl, cfg));
+        const legacy = legacyKeyToPath(name);
+        if (fs.existsSync(current)) {
+            files.push({ name, file: current });
+        } else if (fs.existsSync(legacy)) {
+            files.push({ name: `${name} (legacy)`, file: legacy });
+        }
+    }
+    if (files.length === 0) {
         process.stderr.write("vc-secrets: no stored local secrets to unlock\n");
         return;
     }
-    for (const name of names) {
+    for (const { file } of files) {
         // interactive: pinentry gets the TTY; -o /dev/null: plaintext never enters vc-secrets or the terminal
-        await runTool({ cmd: "gpg", args: ["--quiet", "--decrypt", "-o", "/dev/null",
-            keyToPath(keyFor(name, cfg.secrets[name], cfg))], interactive: true, timeoutMs: null, captureStdout: false });
+        await runTool({ cmd: "gpg", args: ["--quiet", "--decrypt", "-o", "/dev/null", file],
+            interactive: true, timeoutMs: null, captureStdout: false });
     }
-    process.stderr.write(`vc-secrets: gpg agent warmed (${names.join(", ")})\n`);
+    process.stderr.write(`vc-secrets: gpg agent warmed (${files.map((f) => f.name).join(", ")})\n`);
 }
 
 // Pre-rename storage: wcm/keychain credential name was `mcpw:<name>` (no scope, no projectId —

@@ -29,9 +29,13 @@ those FAILs as findings.
 | `WARN … only under the legacy key` | the value exists, under the pre-plugin key | `/vc-secrets:migrate` — it cannot be re-typed, the store never hands a value back |
 | `WARN … declared in both` | the same name in two homes | intended override, or an accident — say which one wins and let the operator decide |
 | `WARN … unknown key … ignored` | the declaration is ahead of the installed launcher | update the plugin, or drop the key |
-| `WARN legacy token in settings/session env` | a plaintext credential still sits somewhere | remove it — nothing reads it once the server is wrapped |
+| `WARN <name> present in settings.local.json env — remove it (servers now read via vc-secrets)` | one of the five names the launcher watches (`ADO_MCP_AUTH_TOKEN`, `GITHUB_PERSONAL_ACCESS_TOKEN`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`) is still set in plaintext | remove the first three — they are stripped from the child and nothing reads them once wrapped. The two identifiers (`AZURE_TENANT_ID`, `AZURE_CLIENT_ID`) are **not** stripped — a server may legitimately inherit a tenant id — so remove them only once your declaration supplies them. This is a fixed list of five names, not a general plaintext sweep |
 | `FAIL` | not resolvable | `set` it, or `az login` for a Key Vault secret |
 | `SKIP` | a Key Vault secret no enabled server consumes | `--all` to check it anyway |
+| `WARN <file>: cannot be read … so advice about leftover tokens may be wrong` | the file behind a wiring check couldn't be read | the legacy-token verdict above it is unreliable — fix the read access and re-run |
+| `WARN … looks like a mistyped reference but is treated as a literal` | an env value looks like a `secrets:`-style typo for `secret:<name>` | fix the reference, or confirm the literal is intended |
+| `WARN … projectId is meaningless at user scope` | a user-scope declaration sets `projectId` | remove it — user scope doesn't use one |
+| `FAIL server "x" env Y: undeclared secret "z"` | the env entry references a secret name absent from `secrets` | declare it, or fix the typo — this is different from the plain `FAIL` row above, which means a *declared* secret didn't resolve |
 
 Exit code is 1 if any line is a `FAIL`, so it works as a gate in a script.
 

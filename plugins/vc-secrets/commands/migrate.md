@@ -1,5 +1,5 @@
 ---
-description: "One-time: move secrets stored under the pre-plugin key prefix to their namespaced keys. Run once after switching a machine from the in-repo wrapper to this plugin. Idempotent."
+description: "One-time: move secrets stored under the older flat `mcpw:` key prefix to their namespaced keys. Needed only on a machine that used the launcher this plugin replaces — otherwise every secret reports `no legacy entry`. Idempotent."
 argument-hint: ""
 disable-model-invocation: true
 ---
@@ -7,7 +7,10 @@ disable-model-invocation: true
 # /vc-secrets:migrate — carry existing secrets over to the namespaced keys
 
 Keys are now namespaced by the declaration's home (`vc-secrets:<projectId>:<name>`,
-`vc-secrets:user:<name>`) instead of a flat prefix. This copies what is already stored.
+`vc-secrets:user:<name>`) instead of the older flat `mcpw:<name>` credential (Credential Manager,
+Keychain) or `~/.config/mcpw/secrets/<name>.gpg` (gpg, `$XDG_CONFIG_HOME` honoured). This copies what
+is already stored under that legacy key. If this machine never ran the older launcher, there is
+nothing to migrate — every secret reports `no legacy entry` and the command can be ignored.
 
 ## Why this exists rather than "just set them again"
 
@@ -24,7 +27,9 @@ node "$VC_SECRETS" migrate
 
 On the gpg backend the agent has to be warm first, so run `node "$VC_SECRETS" unlock` in a terminal
 before this — `migrate` itself never prompts, it reads with pinentry disabled and fails fast on a cold
-agent rather than waiting for a passphrase nobody can type.
+agent rather than waiting for a passphrase nobody can type. That works even here, before anything has
+been migrated: `unlock` decrypts whichever of the current or the legacy stored file exists, so it warms
+the agent equally well before a migration as after one.
 
 If every secret reports as unreadable, check whether the shell can reach your credential store at all
 (a sandboxed or restricted shell cannot read `~/.gnupg`, the Keychain or Credential Manager). That
@@ -40,8 +45,8 @@ answer is about the shell, not about the stored secrets.
 | `cannot tell whether it is already migrated, refusing to touch it` | the store answered neither "here it is" nor "absent" — a cold gpg agent, a timeout, a wrong recipient. Nothing was written, deliberately: the alternative is overwriting a current value with a stale one. Fix the store (`unlock`, or check the backend) and re-run |
 | `migration failed` | the write itself failed; the old entry is untouched |
 
-The run exits non-zero if any secret failed or could not be judged. Idempotent, so re-running is safe. The legacy entry is left in place: nothing reads it, and deleting
-it would add a second way to fail. Remove it by hand later if you want the store tidy.
+The run exits non-zero if any secret failed or could not be judged. Idempotent, so re-running is safe. The legacy `mcpw:<name>` entry (or `~/.config/mcpw/secrets/<name>.gpg`) is left in place: nothing reads
+it, and deleting it would add a second way to fail. Remove it by hand later if you want the store tidy.
 
 ## Report
 
