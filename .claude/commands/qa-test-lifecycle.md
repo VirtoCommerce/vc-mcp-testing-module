@@ -138,7 +138,7 @@ These inputs trigger Phase 2 (Sync) automatically — code changed, so existing 
      "executed": true                        // summary.json verdict is not BLOCKED
    }
    ```
-   `summary.json`'s `promotion` block is `/qa-test` 6i's **hand-off record** — where the previous run got
+   `summary.json`'s `promotion` block is `/qa-test` 5i's **hand-off record** — where the previous run got
    to. It is **not** an approval and **not** an eligibility verdict: Phase 6P re-derives eligibility itself
    (see G10). No `test-cases.csv` ⇒ no `promotionSource` ⇒ **6P is a no-op**, and the ticket runs as an
    ordinary change source.
@@ -555,7 +555,7 @@ CSV itself, exactly as G10 does:
 - `npm run td:validate` → green (a promoted case whose `@td()` no longer resolves is a permanent red).
 - `npm run graphql:lint-labels -- <csv>` for any GraphQL case (DV-019).
 - **Every assertion grounded** — no `{HYPOTHESIS}`, no unconfirmed `{SPEC}`. A `{HYPOTHESIS}` that
-  `/qa-test` 6i could not resolve keeps its case at `Draft`: **not promotable**, no exceptions. An
+  `/qa-test` 5i could not resolve keeps its case at `Draft`: **not promotable**, no exceptions. An
   `{OBSERVED}` with no traceable artifact is the failure mode Dimension 10 exists to catch — if 6i's
   upgrades look unbacked, REJECT the case rather than promoting a fabricated expectation into permanent
   coverage.
@@ -948,7 +948,7 @@ Output: per-case verification:
   `--ci` and `--report-only` never promote. `Draft` cases stay out of regression selections.
 - **A `/qa-test` hand-off is a record, not an approval.** `summary.json`'s `promotion.eligible[]` says where
   the previous run got to; 6P **re-derives eligibility from the CSV** and freely demotes an "eligible" case
-  that fails re-derivation. `/qa-test` prepares promotion (6i) and never performs it — if this command
+  that fails re-derivation. `/qa-test` prepares promotion (5i) and never performs it — if this command
   trusted the hand-off, the promotion gate would be self-certified by the author.
 - **`/qa-test` Step 3 and this pipeline's Phases 3–4 run the SAME mechanism — the skills own it, both
   commands consume it.** `/qa-test-cases-generator` (+ `test-case-template.md`) owns the authoring contract

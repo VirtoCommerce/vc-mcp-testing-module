@@ -39,7 +39,7 @@ deployment.
 bug list for the feature, and the change-scoped regression result (the Artifact-C suite selection from the
 `/qa-test` run). **Owner:** `qa-lead-orchestrator` (this is its go/no-go call).
 
-**Independently ratified at `/qa-test` Step 6h.** This gate is not self-certified by the run that produced
+**Independently ratified at `/qa-test` Step 5h.** This gate is not self-certified by the run that produced
 the inputs: a **fresh `qa-lead-orchestrator` verifier instance** (§Verifier Mode) re-evaluates the criteria
 below from the raw inputs and may **downgrade** the GO/NO-GO. The pass-rate + bug-count math has a
 deterministic core:
@@ -66,13 +66,13 @@ and are combined with that math by the verifier.
 
 | Criterion | Threshold | Source |
 |-----------|-----------|--------|
-| `/qa-test` verdict | **PASS** or **PASS WITH NOTES** | `/qa-test` Step 6e |
-| Acceptance criteria | 100% verified — every atomic condition (story ACs + gap-ACs) carries PASS evidence, all reconciled SATISFIED-live | `/qa-test` Step 6b/6c |
+| `/qa-test` verdict | **PASS** or **PASS WITH NOTES** | `/qa-test` Step 5e |
+| Acceptance criteria | 100% verified — every atomic condition (story ACs + gap-ACs) carries PASS evidence, all reconciled SATISFIED-live | `/qa-test` Step 5b/5c |
 | `BL-*` invariants for the domain | Verified, none violated | `business-logic.md` |
 | Open P0 bugs in the feature | 0 | `reports/bugs/` |
 | Open P1 bugs in the feature | 0, or deferred with documented workaround + risk acceptance | `reports/bugs/` |
 | Change-scoped regression | ≥95% pass on the Artifact-C suites for the touched surface | `/qa-regression` result |
-| Exploratory session | Completed (mandatory P0/P1 + critical revenue flows) | `/qa-test` Step 5 |
+| Exploratory session | Completed (mandatory P0/P1 + critical revenue flows) | `/qa-test` Step 4 |
 | NFRs on the touched surface (as applicable) | No new a11y / performance / security violations introduced | `/qa-accessibility`, perf, security suites |
 | Smoke gate (§1) | PASS — the feature doesn't break a P0 flow | Suite 042/078 |
 
