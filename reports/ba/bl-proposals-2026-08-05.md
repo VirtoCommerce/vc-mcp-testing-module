@@ -56,7 +56,14 @@ request sequence captured this session on `playwright-firefox` with a dedicated 
 
 ## Coverage note (not a proposal)
 
-`BL-CART-009` is flagged **BLC-004 — uncovered**: no test case cites it in `Business_Rule`. Suggested homes,
+**CORRECTION (2026-08-05):** this section originally said `BL-CART-009` was **BLC-004 — uncovered**. That was
+**wrong** — `CPN-060` (077) and `CPN-SMK-060` (077b) both cite it in `Business_Rule`. The BLC-004 finding was a
+**linter false positive**: `buildCoverage()` in `scripts/knowledge/lint-bl.ts` silently `continue`s when
+`parseSuite()` throws, and `parseSuite` throws on a UTF-8 BOM — which **12 of 120** suite CSVs carry, including
+both 077 files. Details + blast radius in `reports/knowledge/BL-AUDIT-2026-08-05.md` §Coverage reconciliation.
+
+The **real** gap is narrower: no case cites `BL-CART-009` for its **read-only / input-provenance facet**
+(Claim C); the two existing citations are both for last-applied-wins anti-stacking. Suggested homes,
 deliberately not authored here (authoring stays with `/qa-test-cases-generator`):
 
 - `regression/suites/Frontend/marketing/077-coupons-promotions-storefront.csv` (`CPN-*`) — the natural home
