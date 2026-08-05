@@ -1385,7 +1385,11 @@ test("install-shim: copies the shim, is idempotent, and prints both variable lin
     const script = fileURLToPath(new URL("./scripts/install-shim.mjs", import.meta.url));
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-inst-"));
     tmpDirs.push(home);
-    const env = { ...process.env, HOME: home, CLAUDE_PLUGIN_DATA: "" };
+    // A foreign CLAUDE_PLUGIN_DATA in the environment, and it changes nothing: with no --data-dir the
+    // directory is computed. Measured provenance of such a value: a session where another plugin's
+    // context had set it, which put the shim in `…/data/codex-openai-codex` before the variable was
+    // dropped as an input.
+    const env = { ...process.env, HOME: home, CLAUDE_PLUGIN_DATA: path.join(home, "data", "some-other-plugin") };
 
     const first = spawnSync(process.execPath, [script], { encoding: "utf8", env });
     assert.equal(first.status, 0, first.stderr);
@@ -1400,22 +1404,86 @@ test("install-shim: copies the shim, is idempotent, and prints both variable lin
     const second = spawnSync(process.execPath, [script], { encoding: "utf8", env });
     assert.equal(second.status, 0, second.stderr);
     assert.match(second.stdout, /already up to date/);
+    assert.equal(fs.existsSync(path.join(env.CLAUDE_PLUGIN_DATA, "vc-secrets-shim.mjs")), false,
+        "must not write into another plugin's directory");
 });
 
-test("install-shim: a CLAUDE_PLUGIN_DATA belonging to another plugin is ignored, with a warning", () => {
-    // Measured, not imagined: run from a session where another plugin's command was active, the variable
-    // pointed at `…/data/codex-openai-codex` and the shim was written into that plugin's directory.
+test("install-shim: --data-dir decides the location, in both spellings", () => {
+    // The client hands over the directory it assigned; re-deriving a path the client already knows is
+    // what this flag replaces. The value is honoured wherever it points, as long as it names this plugin.
     const script = fileURLToPath(new URL("./scripts/install-shim.mjs", import.meta.url));
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-inst2-"));
     tmpDirs.push(home);
-    const foreign = path.join(home, "data", "some-other-plugin");
+    const assigned = path.join(home, "elsewhere", "vc-secrets-vc-tools");
+    const computed = path.join(home, ".claude", "plugins", "data", "vc-secrets-vc-tools");
+
+    for (const argv of [["--data-dir", assigned], [`--data-dir=${assigned}`]]) {
+        fs.rmSync(assigned, { recursive: true, force: true });
+        const r = spawnSync(process.execPath, [script, ...argv], { encoding: "utf8", env: { ...process.env, HOME: home } });
+        assert.equal(r.status, 0, r.stderr);
+        assert.ok(fs.existsSync(path.join(assigned, "vc-secrets-shim.mjs")), `${argv[0]}\n${r.stdout}${r.stderr}`);
+        assert.equal(fs.existsSync(computed), false, "the computed default must not be created when a directory was passed");
+        assert.match(r.stdout, /--data-dir/);
+    }
+
+    // A dropped argument would install into the computed default and report that as the choice, so an
+    // argument that is neither spelling has to stop the run rather than be skipped.
+    const typo = spawnSync(process.execPath, [script, "--data-dirs", assigned], { encoding: "utf8", env: { ...process.env, HOME: home } });
+    assert.equal(typo.status, 1);
+    assert.match(typo.stderr, /unrecognised argument/);
+});
+
+test("install-shim: a --data-dir naming another plugin is ignored, with a warning", () => {
+    // The regression this exists for: the documented line is a SHELL line, so where Claude Code does not
+    // substitute `${CLAUDE_PLUGIN_DATA}` the shell expands it from the inherited environment — measured as
+    // `…/data/codex-openai-codex`. That is an absolute path, so nothing syntactic rejects it, and a later
+    // uninstall of that plugin would delete this plugin's shim with its data directory. Reproduced through
+    // a real shell, because through argv alone the case cannot occur.
+    const script = fileURLToPath(new URL("./scripts/install-shim.mjs", import.meta.url));
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-inst3-"));
+    tmpDirs.push(home);
+    const foreign = path.join(home, ".claude", "plugins", "data", "some-other-plugin");
     fs.mkdirSync(foreign, { recursive: true });
 
-    const r = spawnSync(process.execPath, [script], {
+    const r = spawnSync("bash", ["-c", `node ${JSON.stringify(script)} --data-dir "\${CLAUDE_PLUGIN_DATA}"`], {
         encoding: "utf8", env: { ...process.env, HOME: home, CLAUDE_PLUGIN_DATA: foreign },
     });
+    // Without this the missing-bash case fails on `r.stderr` being undefined, which names nothing.
+    assert.equal(r.error, undefined, `a shell is required to reproduce this: ${r.error?.code}`);
     assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stderr, /ignoring CLAUDE_PLUGIN_DATA/);
-    assert.ok(!fs.existsSync(path.join(foreign, "vc-secrets-shim.mjs")), "must not write into another plugin's directory");
+    assert.match(r.stderr, /ignoring --data-dir/);
+    assert.equal(fs.existsSync(path.join(foreign, "vc-secrets-shim.mjs")), false, "must not write into another plugin's directory");
     assert.ok(fs.existsSync(path.join(home, ".claude", "plugins", "data", "vc-secrets-vc-tools", "vc-secrets-shim.mjs")));
+    assert.match(r.stdout, /some-other-plugin/);
+});
+
+test("install-shim: a --data-dir that never expanded is refused, not turned into a directory", () => {
+    // Reachable on Windows, where cmd.exe leaves `${...}` alone: the placeholder arrives as text and
+    // `mkdir` on it would succeed quietly, creating a directory named after the variable.
+    const script = fileURLToPath(new URL("./scripts/install-shim.mjs", import.meta.url));
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-inst4-"));
+    tmpDirs.push(home);
+
+    const r = spawnSync(process.execPath, [script, "--data-dir", "${CLAUDE_PLUGIN_DATA}"], {
+        encoding: "utf8", env: { ...process.env, HOME: home },
+    });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /must be an absolute path/);
+    assert.equal(fs.existsSync(path.join(home, ".claude")), false, "nothing may be created on that path");
+});
+
+test("install-shim: an empty --data-dir falls back to the computed default and says which was used", () => {
+    // A shell expanding an unset variable produces this, and it is what a human copy-pasting the
+    // documented line into a terminal gets. The default is right for every install whose marketplace
+    // carries the shipped name, so it proceeds — but the output has to name the choice.
+    const script = fileURLToPath(new URL("./scripts/install-shim.mjs", import.meta.url));
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-inst5-"));
+    tmpDirs.push(home);
+
+    const r = spawnSync(process.execPath, [script, "--data-dir", ""], {
+        encoding: "utf8", env: { ...process.env, HOME: home },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(fs.existsSync(path.join(home, ".claude", "plugins", "data", "vc-secrets-vc-tools", "vc-secrets-shim.mjs")));
+    assert.match(r.stdout, /arrived empty/);
 });

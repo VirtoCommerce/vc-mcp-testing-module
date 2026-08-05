@@ -30,7 +30,7 @@ team's servers, a person for their own.
 
 | Command | What it does |
 |---|---|
-| `/vc-secrets:install` | Put the shim at a stable path and print the one environment variable to set |
+| `/vc-secrets:install` | Put the shim at a stable path and print the two lines that point at it |
 | `/vc-secrets:doctor` | Resolve everything a live server needs and report what is broken |
 | `/vc-secrets:migrate` | One-time: move secrets stored under the pre-plugin flat `mcpw:<name>` credential (or `~/.config/mcpw/secrets/<name>.gpg`) to their namespaced keys |
 
@@ -170,15 +170,15 @@ verb below throws.
 
 ```bash
 # 0. Write a declaration (see "Declarations" above) before anything else.
-/vc-secrets:install                  # installs the shim, prints the env line to add
+/vc-secrets:install                  # installs the shim, prints the two lines to add
 node "$VC_SECRETS" set <name>        # <name> must be one of the secrets your declaration lists
 node "$VC_SECRETS" unlock            # gpg backend only, once per session, in a real terminal
 node "$VC_SECRETS" doctor            # expect no FAIL
 ```
 
-`install` prints an `env` entry for `~/.claude/settings.json` setting `VC_SECRETS` to the shim's
-stable path. It prints rather than writes: that file is yours, and a tool that edits a developer's
-global settings unasked is a tool nobody trusts twice.
+`install` prints an `env` entry for `~/.claude/settings.json` and the matching `export` for your shell
+rc, both setting `VC_SECRETS` to the shim's stable path. It prints rather than writes: those files are
+yours, and a tool that edits a developer's global settings unasked is a tool nobody trusts twice.
 
 Then wire each server with the launcher as its `command`, either by hand in the repo's `.mcp.json`
 (project scope) or with `claude mcp add-json --scope user|local` for your own.

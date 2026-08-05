@@ -14,8 +14,18 @@ through one variable.
 ## Run it
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/install-shim.mjs"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/install-shim.mjs" --data-dir "${CLAUDE_PLUGIN_DATA}"
 ```
+
+Claude Code substitutes both placeholders with the values belonging to the plugin that owns this file. The
+documented substitution table names *skill and agent content*, and a plugin's `commands/` directory is one
+of the documented locations for skills — so this line rests on that reading, and the first real run of
+this command on a machine is what confirms it.
+
+The script does not trust the value on arrival: it checks that the directory names this plugin. This line
+is a shell line, so where the placeholder is *not* substituted the shell expands it from the inherited
+environment instead, and the environment variable of that name carries whichever plugin's context set it.
+An argument and an expansion are indistinguishable by the time the script reads them.
 
 The script does the three exact things — resolve the stable directory, copy the shim, print the two
 variable lines — so they come out the same on every machine and are covered by tests. It is idempotent:
@@ -34,11 +44,13 @@ developer, and a tool that edits either unasked is a tool nobody trusts twice.
    file yet the whole output is `FAIL no declaration file found` — expected at this point, not a bug
    report. The next step is writing a declaration, then `set`.
 3. If the script exits non-zero, relay its message and stop. `CLAUDE_PLUGIN_ROOT` unset means this is not
-   a complete plugin install; two candidate data directories means a stale one has to be removed first.
+   a complete plugin install; a `--data-dir` that is not an absolute path means the placeholder reached the
+   script as text, which a shell would have expanded, so the line ran somewhere neither substitutes.
 
 ## Report
 
 The shim's path, whether it was installed / replaced / already current, the two lines to add, and the
-`doctor` output. If the script warned that it ignored `CLAUDE_PLUGIN_DATA`, pass that on — it means the
-variable pointed at another plugin's directory, which happens when the command runs from a session where
-a different plugin was active.
+`doctor` output. The path is printed with how the directory was chosen: anything other than `--data-dir`
+means the placeholder did not reach the script, and the warning naming the ignored directory has to be
+passed on too. The shim works either way, but a substitution that never happens is worth knowing about
+before it is depended on elsewhere.

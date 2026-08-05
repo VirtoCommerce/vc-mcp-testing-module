@@ -14,13 +14,41 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SHIM = "vc-secrets-shim.mjs";
-// The documented id shape: "<plugin>-<marketplace>", non-alphanumerics replaced by a dash.
 const CANONICAL_DATA_ID = "vc-secrets-vc-tools";
 
 function fail(message) {
     // sync write: stderr is an async pipe on Windows, and process.exit abandons pending writes
     fs.writeSync(2, `install-shim: ${message}\n`);
     process.exit(1);
+}
+
+function flag(name) {
+    // Both spellings, because a silently dropped argument is the worst outcome here: an unmatched
+    // `--data-dir=X` would install into the computed default and report that as the choice. For the same
+    // reason two of them are refused rather than resolved by precedence.
+    const joined = process.argv.find((a) => a.startsWith(`${name}=`));
+    const at = process.argv.indexOf(name);
+    if (joined !== undefined) {
+        if (at >= 0) {
+            fail(`${name} was given twice, as ${JSON.stringify(joined)} and as a separate value — pass it once`);
+        }
+
+        return joined.slice(name.length + 1);
+    }
+    if (at < 0) {
+        const misspelt = process.argv.find((a) => a.startsWith(name));
+        if (misspelt !== undefined) {
+            fail(`unrecognised argument ${JSON.stringify(misspelt)} — write ${name} <value> or ${name}=<value>`);
+        }
+
+        return null;
+    }
+    const value = process.argv[at + 1];
+    if (value === undefined || value.startsWith("--")) {
+        fail(`${name} needs a value`);
+    }
+
+    return value;
 }
 
 const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT
@@ -30,27 +58,50 @@ if (!fs.existsSync(source)) {
     fail(`${source} not found — CLAUDE_PLUGIN_ROOT is ${process.env.CLAUDE_PLUGIN_ROOT ?? "unset"}, so this is not a complete plugin install`);
 }
 
-// CLAUDE_PLUGIN_DATA is the documented stable directory and survives updates; the cache path does not,
-// which is the whole reason the shim exists. But it is set per PLUGIN, for whichever plugin's context is
-// executing — measured: running this script from a session where another plugin's command was active
-// pointed it at `…/data/codex-openai-codex`, and the shim was written into that plugin's directory. So
-// the value is used only when it actually names this plugin; otherwise the documented layout is used.
+// The data directory survives plugin updates; the cache path carries the version and does not, which is
+// the whole reason the shim exists. Its location arrives through `--data-dir`, which the plugin's own
+// command fills from `${CLAUDE_PLUGIN_DATA}`: Claude Code substitutes that placeholder in the command's
+// content, with the value belonging to the plugin that owns the file.
+//
+// The received value is still checked against this plugin's name, and the check is the load-bearing part
+// of this block. The command line is a SHELL line: when Claude Code does not substitute the placeholder,
+// the shell expands it from the inherited environment instead — and the environment variable of that name
+// is exported to hook and MCP/LSP processes and inherited onward, so a script reached through the Bash
+// tool sees whichever plugin's context set it. Measured: `…/data/codex-openai-codex`, an absolute path
+// that every syntactic check accepts. Substitution and shell expansion are indistinguishable here, so
+// arriving as an argument buys nothing on its own; only the name does.
+//
+// Getting it wrong is silent and its consequence is remote: uninstalling THAT plugin deletes its data
+// directory, which would take this plugin's shim with it, long after the developer pasted the path into
+// settings.json and a shell rc.
+//
+// With no usable value the id is computed rather than searched for: `<plugin>@<marketplace>` with
+// non-alphanumerics dashed, both names from manifests this repo ships.
 const dataHome = path.join(process.env.HOME || os.homedir(), ".claude", "plugins", "data");
-const declared = process.env.CLAUDE_PLUGIN_DATA;
-let target = declared && path.basename(declared).toLowerCase().includes("vc-secrets") ? declared : null;
-let how = "CLAUDE_PLUGIN_DATA";
+const declared = flag("--data-dir");
+if (declared !== null && declared !== "" && !path.isAbsolute(declared)) {
+    fail(`--data-dir must be an absolute path, got ${JSON.stringify(declared)} — a value still shaped like a placeholder means the command ran where Claude Code does not substitute it`);
+}
+let target = declared || null;
+let how = "--data-dir";
+let ignored = null;
+if (target && !path.basename(target).toLowerCase().startsWith("vc-secrets")) {
+    const because = path.basename(target) === ""
+        ? "it names a filesystem root rather than a plugin directory"
+        : "it names another plugin's directory, so the placeholder was not substituted";
+    fs.writeSync(2, `install-shim: ignoring --data-dir=${target} — ${because}\n`);
+    ignored = target;
+    target = null;
+}
 if (!target) {
-    if (declared) {
-        fs.writeSync(2, `install-shim: ignoring CLAUDE_PLUGIN_DATA=${declared} — it belongs to another plugin\n`);
+    let why = "";
+    if (ignored) {
+        why = ` (--data-dir named ${path.basename(ignored)})`;
+    } else if (declared === "") {
+        why = " (--data-dir arrived empty)";
     }
-    const existing = fs.existsSync(dataHome)
-        ? fs.readdirSync(dataHome).filter((d) => d.toLowerCase().includes("vc-secrets"))
-        : [];
-    if (existing.length > 1) {
-        fail(`${dataHome} holds more than one candidate (${existing.join(", ")}) — remove the stale one, then re-run`);
-    }
-    target = path.join(dataHome, existing[0] ?? CANONICAL_DATA_ID);
-    how = existing.length === 1 ? `existing directory under ${dataHome}` : `created ${CANONICAL_DATA_ID} under ${dataHome}`;
+    target = path.join(dataHome, CANONICAL_DATA_ID);
+    how = `the documented default under ${dataHome}${why}`;
 }
 
 const destination = path.join(target, SHIM);
