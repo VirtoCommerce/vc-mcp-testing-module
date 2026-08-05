@@ -12,12 +12,27 @@ data corruption, but it would mask **any** 400 raised on this blade.
 
 ## STR
 
+> **⚠ The original trigger is gone — the environment was corrected on 2026-08-05.** `Locked` was an
+> admin-added row in the `Customer.OrganizationMembershipStatuses` dictionary and has been **deleted**;
+> `allowedValues` is now exactly the four compiled values, so **no out-of-contract status is selectable
+> from the dropdown any more** and step 4 below cannot be performed as written. Root cause **(a) is
+> therefore resolved by configuration.** Defect **(b) — the client discarding the error body — is
+> unchanged and still open**; it merely has no one-click trigger left on this blade.
+>
+> To reproduce (b) now, either temporarily re-add any out-of-set row to that dictionary setting, or
+> induce any other 400 on this blade — the defect is in the client's error handling, not in the
+> particular value that provoked the 400.
+
 1. Sign in to the Admin SPA at `{{BACK_URL}}` as an administrator.
-2. Contacts → open `@td(MULTI_ORG_TF_BR.email)`.
-3. Open the **Organization memberships** widget → click the TechFlow membership row.
-4. In **Invite status**, select **`Locked`** (the dropdown offers it — see Root cause).
-5. Click **Save**.
+2. Temporarily add an out-of-set value (e.g. `AGENT-TEST-NotAStatus`) to the
+   `Customer.OrganizationMembershipStatuses` dictionary setting. **Remove it afterwards** — leaving it
+   reintroduces exactly the config defect that was just fixed.
+3. Contacts → open `@td(MULTI_ORG_TF_BR.email)`.
+4. Open the **Organization memberships** widget → click the TechFlow membership row.
+5. In **Invite status**, select the out-of-set value → **Save**.
 6. When the red banner appears, click **View details**.
+
+*Originally observed 2026-08-04 with `Locked`, which the dictionary then offered.*
 
 ## Expected vs Actual
 
@@ -38,9 +53,10 @@ confirms the membership status is unchanged.
 
 Two separable issues; **this report covers (b)** and (b) is worth fixing regardless of how (a) is resolved.
 
-- **(a) Why a doomed value is offered at all.** The blade populates Invite status from the
-  `Customer.OrganizationMembershipStatuses` **dictionary setting**, whose live `allowedValues` is
-  `["Approved","Invited","Rejected","Locked","Deleted"]` — five values. The write path validates
+- **(a) Why a doomed value was offered at all — RESOLVED 2026-08-05 by deleting the row.** The blade
+  populates Invite status from the `Customer.OrganizationMembershipStatuses` **dictionary setting**,
+  whose `allowedValues` was `["Approved","Invited","Rejected","Locked","Deleted"]` — five values, now
+  back to the compiled four. The write path validates
   against the four compiled `ModuleConstants.MembershipStatuses.ManuallySelectableStatuses`
   (`Invited, Approved, Rejected, Deleted`) and refuses anything else. The setting is
   `IsDictionary = true`, so `Locked` is an **admin-added row on this environment**, not a code change
