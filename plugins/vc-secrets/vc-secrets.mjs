@@ -18,8 +18,8 @@ const USER_SCOPE = "user";
 // that this field, not the key check, is what reports a genuine skew.
 const SCHEMA_VERSION = 1;
 const BACKENDS = ["local", "keyvault"];
-const TOP_LEVEL_KEYS = ["schemaVersion", "projectId", "secrets", "servers", "tasks"];
-const SECRET_DECL_KEYS = ["backend", "vault", "secret", "format"];
+const TOP_LEVEL_KEYS = ["schemaVersion", "projectId", "secrets", "servers", "tasks", "vaults"];
+const SECRET_DECL_KEYS = ["backend", "vault", "secret", "format", "authorized"];
 const SERVER_DECL_KEYS = ["command", "args", "env"];
 
 // Env vars that inject code/libraries into any child process we spawn — must never
@@ -28,10 +28,19 @@ const SERVER_DECL_KEYS = ["command", "args", "env"];
 // closing the gap for both literal and secret-resolved values, since it's the KEY that matters).
 const DANGEROUS_ENV_VARS = ["NODE_OPTIONS", "LD_PRELOAD", "LD_AUDIT", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH"];
 
+// Matched without regard to case on every platform, not only where the environment is case-insensitive.
+// A declaration is written once and travels: on Windows `node_options` reaches the child as NODE_OPTIONS,
+// so a case-sensitive comparison would pass the exact key the list exists to refuse.
+function isDangerousEnvKey(key) {
+    return DANGEROUS_ENV_VARS.includes(key.toUpperCase());
+}
+
 function sanitizeEnv(env) {
-    const out = { ...env };
-    for (const varName of DANGEROUS_ENV_VARS) {
-        delete out[varName];
+    const out = {};
+    for (const [key, value] of Object.entries(env)) {
+        if (!isDangerousEnvKey(key)) {
+            out[key] = value;
+        }
     }
 
     return out;
@@ -64,16 +73,15 @@ function parseReference(value) {
     return { name: match[1], field: match[2] ?? null };
 }
 
-// A near-miss that really IS a literal — `secrets:` with the plural. Anything starting with exactly
-// `secret:` is NOT a literal: parseReference throws on it, so the launch dies. Reporting those as
-// harmless literals told the operator a launch-breaking value was fine; they now reach the parse below
-// and are reported as the FAIL they are.
-function isTypoReference(value) {
-    if (typeof value !== "string" || REF_RE.test(value) || value.startsWith("secret:")) {
-        return false;
-    }
+// Every env value carries its kind. The alternative — "anything that is not a `secret:` reference is a
+// literal" — makes a pasted credential indistinguishable from an intended constant, which is the one
+// thing a declaration must never be ambiguous about: it is the file this tool exists to keep free of
+// values. It also ends a family of near-misses (`secrets:` with the plural, `Secret:`) by construction,
+// since an unprefixed value no longer has a meaning to fall back to.
+const LITERAL_PREFIX = "literal:";
 
-    return /^secrets?:/i.test(value);
+function parseLiteral(value) {
+    return typeof value === "string" && value.startsWith(LITERAL_PREFIX) ? value.slice(LITERAL_PREFIX.length) : null;
 }
 
 // realpath, not resolve: an aliased .claude — a symlinked home, a bind mount — is one file under two
@@ -108,7 +116,7 @@ function configPaths(env = process.env, cwd = process.cwd()) {
     const userClaude = canonicalPath(path.join(home, ".claude"));
     for (;;) {
         const claude = path.join(dir, ".claude");
-        if (canonicalPath(claude) !== userClaude
+        if (fs.existsSync(claude) && canonicalPath(claude) !== userClaude
             && (fs.existsSync(path.join(claude, CONFIG_NAME)) || fs.existsSync(path.join(claude, LOCAL_CONFIG_NAME)))) {
             projectDir = claude;
             break;
@@ -125,6 +133,138 @@ function configPaths(env = process.env, cwd = process.cwd()) {
         project: projectDir ? path.join(projectDir, CONFIG_NAME) : null,
         local: projectDir ? path.join(projectDir, LOCAL_CONFIG_NAME) : null,
     };
+}
+
+// A project declaration that merely NAMES a user-scope secret grants itself the credential, and no gate
+// above catches it: what the MCP client approves is `node $VC_SECRETS run <name>`, one level above the
+// declaration that decides what `<name>` actually runs. Rewrite the command behind an already-approved
+// name and every existing check still passes. So the owner of the secret authorizes the SHAPE that may
+// receive it, in the user file, which no repository can carry — and a change to that shape stops the
+// launch instead of riding along.
+function consumerShape(launchable) {
+    return { command: launchable.command, args: [...launchable.args], envKeys: Object.keys(launchable.env).sort() };
+}
+
+// The differences, in the words the reader needs to decide; null when the shapes agree.
+function shapeDifferences(authorized, actual) {
+    const diffs = [];
+    if (authorized.command !== actual.command) {
+        diffs.push(`command is ${JSON.stringify(actual.command)}, authorized ${JSON.stringify(authorized.command)}`);
+    }
+    if (JSON.stringify(authorized.args) !== JSON.stringify(actual.args)) {
+        diffs.push(`args are ${JSON.stringify(actual.args)}, authorized ${JSON.stringify(authorized.args)}`);
+    }
+    const wanted = [...authorized.envKeys].sort();
+    if (JSON.stringify(wanted) !== JSON.stringify(actual.envKeys)) {
+        diffs.push(`env keys are ${JSON.stringify(actual.envKeys)}, authorized ${JSON.stringify(wanted)}`);
+    }
+
+    return diffs.length === 0 ? null : diffs;
+}
+
+function validateVaults(vaults) {
+    if (vaults === undefined) {
+        return;
+    }
+    if (typeof vaults !== "object" || vaults === null || Array.isArray(vaults)) {
+        throw new VcSecretsError(`"vaults" must be an object keyed by vault name`);
+    }
+    for (const [vault, secrets] of Object.entries(vaults)) {
+        if (typeof secrets !== "object" || secrets === null || Array.isArray(secrets)) {
+            throw new VcSecretsError(`vaults."${vault}" must be an object keyed by secret name`);
+        }
+        for (const [secret, block] of Object.entries(secrets)) {
+            // Same validator as a secret's own `authorized` block: one shape rule, so a change to one
+            // cannot leave the other authorizing something it no longer understands.
+            validateAuthorized(`${vault}/${secret}`, block);
+        }
+    }
+}
+
+function validateAuthorized(secretName, authorized) {
+    if (authorized === undefined) {
+        return;
+    }
+    if (typeof authorized !== "object" || authorized === null || Array.isArray(authorized)) {
+        throw new VcSecretsError(`secret "${secretName}": "authorized" must be an object`);
+    }
+    for (const [kind, entries] of Object.entries(authorized)) {
+        if (kind !== "servers" && kind !== "tasks") {
+            throw new VcSecretsError(`secret "${secretName}": authorized "${kind}" is not a kind (expected servers/tasks)`);
+        }
+        if (typeof entries !== "object" || entries === null || Array.isArray(entries)) {
+            throw new VcSecretsError(`secret "${secretName}": authorized.${kind} must be an object keyed by name`);
+        }
+        for (const [name, shape] of Object.entries(entries)) {
+            if (typeof shape !== "object" || shape === null || Array.isArray(shape)) {
+                throw new VcSecretsError(`secret "${secretName}": authorized.${kind}."${name}" must be an object`);
+            }
+            if (typeof shape.command !== "string" || !shape.command) {
+                throw new VcSecretsError(`secret "${secretName}": authorized.${kind}."${name}" needs a "command" string`);
+            }
+            if (!Array.isArray(shape.args) || !shape.args.every((a) => typeof a === "string")) {
+                throw new VcSecretsError(`secret "${secretName}": authorized.${kind}."${name}" needs "args" as an array of strings`);
+            }
+            if (!Array.isArray(shape.envKeys) || !shape.envKeys.every((k) => typeof k === "string")) {
+                throw new VcSecretsError(`secret "${secretName}": authorized.${kind}."${name}" needs "envKeys" as an array of strings`);
+            }
+        }
+    }
+}
+
+// null when the reference needs no authorization; otherwise what is wrong with it, ready to be reported by
+// `doctor` or thrown at launch. Both callers must agree, so the decision lives in one place.
+// The condition is "nothing in the repository authorizes this read", which covers two cases and not a
+// third. A user-scope declaration: the value is yours, so the authorization sits on it. A keyvault
+// declaration at ANY scope: the read is paid for by whatever identity `az` is logged in as, which the
+// repository does not own — while the vault and the secret name it reads DO come from the repository, so
+// the authorization cannot live there either and is keyed by that pair in the user file. A project-declared
+// `local` secret needs nothing: its key is namespaced to the project, so it reads what you set for that
+// project and nothing else — the `set` you ran IS the authorization, and there is no equivalent act behind
+// a vault read.
+// Every lookup below reads parsed JSON, not one of the null-prototype maps this module builds — and a
+// launchable may legally be named `toString` or `constructor` (LAUNCHABLE_NAME_RE allows both). A plain
+// bracket read would return the inherited builtin instead of undefined, which then reaches
+// shapeDifferences as an object with no envKeys and throws where a refusal belongs. Measured: one such
+// name in a project file took down the whole doctor report, not just its own line.
+function own(map, key) {
+    return map !== null && typeof map === "object" && Object.hasOwn(map, key) ? map[key] : undefined;
+}
+
+function authorizationFor(cfg, decl) {
+    if (decl.home === USER_SCOPE) {
+        return { block: decl.authorized, where: `secrets."${decl.declaredName}".authorized` };
+    }
+    if (decl.backend === "keyvault") {
+        return {
+            block: own(own(cfg.vaults, decl.vault), decl.secret),
+            where: `vaults."${decl.vault}"."${decl.secret}"`,
+        };
+    }
+
+    return null;
+}
+
+function crossingProblem(cfg, kind, name, secretName) {
+    const launchable = own(cfg[kind], name);
+    const decl = own(cfg.secrets, secretName);
+    if (!launchable || !decl || launchable.home === USER_SCOPE) {
+        return null;
+    }
+    const source = authorizationFor(cfg, { ...decl, declaredName: secretName });
+    if (source === null) {
+        return null;
+    }
+    const actual = consumerShape(launchable);
+    const authorized = own(own(source.block, kind), name);
+    if (authorized === undefined) {
+        return { secretName, actual, where: source.where, reason: "not authorized" };
+    }
+    const diffs = shapeDifferences(authorized, actual);
+
+    return diffs === null
+        ? null
+        : { secretName, actual, where: source.where, reason: `authorized for a different shape: ${diffs.join("; ")}` };
 }
 
 // Servers and tasks are validated identically — same declaration shape, same env rules, same refusal
@@ -164,9 +304,12 @@ function validateLaunchables(label, map) {
         if (!Object.values(srv.env).every((v) => typeof v === "string")) {
             throw new VcSecretsError(`${label} "${name}": every env value must be a string`);
         }
-        for (const envKey of Object.keys(srv.env)) {
-            if (DANGEROUS_ENV_VARS.includes(envKey)) {
+        for (const [envKey, value] of Object.entries(srv.env)) {
+            if (isDangerousEnvKey(envKey)) {
                 throw new VcSecretsError(`${label} "${name}": env key "${envKey}" is not allowed (code-injection vector)`);
+            }
+            if (!value.startsWith("secret:") && parseLiteral(value) === null) {
+                throw new VcSecretsError(`${label} "${name}": env ${envKey} must be "secret:<name>" or "literal:<value>" — an unprefixed value cannot be told apart from a pasted credential`);
             }
         }
     }
@@ -231,9 +374,11 @@ function parseConfigFile(file, warnings) {
                 throw new VcSecretsError(`secret "${name}": a double quote in "${field}" is not allowed`);
             }
         }
+        validateAuthorized(name, decl.authorized);
     }
     validateLaunchables("server", cfg.servers);
     validateLaunchables("task", cfg.tasks);
+    validateVaults(cfg.vaults);
 
     return cfg;
 }
@@ -266,12 +411,17 @@ function loadConfig(paths = configPaths()) {
     // homes, so its entries are attributed to the wrong scope (and a secret to the wrong keystore
     // namespace) and every name in it collides with itself.
     const seen = new Set();
+    let vaults = Object.create(null);
     for (const scope of SCOPE_ORDER) {
         const file = paths[scope];
-        if (!file || !fs.existsSync(file) || seen.has(canonicalPath(file))) {
+        if (!file || !fs.existsSync(file)) {
             continue;
         }
-        seen.add(canonicalPath(file));
+        const realFile = canonicalPath(file);
+        if (seen.has(realFile)) {
+            continue;
+        }
+        seen.add(realFile);
         files[scope] = file;
         let cfg;
         try {
@@ -297,6 +447,15 @@ function loadConfig(paths = configPaths()) {
                 projectIdFrom = file;
             }
         }
+        if (cfg.vaults !== undefined) {
+            if (scope === USER_SCOPE) {
+                vaults = cfg.vaults;
+            } else {
+                // A repository authorizing the vault reads it asks for would be the grant written by the
+                // party requesting it — the same reason `authorized` is user-scope only.
+                warnings.push(`${file}: "vaults" only authorizes at user scope — ignored`);
+            }
+        }
         for (const [name, decl] of Object.entries(cfg.secrets)) {
             if (secrets[name]) {
                 collisions.push({ kind: "secret", name, from: secrets[name].home, to: scope });
@@ -304,6 +463,11 @@ function loadConfig(paths = configPaths()) {
             // `scope` is the keystore namespace (local shares the project's); `home` is which file
             // declared it. They differ for a local declaration, which is what keyFor and the crossing
             // report each need to read.
+            if (decl.authorized !== undefined && scope !== USER_SCOPE) {
+                // The point of the block is that its author owns the secret. A project authorizing its own
+                // access would be the grant it is meant to require, written by the party asking for it.
+                warnings.push(`${file}: secret "${name}": "authorized" only authorizes at user scope — ignored`);
+            }
             secrets[name] = { ...decl, scope: scope === "local" ? "project" : scope, home: scope };
         }
         for (const [name, srv] of Object.entries(cfg.servers)) {
@@ -336,7 +500,7 @@ function loadConfig(paths = configPaths()) {
     // bought. What replaces the ban is visibility: `doctor` reports each crossing, so it is a fact the
     // developer can see rather than one nobody mentions.
 
-    return { secrets, servers, tasks, projectId, collisions, warnings, files };
+    return { secrets, servers, tasks, vaults, projectId, collisions, warnings, files };
 }
 
 // The keystore key. Project and local declarations share one namespace on purpose — they are the
@@ -361,11 +525,19 @@ async function resolveEnvEntries(name, cfg, resolveSecret, kind = "servers") {
     for (const [envVar, value] of Object.entries(server.env)) {
         const ref = parseReference(value);
         if (ref === null) {
-            entries.push({ envVar, literal: value });
+            // loadConfig refuses any other shape, so this cannot be a bare value reaching the child.
+            entries.push({ envVar, literal: parseLiteral(value) });
             continue;
         }
         if (!Object.hasOwn(cfg.secrets, ref.name)) {
             throw new VcSecretsError(`env ${envVar}: undeclared secret "${ref.name}"`);
+        }
+        const problem = crossingProblem(cfg, kind, name, ref.name);
+        if (problem !== null) {
+            throw new VcSecretsError(`env ${envVar}: this ${kind === "tasks" ? "task" : "server"} is `
+                + `${problem.reason} to receive "${ref.name}" — the authorization for it lives at `
+                + `${problem.where} in ${path.join("~", ".claude", CONFIG_NAME)}; `
+                + `run "vc-secrets doctor" for the block to add`);
         }
         const decl = cfg.secrets[ref.name];
         if (ref.field !== null && decl.format !== "json") {
@@ -412,6 +584,16 @@ const TIMEOUT_LOCAL_MS = 10_000;
 const TIMEOUT_AZ_MS = 20_000;
 const LOCAL_BACKENDS = ["wcm", "keychain", "gpg"];
 const VALUE_ON_STDIN = "<VALUE_ON_STDIN>";
+// The whole command goes on stdin, not just the value: `security` has no stdin path for a password, but
+// its interactive mode reads COMMANDS there, which keeps the value out of argv. spec.stdinCommand builds
+// the line from the value runTool is handed.
+const COMMAND_ON_STDIN = "<COMMAND_ON_STDIN>";
+
+// Quoting for `security -i`'s own tokenizer: double quotes with backslash escapes. A newline cannot be
+// quoted into it at all — it ends the command — so the caller must not offer one.
+function quoteForSecurityInteractive(value) {
+    return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
+}
 
 function detectLocalBackend(platform = process.platform, env = process.env) {
     const override = env.VC_SECRETS_LOCAL_BACKEND;
@@ -559,19 +741,28 @@ function buildLocalWrite(backend, key, env = process.env, { tmp = false, value =
             extraEnv: { VC_SECRETS_NAME: key }, stdinData: VALUE_ON_STDIN, timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: false };
     }
     if (backend === "keychain") {
-        // Two shapes, and the difference is load-bearing. `set`: `-w` with no value makes security prompt
-        // on the TTY, so the plaintext never passes through this process at all. `migrate`: there IS no
-        // value to type — the point is to copy one the user cannot read — and `security` has no stdin
-        // path, so the value goes in argv. That is briefly visible in the process list of this machine,
-        // which is the lesser evil: the interactive shape asked the human for a value they do not have
-        // and stored whatever they typed as a successful migration.
+        const account = env.USER || os.userInfo().username;
+        // Three shapes, and the differences are load-bearing. `set`: `-w` with no value makes security
+        // prompt on the TTY, so the plaintext never passes through this process at all.
         if (value === undefined) {
-            return { cmd: "security", args: ["add-generic-password", "-U", "-a", env.USER || os.userInfo().username, "-s", key, "-w"],
+            return { cmd: "security", args: ["add-generic-password", "-U", "-a", account, "-s", key, "-w"],
                 interactive: true, timeoutMs: null, captureStdout: false };
         }
+        // `migrate`: there IS no value to type — the point is to copy one the user cannot read — and
+        // `security` takes no password on stdin. Its interactive mode takes the whole COMMAND there, which
+        // is what keeps the value out of argv and out of this machine's process list.
+        if (!/[\r\n]/.test(value)) {
+            return { cmd: "security", args: ["-i"], stdinData: COMMAND_ON_STDIN,
+                stdinCommand: (v) => `add-generic-password -U -a ${quoteForSecurityInteractive(account)} `
+                    + `-s ${quoteForSecurityInteractive(key)} -w ${quoteForSecurityInteractive(v)}\n`,
+                timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: false };
+        }
 
-        return { cmd: "security", args: ["add-generic-password", "-U", "-a", env.USER || os.userInfo().username, "-s", key, "-w", value],
-            timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: false };
+        // A line ending cannot be quoted into that command — it ends it — so this one value takes the
+        // older route and its exposure is reported rather than hidden. Refusing instead would strand the
+        // secret: migrate exists for values the user cannot retype.
+        return { cmd: "security", args: ["add-generic-password", "-U", "-a", account, "-s", key, "-w", value],
+            argvExposesValue: true, timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: false };
     }
     const recipientArgs = env.VC_SECRETS_GPG_RECIPIENT
         ? ["--recipient", env.VC_SECRETS_GPG_RECIPIENT, "--trust-model", "always"]
@@ -664,6 +855,8 @@ function runTool(spec, { stdinValue, redactValues = [] } = {}) {
             child.stdin.on("error", () => {});   // EPIPE if the tool dies before reading — surfaced via exit code
             if (spec.stdinData === VALUE_ON_STDIN && stdinValue !== undefined) {
                 child.stdin.write(stdinValue);
+            } else if (spec.stdinData === COMMAND_ON_STDIN && stdinValue !== undefined) {
+                child.stdin.write(spec.stdinCommand(stdinValue));
             }
             child.stdin.end();
         }
@@ -975,7 +1168,21 @@ async function cmdMigrate(cfg) {
 
         try {
             const spec = buildLocalWrite(backend, key, process.env, { tmp: backend === "gpg", value: legacyValue });
+            if (spec.argvExposesValue) {
+                lines.push(`${name}: the value contains a line ending, so it passed through the command line of a `
+                    + `short-lived process — visible to anything reading this machine's process list during the write`);
+            }
             await writeLocalValue(backend, key, spec, legacyValue, process.env);
+            if (backend === "keychain") {
+                // Read back and compare. `security -i` reports a failed sub-command through an exit code
+                // this loop cannot check on a machine without macOS, and a store that accepted something
+                // other than what was handed to it must not be reported as a migration. gpg is left out:
+                // its read needs a warm agent, so a cold one would fail a write that in fact succeeded.
+                const stored = await runTool(buildLocalRead(backend, key, process.env), { redactValues: [legacyValue] });
+                if (stored !== legacyValue) {
+                    throw new VcSecretsError("the store returned a different value than was written — the legacy entry is untouched, migrate it by hand");
+                }
+            }
             migrated += 1;
             lines.push(`${name}: migrated`);
         } catch (e) {
@@ -1142,10 +1349,6 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
     for (const [label, map] of [["server", cfg.servers], ["task", cfg.tasks ?? {}]]) {
         for (const [srvName, srv] of Object.entries(map)) {
             for (const [envVar, value] of Object.entries(srv.env)) {
-                if (isTypoReference(value)) {
-                    lines.push(`WARN ${label} "${srvName}" env ${envVar}: "${value}" looks like a mistyped reference but is treated as a literal`);
-                    continue;
-                }
                 try {
                     const ref = parseReference(value);
                     if (ref !== null && !Object.hasOwn(cfg.secrets, ref.name)) {
@@ -1160,19 +1363,40 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
     // Crossing from a project declaration to a personal secret is allowed and often intended, but it is
     // the one relationship a reader of either file alone cannot see: the project file names a secret it
     // did not declare, and the user file has no idea who consumes it.
-    for (const [label, map] of [["server", cfg.servers], ["task", cfg.tasks ?? {}]]) {
+    for (const [kind, map] of [["servers", cfg.servers], ["tasks", cfg.tasks ?? {}]]) {
+        const label = kind === "tasks" ? "task" : "server";
         for (const [name, decl] of Object.entries(map)) {
-            if (decl.home !== "project") {
-                continue;   // your own local file is not a crossing anyone needs told about
+            if (decl.home === USER_SCOPE) {
+                continue;   // you wrote both sides; there is no grant to report
             }
+            const reported = new Set();
             for (const value of Object.values(decl.env)) {
                 let ref = null;
                 try {
                     ref = parseReference(value);
                 } catch { /* reported as a FAIL above */ }
-                if (ref !== null && cfg.secrets[ref.name]?.home === USER_SCOPE) {
-                    lines.push(`INFO ${label} "${name}" (${decl.home}) uses "${ref.name}", which you declared at user scope`);
+                if (ref === null || reported.has(ref.name)) {
+                    continue;
                 }
+                const sdecl = cfg.secrets[ref.name];
+                // Only references that need authorizing are worth a line: a project-declared `local`
+                // secret is namespaced to the project, so there is no grant to report either way.
+                if (!sdecl || authorizationFor(cfg, { ...sdecl, declaredName: ref.name }) === null) {
+                    continue;
+                }
+                reported.add(ref.name);
+                const problem = crossingProblem(cfg, kind, name, ref.name);
+                if (problem === null) {
+                    lines.push(`INFO ${label} "${name}" (${decl.home}) is authorized to receive "${ref.name}"`);
+                    continue;
+                }
+                // The block, not advice about the block: what stands between the reader and a working
+                // launch is one paste, and asking them to translate a diff into JSON adds a way to get it
+                // wrong. A shape they can read is also a shape they can refuse.
+                const shape = JSON.stringify({ [name]: problem.actual }, null, 2).split("\n").map((l) => `       ${l}`).join("\n");
+                lines.push(`FAIL ${label} "${name}" (${decl.home}) wants "${ref.name}" and is ${problem.reason}.`
+                    + `\n     Read the command below; if you want it to have that secret, put this under`
+                    + ` ${problem.where}.${kind} in ~/.claude/${CONFIG_NAME}:\n${shape}`);
             }
         }
     }
@@ -1433,15 +1657,17 @@ async function runCli(argv, { shimContract } = {}) {
 
 export {
     runCli, REQUIRED_SHIM_CONTRACT,
-    VcSecretsError, REF_RE, parseReference, isTypoReference, CONFIG_NAME, LOCAL_CONFIG_NAME, KEY_PREFIX,
+    VcSecretsError, REF_RE, parseReference, parseLiteral, LITERAL_PREFIX, CONFIG_NAME, LOCAL_CONFIG_NAME, KEY_PREFIX,
     SCHEMA_VERSION, SCOPE_ORDER, configPaths, parseConfigFile, loadConfig, keyFor, keyToPath, legacyKeyToPath,
     resolveEnvEntries, detectLocalBackend, redactSecrets, secretsDir, psEncode, psCommand, PS_CRED_READ, PS_CRED_WRITE,
     buildLocalRead, buildLocalWrite, buildKeyvaultRead, TIMEOUT_LOCAL_MS, TIMEOUT_AZ_MS, VALUE_ON_STDIN,
+    COMMAND_ON_STDIN, quoteForSecurityInteractive,
     runTool, resolveSpawnCommand, buildSpawnInvocation, makeSecretResolver, cmdRun, cmdTask, cmdLaunch,
     validateLaunchables, LEGACY_ENV_VARS, LEGACY_SECRET_ENV_VARS,
     mapResolveError, applyKeystrokes, promptHidden, cmdSet, cmdUnlock, cmdDoctor, cmdMigrate, newKeyPresent,
     SECRET_NAME_RE, LAUNCHABLE_NAME_RE, doctorReport,
     readEnableLists, readWiredServers, DANGEROUS_ENV_VARS, sanitizeEnv,
+    consumerShape, shapeDifferences, validateAuthorized, validateVaults, authorizationFor, crossingProblem, own,
 };
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

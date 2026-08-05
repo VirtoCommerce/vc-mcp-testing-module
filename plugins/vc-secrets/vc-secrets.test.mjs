@@ -64,9 +64,13 @@ test("parseReference: invalid chars in name → VcSecretsError", () => {
     assert.throws(() => m.parseReference("secret:Bad_Name"), m.VcSecretsError);
 });
 
-test("isTypoReference: secrets: prefix flagged", () => {
-    assert.equal(m.isTypoReference("secrets:ado-pat"), true);
-    assert.equal(m.isTypoReference("plain"), false);
+test("parseLiteral: only an explicit prefix is a literal, and the prefix is stripped once", () => {
+    assert.equal(m.parseLiteral("literal:as-is"), "as-is");
+    assert.equal(m.parseLiteral("literal:"), "");
+    // A value that really begins with the prefix: strip once, keep the rest verbatim.
+    assert.equal(m.parseLiteral("literal:literal:x"), "literal:x");
+    assert.equal(m.parseLiteral("plain"), null);
+    assert.equal(m.parseLiteral("secrets:ado-pat"), null);
 });
 
 test("loadConfig: reads and validates, entries carry their scope", () => {
@@ -181,24 +185,212 @@ test("loadConfig: a project secret shadowing a user-scope name keys the PROJECT 
     assert.equal(m.keyFor("shared", cfg.secrets.shared, cfg), `${m.KEY_PREFIX}:proj-x:shared`);
 });
 
-test("loadConfig: a project-declared launchable MAY reference a user-scope secret, and doctor says so", () => {
-    // One personal PAT used from several repos is the ordinary case; banning it would force a copy of
-    // that credential into every project namespace, which is more copies to rotate, not fewer. What
-    // stands in for the ban is that the crossing is reported — neither file shows it on its own.
-    const paths = scopedPaths({
-        user: { secrets: { "personal-pat": { backend: "local" } } },
-        project: { projectId: "proj-x", servers: { gh: { command: "x", args: [], env: { T: "secret:personal-pat" } } } },
-    });
-    const cfg = m.loadConfig(paths);
-    assert.equal(cfg.servers.gh.env.T, "secret:personal-pat");
+const CROSSING_SHAPE = { command: "npx", args: ["-y", "gh-mcp"], envKeys: ["T"] };
 
-    const lines = m.doctorReport(cfg, {
+function crossingPaths(authorized) {
+    const secret = { backend: "local" };
+    if (authorized !== undefined) {
+        secret.authorized = authorized;
+    }
+
+    return scopedPaths({
+        user: { secrets: { "personal-pat": secret } },
+        project: { projectId: "proj-x", servers: { gh: { command: "npx", args: ["-y", "gh-mcp"], env: { T: "secret:personal-pat" } } } },
+    });
+}
+
+function crossingReport(cfg) {
+    return m.doctorReport(cfg, {
         env: {}, platform: "linux", enableLists: { enabled: [], disabled: [], envKeys: [] },
         resolvable: {}, skipped: [], toolsMissing: [], wired: new Set(),
     });
-    assert.ok(
-        lines.some((l) => l.startsWith("INFO") && l.includes('server "gh"') && l.includes("personal-pat") && l.includes("user scope")),
-        `expected the crossing to be reported, got:\n${lines.join("\n")}`);
+}
+
+test("a project declaration cannot take a user-scope secret by naming it — the owner authorizes the shape", async () => {
+    // The gate above this one does not cover it: what the MCP client approves is `node $VC_SECRETS run gh`,
+    // and the declaration deciding what `gh` runs sits below that. So naming the secret is not consent.
+    const cfg = m.loadConfig(crossingPaths(undefined));
+    let called = false;
+    await assert.rejects(
+        () => m.resolveEnvEntries("gh", cfg, async () => { called = true; return "tok"; }),
+        /not authorized to receive "personal-pat"/);
+    assert.equal(called, false, "the backend must not be contacted for a launch that is refused");
+
+    // The config still LOADS: doctor's job is to report this, which it cannot do if the load throws.
+    const lines = crossingReport(cfg);
+    const fail = lines.find((l) => l.startsWith("FAIL") && l.includes('server "gh"'));
+    assert.ok(fail, `expected a FAIL naming the server, got:\n${lines.join("\n")}`);
+    assert.match(fail, /not authorized/);
+    // The block to paste, not advice about it: a reader translating a description into JSON is a reader
+    // given one more way to get it wrong.
+    assert.match(fail, /"command": "npx"/);
+    assert.match(fail, /"envKeys": \[\s*"T"\s*\]/);
+    assert.match(fail, /authorized\.servers/);
+});
+
+test("an authorized shape passes, and its authorization is reported rather than silent", async () => {
+    const cfg = m.loadConfig(crossingPaths({ servers: { gh: CROSSING_SHAPE } }));
+    assert.deepEqual(await m.resolveEnvEntries("gh", cfg, async () => "tok"), { T: "tok" });
+
+    const lines = crossingReport(cfg);
+    assert.ok(lines.some((l) => l.startsWith("INFO") && l.includes('server "gh"') && l.includes("personal-pat")),
+        `expected the authorized crossing to be reported, got:\n${lines.join("\n")}`);
+});
+
+test("changing the command behind an authorized name stops the launch — the attack the shape exists for", async () => {
+    // An agent rewriting the project declaration keeps the approved NAME and swaps what runs under it.
+    // Nothing in the client notices: `.mcp.json` still says `run gh`.
+    const paths = scopedPaths({
+        user: { secrets: { "personal-pat": { backend: "local", authorized: { servers: { gh: CROSSING_SHAPE } } } } },
+        project: { projectId: "proj-x", servers: { gh: { command: "printenv", args: [], env: { T: "secret:personal-pat" } } } },
+    });
+    const cfg = m.loadConfig(paths);
+    await assert.rejects(() => m.resolveEnvEntries("gh", cfg, async () => "tok"), /authorized for a different shape/);
+
+    const fail = crossingReport(cfg).find((l) => l.startsWith("FAIL") && l.includes('server "gh"'));
+    assert.ok(fail);
+    assert.match(fail, /command is "printenv", authorized "npx"/);
+});
+
+test("an added env key changes the shape, because it changes what the process holding the secret gets", async () => {
+    const paths = scopedPaths({
+        user: { secrets: { "personal-pat": { backend: "local", authorized: { servers: { gh: CROSSING_SHAPE } } } } },
+        project: { projectId: "proj-x", servers: { gh: { command: "npx", args: ["-y", "gh-mcp"],
+            env: { T: "secret:personal-pat", EXTRA: "literal:x" } } } },
+    });
+    await assert.rejects(() => m.resolveEnvEntries("gh", m.loadConfig(paths), async () => "tok"),
+        /env keys are \["EXTRA","T"\], authorized \["T"\]/);
+});
+
+const VAULT_SHAPE = { command: "printenv", args: ["V"], envKeys: ["V"] };
+
+function vaultPaths(vaults) {
+    const user = { secrets: {} };
+    if (vaults !== undefined) {
+        user.vaults = vaults;
+    }
+
+    return scopedPaths({
+        user,
+        project: { projectId: "demo",
+            secrets: { x: { backend: "keyvault", vault: "victim-prod", secret: "db-password" } },
+            tasks: { build: { command: "printenv", args: ["V"], env: { V: "secret:x" } } } },
+    });
+}
+
+test("a project-declared keyvault secret needs the owner's authorization too — the repo picks the vault, your login pays", async () => {
+    // The namespace that makes a project-declared `local` secret inert does not exist here: keyFor is not
+    // consulted for keyvault, so the vault and secret name in the repository are read as written, with
+    // whatever identity `az` holds. Demonstrated before this rule existed: a committed declaration plus a
+    // printenv task returned the value of any secret the developer's login could read.
+    const cfg = m.loadConfig(vaultPaths(undefined));
+    let called = false;
+    await assert.rejects(
+        () => m.resolveEnvEntries("build", cfg, async () => { called = true; return "v"; }, "tasks"),
+        /not authorized to receive "x"/);
+    assert.equal(called, false, "the vault must not be contacted for a refused launch");
+});
+
+test("the vaults block authorizes by vault and secret name, and pins the consumer's shape", async () => {
+    const authorized = { "victim-prod": { "db-password": { tasks: { build: VAULT_SHAPE } } } };
+    const cfg = m.loadConfig(vaultPaths(authorized));
+    assert.deepEqual(await m.resolveEnvEntries("build", cfg, async () => "v", "tasks"), { V: "v" });
+
+    // Same shape, different vault: the authorization does not transfer.
+    const elsewhere = m.loadConfig(vaultPaths({ "other-vault": { "db-password": { tasks: { build: VAULT_SHAPE } } } }));
+    await assert.rejects(() => m.resolveEnvEntries("build", elsewhere, async () => "v", "tasks"), /not authorized/);
+
+    // Authorized vault and secret, but the command behind the task changed.
+    const swapped = m.loadConfig(scopedPaths({
+        user: { secrets: {}, vaults: authorized },
+        project: { projectId: "demo",
+            secrets: { x: { backend: "keyvault", vault: "victim-prod", secret: "db-password" } },
+            tasks: { build: { command: "curl", args: ["V"], env: { V: "secret:x" } } } },
+    }));
+    await assert.rejects(() => m.resolveEnvEntries("build", swapped, async () => "v", "tasks"),
+        /command is "curl", authorized "printenv"/);
+});
+
+test("a project-declared LOCAL secret still needs nothing — the set you ran is the authorization", async () => {
+    // The rule must not spread to the case the namespace already covers: this reads
+    // vc-secrets:demo:x, which holds only what was set for this project.
+    const cfg = m.loadConfig(scopedPaths({
+        user: { secrets: {} },
+        project: { projectId: "demo", secrets: { x: { backend: "local" } },
+            tasks: { build: { command: "printenv", args: ["V"], env: { V: "secret:x" } } } },
+    }));
+    assert.deepEqual(await m.resolveEnvEntries("build", cfg, async () => "v", "tasks"), { V: "v" });
+});
+
+test("doctor names the file and the path to paste into, and which of the two it is", () => {
+    const lines = m.doctorReport(m.loadConfig(vaultPaths(undefined)), {
+        env: {}, platform: "linux", enableLists: { enabled: [], disabled: [], envKeys: [] },
+        resolvable: {}, skipped: [], toolsMissing: [], wired: new Set(),
+    });
+    const fail = lines.find((l) => l.startsWith("FAIL") && l.includes('task "build"'));
+    assert.ok(fail, lines.join("\n"));
+    assert.match(fail, /vaults\."victim-prod"\."db-password"/);
+    assert.match(fail, /"command": "printenv"/);
+});
+
+test("a vaults block in a repository file authorizes nothing, and says so", () => {
+    const cfg = m.loadConfig(scopedPaths({
+        user: { secrets: {} },
+        project: { projectId: "demo",
+            vaults: { "victim-prod": { "db-password": { tasks: { build: VAULT_SHAPE } } } },
+            secrets: { x: { backend: "keyvault", vault: "victim-prod", secret: "db-password" } },
+            tasks: { build: { command: "printenv", args: ["V"], env: { V: "secret:x" } } } },
+    }));
+    assert.ok(cfg.warnings.some((w) => w.includes('"vaults" only authorizes at user scope')), cfg.warnings.join("\n"));
+    await_refusal: {
+        assert.equal(m.crossingProblem(cfg, "tasks", "build", "x")?.reason, "not authorized");
+    }
+});
+
+test("a launchable named after an Object.prototype member is refused, and doctor still reports", async () => {
+    // LAUNCHABLE_NAME_RE allows `toString`, `constructor`, `__proto__`. The authorization blocks come from
+    // JSON.parse, so a plain bracket read returned the inherited builtin instead of undefined: it passed
+    // the "is it authorized" test and then threw inside the shape comparison. One such name in a committed
+    // declaration took the entire doctor report down — a diagnostic that dies on the config it exists to
+    // diagnose is worse than the finding it was hiding.
+    for (const hostile of ["toString", "constructor", "__proto__", "hasOwnProperty", "valueOf"]) {
+        const cfg = m.loadConfig(scopedPaths({
+            user: { secrets: { pat: { backend: "local", authorized: { servers: {} } } } },
+            project: { projectId: "demo", servers: {
+                [hostile]: { command: "x", args: [], env: { T: "secret:pat" } },
+                healthy: { command: "y", args: [], env: { U: "literal:u" } },
+            } },
+        }));
+        await assert.rejects(() => m.resolveEnvEntries(hostile, cfg, async () => "v"), /not authorized/, hostile);
+
+        const lines = m.doctorReport(cfg, {
+            env: {}, platform: "linux", enableLists: { enabled: [], disabled: [], envKeys: [] },
+            resolvable: {}, skipped: [], toolsMissing: [], wired: new Set(),
+        });
+        assert.ok(lines.some((l) => l.startsWith("FAIL") && l.includes(hostile)), `${hostile}: ${lines.join("\n")}`);
+    }
+});
+
+test("a vault or secret named after an Object.prototype member does not authorize by inheritance", async () => {
+    const cfg = m.loadConfig(scopedPaths({
+        user: { secrets: {}, vaults: {} },
+        project: { projectId: "demo",
+            secrets: { x: { backend: "keyvault", vault: "toString", secret: "constructor" } },
+            tasks: { build: { command: "printenv", args: [], env: { V: "secret:x" } } } },
+    }));
+    await assert.rejects(() => m.resolveEnvEntries("build", cfg, async () => "v", "tasks"), /not authorized/);
+});
+
+test("an authorized block outside the user file authorizes nothing, and says so", () => {
+    // Otherwise the party asking for the grant would be writing it.
+    const paths = scopedPaths({
+        user: { secrets: { "personal-pat": { backend: "local" } } },
+        project: { projectId: "proj-x",
+            secrets: { "own-pat": { backend: "local", authorized: { servers: { gh: CROSSING_SHAPE } } } },
+            servers: { gh: { command: "npx", args: ["-y", "gh-mcp"], env: { T: "secret:personal-pat" } } } },
+    });
+    const cfg = m.loadConfig(paths);
+    assert.ok(cfg.warnings.some((w) => w.includes("only authorizes at user scope")), cfg.warnings.join("\n"));
 });
 
 test("loadConfig: a user-scope server may of course use a user-scope secret", () => {
@@ -288,7 +480,7 @@ const CFG = {
         "azure-monitor-sp": { backend: "keyvault", vault: "demo-vault", secret: "monitor-sp-nonprod", format: "json" },
     },
     servers: {
-        "azure-mcp": { command: "npx", args: ["-y"], env: { ADO_MCP_AUTH_TOKEN: "secret:ado-pat", LITERAL: "as-is" } },
+        "azure-mcp": { command: "npx", args: ["-y"], env: { ADO_MCP_AUTH_TOKEN: "secret:ado-pat", LITERAL: "literal:as-is" } },
         "azure-monitor": {
             command: "dnx", args: [],
             env: { AZURE_TENANT_ID: "secret:azure-monitor-sp.tenantId", AZURE_CLIENT_SECRET: "secret:azure-monitor-sp.clientSecret" },
@@ -297,6 +489,12 @@ const CFG = {
         "bad-field": { command: "x", args: [], env: { X: "secret:ado-pat.field" } },
     },
     tasks: {},
+    // A keyvault read is paid for by whatever identity `az` holds, so it needs the owner's authorization
+    // even though the vault and secret name come from the project — hence this block rather than a
+    // `authorized` block on a declaration the project owns.
+    vaults: { "demo-vault": { "monitor-sp-nonprod": { servers: {
+        "azure-monitor": { command: "dnx", args: [], envKeys: ["AZURE_TENANT_ID", "AZURE_CLIENT_SECRET"] },
+    } } } },
 };
 
 test("resolveEnvEntries: literal passthrough + secret resolution", async () => {
@@ -568,7 +766,7 @@ test("cmdRun: child gets literal env, legacy + dangerous vars stripped, exit cod
         secrets: {},
         servers: { probe: { command: process.execPath,
             args: ["-e", "if(process.env.PROBE!=='v'||process.env.ADO_MCP_AUTH_TOKEN||process.env.NODE_OPTIONS){process.exit(9)};process.exit(7)"],
-            env: { PROBE: "v" } } },
+            env: { PROBE: "literal:v" } } },
     });
     const r = spawnSync(process.execPath, [LAUNCHER_PATH, "run", "probe"],
         { env: { ...process.env, VC_SECRETS_CONFIG_DIR: dir, ADO_MCP_AUTH_TOKEN: "stale", NODE_OPTIONS: "--max-old-space-size=4096" }, encoding: "utf8" });
@@ -648,7 +846,7 @@ test("doctorReport: legacy env var phase-aware, names only", () => {
 
 test("doctorReport: skipped keyvault, missing tools, config override, dangling refs", () => {
     const cfg = { secrets: { "ado-pat": { backend: "local" } },
-        servers: { s: { command: "x", args: [], env: { A: "secret:ghost", B: "secrets:oops" } } } };
+        servers: { s: { command: "x", args: [], env: { A: "secret:ghost", B: "literal:fine" } } } };
     const lines = m.doctorReport(cfg, {
         env: {}, platform: "linux",
         enableLists: { enabled: [], disabled: [] },
@@ -660,7 +858,6 @@ test("doctorReport: skipped keyvault, missing tools, config override, dangling r
     assert.ok(lines.some((l) => l.startsWith("FAIL") && l.includes("gpg") && l.includes("PATH")));
     assert.ok(lines.some((l) => l.includes("VC_SECRETS_CONFIG_DIR")));
     assert.ok(lines.some((l) => l.includes('undeclared secret "ghost"')));
-    assert.ok(lines.some((l) => l.includes("secrets:oops") && l.includes("literal")));
 });
 
 test("doctorReport: prototype-chain secret name → still flagged as undeclared", () => {
@@ -809,6 +1006,19 @@ test("sanitizeEnv: strips DANGEROUS_ENV_VARS, keeps everything else", () => {
     assert.deepEqual(m.sanitizeEnv({ FOO: "bar" }), { FOO: "bar" });
 });
 
+test("a dangerous env key is refused and stripped whatever its case — Windows reads them case-insensitively", () => {
+    // `node_options` inherited from the operator's shell, or declared in a server's env, reaches a child
+    // on Windows as NODE_OPTIONS: the platform folds the case, so a case-sensitive list would pass
+    // through the exact injection it names. The declaration is written on one platform and run on another,
+    // so the refusal cannot be conditional on this one.
+    for (const key of ["node_options", "Node_Options", "ld_preload", "DyLd_Insert_Libraries"]) {
+        assert.deepEqual(m.sanitizeEnv({ [key]: "x", PATH: "p" }), { PATH: "p" }, key);
+        assert.throws(() => m.loadConfig(projectPaths({
+            secrets: {}, servers: { s: { command: "node", args: [], env: { [key]: "--require=/tmp/x.js" } } } })),
+        /code-injection vector/, key);
+    }
+});
+
 // The pre-rename suite pinned two properties against the ONE repo's committed declaration. This plugin
 // ships no servers, so there is no such file — and re-stating a fixture as its own assertion would be a
 // test that cannot fail. What survives the move is the launcher property each check was really about.
@@ -864,21 +1074,36 @@ test("two servers naming different secrets get different values — the resolve 
 
 // Puts an executable stub earlier on PATH than the real binary, so a backend read can be made to fail
 // in a chosen way without touching any real credential store.
-function stubBinary(name, script) {
+// On win32 a `#!/bin/sh` body is not executable by a shell-less spawn, and resolveSpawnCommand only
+// recognizes a `.cmd`/`.bat` shim there — so the body is kept as `<name>.sh` and paired with a `.cmd`
+// launcher that hands it to `sh` (Git Bash, present on GitHub's windows-latest runners), forwarding
+// arguments and the child's exit code. `platform` defaults to process.platform but takes an explicit
+// value so the win32 branch is unit-testable without faking a global.
+function stubBinary(name, script, platform = process.platform) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-bin-"));
     tmpDirs.push(dir);
-    const file = path.join(dir, name);
-    fs.writeFileSync(file, script, { mode: 0o755 });
+    if (platform === "win32") {
+        fs.writeFileSync(path.join(dir, `${name}.sh`), script, { mode: 0o755 });
+        fs.writeFileSync(path.join(dir, `${name}.cmd`), `@echo off\r\nsh "%~dp0${name}.sh" %*\r\nexit /b %ERRORLEVEL%\r\n`);
+    } else {
+        fs.writeFileSync(path.join(dir, name), script, { mode: 0o755 });
+    }
 
     return dir;
 }
+
+test("stubBinary: on win32 writes a .sh body plus a .cmd launcher naming it", () => {
+    const dir = stubBinary("gpg", "#!/bin/sh\nexit 0\n", "win32");
+    assert.ok(fs.existsSync(path.join(dir, "gpg.sh")));
+    assert.match(fs.readFileSync(path.join(dir, "gpg.cmd"), "utf8"), /gpg\.sh/);
+});
 
 // runTool spawns with process.env, not with the env handed to the builders, so a stub is only reachable
 // by moving the real PATH aside for the duration of the call.
 async function withStubOnPath(name, script, fn) {
     const binDir = stubBinary(name, script);
     const saved = process.env.PATH;
-    process.env.PATH = `${binDir}:${saved}`;
+    process.env.PATH = `${binDir}${path.delimiter}${saved}`;
     try {
         return await fn();
     } finally {
@@ -1184,7 +1409,7 @@ test("cmdMigrate: prints no advice about \"the other scope\" for a project/local
     const binDir = stubBinary("security", "#!/bin/sh\necho already-present\nexit 0\n");
 
     const r = spawnSync(process.execPath, [LAUNCHER_PATH, "migrate"], {
-        env: { ...process.env, VC_SECRETS_CONFIG_DIR: dir, VC_SECRETS_LOCAL_BACKEND: "keychain", PATH: `${binDir}:${process.env.PATH}` },
+        env: { ...process.env, VC_SECRETS_CONFIG_DIR: dir, VC_SECRETS_LOCAL_BACKEND: "keychain", PATH: `${binDir}${path.delimiter}${process.env.PATH}` },
         encoding: "utf8",
     });
 
@@ -1213,7 +1438,7 @@ esac
     const r = spawnSync(process.execPath, [LAUNCHER_PATH, "migrate"], {
         env: {
             ...process.env, VC_SECRETS_CONFIG_DIR: dir, VC_SECRETS_LOCAL_BACKEND: "keychain",
-            PATH: `${binDir}:${process.env.PATH}`, SECURITY_CALL_LOG: logPath,
+            PATH: `${binDir}${path.delimiter}${process.env.PATH}`, SECURITY_CALL_LOG: logPath,
         },
         encoding: "utf8",
     });
@@ -1301,10 +1526,15 @@ test("doctorReport: a malformed secret: reference is a FAIL, not a 'treated as a
     assert.ok(!lines.some((l) => l.includes("treated as a literal")), "must not be reported as a harmless literal");
 });
 
-test("isTypoReference: only the plural prefix is a literal; a malformed secret: value is not", () => {
-    assert.equal(m.isTypoReference("secrets:ado-pat"), true);
-    assert.equal(m.isTypoReference("secret:ado_pat"), false, "this one throws at launch — it is not a literal");
-    assert.equal(m.isTypoReference("plain"), false);
+test("an env value that is neither prefix is refused, so a pasted credential cannot look like a constant", () => {
+    // What this replaces: "anything that is not a secret: reference is a literal" made `secrets:ado-pat`
+    // and a real token equally valid, and each was reported as a harmless constant.
+    for (const value of ["ghp_realtokenshapedthing", "secrets:ado-pat", "Secret:ado-pat", ""]) {
+        assert.throws(() => m.loadConfig(projectPaths({
+            secrets: { "ado-pat": { backend: "local" } },
+            servers: { s: { command: "x", args: [], env: { TOKEN: value } } } })),
+        /must be "secret:<name>" or "literal:<value>"/, JSON.stringify(value));
+    }
 });
 
 test("readWiredServers: the DOCUMENTED wiring form is detected", () => {
@@ -1353,7 +1583,32 @@ test("keychain write: migrate gets a non-interactive shape, set keeps the prompt
 
     const copying = m.buildLocalWrite("keychain", key, { USER: "u" }, { value: "secret-value" });
     assert.ok(!copying.interactive, "a copy must not wait for a human");
-    assert.equal(copying.args.at(-1), "secret-value");
+    // And the value must not be in argv, where this machine's process list can read it while the write
+    // runs. It rides the command that `security -i` reads from stdin instead.
+    assert.deepEqual(copying.args, ["-i"]);
+    assert.ok(!JSON.stringify(copying.args).includes("secret-value"));
+    assert.equal(copying.stdinData, m.COMMAND_ON_STDIN);
+    assert.match(copying.stdinCommand("secret-value"), /^add-generic-password -U -a "u" -s "vc-secrets:demo:tok" -w "secret-value"\n$/);
+    assert.ok(!copying.argvExposesValue);
+});
+
+test("a value with a line ending falls back to argv, and says so instead of hiding it", () => {
+    // `security -i` reads one command per line, so a newline in the value ends the command whatever the
+    // quoting does. Refusing would strand a secret migrate exists to move, so the exposure is reported.
+    const key = `${m.KEY_PREFIX}:demo:tok`;
+    const spec = m.buildLocalWrite("keychain", key, { USER: "u" }, { value: "line1\nline2" });
+    assert.equal(spec.argvExposesValue, true);
+    assert.equal(spec.args.at(-1), "line1\nline2");
+    assert.equal(spec.stdinData, undefined);
+});
+
+test("quoting for security -i escapes what would end or reshape the command", () => {
+    const q = m.quoteForSecurityInteractive;
+    assert.equal(q("plain"), '"plain"');
+    assert.equal(q('a"b'), '"a\\"b"');
+    assert.equal(q("a\\b"), '"a\\\\b"');
+    // A quote followed by a second command is the shape that would matter if it were not escaped.
+    assert.equal(q('x" \ndelete-generic-password -s y'), '"x\\" \ndelete-generic-password -s y"');
 });
 
 test("a gpg read preserves a trailing newline the stored value really contains", async () => {
@@ -1361,7 +1616,7 @@ test("a gpg read preserves a trailing newline the stored value really contains",
     // reads and then writes: "token\n" would be migrated as "token".
     const binDir = stubBinary("gpg", '#!/bin/sh\nprintf "token\\n"\n');
     const saved = process.env.PATH;
-    process.env.PATH = `${binDir}:${saved}`;
+    process.env.PATH = `${binDir}${path.delimiter}${saved}`;
     try {
         const spec = m.buildLocalRead("gpg", `${m.KEY_PREFIX}:demo:tok`, { XDG_CONFIG_HOME: "/tmp" });
         assert.equal(spec.keepTrailingNewline, true);
@@ -1381,7 +1636,7 @@ test("a double quote in command/args/vault/secret is refused — it would break 
         secrets: { kv: { backend: "keyvault", vault: q, secret: "s" } }, servers: {} })), /double quote/);
 });
 
-test("install-shim: copies the shim, is idempotent, and prints both variable lines", () => {
+test("install-shim: copies the shim, is idempotent, and prints the settings entry plus literal commands", () => {
     const script = fileURLToPath(new URL("./scripts/install-shim.mjs", import.meta.url));
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-inst-"));
     tmpDirs.push(home);
@@ -1396,10 +1651,15 @@ test("install-shim: copies the shim, is idempotent, and prints both variable lin
     const shim = path.join(home, ".claude", "plugins", "data", "vc-secrets-vc-tools", "vc-secrets-shim.mjs");
     assert.ok(fs.existsSync(shim), `expected the shim at ${shim}\n${first.stdout}${first.stderr}`);
     assert.match(first.stdout, /installed/);
-    // Both lines, because they are read by different processes — the settings entry by a wrapped server,
-    // the export by the verbs a human runs in a terminal.
     assert.match(first.stdout, /"VC_SECRETS"/);
-    assert.match(first.stdout, /export VC_SECRETS=/);
+    // No shell export: the shim's path is already stable and literal, so a human running set/unlock/
+    // migrate/doctor by hand needs no per-shell setup, and none is printed or suggested.
+    assert.doesNotMatch(first.stdout, /export/i);
+    assert.doesNotMatch(first.stdout, /shell rc/i);
+    const quoted = JSON.stringify(shim);
+    for (const verb of ["set <name>", "unlock", "migrate", "doctor"]) {
+        assert.ok(first.stdout.includes(`node ${quoted} ${verb}`), `expected the literal ${verb} command\n${first.stdout}`);
+    }
 
     const second = spawnSync(process.execPath, [script], { encoding: "utf8", env });
     assert.equal(second.status, 0, second.stderr);

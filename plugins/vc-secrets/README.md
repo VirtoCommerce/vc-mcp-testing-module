@@ -10,12 +10,20 @@ not one. The config entry holds a call to the launcher instead of a credential:
 ```
 
 At launch, `vc-secrets` reads that server's declaration, resolves the secrets it names from the OS
-credential store (or Azure Key Vault), injects them into **that child process only**, and stays as
-its parent to forward stdio and kill the tree on exit. "That child only" is about the resolved
-secrets — the child otherwise inherits your ambient environment, as any spawned process does, so a
-credential already exported in your shell reaches it too. Moving those into declarations is what
-removes them. No token in `.mcp.json`, in `~/.claude.json`,
-in a settings `env` block, or in a `.env` file.
+credential store (or Azure Key Vault), injects them into **the process tree rooted at that declared
+process**, and stays as its parent to forward stdio and kill the tree on exit. Two things that phrase does
+not say: a sibling process gets nothing, and the declared process's own children get everything it got —
+environment is inherited, and nothing can un-inherit it. The child also keeps your ambient environment, as
+any spawned process does, so a credential already exported in your shell reaches it too; moving those into
+declarations is what removes them. No token in `.mcp.json`, in `~/.claude.json`, in a settings `env` block,
+or in a `.env` file.
+
+**What this protects, and what it does not.** It protects credentials **at rest** — out of the files that
+get committed, synced, pasted into an issue, or read by anything that can read your config — and against
+**accidental exposure** through those files. It does **not** isolate a secret from the process you declared,
+from that process's descendants, or from other code running as the same OS user: whatever can run commands
+as you can read the same credential store directly, with or without this tool. Read the rest of this file
+with that boundary in mind; nothing below quietly widens it.
 
 What it does not do: there is deliberately **no command that prints a secret value**, and no verb that
 runs an arbitrary command with secrets attached. Only declared servers and tasks are launched — and
@@ -30,7 +38,7 @@ team's servers, a person for their own.
 
 | Command | What it does |
 |---|---|
-| `/vc-secrets:install` | Put the shim at a stable path and print the two lines that point at it |
+| `/vc-secrets:install` | Put the shim at a stable path and print the settings entry plus the commands that use it |
 | `/vc-secrets:doctor` | Resolve everything a live server needs and report what is broken |
 | `/vc-secrets:migrate` | One-time: move secrets stored under the pre-plugin flat `mcpw:<name>` credential (or `~/.config/mcpw/secrets/<name>.gpg`) to their namespaced keys |
 
@@ -39,9 +47,12 @@ directory whose path carries the version, so a copy would keep running an old la
 update while the plugin's commands moved on. The shim resolves the plugin's current location on every
 launch, so an ordinary plugin update needs no reinstall.
 
-From a terminal, everything runs through the shim — `node "$VC_SECRETS" <verb>` — once `VC_SECRETS` is
-exported from your shell rc as well as set in `settings.json`, because the settings entry reaches only
-the processes Claude Code starts:
+From a terminal, everything runs through the shim, by its literal path — `install` prints the exact
+command for each verb, so there is nothing to configure first. (If you'd rather type a short name than
+paste the path each time, export it as `VC_SECRETS` from your shell's own startup file — that's a
+convenience you set up yourself, not something this tool needs or writes.) The `settings.json` entry
+`install` also prints is separate and unrelated to your terminal: it reaches only the processes Claude
+Code itself starts, which is why a wrapped MCP server needs it but a command you type by hand does not:
 
 | Verb | |
 |---|---|
@@ -110,11 +121,16 @@ environment does not help there; that case wants a git credential helper, not th
 
 - A pinned version belongs here, not in `.mcp.json` — this file is the single source of a wrapped
   server's argv.
-- Nothing stops you pasting a literal credential into an `env` value, and nothing warns about it:
-  these files are *meant* to hold references, and a value written there is plaintext at rest in the
-  place this tool exists to empty. `secret:<name>` or a non-secret literal — nothing else belongs here.
+- **Every `env` value carries its kind**: `secret:<name>` for a reference, `literal:<value>` for a
+  constant. Anything else is refused when the declaration loads. A pasted credential has no shape it can
+  hide in — the reader who forgets the prefix gets an error, not a plaintext token in the file this tool
+  exists to empty. It also ends the near-miss family: `secrets:<name>` with the plural no longer means
+  anything, so it cannot be silently accepted as a constant.
 - `secret:<name>` resolves the whole value; `secret:<name>.<field>` needs `"format": "json"`.
-- Anything not a `secret:` reference is a literal.
+- `literal:` is stripped once: `literal:literal:x` sets the value `literal:x`.
+- The rule covers `env`, which is where a credential belongs if it must be given to a process at all.
+  `args` stay free text — a token there would be visible in the machine's process list anyway, so it is
+  reviewable text rather than a surface this tool can defend.
 - `projectId` is **declared, never derived.** A git worktree has a different path from its main
   checkout, so a path-derived identity would hide the secrets you already set. It may appear in the
   project or the local file; if in both, they must agree. `user` is reserved.
@@ -139,23 +155,69 @@ fields. The same name in more than one home is therefore normal here too, across
 included — and `doctor` reports every such collision with the home that won, which is how the client
 answers the same ambiguity when it shows you the effective set.
 
-A project-declared server may also **reference** a user-scope secret, and usually should: one personal
-PAT used from several repos is the ordinary case, and declaring it per project would put copies of the
-same credential in as many namespaces, each of which you would then have to remember to rotate. `doctor`
-prints an `INFO` line for every project-declared server or task that consumes a secret you declared at
-user scope — that relationship is invisible in either file on its own.
+A project-declared server may **reference** a user-scope secret — one personal PAT used from several repos
+is the ordinary case, and declaring it per project would put copies of the same credential in as many
+namespaces, each of which you would then have to remember to rotate. But naming your secret is not consent
+to receive it. You authorize the **shape** that may, in your own file:
+
+```json
+{
+  "secrets": {
+    "personal-pat": {
+      "backend": "local",
+      "authorized": {
+        "servers": {
+          "gh": { "command": "npx", "args": ["-y", "gh-mcp"], "envKeys": ["T"] }
+        }
+      }
+    }
+  }
+}
+```
+
+A launch compares the declaration against that block and refuses on any difference — a changed `command`,
+changed `args`, an added env key. `doctor` reports each crossing: `INFO` when it is authorized, `FAIL` with
+the block to paste when it is not, built from the declaration as it stands so you read the command before
+approving it. `authorized` takes effect only in the user file; anywhere else the party asking for the
+approval would be the one writing it, and the loader says so and ignores it.
+
+The shape, rather than the name, is what has to match, and the reason is one level of indirection: your
+`.mcp.json` entry says `node "$VC_SECRETS" run gh`, and that is what the MCP client asks you to approve.
+The declaration deciding what `gh` actually runs sits below that approval — rewrite it and the client sees
+no change to re-ask about. So an approved name is not an approved command, and the authorization pins the
+command.
+
+Your own user-scope servers and tasks need no block: you wrote both sides, and there is no one to
+authorize against.
+
+**A `keyvault` secret needs the same authorization even when the project declares it**, and this is the one
+place the rule is not about which file the declaration sits in. A project-declared `local` secret is already
+harmless: its key is namespaced to the project, so it reads what *you* set for that project and nothing
+else — the `set` you ran is the authorization. A vault read has no such act behind it. `keyFor` is not
+consulted; the vault and secret name are read from the declaration as written, and the read is paid for by
+whatever identity `az` holds, which the repository does not own. So a committed declaration naming any vault
+your login can reach would otherwise hand over that secret. The vault and the secret name stay in the
+repository, where they belong; the authorization is keyed by that pair in your file:
+
+```json
+{
+  "vaults": {
+    "team-nonprod": {
+      "db-password": {
+        "servers": { "api": { "command": "npx", "args": ["-y", "api-mcp"], "envKeys": ["DB_PASSWORD"] } }
+      }
+    }
+  }
+}
+```
+
+Same comparison, same `doctor` output, same paste. `vaults` takes effect only in the user file — in a
+repository file it is ignored with a warning, for the reason `authorized` is user-scope only.
 
 One consequence worth knowing: when a project declares a secret whose name you also use personally, the
 project's entry wins **and keys the project's namespace**, so its server reads
 `vc-secrets:<projectId>:<name>` and not your personal value. Nothing silently borrows the other's
 credential; the two simply live under different keys.
-
-Worth being exact about the remaining exposure, since it is a security tool: a declaration arrives with
-whatever pull request adds it, so a repo could name your personal secret in a server of its own. What
-stands between that and your credential is the same thing that always did — a new project-scope server in
-`.mcp.json` is pending until you approve it, a task runs only when someone names it, and both the
-declaration and the `.mcp.json` entry are diffable. This tool moves the secret out of those files; it does
-not review them for you.
 
 The value itself lives where your platform keeps credentials: a Credential Manager generic
 credential (Windows), a Keychain generic password (macOS), or a gpg-encrypted file under
@@ -170,15 +232,17 @@ verb below throws.
 
 ```bash
 # 0. Write a declaration (see "Declarations" above) before anything else.
-/vc-secrets:install                  # installs the shim, prints the two lines to add
-node "$VC_SECRETS" set <name>        # <name> must be one of the secrets your declaration lists
-node "$VC_SECRETS" unlock            # gpg backend only, once per session, in a real terminal
-node "$VC_SECRETS" doctor            # expect no FAIL
+/vc-secrets:install                          # installs the shim, prints the settings entry and the commands below
+node "<the path install printed>" set <name> # <name> must be one of the secrets your declaration lists
+node "<the path install printed>" unlock     # gpg backend only, once per session, in a real terminal
+node "<the path install printed>" doctor     # expect no FAIL
 ```
 
-`install` prints an `env` entry for `~/.claude/settings.json` and the matching `export` for your shell
-rc, both setting `VC_SECRETS` to the shim's stable path. It prints rather than writes: those files are
-yours, and a tool that edits a developer's global settings unasked is a tool nobody trusts twice.
+`install` prints an `env` entry for `~/.claude/settings.json`, setting `VC_SECRETS` to the shim's stable
+path, and the exact commands above with that path already filled in — copy-paste, no shell setup needed.
+It prints rather than writes: that file is yours, and a tool that edits a developer's global settings
+unasked is a tool nobody trusts twice. If you'd rather type `$VC_SECRETS` than the full path, export it
+yourself from your shell's own startup file; the tool doesn't need you to.
 
 Then wire each server with the launcher as its `command`, either by hand in the repo's `.mcp.json`
 (project scope) or with `claude mcp add-json --scope user|local` for your own.

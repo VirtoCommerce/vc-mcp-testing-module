@@ -1,12 +1,15 @@
 #!/usr/bin/env node
-// install-shim.mjs — puts the shim at a stable path and prints the two variable lines.
+// install-shim.mjs — puts the shim at a stable path and prints the settings entry and the commands
+// that use it.
 //
 // This exists as a script rather than as prose in the command file because the three operations are
-// exact: resolve one directory, copy one file, print two lines. Prose would have the agent re-derive
-// them on every run, and a script can be tested.
+// exact: resolve one directory, copy one file, print the entry and the commands. Prose would have the
+// agent re-derive them on every run, and a script can be tested.
 //
-// It never writes settings.json or a shell rc: those belong to the developer, and a tool that edits
-// them unasked is a tool nobody trusts twice. It prints; the human pastes.
+// It never writes settings.json: that belongs to the developer, and a tool that edits it unasked is a
+// tool nobody trusts twice. It prints; the human pastes. The commands it prints for `set`/`unlock`/
+// `migrate`/`doctor` use the shim's literal path, so nothing needs writing to a shell's own startup
+// file either — there is no second file in this story.
 
 import fs from "node:fs";
 import os from "node:os";
@@ -73,7 +76,7 @@ if (!fs.existsSync(source)) {
 //
 // Getting it wrong is silent and its consequence is remote: uninstalling THAT plugin deletes its data
 // directory, which would take this plugin's shim with it, long after the developer pasted the path into
-// settings.json and a shell rc.
+// settings.json.
 //
 // With no usable value the id is computed rather than searched for: `<plugin>@<marketplace>` with
 // non-alphanumerics dashed, both names from manifests this repo ships.
@@ -121,14 +124,16 @@ try {
 const lines = [
     `shim: ${destination} (${replaced}; directory chosen via ${how})`,
     "",
-    "Add BOTH of these — they are read by different processes:",
+    "Add this to ~/.claude/settings.json — a wrapped MCP server reads it, and picks it up only after a",
+    "restart. Merge it into the existing \"env\" object if there is one; this file is not written for you.",
     "",
-    `  ~/.claude/settings.json   {"env": {"VC_SECRETS": ${JSON.stringify(destination)}}}`,
-    `  shell rc                  export VC_SECRETS=${JSON.stringify(destination)}`,
+    `  {"env": {"VC_SECRETS": ${JSON.stringify(destination)}}}`,
     "",
-    "The settings entry is what a wrapped MCP server reads; MCP servers pick it up only after a restart.",
-    "The export is what `set`, `unlock`, `doctor` and `migrate` read when you run them by hand — without",
-    "it those commands run `node \"\"` in a terminal. Neither file is written for you.",
+    "Run these directly when working with vc-secrets by hand — no other setup needed:",
+    "",
+    `  node ${JSON.stringify(destination)} set <name>`,
+    `  node ${JSON.stringify(destination)} unlock`,
+    `  node ${JSON.stringify(destination)} migrate`,
     "",
     `Then verify:  node ${JSON.stringify(destination)} doctor`,
 ];
