@@ -23,6 +23,7 @@ import { join, resolve, extname, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { parse as parseCsv } from "csv-parse/sync";
+import { markRunStalled, DEFAULT_IDLE_LIMIT_MS } from "./reap-stalled-run.ts";
 
 type Verdict = "PASS" | "FAIL" | "SKIPPED" | "BLOCKED" | "PENDING" | "EMPTY" | "UNKNOWN";
 
@@ -84,7 +85,9 @@ interface RunStatus {
   finishedAt?: string | null;
   env?: string;
   build?: Record<string, string>;
-  status?: string; // in_progress | running | completed
+  // in_progress | running | completed | stalled (reclaimed by reap-stalled-run.ts —
+  // an orphaned run the orchestrator never closed out; NOT a completed run)
+  status?: string;
   mode?: string;
   outputDir?: string;
   suites?: RunStatusSuite[];
@@ -1795,11 +1798,57 @@ function reconcileLooseScreenshots(runDir: string, reportsRoot: string): void {
   if (stillMissing.length) console.warn(`  ⚠ ${stillMissing.length} referenced screenshot(s) not found anywhere (never captured): ${stillMissing.slice(0, 8).join(", ")}${stillMissing.length > 8 ? " …" : ""}`);
 }
 
+/** What the --watch loop measures "progress" against between ticks. */
+export interface WatchProgress {
+  runId: string;
+  /** Run-level status string from test-run-status.json ("in_progress"/"completed"/…). */
+  statusLabel: string;
+  /** Suites that have written a results file. */
+  suitesWithResults: number;
+  /** Case rows present across those results files (pre-seeded PENDING rows included). */
+  casesRecorded: number;
+  /** Case rows that have reached a verdict (PASS/FAIL/BLOCKED/SKIPPED). */
+  evaluatedCases: number;
+}
+
+/**
+ * Stall-detection signature for the --watch loop: the watcher stops when this
+ * string has not changed for `idleLimitMs`.
+ *
+ * Progress on a live run is per-CASE, not per-suite. The runner pre-seeds every
+ * case as PENDING when a suite starts and rewrites its results file after each
+ * case, so `suitesWithResults` goes constant on the very first tick of a
+ * single-suite run — a signature built from run/status/suite-count alone then
+ * reports "no progress" and kills a perfectly healthy watcher after 45 min.
+ * (Multi-suite runs masked it: the suite count kept incrementing.) Folding the
+ * case counts in is what makes the signature track actual work.
+ */
+export function watchProgressSignature(p: WatchProgress): string {
+  return [p.runId, p.statusLabel || "?", p.suitesWithResults, p.casesRecorded, p.evaluatedCases].join(":");
+}
+
+/** The subset of a suite's counters that describes how far it has actually got. */
+type SuiteCaseCounters = Pick<NormSuite, "casesRecorded" | "passed" | "failed" | "blocked" | "skipped">;
+
+/** Sum the per-case progress counters across the suites that wrote results. */
+export function tallyCaseProgress(suites: SuiteCaseCounters[]): { casesRecorded: number; evaluatedCases: number } {
+  return suites.reduce(
+    (a, s) => ({
+      casesRecorded: a.casesRecorded + s.casesRecorded,
+      evaluatedCases: a.evaluatedCases + s.passed + s.failed + s.blocked + s.skipped,
+    }),
+    { casesRecorded: 0, evaluatedCases: 0 }
+  );
+}
+
 /**
  * Render one snapshot. Returns the run-level status ("in_progress"/"completed"/absent)
  * so the watch loop knows when to stop. Never exits the process itself.
  */
-function renderOnce(args: Args, reportsRoot: string): { status: RunStatus | null; runId: string; outPath: string; suitesWithResults: number } {
+function renderOnce(
+  args: Args,
+  reportsRoot: string
+): { status: RunStatus | null; runId: string; outPath: string; suitesWithResults: number; casesRecorded: number; evaluatedCases: number } {
   const status = loadRunStatus(reportsRoot);
   const runId = resolveRunId(reportsRoot, args.runId, status);
   const runDir = join(reportsRoot, runId);
@@ -1814,7 +1863,7 @@ function renderOnce(args: Args, reportsRoot: string): { status: RunStatus | null
   if (suites.length === 0) {
     if (args.watch) {
       console.log(`[watch] ${runId}: no suite results yet — waiting…`);
-      return { status, runId, outPath: "", suitesWithResults: 0 };
+      return { status, runId, outPath: "", suitesWithResults: 0, casesRecorded: 0, evaluatedCases: 0 };
     }
     if (!dirExists) throw new Error(`Run directory not found: ${runDir}`);
     console.error(`No suite results (suite-*-results.json) found in ${runDir}`);
@@ -1830,7 +1879,7 @@ function renderOnce(args: Args, reportsRoot: string): { status: RunStatus | null
   });
   writeFileSync(outPath, html, "utf-8");
 
-  return { status, runId, outPath, suitesWithResults: resultSuites.length };
+  return { status, runId, outPath, suitesWithResults: resultSuites.length, ...tallyCaseProgress(resultSuites) };
 }
 
 async function main(): Promise<void> {
@@ -1896,7 +1945,8 @@ async function main(): Promise<void> {
 
   // Watch mode: regenerate on an interval until the run completes.
   // Safety valve: stop after a long idle with no status/results so a stray watcher can't run forever.
-  const idleLimitMs = 45 * 60 * 1000;
+  // Shared with the reaper CLI so the two can't drift on what "stalled" means.
+  const idleLimitMs = DEFAULT_IDLE_LIMIT_MS;
   let opened = false;
   let lastProgressAt = Date.now();
   let lastSignature = "";
@@ -1918,7 +1968,13 @@ async function main(): Promise<void> {
     }
 
     const inProgress = statusIsInProgress(result.status) && result.status?.runId === result.runId;
-    const signature = `${result.runId}:${result.status?.status ?? "?"}:${result.suitesWithResults}`;
+    const signature = watchProgressSignature({
+      runId: result.runId,
+      statusLabel: result.status?.status ?? "?",
+      suitesWithResults: result.suitesWithResults,
+      casesRecorded: result.casesRecorded,
+      evaluatedCases: result.evaluatedCases,
+    });
     if (signature !== lastSignature) {
       lastSignature = signature;
       lastProgressAt = Date.now();
@@ -1957,7 +2013,23 @@ async function main(): Promise<void> {
     }
 
     if (Date.now() - lastProgressAt > idleLimitMs) {
-      console.log(`[watch] no progress for ${idleLimitMs / 60000} min — stopping.`);
+      const reason = `no progress for ${idleLimitMs / 60000} min (${signature})`;
+      console.log(`[watch] ${reason} — stopping.`);
+      // The orchestrator writes `completed`; nothing else does. If it died mid-run
+      // the status file would stay `in_progress` forever — the watcher could never
+      // settle and Step 0's duplicate check would block every future run. This
+      // watcher has just proven the silence, so it closes the run out as `stalled`
+      // (an observation, never `completed`) rather than leaving the orphan behind.
+      if (inProgress) {
+        try {
+          if (markRunStalled(reportsRoot, result.runId, reason, new Date().toISOString())) {
+            console.log(`[watch] ${result.runId} marked "stalled" — a new run is no longer blocked.`);
+            renderOnce(args, reportsRoot); // one final static render, refresh meta dropped
+          }
+        } catch (e) {
+          console.error(`[watch] could not mark ${result.runId} stalled: ${(e as Error).message}`);
+        }
+      }
       return;
     }
 
@@ -1965,7 +2037,18 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// Only run as a CLI — importing this module (unit tests) must not start a render.
+const isCli = (() => {
+  try {
+    return !!process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+  } catch {
+    return false;
+  }
+})();
+
+if (isCli) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
