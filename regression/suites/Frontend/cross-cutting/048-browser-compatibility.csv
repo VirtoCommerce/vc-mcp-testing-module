@@ -36,7 +36,7 @@ Chrome latest version; BOPIS pickup locations configured in admin; {{FRONT_URL}}
 [STATE] smooth rendering with no visible tile loading delays","[CONSOLE] no Google Maps JS API errors
 [NETWORK] Maps API tile requests return 200; no blocked requests
 [API] store location data API returns correct coordinates and details","JS error in browser console; map blank or fails to load; markers not clickable; info window missing or showing wrong data","none","VCST-4499 TC-013","Manual"
-"BROWSER-CHROME-003","Chrome Android - Mobile Flow","Chrome > Mobile","Critical","BL-COMPAT-001,BL-COMPAT-002,BL-COMPAT-003","ECL-13.1,ECL-13.2","[PRE:SIGNIN_AS:USER_DEFAULT]
+"BROWSER-CHROME-003","Chrome Android - Mobile Flow","Chrome > Mobile","Critical","BL-COMPAT-001,BL-COMPAT-002,BL-COMPAT-003","ECL-7.4","[PRE:SIGNIN_AS:USER_DEFAULT]
 [PRE:RESET_CART]
 Chrome on Android (physical device or BrowserStack emulator); mobile viewport active; {{FRONT_URL}} accessible","url={{FRONT_URL}};browser=Chrome Android;os=Android 14","[NAV] {{FRONT_URL}}
 [WAIT] homepage loads in mobile layout (hamburger menu visible)
@@ -52,7 +52,7 @@ Chrome on Android (physical device or BrowserStack emulator); mobile viewport ac
 [DOM] all touch targets are at least 44x44px
 [STATE] order confirmation visible","[CONSOLE] no JS errors during mobile navigation or checkout
 [NETWORK] all API calls 2xx on mobile network profile","JS error in browser console; layout broken or overflow at any viewport; touch gesture not recognized; checkout flow broken on mobile","Remove test order from admin if created","VCST-4499 TC-013","Manual"
-"BROWSER-CHROME-004","Chrome Android - Touch Events","Chrome > Mobile","High","BL-COMPAT-001,BL-COMPAT-003,BL-COMPAT-004","ECL-13.1,ECL-13.2","[PRE:SIGNIN_AS:USER_DEFAULT]
+"BROWSER-CHROME-004","Chrome Android - Touch Events","Chrome > Mobile","High","BL-COMPAT-001,BL-COMPAT-003,BL-COMPAT-004","ECL-7.4","[PRE:SIGNIN_AS:USER_DEFAULT]
 Chrome on Android device or BrowserStack; BOPIS modal accessible; {{FRONT_URL}} accessible","url={{FRONT_URL}};browser=Chrome Android;os=Android 14","[NAV] {{FRONT_URL}}
 [ACT] open BOPIS pickup modal with map view
 [WAIT] map renders with store markers
@@ -212,7 +212,7 @@ Chrome, Firefox, Safari (macOS), and Edge available; {{FRONT_URL}} accessible; m
 [DOM] no horizontal scroll at any tested viewport in any browser
 [STATE] responsive breakpoints trigger at consistent widths across browsers","[CONSOLE] no CSS grid or flexbox property deprecation warnings
 [NETWORK] layout assets (CSS) load with 200 status in all browsers","layout broken or overflow at any viewport; horizontal scroll present at mobile viewport in any browser; grid column count differs between browsers; flexbox wrapping breaks in Safari WebKit; JS error in browser console","none","VCST-4499 TC-013","Manual"
-"BROWSER-MOBILE-001","Mobile Matrix - iPhone Models","Mobile > iPhone","Critical","BL-COMPAT-001,BL-COMPAT-003,BL-COMPAT-004","ECL-13.1,ECL-13.2","[PRE:SIGNIN_AS:USER_DEFAULT]
+"BROWSER-MOBILE-001","Mobile Matrix - iPhone Models","Mobile > iPhone","Critical","BL-COMPAT-001,BL-COMPAT-003,BL-COMPAT-004","ECL-7.4","[PRE:SIGNIN_AS:USER_DEFAULT]
 iPhone 16, 17, and 18 (or latest 3 models) with Safari iOS; physical devices preferred; BrowserStack acceptable; {{FRONT_URL}} accessible","url={{FRONT_URL}};browser=Safari iOS;devices=iPhone 16,iPhone 17,iPhone 18;email={{USER_EMAIL}};password={{USER_PASSWORD}}","[NAV] {{FRONT_URL}} on iPhone 16 — note safe area inset at top (notch/Dynamic Island) and bottom (home bar)
 [ASSERT] content does not render under notch or home bar
 [ACT] run mobile smoke tests SMK-001 through SMK-012 on iPhone 16
@@ -226,7 +226,7 @@ iPhone 16, 17, and 18 (or latest 3 models) with Safari iOS; physical devices pre
 [STATE] swipe gestures inside app modals/carousels are captured by the app and do not trigger the browser's native swipe-to-go-back navigation
 [DOM] no model-specific layout breaks (each iPhone model has slightly different viewport height)","[CONSOLE] no JS errors across any tested iPhone model
 [NETWORK] all API calls succeed on each device","touch gesture not recognized; layout broken or overflow at any viewport; JS error in browser console; safe area inset violated on any model; smoke test failure specific to one iPhone model","Remove any test cart items or orders created during smoke tests","VCST-4499 TC-013","Manual"
-"BROWSER-MOBILE-002","Mobile Matrix - Android Models","Mobile > Android","Critical","BL-COMPAT-001,BL-COMPAT-003,BL-COMPAT-004","ECL-13.1","[PRE:SIGNIN_AS:USER_DEFAULT]
+"BROWSER-MOBILE-002","Mobile Matrix - Android Models","Mobile > Android","Critical","BL-COMPAT-001,BL-COMPAT-003,BL-COMPAT-004","ECL-7.4","[PRE:SIGNIN_AS:USER_DEFAULT]
 Last 3 Android flagship models (e.g., Samsung Galaxy S24, Google Pixel 9, OnePlus 12) with Chrome Android; physical devices or BrowserStack; {{FRONT_URL}} accessible","url={{FRONT_URL}};browser=Chrome Android;devices=Samsung Galaxy S24,Google Pixel 9,OnePlus 12;email={{USER_EMAIL}};password={{USER_PASSWORD}}","[NAV] {{FRONT_URL}} on Samsung Galaxy S24 (Chrome Android)
 [ASSERT] homepage layout renders correctly for this screen size and density
 [ACT] run mobile smoke tests SMK-001 through SMK-012 on Galaxy S24
@@ -244,7 +244,7 @@ Last 3 Android flagship models (e.g., Samsung Galaxy S24, Google Pixel 9, OnePlu
 [STATE] tap, scroll, and swipe touch events each produce their corresponding UI response (navigation, scroll, or selection) on all three Android models
 [DOM] content adapts to varying screen sizes (different aspect ratios between models)","[CONSOLE] no JS errors on any tested Android device
 [NETWORK] all API calls succeed on each device","touch gesture not recognized; layout broken or overflow at any viewport; JS error in browser console; smoke test failure specific to one Android model; Android OEM browser engine quirk breaking layout","Remove any test cart items or orders created during smoke tests","VCST-4499 TC-013","Manual"
-"BROWSER-MOBILE-003","Viewport Handling - All Devices","Mobile > Viewport","High","BL-COMPAT-001,BL-COMPAT-004","ECL-13.1,ECL-13.2","[PRE:SIGNIN_AS:USER_DEFAULT]
+"BROWSER-MOBILE-003","Viewport Handling - All Devices","Mobile > Viewport","High","BL-COMPAT-001,BL-COMPAT-004","ECL-7.4","[PRE:SIGNIN_AS:USER_DEFAULT]
 Browser DevTools or BrowserStack available for viewport simulation; {{FRONT_URL}} accessible","url={{FRONT_URL}};viewports=320px,375px,414px,768px,1024px,1920px","[NAV] {{FRONT_URL}} — resize browser to 320px width (minimum supported mobile)
 [ASSERT] no horizontal scroll; all content visible; text not clipped
 [ACT] resize to 375px (iPhone SE / standard mobile)
