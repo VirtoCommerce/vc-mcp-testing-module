@@ -15,9 +15,9 @@
  * past the idle limit — marks it `stalled`.
  *
  * `stalled` is deliberately NOT `completed`: the run did not finish, and saying
- * it did would put a phantom green run into history.json and the overview. It is
- * an observation ("nobody has touched this for N minutes"), so a still-alive
- * orchestrator that later writes `completed` simply wins.
+ * it did would put a phantom green run into history.json. It is an observation
+ * ("nobody has touched this for N minutes"), so a still-alive orchestrator that
+ * later writes `completed` simply wins.
  *
  * Usage:
  *   npx tsx scripts/regression/reap-stalled-run.ts              # dry-run classification
