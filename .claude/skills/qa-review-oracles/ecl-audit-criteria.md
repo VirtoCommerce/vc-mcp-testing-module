@@ -119,6 +119,42 @@ non-existent section; ECLL-003: body section missing from the appendix).
   bad ref inside the ECL library, only inside a suite CSV.
 - Update it as its **own deliberate edit**, never as an incidental side effect of a body change.
 
+## 6a. Where an amendment stamp goes in a TABLE (worked example)
+
+BL entries are prose with their own `- **Amended:**` bullet. ECL rows are **pipe-table cells** with
+nowhere to hang a per-row stamp — a stamp inside a cell would wreck the column count. So:
+
+**Rewrite the row in place, then append ONE section-level `**Amended:**` paragraph below the table**,
+mirroring the existing `**Agent rule:**` convention chapter 14 already uses. Name which row changed and
+why, since the stamp is no longer adjacent to it.
+
+Worked example — §14.6 row 2, audited 2026-08-06:
+
+> **Before:** `| **Skyflow/AuthorizeNet after Place Order** | Skyflow, Authorize.Net, DataTrance require clicking 'Place Order' first — redirects to /checkout/payment | High | … |`
+>
+> **After:** the pattern **name itself** was wrong, not just the description — Skyflow and Authorize.Net had moved to `allowCartPayment=true` and render inline on the cart, leaving Datatrans as the only redirect processor. The row became `| **Datatrans is the only redirect processor** | … |`, followed by a section-level stamp naming row 2, the source anchors, and the live observation.
+
+Two things that example establishes: a DRIFT may require rewriting the **pattern name**, not only the
+description (a stale name is what agents actually read); and the stamp names the row because it cannot sit
+beside it.
+
+## 6b. An uncited section (ECLC-002) is not automatically a gap
+
+§5 covers the dangling-citation direction. The inverse — a section **no case cites** — has three
+readings, and only one of them is "write a test":
+
+1. **Coverage pending** — a real, testable pattern nobody has covered yet. Note it for
+   `/qa-test-lifecycle` Phase 3. Do not author cases here.
+2. **Legitimately never suite-coverable** — the condition cannot be exercised as a repeatable functional
+   CSV case without doing something destructive or out-of-band. `ECL-14.8` (module version/schema drift)
+   is the worked example: reproducing it means deliberately corrupting a shared environment's schema.
+   **Say so explicitly and close the finding** — this is an environment-hygiene concern that belongs in a
+   deploy health check, not a suite. Never manufacture a destructive test to satisfy the gate.
+3. **Genuinely dead** — nothing cites it because the pattern is obsolete. That is a RETIRE candidate, and
+   it needs §0's positive-evidence bar, not merely the absence of citations.
+
+ECLC-002 is Medium, not High, precisely because reading 2 is common and legitimate.
+
 ## 7. Edit-safety rules
 
 - **Body-only.** Never reflow or reformat a section you did not audit.

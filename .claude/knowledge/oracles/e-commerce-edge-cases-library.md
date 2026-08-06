@@ -623,9 +623,11 @@ VC-specific patterns observed on the platform. Each entry maps to a business log
 | Pattern | Description | Frequency | Impact | BL Invariant | ECL Ref | Status |
 |---------|-------------|-----------|--------|-------------|---------|--------|
 | **CyberSource on cart page** | CyberSource payment form renders directly on `/cart` — NOT on `/checkout/payment`. Agent that navigates to `/checkout/payment` first will miss the form | High | Test never reaches payment | BL-PAY-004 | ECL-1.1 | [OBSERVED] |
-| **Skyflow/AuthorizeNet after Place Order** | Skyflow, Authorize.Net, DataTrance require clicking 'Place Order' first — redirects to `/checkout/payment` | High | Agent tries wrong page | BL-PAY-004 | ECL-1.1 | [OBSERVED] |
+| **Datatrans is the only redirect processor** | Datatrans has no inline cart-payment component (`allowCartPayment=false`) — selecting it and clicking 'Place Order' redirects to `/checkout/payment` for card entry. CyberSource, Skyflow **and** Authorize.Net all render inline on `/cart` (as the row above), so an agent that still expects Skyflow or Authorize.Net to redirect will navigate away from the form it needs | High | Agent tries wrong page / misses the inline form | BL-PAY-004 | ECL-1.1 | [OBSERVED] |
 | **Payment iframe blocked by ad-blocker** | Payment script (CyberSource/Skyflow) blocked silently — form appears blank, no error shown | Low-Medium | Silent payment failure | BL-PAY-001 | ECL-7.1 | [OBSERVED] |
 | **Double-click Place Order** | Slow connection: user/agent clicks 'Place Order' twice — two orders created | Medium | Duplicate order | BL-CHK-002 | ECL-7.3 | [OBSERVED] |
+
+**Amended:** 2026-08-06 (auto-applied, triangulated — ECL-AUDIT-2026-08-06). Row 2 was **DRIFT**: it claimed Skyflow, Authorize.Net and "DataTrance" all redirect after Place Order. Skyflow and Authorize.Net have since moved to `allowCartPayment=true` and render inline on the cart like CyberSource, leaving Datatrans as the only redirect processor — the row was steering agents to the wrong page for two of the three processors it named. **Source:** the storefront's shared payment component renders the CyberSource, Skyflow and Authorize.Net processors inline, keyed on the payment type, with an explicit `TODO` noting Datatrans cart payments are not yet supported; the checkout composable's `canPayFromCart` gates on the payment method's `allowCartPayment` flag generically, not on a processor allowlist. **Live:** selecting Authorize.Net on the cart kept the page on `/cart` with no redirect.
 
 ### 14.7 Background Job Timing (Hangfire)
 

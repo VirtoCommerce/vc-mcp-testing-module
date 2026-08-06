@@ -88,7 +88,9 @@ Each agent captures the three axes with concrete evidence, never a bare opinion 
 
 - **Docs axis** — `/vc-docs` (VirtoOZ MCP), topic-scoped tool by domain (`StorefrontUserGuide`/`StorefrontDeveloperGuide` for cart/checkout UX, `PlatformDeveloperGuide` for platform/admin, `*SourceCode` for "where is this implemented"). Capture a **quote + doc reference**.
 - **Source axis** — GitHub MCP `search_code` / `get_file_contents` on `org:VirtoCommerce` (read-only; QA never clones). Capture a **`file:line` anchor** and the relevant code shape.
-- **Live axis** — delegate to **qa-testing-expert** (playwright-firefox) to OBSERVE the behavior via the real UI/API. Capture an **`{OBSERVED}` result + screenshot**. Honors the REAL-USER rule — no `browser_evaluate` / `run_code_unsafe` bypass.
+- **Live axis** — OBSERVE the behavior via the real UI/API. Capture an **`{OBSERVED}` result + screenshot**. Honors the REAL-USER rule — no `browser_evaluate` / `run_code_unsafe` bypass.
+  > **In parallel mode (the default) each batch agent does its OWN live observation on its assigned slot — do NOT sub-delegate to `qa-testing-expert`.** Three batch agents already occupy the three browser slots; a sub-delegated fourth blows the cap. `qa-testing-expert` is reserved for a *sequential* single-entry deep-dive after the batches finish. (Only in a single-batch run is delegating the live axis to `qa-testing-expert` on `playwright-firefox` the right call.)
+  > **If an axis's tooling fails mid-run — GitHub API rate limit, MCP timeout — degrade explicitly, don't silently drop it.** Accepted fallback for the source axis: reuse the `file:line` already recorded in a related entry's `Source:` field and say you did, then lean on the live axis for reachability. That is a **two-axis** result under the applicable-axes waiver, and the outstanding anchor must be named in the report. A tooling failure is never the same as "no evidence exists".
 
 ### Step 2: Assign a verdict
 
