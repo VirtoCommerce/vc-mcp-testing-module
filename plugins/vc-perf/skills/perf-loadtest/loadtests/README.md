@@ -32,6 +32,10 @@ Knobs (env): `SCENARIO` (scenario basename under `scenarios/`, default `cart-ord
 non-default scenarios write to `results/<scenario>/<profile>/`) ·
 `NO_COUNTERS=1` (skip the dotnet-counters sidecar — REQUIRED when `dotnet-trace` will attach to
 the backend pid during the load window; EventPipe is single-consumer) ·
+`TRACE=1` (attach `dotnet-trace --profile gc-verbose` INSTEAD of the counters sidecar and write a
+`.nettrace` for allocation attribution; it owns the pid exclusively and never falls back to
+counters. A capture whose collector had to be force-stopped is renamed `*.suspect.nettrace` — it
+has no guaranteed footer and may fail to parse) ·
 `HOLD` (steady hold duration, default `120s` — long holds host sequential L3 captures inside one
 run so all captures share identical knobs by construction) ·
 `ITEMS` (items per iteration, default 5) · `RATE` (steady arrivals/s, default 5) ·
