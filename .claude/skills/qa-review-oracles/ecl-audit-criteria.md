@@ -38,6 +38,32 @@ Same tuple as BL: concrete artifacts from all three **applicable** axes, agreein
 > edge case would retire most of the library on the first audit, which is precisely backwards:
 > an edge case that reproduces easily is a bug, and belongs in the tracker.
 
+**Worked examples of the reachability bar** — the first live run of this axis over-claimed UNGROUNDED
+until it re-read this rule, so calibrate against these:
+
+| Pattern | SUFFICIENT live evidence | NOT required |
+|---|---|---|
+| Search index lag | the search endpoint responds and returns the field the pattern concerns | forcing an actual reindex race |
+| GraphQL error-shape | the mutation is callable and the response carries the field in question | provoking a real failure |
+| Configurable-product selection gate | the PDP renders and the control the pattern names is present/absent as described | completing a bad configuration |
+| Payment form location | the processor is selectable and the page behaves as the row claims | submitting a real payment |
+| Validator crash / destructive states | **N/A — do not attempt.** Reachability of the surface is the ceiling | triggering the crash on a shared environment |
+
+If you observed the surface and the pattern's subject is present, that is CONFIRMED at the reachability
+bar. Reserve UNGROUNDED for "I could not reach the surface at all", not "I did not see it fail".
+
+> **Team memory is corroboration, never an axis.** A `feedback_*` / `project_*` memory matching a row
+> (e.g. stale mini-cart pricing) is useful context and worth citing in the report, but it does **not**
+> satisfy docs, source or live and must never upgrade a verdict. Memories record what was true when
+> written — the whole reason this audit exists.
+
+> **Prefer `get_file_contents` over `search_code` in parallel runs.** GitHub's Search API has a much
+> lower shared quota than the Contents API, and 3 concurrent batch agents contend on it — the first
+> live run hit `API rate limit exceeded` almost immediately on `search_code` while `get_file_contents`
+> kept working throughout. Navigate to the file by path where you can; save `search_code` for when you
+> genuinely don't know where to look. If you do get rate-limited, take the degrade path in SKILL.md
+> Step 1 rather than scoring the axis absent.
+
 ## 1a. `docs: N/A` allowance
 
 Inherited verbatim from `bl-audit-criteria.md` §1a, and it fires **more often** here. Two

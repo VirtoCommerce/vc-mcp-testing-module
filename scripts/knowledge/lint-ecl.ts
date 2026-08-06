@@ -42,9 +42,15 @@
  * suite CSV schema stays single-sourced.
  *
  * Usage:
- *   npx tsx scripts/knowledge/lint-ecl.ts [library.md] [--json] [--fail-on=Blocker|Critical|High|Medium|Informational]
- *   npm run ecl:lint             # human report, gate on High
- *   npm run ecl:audit:collect    # --json inventory
+ *   npx tsx scripts/knowledge/lint-ecl.ts [library.md] [--json] [--filter=<id-regex>] [--fail-on=Blocker|Critical|High|Medium|Informational]
+ *   npm run ecl:lint                          # human report, gate on High
+ *   npm run ecl:audit:collect                 # --json inventory
+ *   npm run ecl:audit:collect -- --filter=14  # one chapter, for a scoped audit batch
+ *
+ * `--filter` scopes the REPORT, never the SCAN: citations are always collected from
+ * every suite, so a scoped run cannot mistake "outside my filter" for "not cited".
+ * It matches the section id (`ECL-14.6`) — `--filter=14\.` for a chapter, `--filter=14\.6$`
+ * for one section. Mirrors `bl:lint --filter=BL-CART`.
  *
  * Exit code: 0 if no finding at/above --fail-on (default High); 1 otherwise.
  */
@@ -292,6 +298,7 @@ function main(): void {
   const repoRoot = resolve(here, "..", "..");
   const file = argv.find((a) => !a.startsWith("--")) ?? join(repoRoot, ".claude", "knowledge", "oracles", "e-commerce-edge-cases-library.md");
   const json = argv.includes("--json");
+  const filterArg = argv.find((a) => a.startsWith("--filter="))?.split("=")[1];
   const failOnArg = (argv.find((a) => a.startsWith("--fail-on=")) ?? "--fail-on=High").split("=")[1] as Severity;
   const failOn: Severity = SEVERITY_ORDER.includes(failOnArg) ? failOnArg : "High";
 
@@ -304,8 +311,24 @@ function main(): void {
   }
 
   const { sections, appendixIds } = parseLibrary(text);
+  // Citations are scanned from EVERY suite regardless of --filter. Narrowing the scan
+  // would let a scoped run report "uncited" for a section cited only by a suite the
+  // filter excluded — the same false-clean class ECLC-003 exists to prevent.
   const citations = buildCitations(join(repoRoot, "regression", "suites"));
-  const findings = lint(sections, appendixIds, citations, repoRoot);
+  const allFindings = lint(sections, appendixIds, citations, repoRoot);
+
+  let re: RegExp | null = null;
+  if (filterArg) {
+    try {
+      re = new RegExp(filterArg);
+    } catch {
+      console.error(`[ecl:lint] invalid --filter regex: ${filterArg}`);
+      process.exit(1);
+    }
+  }
+  const inScope = (id: string): boolean => !re || re.test(id);
+  const findings = allFindings.filter((f) => inScope(f.id));
+  const scopedSections = sections.filter((s) => inScope(s.id));
   const blocking = findings.filter((x) => rank(x.severity) >= rank(failOn));
 
   if (json) {
@@ -313,7 +336,8 @@ function main(): void {
       JSON.stringify(
         {
           library: relative(repoRoot, file),
-          sections: sections.map((s) => ({
+          filter: filterArg ?? null,
+          sections: scopedSections.map((s) => ({
             id: s.id,
             title: s.title,
             chapter: s.chapter,
@@ -333,8 +357,9 @@ function main(): void {
     process.exit(blocking.length > 0 ? 1 : 0);
   }
 
-  const cited = sections.filter((s) => citations.byEcl.has(s.id)).length;
-  console.log(`\n[ecl:lint] ${sections.length} sections, ${cited} cited by ≥1 case, ${citations.byEcl.size} distinct ids cited across the suites`);
+  const cited = scopedSections.filter((s) => citations.byEcl.has(s.id)).length;
+  const scopeNote = filterArg ? ` (filtered to /${filterArg}/ — citations still scanned across ALL suites)` : "";
+  console.log(`\n[ecl:lint] ${scopedSections.length} sections, ${cited} cited by ≥1 case, ${citations.byEcl.size} distinct ids cited across the suites${scopeNote}`);
 
   if (findings.length === 0) {
     console.log(`[ecl:lint] OK — no findings\n`);
