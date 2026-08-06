@@ -65,7 +65,8 @@ expensive mistake available here.
   the recipe: env confirmation, fixture filter, the KQL + its gotchas, the confounds, worked examples.
 - `.claude/knowledge/execution/performance-thresholds.md` — latency budgets. A **count** has no
   threshold; do not invent one.
-- `plugins/vc-perf/skills/perf-loadtest/SKILL.md` — the k6 L2 harness for `--load`.
+- `plugins/vc-perf/skills/perf-loadtest/SKILL.md` — the k6 L2 harness for `--load`. **Requires the separate
+  `vc-perf` plugin** (not enabled by default — see §Agent delegation); the core measurement does not.
 
 ---
 
@@ -158,10 +159,13 @@ category correctly is the whole point of this phase.
 
 - **Never hardcode a threshold or baseline.** A call count has no budget in `performance-thresholds.md`;
   inventing one manufactures phantom regressions (`feedback_never_hardcode_in_scripts`).
-- **Warm vs warm, always.** Discard the first request of every cell — cold start dominates by two orders
-  of magnitude (1613 ms / 75 SQL vs 20 ms / 3 SQL on the same build).
-- **Repeated identical requests are not independent samples** — they measure cache warming. For a
-  *count*, only the cold request discriminates; for steady state use sustained k6 traffic.
+- **Warm vs warm — a *latency* rule.** When reporting duration, discard the first request of every cell;
+  cold start dominates by two orders of magnitude (1613 ms / 75 SQL vs 20 ms / 3 SQL on the same build).
+  **Never apply it to a count** — that discards the discriminating observation and manufactures a false
+  floor (reference §4.1–4.2, §8.1).
+- **Repeated identical requests are not independent samples** — they measure cache warming. For a *count*,
+  the cold request is the discriminating one, so **rotate targets and keep every row**; for steady state
+  use sustained k6 traffic.
 - **Every figure re-traceable to the query that produced it** — cite the window and the arm.
 - **State what you did not measure.** A number whose confounds you have not addressed costs more than
   no number (`feedback_verify_payload_bugs_second_source`).
@@ -175,8 +179,18 @@ category correctly is the whole point of this phase.
 | Situation | Agent | Notes |
 |---|---|---|
 | Run the runner case / k6 arm, query App Insights | `qa-backend-expert` | `playwright-edge` if a UI check is needed at all |
-| Rank what to optimize next from the artifacts | `perf-analyst` (vc-perf) | read-only; consumes L1/L2/L3 outputs |
+| Rank what to optimize next from the artifacts | `perf-analyst` — **`vc-perf` only** | read-only; consumes L1/L2/L3 outputs. **Optional, see below** |
 | Confirm a symptom is user-visible | `qa-frontend-expert` | `playwright-chrome` |
+
+> **`vc-perf` is a separate plugin and is not enabled by default.** `perf-analyst`, the k6 L2 harness
+> (`--load`) and the L3 `dotnet-trace` path all live in `plugins/vc-perf/` — a distinct `vc-tools`
+> marketplace plugin, absent from `enabledPlugins` in the tracked `.claude/settings.json` and not one of the
+> 19 project agents in `.claude/rules/agents.md`. **Everything this skill's core measurement needs
+> (Phases 0–4, App Insights counts, N+1 detection, the controls) works without it.** If it is not installed:
+> `--load` and L3 attribution are **unavailable — say so rather than substituting one-shot repeats, which
+> measure cache warming**; and ranking is done inline by `qa-backend-expert` from the same artifacts. To
+> enable it: `/plugin install vc-perf@vc-tools`, then restart Claude Code (plugin agents bind at session
+> start).
 
 ## Cross-references
 - Command: `commands/qa-perf-measure.md`

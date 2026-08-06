@@ -43,16 +43,22 @@ any dependency type (search, SQL, cache, outbound HTTP). Methodology + the concr
 - Byte-identical request text sent straight to each backend — never through two storefronts.
 - Fixed input shape; fixtures verified to actually exercise the path (the four-condition filter — an
   `addItem` that silently no-ops leaves you measuring nothing).
-- Uniquely named operations so a per-request row maps back to what produced it.
+- Uniquely named operations so a **harness log line** maps back to what produced it — telemetry names the
+  route (`POST graphql/`), not the operation, so attribute a per-request row to its arm **by window**.
+- **Rotate targets — one distinct target per repetition**, so every observation is cache-cold. A repeated
+  target measures the platform cache, not the code.
 - **Include the paired controls in the same run**: a positive control (N byte-identical calls in one
   request — must collapse) and a negative control (N calls differing in one argument — must not).
 - Discovery warms its targets: discover, then measure *different* ones.
 
 ## Phase 2 — Count
 > **Owner:** `qa-backend-expert`.
-- Run the `requests ⋈ dependencies` join on `operation_Id` (skill reference §3) over each arm's window.
+- Run the `requests ⋈ dependencies` join on `operation_Id` (skill reference §3) over each arm's window —
+  the **same absolute window on both legs** (never `ago(...)` on one and a literal on the other, which
+  silently joins nothing and reports a false floor).
 - Carry `totalDeps` as the control on every row. Report **per-request rows**, not just an average.
-- Warm vs warm: discard the first request of each cell.
+- **Counting pass: keep every row.** Discard-the-first-request is the *latency* rule (cold start); applying
+  it to a count throws away the discriminating cold observation. Rotate targets instead (reference §4).
 - Budget 3–4× the volume on a traffic-carrying env — sampling is asymmetric against an idle baseline.
 
 ## Phase 3 — Attribute (Gate)
@@ -69,6 +75,9 @@ any dependency type (search, SQL, cache, outbound HTTP). Methodology + the concr
 - Optional `--load`: k6 L2 for throughput/p95 on **one** env
   (`plugins/vc-perf/skills/perf-loadtest/`). Set `RESULTS_DIR="$PWD/.vc-perf/results"`.
 - Ranking what to optimize next → delegate to `perf-analyst` (read-only).
+- **Both need the separate `vc-perf` plugin, which is not enabled by default** (skill §Agent delegation).
+  Not installed → report `--load`/L3 as unavailable and rank inline via `qa-backend-expert`; never
+  substitute one-shot repeats for load, which measure cache warming. Phases 0–3 need nothing extra.
 
 ## Phase 5 — Report + STOP
 - `reports/performance/{topic}-investigation-<date>.md` (category 10, 40–80 lines, cap 120), or a

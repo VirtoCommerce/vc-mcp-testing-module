@@ -55,11 +55,11 @@ Note some envs have **zero tracked inventory** (vcptcore-qa at time of writing):
 ```
 requests
 | where timestamp between (datetime(<run-start>) .. datetime(<run-end>))
-| where name == 'POST graphql/'        // the runner sends no operationName → unnamed
+| where name startswith 'POST graphql'   // route, not operation — see below
 | project rid=operation_Id, ts=timestamp, rdur=duration, samp=itemCount
 | join kind=leftouter (
     dependencies
-    | where timestamp > ago(30m)
+    | where timestamp between (datetime(<run-start minus 2m>) .. datetime(<run-end plus 2m>))
     | summarize esProd=todouble(countif(name endswith '-product-active/_search')),
                 allDeps=todouble(count()),
                 sqlN=todouble(countif(type=='SQL')) by operation_Id
@@ -69,6 +69,16 @@ requests
 | order by ts asc
 ```
 
+- **Both legs must carry the SAME absolute window** — the `dependencies` leg guard-banded ±2 min so a
+  dependency that starts just after its parent request still joins. Never pair a literal window on
+  `requests` with a relative `ago(...)` on `dependencies`: any window older than that lookback joins
+  nothing, every row `coalesce`s to `0`, and the output is **indistinguishable from a real "already at the
+  floor" result** — the same false floor §8.1 describes, and non-reproducible a day later. `let` returns
+  empty on the Azure MCP path (below), so repeat the literals in both legs rather than binding them once.
+- **The request name is the route, not the operation.** It stays `POST graphql/` whether or not the body
+  carries an `operationName`, so `startswith 'POST graphql'` matches named and unnamed alike. Unique
+  operation names buy you traceability in the *harness and its logs*, **not** per-row attribution in
+  telemetry — attribute a row to an arm by its window (§4.3), never by the request name.
 - `leftouter` + `coalesce` keeps a zero-search request as `0` instead of dropping it.
 - **Always carry `totalDeps` alongside.** If the total moves as much as the slice you changed, something
   other than your change is moving — that row is what stops a fix being credited with an unrelated win.
@@ -78,16 +88,25 @@ requests
 
 ## 4. Three artifacts that will fool you
 
-1. **Cold start dominates.** A first request against an idle env measured **1613 ms / 75 SQL** where the
-   warm steady state was **20 ms / 3 SQL** — same build, same cart. Always compare **warm vs warm**, and
-   discard the first run of each cell.
+1. **Cold start dominates — this rule is about *latency*.** A first request against an idle env measured
+   **1613 ms / 75 SQL** where the warm steady state was **20 ms / 3 SQL** — same build, same cart. When
+   reporting **duration**, compare warm vs warm and discard the first request of each cell. **Do not apply
+   this to a count** — see 2; it is the opposite rule.
 2. **Repeated identical requests are not independent samples.** Platform caches warm within seconds: eight
    identical cart reads fell from 6 searches / 317 ms to 1 search / 10 ms *on the pre-fix build*. A
-   repeat-and-average therefore measures the cache, not the code. Only the cold request discriminates for
-   a *count*; for steady-state load use sustained k6 traffic instead.
+   repeat-and-average therefore measures the cache, not the code. For a **count**, the discriminating
+   observation is the cache-cold one, so **rotate targets — never discard the first row**: every
+   repetition hits a *distinct* target and every observation is therefore cold. Discarding "the first
+   run" of a repeated-target cell throws away the only discriminating request and leaves you averaging
+   cache hits, which reads as a false "already at the floor" (§8.1). For steady-state load use sustained
+   k6 traffic instead.
 3. **Adaptive sampling.** `itemCount > 1` means the record represents that many requests. Per-request
    integrity survives (a request and its dependencies share the multiplier), but you cannot label which
    individual operation a retained record was — space configs apart in time and read the window.
+
+> Rules 1 and 2 are **per-metric and mutually exclusive**: discard-the-first is for duration,
+> rotate-targets-and-keep-every-row is for counts. Applying the latency rule inside a counting pass is how
+> the false floor gets manufactured.
 
 ## 5. Counts transfer; latency does not
 
@@ -110,10 +129,18 @@ Worked example: after VCST-5637, cart-read ES product searches measured **2–3,
 items and identical whether items shared a product or were all distinct — so no N+1 remained, and further
 reduction is a question of collapsing distinct shapes, not batching.
 
-Second worked example (browsing, VCST-5637): a PLP measured **1 + one per variation-bearing product in the
-page** — 1 for a zero-variation category, 6–8 for a variation-rich one at `first:16`. Count **scales** ⇒
-N+1 ⇒ the lever is batching the `variations` resolver into one by-ids load. A request-scoped dedup does
-nothing here, because each extra search carries a *different* master product.
+Second worked example (browsing, VCST-5637): a PLP measured **1 search for a zero-variation category and
+6–8 for a variation-rich one** at `first:16` (5–6 variation-bearing products in the page). The count
+**tracks the number of variation-bearing products** ⇒ N+1 ⇒ the lever is batching the `variations` resolver
+into one by-ids load. A request-scoped dedup does nothing here, because each extra search carries a
+*different* master product.
+
+**Classify the residual, don't publish a formula off two cells.** The tempting write-up was
+`searches ≈ 1 + variation-bearing products`, and neither observed cell satisfies it (7 searches at 5 such
+products; 6 at 6 — see the report). The N+1 *class* is what the scaling supports and what picks the lever;
+an exact per-element constant needs a third point holding page size fixed. Naming the class is the
+deliverable — an arithmetic law asserted from two rows is how a reviewer finds your table contradicting
+its own conclusion.
 
 ## 7. A null result is only a result if you ship a positive control
 
@@ -125,9 +152,15 @@ the same telemetry window**, you also run a case where the count is *known* to m
 | **positive** | N byte-identical calls in ONE request | BEFORE `N`, AFTER `1` — the mechanism fires |
 | **negative** | N calls differing in one argument | `N` on **both** — the key is complete, no over-collapse |
 
-In the VCST-5637 browsing run the browsing arms were flat 1→1 and 6→7 while the positive control in the
-same windows went 4→1. That pairing is what licensed "browsing has no redundancy to remove" instead of
-"the measurement is broken" — and the two readings recommend opposite engineering decisions.
+In the VCST-5637 browsing run no browsing arm dropped (1→1, 6→7) while the positive control in the same
+windows went 4→1. That pairing is what licensed "browsing has no redundancy to remove" instead of "the
+measurement is broken" — and the two readings recommend opposite engineering decisions.
+
+**Give the negative control real n, and mark it provisional until it has some.** It is the cheaper arm to
+under-sample and the one whose thin n is easiest to miss: the same run published its negative control off a
+**single** retained AFTER record. That is *consistent with* a complete key, not evidence of one. Note which
+claims depend on it — a null result licensed by the positive control does not, since over-collapse would
+show up as the arms *falling*.
 
 ## 8. Three more traps this method hit
 
