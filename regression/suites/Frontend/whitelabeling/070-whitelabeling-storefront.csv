@@ -398,7 +398,7 @@ Organization @td(WL_ELECTRONICS.name) with custom logo; Tablet device or browser
 [DOM] Logo positioning is correct in tablet header
 [STATE] Logo works in both portrait (768px) and landscape (1024px) orientations
 [STATE] Logo is clickable and links to homepage","[CONSOLE] no uncaught JS errors","Logo missing or broken on tablet; Logo distorted in landscape; Logo not clickable on tablet","none","Mobile Responsive","Manual"
-"FWL-038","Verify whitelabeling renders correctly in Chrome browser (desktop)","Cross-Browser","High","BL-WL-001","ECL-13.1","[PRE:SIGNIN_AS:WL_USER_ELECTRONICS]
+"FWL-038","Verify whitelabeling renders correctly in Chrome browser (desktop)","Cross-Browser","High","BL-WL-001","","[PRE:SIGNIN_AS:WL_USER_ELECTRONICS]
 [PRE:RESET_CART]
 Organization @td(WL_ELECTRONICS.name) with full branding configured; Chrome browser latest version (120+)","storefront={{FRONT_URL}}, org_user=@td(WL_USER_ELECTRONICS.email), org_password=@td(WL_USER_ELECTRONICS.password)","[NAV] 1. Open Chrome browser (version 120 or later)
 [NAV] 2. Navigate to {{FRONT_URL}}
@@ -415,7 +415,7 @@ Organization @td(WL_ELECTRONICS.name) with full branding configured; Chrome brow
 [DOM] Footer links display in correct hierarchy
 [STATE] All branding persists across pages","[CONSOLE] no uncaught JS errors
 [NETWORK] all branding assets load with HTTP 200","Broken logo or favicon in Chrome; CSS not loading in Chrome; Dropdown malfunction in Chrome; Console errors","none","Chrome Cross-Browser","Manual"
-"FWL-039","Verify whitelabeling renders correctly in Firefox browser (desktop)","Cross-Browser","High","BL-WL-001","ECL-13.1","[PRE:SIGNIN_AS:WL_USER_ELECTRONICS]
+"FWL-039","Verify whitelabeling renders correctly in Firefox browser (desktop)","Cross-Browser","High","BL-WL-001","","[PRE:SIGNIN_AS:WL_USER_ELECTRONICS]
 Organization @td(WL_ELECTRONICS.name) with full branding configured; Firefox browser latest version (121+)","storefront={{FRONT_URL}}, org_user=@td(WL_USER_ELECTRONICS.email), org_password=@td(WL_USER_ELECTRONICS.password)","[NAV] 1. Open Firefox browser (version 121 or later)
 [NAV] 2. Navigate to {{FRONT_URL}}
 [ACT] 3. Sign in with @td(WL_ELECTRONICS.name) organization user
@@ -429,7 +429,7 @@ Organization @td(WL_ELECTRONICS.name) with full branding configured; Firefox bro
 [DOM] Footer links display correctly
 [STATE] No Firefox-specific rendering issues","[CONSOLE] no uncaught JS errors
 [NETWORK] all branding assets load with HTTP 200","Broken logo or favicon in Firefox; Firefox-specific CSS rendering issue; Dropdown not working on hover in Firefox","none","Firefox Cross-Browser","Manual"
-"FWL-040","Verify whitelabeling renders correctly in Edge browser (desktop)","Cross-Browser","High","BL-WL-001","ECL-13.1","[PRE:SIGNIN_AS:WL_USER_ELECTRONICS]
+"FWL-040","Verify whitelabeling renders correctly in Edge browser (desktop)","Cross-Browser","High","BL-WL-001","","[PRE:SIGNIN_AS:WL_USER_ELECTRONICS]
 Organization @td(WL_ELECTRONICS.name) with full branding configured; Edge browser latest version (120+)","storefront={{FRONT_URL}}, org_user=@td(WL_USER_ELECTRONICS.email), org_password=@td(WL_USER_ELECTRONICS.password)","[NAV] 1. Open Edge browser (version 120 or later)
 [NAV] 2. Navigate to {{FRONT_URL}}
 [ACT] 3. Sign in with @td(WL_ELECTRONICS.name) organization user
