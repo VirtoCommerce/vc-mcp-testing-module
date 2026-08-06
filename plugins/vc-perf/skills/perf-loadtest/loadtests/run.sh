@@ -10,7 +10,9 @@
 # PERF_API_USER / PERF_API_PASSWORD (required env). No secrets are printed or passed via argv.
 # Other knobs: K6 (k6 binary path, default `k6` on PATH); PAYLOAD_DIR (a consumer scenarios/+queries/
 # dir to run instead of the bundled ones, see below); RESULTS_DIR (artifact base dir — set to a
-# workspace path so artifacts survive plugin updates, see below).
+# workspace path so artifacts survive plugin updates, see below); TRACE_INT_GRACE (integer seconds
+# to wait for the trace sidecar to honour SIGINT before escalating, default 3 — raise it on a
+# platform where SIGINT cannot reach the collector and SIGTERM would truncate the capture).
 set -euo pipefail
 
 DIR=$(cd "$(dirname "$0")" && pwd)
@@ -156,12 +158,20 @@ wait_for_exit() {
 stop_sidecars() {
     # SIGINT cannot reach either sidecar in this launch shape, and the reason is the shape rather
     # than the tool: a background child of a shell with job control OFF — which is every `&` in a
-    # script run non-interactively — inherits SIGINT set to SIG_IGN (POSIX). Measured: a bare
-    # `sleep 300 &` inside a script survives SIGINT, the same `&` from a job-controlled shell dies
-    # on it. So a report that the tool "exits ~2 s after SIGINT" is true interactively and false
+    # script run non-interactively — inherits SIGINT set to SIG_IGN (POSIX). Measured on Linux/WSL:
+    # a bare `sleep 300 &` inside a script survives SIGINT, the same `&` from a job-controlled shell
+    # dies on it. So a report that the tool "exits ~2 s after SIGINT" is true interactively and false
     # here, which is how the unbounded `wait` that used to sit below came to be written. `trap -
     # INT` in a wrapper does NOT fix it: bash's reset restores the disposition the shell itself
     # inherited, and a signal ignored at entry cannot be trapped or restored — measured too.
+    #
+    # SCOPE: that is measured on Linux/WSL only. On Windows/Git Bash the collector is a NATIVE
+    # process and MSYS2 does not map POSIX signals onto it the way it does onto MSYS children, so
+    # the operative mechanism there is unknown. Expected but UNVERIFIED: the escalation fires on
+    # every Windows run and marks every capture suspect — which is worse than the hang it replaces
+    # if the tool would otherwise have produced a valid file at --duration. `TRACE_INT_GRACE` raises
+    # the SIGINT grace there without editing this file, and a signal-free stop (the tool also stops
+    # on a newline on stdin) is the candidate cross-platform fix, untested against a native process.
     #
     # SIGINT is still sent, and still given a grace, for the day the launch shape changes — the
     # same 3 s the counters sidecar below allows, for the same reason. It stays SHORT because
@@ -177,7 +187,7 @@ stop_sidecars() {
     # externally. The capture it left carried nine minutes of idle work.
     if [ -n "$TRACE_PID" ]; then
         kill -INT "$TRACE_PID" 2>/dev/null || true
-        if ! wait_for_exit "$TRACE_PID" 3; then
+        if ! wait_for_exit "$TRACE_PID" "${TRACE_INT_GRACE:-3}"; then
             kill -TERM "$TRACE_PID" 2>/dev/null || true
             _trace_stop=SIGTERM
             # Last resort: a wedged sidecar must never outlive the run that started it.
