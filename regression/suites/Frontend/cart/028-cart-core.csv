@@ -473,18 +473,20 @@ password={{USER_PASSWORD}}","[NAV] log in to {{FRONT_URL}}
 [CONSOLE] no JS errors
 [NETWORK] no 4xx/5xx
 [API] addItem mutation response errors[] is empty",mixed currency symbols in Order Summary; shipping still in old currency; tax not recalculated; grand total arithmetic mismatch,Switch currency back to original; remove items from cart,Coverage Gap Analysis; Audited: 2026-08-06 (TCA-2026-08-06); Source: VirtoCommerce/vc-frontend/client-app/core/api/graphql/cart/mutations/changeCartCurrency/changeCartCurrencyMutation.graphql; Docs: N/A — implementation-detail: currency-switch/price-list mechanics,Draft
-CART-052,Cart Isolation - Org A Items Not Visible in Org B Cart,Cart > B2B > Org Isolation,Critical,BL-CART-005,ECL-14.3,"[PRE:SIGNIN_AS:USER_DEFAULT]
+CART-052,Cart Isolation - Org A Items Not Visible in Org B Cart,Cart > B2B > Org Isolation,Critical,BL-CART-005,ECL-14.3,"[PRE:SIGNIN_AS:MULTI_ORG_TF_BR]
 [PRE:RESET_CART]
-SEED REQUIRED: User who is a member of TWO separate B2B organizations simultaneously (e.g., both TechFlow and BuildRight). Set @td(USER_MULTI_ORG.email) and @td(USER_MULTI_ORG.password). Standard {{ORG_USER_EMAIL}} belongs to only one org — this user is insufficient.","url={{FRONT_URL}}
-org_user=@td(USER_MULTI_ORG.email)
-org_password=@td(USER_MULTI_ORG.password)","[NAV] log in to {{FRONT_URL}} as {{ORG_USER_EMAIL}}
-[ASSERT] verify current organization context is Org A
+SEED PROVIDED (no manual seeding): @td(MULTI_ORG_TF_BR.email) is a seeded member of TWO B2B orgs with distinct per-org roles — Org A = @td(ORG_TECHFLOW.name) (org-maintainer), Org B = @td(ORG_BUILDRIGHT.name) (org-employee); both memberships Approved (VCST-5028). Refresh idempotently with `npm run seed:b2b:memberships`.","url={{FRONT_URL}}
+org_user=@td(MULTI_ORG_TF_BR.email)
+org_password=@td(MULTI_ORG_TF_BR.password)
+org_a=@td(ORG_TECHFLOW.name)
+org_b=@td(ORG_BUILDRIGHT.name)","[NAV] log in to {{FRONT_URL}} as {{org_user}} (password {{org_password}})
+[ASSERT] verify current organization context is Org A = {{org_a}}
 [ACT] add 2 products to cart (Product X qty 1, Product Y qty 2) in Org A context
 [WAIT] wait for the cart mutation to settle (cart badge updates or items[] reflects the new/updated line — addItem async settle)
 [ASSERT] verify cart badge shows 2 items (or 3 total qty)
 [NAV] navigate to {{FRONT_URL}}/cart
 [ASSERT] note Org A cart contents
-[ACT] switch organization context to Org B (via org selector in header or account settings)
+[ACT] switch organization context to Org B = {{org_b}} (via org selector in header or account settings)
 [WAIT] wait for org switch to complete and cart to refresh
 [NAV] navigate to {{FRONT_URL}}/cart","[STATE] Org B cart does not contain Org A items (Product X and Product Y absent)
 [DOM] cart badge updated to reflect Org B cart count (""0"" or Org B-only items)
@@ -494,12 +496,14 @@ org_password=@td(USER_MULTI_ORG.password)","[NAV] log in to {{FRONT_URL}} as {{O
 [API] verify me.organization reflects Org B after switch
 [CONSOLE] no JS errors during org switch
 [NETWORK] no 4xx/5xx
-[API] addItem mutation response errors[] is empty",Org A items appear in Org B cart; cart badge shows Org A count after switch; Product X or Y visible in Org B,Switch back to Org A; remove test items from both carts,Coverage Gap Analysis; Audited: 2026-08-06 (TCA-2026-08-06); Source: VirtoCommerce/vc-module-x-cart/src/VirtoCommerce.XCart.Core/Queries/GetCartQuery.cs:37 (OrganizationId = GetCurrentOrganizationId); Docs: N/A — implementation-detail: cart-scoping,Manual
-CART-053,Cart Isolation - Org A Items Restored After Switching Back,Cart > B2B > Org Isolation,High,BL-CART-005,ECL-14.3,"[PRE:SIGNIN_AS:USER_DEFAULT]
+[API] addItem mutation response errors[] is empty",Org A items appear in Org B cart; cart badge shows Org A count after switch; Product X or Y visible in Org B,Switch back to Org A; remove test items from both carts,"Coverage Gap Analysis; Audited: 2026-08-06 (TCA-2026-08-06); Source: VirtoCommerce/vc-module-x-cart/src/VirtoCommerce.XCart.Core/Queries/GetCartQuery.cs:37 (OrganizationId = GetCurrentOrganizationId); Docs: N/A — implementation-detail: cart-scoping; Fixed 2026-08-06: repointed from the unseeded USER_MULTI_ORG template (b2b/users.csv USR-014, seeded=false, blank platform_id) to the seeded 2-org fixture MULTI_ORG_TF_BR (VCST-5028; TechFlow org-maintainer + BuildRight org-employee, both Approved) — DV-022-safe here because these cases only switch org context, they never mutate a membership. CART-052 Step 1 was also signing in as the single-org {{ORG_USER_EMAIL}}, so the case could not exercise BL-CART-005 at all.",Manual
+CART-053,Cart Isolation - Org A Items Restored After Switching Back,Cart > B2B > Org Isolation,High,BL-CART-005,ECL-14.3,"[PRE:SIGNIN_AS:MULTI_ORG_TF_BR]
 [PRE:RESET_CART]
-SEED REQUIRED: multi-org user @td(USER_MULTI_ORG.email) is a member of Org A and Org B (companion scenario to CART-052, the org-isolation case). This case establishes its own Org A cart state in Steps below (adds Product X qty 1, Product Y qty 2) — it does not depend on another case having run first.","url={{FRONT_URL}}
-org_user=@td(USER_MULTI_ORG.email)
-org_password=@td(USER_MULTI_ORG.password)","[NAV] log in to {{FRONT_URL}} as @td(USER_MULTI_ORG.email) in Org A context
+SEED PROVIDED (no manual seeding): @td(MULTI_ORG_TF_BR.email) is a seeded member of TWO B2B orgs with distinct per-org roles — Org A = @td(ORG_TECHFLOW.name) (org-maintainer), Org B = @td(ORG_BUILDRIGHT.name) (org-employee); both memberships Approved (VCST-5028). Refresh idempotently with `npm run seed:b2b:memberships`. Companion scenario to CART-052, the org-isolation case. This case establishes its own Org A cart state in Steps below (adds Product X qty 1, Product Y qty 2) — it does not depend on another case having run first.","url={{FRONT_URL}}
+org_user=@td(MULTI_ORG_TF_BR.email)
+org_password=@td(MULTI_ORG_TF_BR.password)
+org_a=@td(ORG_TECHFLOW.name)
+org_b=@td(ORG_BUILDRIGHT.name)","[NAV] log in to {{FRONT_URL}} as {{org_user}} (password {{org_password}}) in Org A = {{org_a}} context
 [ACT] add Product X (qty 1) to cart in Org A context
 [WAIT] wait for the cart mutation to settle (cart badge updates or items[] reflects the new/updated line — addItem async settle)
 [ACT] add Product Y (qty 2) to cart in Org A context
@@ -520,7 +524,7 @@ org_password=@td(USER_MULTI_ORG.password)","[NAV] log in to {{FRONT_URL}} as @td
 [API] verify me.organization reflects Org A
 [CONSOLE] no JS errors during org switch cycle
 [NETWORK] no 4xx/5xx
-[API] addItem mutation response errors[] is empty",Org A cart empty after round-trip switch; items lost; quantities changed; subtotal mismatch after switching back,Remove test items from both org carts,Coverage Gap Analysis; Audited: 2026-08-06 (TCA-2026-08-06); Source: VirtoCommerce/vc-module-x-cart/src/VirtoCommerce.XCart.Core/Queries/GetCartQuery.cs:37 (OrganizationId = GetCurrentOrganizationId); Docs: N/A — implementation-detail: cart-scoping,Manual
+[API] addItem mutation response errors[] is empty",Org A cart empty after round-trip switch; items lost; quantities changed; subtotal mismatch after switching back,Remove test items from both org carts,"Coverage Gap Analysis; Audited: 2026-08-06 (TCA-2026-08-06); Source: VirtoCommerce/vc-module-x-cart/src/VirtoCommerce.XCart.Core/Queries/GetCartQuery.cs:37 (OrganizationId = GetCurrentOrganizationId); Docs: N/A — implementation-detail: cart-scoping; Fixed 2026-08-06: repointed from the unseeded USER_MULTI_ORG template (b2b/users.csv USR-014, seeded=false, blank platform_id) to the seeded 2-org fixture MULTI_ORG_TF_BR (VCST-5028; TechFlow org-maintainer + BuildRight org-employee, both Approved) — DV-022-safe here because these cases only switch org context, they never mutate a membership. CART-052 Step 1 was also signing in as the single-org {{ORG_USER_EMAIL}}, so the case could not exercise BL-CART-005 at all.",Manual
 CART-054,Pack Size Enforcement - Quantity Stepper Increments by Pack Size,Cart > Pack Size,Medium,BL-CART-006,ECL-3.1,"[PRE:SIGNIN_AS:USER_DEFAULT]
 [PRE:RESET_CART]
 SEED REQUIRED: Product with pack size / MOQ configured (pack size = 6) must exist in catalog and B2B virtual catalog. Set @td(PROD_PACK_SIZE.sku) env var. Admin step: set product MinQuantity = 6, PackSize = 6 in product properties. User logged in.","url={{FRONT_URL}}@td(PROD_PACK_SIZE.url)
@@ -595,7 +599,7 @@ skus={{TEST_SKU}}, {{TEST_SKU_2}}, {{TEST_SKU_3}}","[NAV] log in to {{FRONT_URL}
 [STATE] cart badge unchanged (item is in cart, just unselected)
 [MATH] subtotal after re-check = original 3-item subtotal
 [STATE] verify subtotal returns to original 3-item value","[CONSOLE] no JS errors during selection/deselection
-[NETWORK] no 4xx/5xx on selection toggle",no checkbox controls visible; deselecting does not update subtotal; deselected item removed from cart instead of retained,none (all items remain in cart; reset selection state),Coverage Gap Analysis; Audited: 2026-08-06 (TCA-2026-08-06); Source: VirtoCommerce/vc-frontend/client-app/shared/cart/composables/useCart.ts (selectCartItems/unselectCartItems/selectedForCheckout); Docs: N/A — implementation-detail,Manual
+[NETWORK] no 4xx/5xx on selection toggle",no checkbox controls visible; deselecting does not update subtotal; deselected item removed from cart instead of retained,none (all items remain in cart; reset selection state),"Coverage Gap Analysis; Audited: 2026-08-06 (TCA-2026-08-06); Source: VirtoCommerce/vc-frontend/client-app/shared/cart/composables/useCart.ts (selectCartItems/unselectCartItems/selectedForCheckout); Docs: N/A — implementation-detail",Manual
 CART-057,Coupons Sidebar — Widget Renders Below OrderSummary on /cart,Cart > Coupons Sidebar,Critical,BL-CART-003,ECL-14.1,"[PRE:SIGNIN_AS:USER_DEFAULT]
 [PRE:RESET_CART]
 User logged in. At least 1 product in cart. Theme 2.48.0-pr-2269-cd06 or later deployed.","url={{FRONT_URL}}/cart
@@ -672,7 +676,7 @@ password={{USER_PASSWORD}}","[NAV] navigate to {{FRONT_URL}}/cart
 [DOM] error UI is BUILD-GATED (VCST-5518 / vc-frontend PR #2422): on theme >= 2.55.0-pr-2422 the Custom code card transitions to the error state (dashed border, red receipt-tax icon, 'This code is not valid' text below input mapping to t('common.messages.invalid_coupon'), apply button disabled) auto-clearing after COUPON_ERROR_TIMEOUT=7000ms; on the deployed pr-2417 build the invalid code fails SILENTLY with no error UI","[API] validateCoupon returns false for the invalid code and NO addCoupon mutation is sent (validate-before-add order per VCST-5518 / vc-frontend PR #2422); cart.coupons[] is unchanged
 [API] cart.totals.discountTotal.amount = 0
 [CONSOLE] no TypeError — error state rendered gracefully
-[NETWORK] no 5xx","error text not displayed (no feedback to user), wrong error message shown (not 'This code is not valid'), cart total changed after invalid code, console TypeError, 'BOGUS123' somehow applied",none — no coupon was applied,"VCST-4896 AC#4, AC#6, AC#8; Audited: 2026-08-06 (TCA-2026-08-06); Source: VirtoCommerce/vc-frontend PR #2422 (VCST-5518) useCoupon.ts (COUPON_ERROR_TIMEOUT=7000; setError on validateCartCoupon()===false) + coupons-section.vue:82. LIVE 2026-08-06 (theme 2.55.0-pr-2417, #2422 NOT deployed): invalid code = validateCoupon->false, NO addCoupon, discount unchanged; error message + 7s auto-clear are #2422-gated (silent on pr-2417); Docs: N/A — implementation-detail",Reviewed
+[NETWORK] no 5xx","error text not displayed (no feedback to user), wrong error message shown (not 'This code is not valid'), cart total changed after invalid code, console TypeError, 'BOGUS123' somehow applied",none — no coupon was applied,"VCST-4896 AC#4, AC#6, AC#8; Audited: 2026-08-06 (TCA-2026-08-06); Source: VirtoCommerce/vc-frontend PR #2422 (VCST-5518) useCoupon.ts (COUPON_ERROR_TIMEOUT=7000; setError on validateCartCoupon()===false) + coupons-section.vue:82. LIVE 2026-08-06 (theme 2.55.0-pr-2417, #2422 NOT deployed): invalid code = validateCoupon->false, NO addCoupon, discount unchanged; error message + 7s auto-clear are #2422-gated (silent on pr-2417); Docs: N/A — implementation-detail. Cross-ref: the VCST-5518 core invariant (an INVALID apply while a working coupon is applied leaves that coupon applied) is guarded by CPN-063 in suite 077 (regression/suites/Frontend/marketing/077-coupons-promotions-storefront.csv) — do not duplicate it in this suite.",Reviewed
 CART-061,Coupons Sidebar — Radio-Button Behavior: Applying B While A Is Active Auto-Removes A,Cart > Coupons Sidebar > Radio Behavior,Critical,BL-CART-003,"ECL-1.3, ECL-14.1","[PRE:SIGNIN_AS:USER_DEFAULT]
 [PRE:RESET_CART]
 User logged in. Cart has at least 1 item. Two valid coupon codes available: @td(COUPON_10PCT.code) and @td(COUPON_20PCT.code) (or any second valid code). Both are applicable to the cart. Theme 2.48.0-pr-2269-cd06 or later deployed. Design Technique: Decision Table (one coupon active + apply second).","url={{FRONT_URL}}/cart
@@ -697,7 +701,7 @@ coupon_b=@td(COUPON_20PCT.code)","[NAV] navigate to {{FRONT_URL}}/cart
 [API] cart.coupons[] contains only @td(COUPON_20PCT.code) after the sequence (or only 1 entry with isAppliedSuccessfully=true)
 [API] errors[] empty on both mutations
 [CONSOLE] no JS errors
-[NETWORK] no 4xx/5xx","both coupons shown as applied simultaneously (multi-coupon stacking — BL-CART-003 violation), @td(COUPON_10PCT.code) card remains in applied state after @td(COUPON_20PCT.code) applied, discount amount = sum of both coupons, removeCoupon mutation not fired for A",Click trash icon to remove active coupon after test,"VCST-4896 AC#3, BL-CART-009; Audited: 2026-08-06 (TCA-2026-08-06); Source: VirtoCommerce/vc-frontend PR #2422 (VCST-5518) useCoupon.ts applyCoupon — validate-before-remove: validate(new) -> remove(old) -> add(new); an invalid new code leaves the old coupon intact. LIVE-VERIFIED 2026-08-06 (theme 2.55.0-pr-2417): exact order ValidateCoupon(B)->RemoveCoupon(A)->AddCoupon(B), only B applied; Docs: N/A — implementation-detail",Reviewed
+[NETWORK] no 4xx/5xx","both coupons shown as applied simultaneously (multi-coupon stacking — BL-CART-003 violation), @td(COUPON_10PCT.code) card remains in applied state after @td(COUPON_20PCT.code) applied, discount amount = sum of both coupons, removeCoupon mutation not fired for A",Click trash icon to remove active coupon after test,"VCST-4896 AC#3, BL-CART-009; Audited: 2026-08-06 (TCA-2026-08-06); Source: VirtoCommerce/vc-frontend PR #2422 (VCST-5518) useCoupon.ts applyCoupon — validate-before-remove: validate(new) -> remove(old) -> add(new); an invalid new code leaves the old coupon intact. LIVE-VERIFIED 2026-08-06 (theme 2.55.0-pr-2417): exact order ValidateCoupon(B)->RemoveCoupon(A)->AddCoupon(B), only B applied; Docs: N/A — implementation-detail. Cross-ref: the VCST-5518 core invariant (an INVALID apply while a working coupon is applied leaves that coupon applied) is guarded by CPN-063 in suite 077 (regression/suites/Frontend/marketing/077-coupons-promotions-storefront.csv) — do not duplicate it in this suite.",Reviewed
 CART-062,Coupons Sidebar — Cancel Applied Coupon via Trash Icon,Cart > Coupons Sidebar > Cancel,Critical,BL-CART-003,"ECL-1.3, ECL-14.1","[PRE:SIGNIN_AS:USER_DEFAULT]
 [PRE:RESET_CART]
 User logged in. Cart has at least 1 item. @td(COUPON_10PCT.code) is applied via the 'Discount & coupons' widget — card in applied state. Theme 2.48.0-pr-2269-cd06 or later deployed. Design Technique: State Transition (applied → default).","url={{FRONT_URL}}/cart
