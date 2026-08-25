@@ -633,7 +633,7 @@ CAT-GQL-131,"xCatalog — sortings name Localized per cultureName (VCST-5177)","
 [GQL-VARS sortings_de] {""storeId"": ""{{STORE_ID}}"", ""currencyCode"": ""{{CURRENCY_CODE}}""}
 [GQL-EXEC sortings_de]
 [GQL-CAPTURE sortings_de.data.products.sortings[0].name → SORT_NAME_DE]","[ERRORS label=sortings_en] errors[] empty
-[DATA label=sortings_en] data.products.sortings[0].name is non-null OR data.products.sortings[0].name is null
+[DATA label=sortings_en] data.products.sortings[0].name is non-null OR is null
 [DATA label=sortings_en] data.products.sortings[0].name matches /.+/
 [ERRORS label=sortings_de] errors[] empty
 [DATA label=sortings_de] data.products is non-null

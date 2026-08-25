@@ -38,7 +38,6 @@ import {
   repFixtureStatus,
 } from './sales-rep-layout-specs.mjs';
 import { hasStaleLockout } from '../../lib/user-provision.mjs';
-import { windowDaysFor, isFresh, CSV_KEY as ORDERS_CSV_KEY } from './sales-rep-orders-specs.mjs';
 
 const OWNER_NAME = 'AGENT-TEST-SR-Owner-Acme';
 const OWNER_PHONE = '+1-206-555-0142';
