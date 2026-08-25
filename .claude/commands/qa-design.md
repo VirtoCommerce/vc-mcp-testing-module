@@ -32,7 +32,8 @@ Classify the argument:
 
 **Flags:**
 - `--storefront-only` — skip the Storybook phase for component targets. No-op for page/flow targets (already storefront-only).
-- `--design <project | artboard>` — also run the **`vs. DESIGN` axis**: diff the target against a Claude Design project (tokens / control geometry / icon parity). Accepts a project name, a project UUID, or an artboard path within it. Without the flag the design axis does not run and is reported as `not requested` — which is distinct from `SKIPPED` (requested but unreachable).
+- `--design <project | artboard>` — **override** which Claude Design project the `vs. DESIGN` axis diffs against. Accepts a project UUID or an artboard path within it. **The axis runs by DEFAULT**: without the flag it resolves `DESIGN_SYSTEM_PROJECT_ID` from `.env.defaults` (the storefront design system) and diffs tokens / control geometry / icon parity / icon stroke. There is no longer a `not requested` state — the axis either reports verdicts or reports `SKIPPED` with the reason it could not run.
+  - **Prefer a UUID over a name.** `DesignSync list_projects` lists only projects you can *write* to, so name-matching silently misses a share-access project and can resolve to an unrelated design system instead. A `/qa-design VcIcon --design` run did exactly that and diffed the storefront against a marketing-site system.
 
 Resolve current sprint: check `reports/tickets/Sprint-current` → otherwise list `reports/tickets/` and pick the latest `SprintXX-XX`. This becomes `{SPRINT}` for the output path.
 
@@ -99,11 +100,11 @@ Otherwise, discover the Storybook URL using **convention first, GitHub fallback*
 
 ---
 
-### Step 2.6 — Resolve the Claude Design source (`--design` only)
+### Step 2.6 — Resolve the Claude Design source (always)
 
-Skip entirely unless `--design` was passed.
+Runs on every component/page/flow audit. `--design` only changes step 1.
 
-1. `DesignSync list_projects` → match the argument against project names (case-insensitive) or treat it as a UUID.
+1. Resolve the project id: `--design <uuid>` if given, else `DESIGN_SYSTEM_PROJECT_ID` from the env layer. **Do not search `list_projects` for it** — that method returns only projects the caller can *write* to, so a share-access design system is invisible to discovery and a name search resolves to the wrong project or none. Read the artboard scope table in [claude-design-verification.md](../skills/qa-design/claude-design-verification.md) §1 to pick which artboards to fetch.
 2. `DesignSync get_project { projectId }` → **confirm `type: PROJECT_TYPE_DESIGN_SYSTEM`**. That type is immutable at creation, so a regular project is not a design system and never will be — stop and say so rather than reading it anyway.
 3. `DesignSync list_files { projectId }` → build the artboard scope from this structural listing. Prefer the artboard whose `@dsCard group` matches the target; if the user named an artboard explicitly, use exactly that one.
 4. `DesignSync get_file { projectId, path }` for **only** the in-scope artboards (256 KiB cap each). `get_file` pulls content into context — do not sweep the project.
@@ -203,12 +204,13 @@ For **page or flow targets**, the page IS the context — skip the explorer enum
 - For each viewport (375 / 768 / 1280), run the invariant audits on the live page.
 - Output: `reports/tickets/{SPRINT}/qa-design/{target-slug}-{YYYY-MM-DD}/storefront/` — screenshots only for FAIL.
 
-**Phase C — Design spec diff (`--design` only):**
+**Phase C — Design spec diff (default; skipped only when the source is unreachable):**
 
 Runs alongside Phase B against the same live contexts, per the [`/qa-design` skill § Design spec comparison](../skills/qa-design/SKILL.md) and [claude-design-verification.md](../skills/qa-design/claude-design-verification.md):
 
 - `extractDesignSpec(html, { path })` per in-scope artboard → tokens / geometry / icon map / `unresolved[]`.
-- `designTokenAuditSnippet` / `iconParityAuditSnippet` / `componentGeometryAuditSnippet` at each viewport and on the **Coffee + Red** presets (a token diff is preset-dependent), then the matching `classify*` and `summarizeDesignFindings`.
+- `designTokenAuditSnippet` / `iconParityAuditSnippet` / `componentGeometryAuditSnippet` / `iconStrokeAuditSnippet` at each viewport and on the **Coffee + Red** presets (a token diff is preset-dependent), then the matching `classify*` and `summarizeDesignFindings`.
+- **Pass the audited surface** to `iconParityAuditSnippet(spec, selector, { surface })` and `spec.divergences` to `classifyIconParity`. Unscoped, a name that maps to two glyphs on two surfaces reports one of them as DRIFT against a mapping that never applied there; without the divergences, a rule the spec says is unshipped is filed as a defect on every element it touches.
 - Pair the icon axis with `nonTextContrastAuditSnippet()` (WCAG 1.4.11) — parity proves the right glyph rendered, not that it is visible.
 - **Precedence `BL-UI invariant > design spec > UX heuristic`**: a spec match never rescues an invariant FAIL, and a spec that contradicts an invariant or a WCAG criterion is `AMBIGUOUS` → escalate rather than obey.
 - If `designSkipReason` is set, emit `designAxisSkipped(reason)` and skip the measurements — never report the axis as PASS.
@@ -271,7 +273,7 @@ Receive agent results, write `reports/tickets/{SPRINT}/qa-design/{target-slug}-{
 | ...           | ...        | ...  |
 ```
 
-**Design spec section (`--design` only)** — appended to the report:
+**Design spec section (always present — verdicts, or `SKIPPED` + reason)** — appended to the report:
 
 ```markdown
 ## Design Spec Diff — {project} / {artboard}
