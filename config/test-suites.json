@@ -1565,8 +1565,8 @@
       "customerApplicability": "universal",
       "clickDriven": true,
       "lanes": {
-        "machine": 29,
-        "browser": 4,
+        "machine": 33,
+        "browser": 0,
         "manual": 1
       }
     },

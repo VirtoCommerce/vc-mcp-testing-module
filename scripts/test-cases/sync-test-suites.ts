@@ -428,7 +428,7 @@ const XREF_BASELINE: Record<string, number> = {
   "regression/suites/Backend/graphql/050b2-graphql-xcart-items.csv": 1,
   "regression/suites/Backend/graphql/050b5-graphql-xcart-validation.csv": 2,
   "regression/suites/Backend/graphql/050d-graphql-xprofile.csv": 3,
-  "regression/suites/Backend/graphql/050h-graphql-wishlist.csv": 4,
+  "regression/suites/Backend/graphql/050h-graphql-wishlist.csv": 1,
   "regression/suites/Backend/graphql/050l-graphql-push.csv": 1,
   "regression/suites/Backend/graphql/050m-graphql-sales-rep.csv": 3,
   "regression/suites/Backend/loyalty/075c-loyalty-product-points-earning.csv": 1,
