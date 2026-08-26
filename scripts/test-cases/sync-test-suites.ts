@@ -9,12 +9,16 @@
  *   - verifies every rule expands to known suite IDs (and to a non-empty list)
  *   - **manifest integrity**: hard-fails if any declared suite `file` is absent
  *     (`findMissingFiles`), and warns on duplicate ids / orphan CSVs
- *     (`findManifestDisagreements`) — the three ways a declared suite can
+ *     (`findManifestDisagreements`); hard-fails on an ORPHAN CSV (on disk, no manifest
+ *     entry — it can never be selected, so it never runs and no gate sees it drift)
  *     silently never run
  *   - **globally unique case IDs**: hard-fails if one case ID appears in more
  *     than one suite CSV (`findDuplicateCaseIds`)
  *   - hard-fails (XREF-001, ratcheted) when a case's Preconditions depend on a case
  *     that lives in a DIFFERENT suite CSV (`findCrossFileCaseRefs`)
+ *   - hard-fails (S-006, ratcheted) on an `Automation_Status` outside the canonical
+ *     vocabulary (`findAutomationStatusDrift`); a case-variant of a canonical value is
+ *     fatal with no baseline, because per-case lane routing reads an exact `Manual`
  *   - strict-parses every suite CSV against a burn-down baseline
  *
  * Usage:
@@ -26,7 +30,8 @@ import { readFileSync, writeFileSync, existsSync, readdirSync } from "fs";
 import { join, sep } from "path";
 import { fileURLToPath } from "url";
 import { parse as parseCsv } from "csv-parse/sync";
-import { extractExistingIds } from "./append-test-cases-to-suite.js";
+import { COLUMNS, extractExistingIds, headerFields, parseSuite } from "./append-test-cases-to-suite.js";
+import { AUTOMATION_STATUSES } from "./lint-test-cases.js";
 
 const MANIFEST_PATH = join("config", "test-suites.json");
 const CHECK_MODE = process.argv.includes("--check");
@@ -168,7 +173,13 @@ function findMissingFiles(manifest: Manifest): string[] {
  *  - **Orphan CSV** — a suite file on disk that no manifest entry declares is
  *    unreachable by every selection, so it never runs and nothing says so.
  */
-function findManifestDisagreements(manifest: Manifest): { dupIds: string[]; orphans: string[] } {
+/** `root` is parameterised so the orphan gate can be unit-tested against a fixture corpus
+ * rather than only against the real one — the same reason `allSuiteCsvs` and
+ * `findDuplicateCaseIds` take it. */
+export function findManifestDisagreements(
+  manifest: Manifest,
+  root?: string,
+): { dupIds: string[]; orphans: string[] } {
   const byId = new Map<string, string[]>();
   for (const s of manifest.suites) {
     byId.set(s.id, [...(byId.get(s.id) ?? []), s.file]);
@@ -178,7 +189,7 @@ function findManifestDisagreements(manifest: Manifest): { dupIds: string[]; orph
     .map(([id, files]) => `id "${id}" declared ${files.length}× — only the last runs: ${files.join(", ")}`);
 
   const declared = new Set(manifest.suites.map((s) => s.file.split(sep).join("/")));
-  const orphans = allSuiteCsvs().filter((f) => !declared.has(f));
+  const orphans = allSuiteCsvs(root).filter((f) => !declared.has(f));
 
   return { dupIds, orphans };
 }
@@ -309,6 +320,90 @@ export function findCrossFileCaseRefs(root?: string): CrossFileRef[] {
 }
 
 /**
+ * S-006 corpus ratchet — `Automation_Status` must come from the canonical vocabulary.
+ *
+ * The vocabulary was ALREADY declared (`AUTOMATION_STATUSES` in `lint-test-cases.ts`) and
+ * already checked as a High finding — but only per file, by a linter nothing runs across the
+ * corpus. So the rule existed and the enforcement did not, and 22 distinct values
+ * accumulated: `Not Automated`, `None`, `synced`, `generated`, `runner`, `validated`,
+ * `verified`, `Quarantined`, `needs-review`, `ready`, plus case-dupes and one free-text
+ * `'Draft (SERIAL — isolate; restore ALL after)'` that encodes real execution semantics
+ * nothing reads.
+ *
+ * This matters more than tidiness now: per-case lane routing treats an exact `Manual` as the
+ * explicit opt-out (`case-classifier.ts` EX-200), so the column carries routing weight. A
+ * value that merely LOOKS like a canonical one is the dangerous case, which is why a
+ * case-variant is fatal with no baseline: the 39 that existed (`manual` ×22, `deprecated` ×11,
+ * `automated` ×6) were normalised, since changing case is definitionally value-preserving.
+ *
+ * The remaining 325 are NOT mechanical. Whether `Semi-Automated` means Manual or Draft,
+ * whether a `Deprecated` case should still run, whether `Quarantined` is a skip — each is a
+ * decision with test-coverage consequences, and this repo's own rule is that deprecation and
+ * authoring stay human. So they are baselined per value: a listed value may not GROW, and an
+ * unlisted one fails. Same ratchet shape as `CSV_LINT_BASELINE` / `XREF_BASELINE`.
+ */
+const AUTOMATION_STATUS_BASELINE: Record<string, number> = {
+  "Draft (SERIAL — isolate; restore ALL after)": 1,
+  Generated: 9,
+  None: 63,
+  "Not Automated": 86,
+  Quarantined: 11,
+  generated: 38,
+  "needs-review": 4,
+  ready: 3,
+  runner: 28,
+  synced: 45,
+  validated: 26,
+  verified: 11,
+};
+
+export interface StatusDrift {
+  /** A value that is a case-variant of a canonical one — always fatal, never baselined. */
+  caseVariants: Array<{ value: string; canonical: string; count: number }>;
+  /** A non-canonical value that is absent from the baseline, or above its baselined count. */
+  newOrGrown: Array<{ value: string; count: number; allowed: number }>;
+  /** A baselined value that has shrunk — progress; lower the baseline. */
+  shrunk: Array<{ value: string; count: number; allowed: number }>;
+}
+
+export function findAutomationStatusDrift(root?: string): StatusDrift {
+  const counts = new Map<string, number>();
+  for (const file of allSuiteCsvs(root)) {
+    const raw = readFileSync(file, "utf-8").replace(/^\uFEFF/, "");
+    // A legacy-header suite is skipped, not guessed at: `parseSuite` maps positionally, so on
+    // an 11-column file this column would read whatever sits at index 14.
+    if (headerFields(raw).join(",") !== COLUMNS.join(",")) continue;
+    let rows;
+    try {
+      rows = parseSuite(raw).rows;
+    } catch {
+      continue; // reported by lintSuiteCsvs
+    }
+    for (const row of rows) {
+      const value = (row.Automation_Status ?? "").trim();
+      if (!value || AUTOMATION_STATUSES.has(value)) continue;
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+  }
+
+  const drift: StatusDrift = { caseVariants: [], newOrGrown: [], shrunk: [] };
+  for (const [value, count] of counts) {
+    const canonical = [...AUTOMATION_STATUSES].find((c) => c.toLowerCase() === value.toLowerCase());
+    if (canonical) {
+      drift.caseVariants.push({ value, canonical, count });
+      continue;
+    }
+    const allowed = AUTOMATION_STATUS_BASELINE[value] ?? 0;
+    if (count > allowed) drift.newOrGrown.push({ value, count, allowed });
+    else if (count < allowed) drift.shrunk.push({ value, count, allowed });
+  }
+  for (const [value, allowed] of Object.entries(AUTOMATION_STATUS_BASELINE)) {
+    if (!counts.has(value)) drift.shrunk.push({ value, count: 0, allowed });
+  }
+  return drift;
+}
+
+/**
  * XREF-001 burn-down baseline: per-file count of PRE-EXISTING cross-file
  * dependencies. A ratchet, not an exemption — the same shape and the same reason
  * as `CSV_LINT_BASELINE` above. 101 of these were already in the corpus when the
@@ -353,7 +448,7 @@ const XREF_BASELINE: Record<string, number> = {
 
 /**
  * Strict-parse every suite CSV that EXISTS, with the repo's canonical settings
- * (bom + strict column count + strict quotes — same as graphql-runner.ts /
+ * (bom + strict column count + strict quotes — same as graphql-runner.ts `loadCase` /
  * review-graphql-labels.ts). Returns errors for suites NOT in the burn-down
  * baseline, plus any baseline entries that now pass (stale — remove them).
  * Missing files are handled by `findMissingFiles`, not here.
@@ -558,8 +653,21 @@ function main(): void {
 
   const { dupIds, orphans } = findManifestDisagreements(manifest);
   for (const d of dupIds) console.warn(`[suites:lint] WARN duplicate suite ${d}`);
-  for (const o of orphans) {
-    console.warn(`[suites:lint] WARN orphan CSV (no manifest entry — never runs): ${o}`);
+
+  // An orphan CSV is now FATAL, not a warning. It used to warn, and suite 096
+  // (`Backend/import-export/096-backup-restore.csv`, 75 cases) sat orphaned for weeks as a
+  // result: on disk, never selected by any group, invisible to every gate that iterates the
+  // manifest — so it could neither run nor rot detectably. A warning in a command whose
+  // normal output already carries warnings is indistinguishable from silence. The corpus was
+  // brought to zero orphans when 096 was registered, so there is no burn-down set here (the
+  // same reasoning as `findDuplicateCaseIds`).
+  if (orphans.length > 0) {
+    console.error(`[suites:lint] FAIL — ${orphans.length} suite CSV(s) on disk with no manifest entry:`);
+    for (const o of orphans) console.error(`  - ${o}`);
+    console.error(`A suite absent from the manifest can never be selected, so it never runs and no`);
+    console.error(`gate can see it drift. Fix by adding a manifest entry (and a \`selections\` reference`);
+    console.error(`if it should run), or by deleting the CSV if it is genuinely dead.`);
+    process.exit(1);
   }
 
   // Globally unique case IDs. Runs on every CSV on disk (orphans included), so an
@@ -636,6 +744,46 @@ function main(): void {
       `requirement as STATE the runner can establish itself ("Admin logged in as {{ADMIN}} (suite`,
     );
     console.error(`setup)"), or by moving the depended-on case into the same suite.`);
+    process.exit(1);
+  }
+
+  // S-006 corpus ratchet: Automation_Status must come from the canonical vocabulary.
+  const status = findAutomationStatusDrift();
+  if (status.shrunk.length > 0) {
+    console.warn(
+      `[suites:lint] Automation_Status burn-down progress — lower these AUTOMATION_STATUS_BASELINE ` +
+        `entries: ${status.shrunk.map((s) => `${s.value} (${s.allowed} -> ${s.count})`).join(", ")}`,
+    );
+  }
+  const statusBacklog = Object.values(AUTOMATION_STATUS_BASELINE).reduce((a, b) => a + b, 0);
+  if (statusBacklog > 0) {
+    console.warn(
+      `[suites:lint] Automation_Status backlog: ${statusBacklog} case(s) across ` +
+        `${Object.keys(AUTOMATION_STATUS_BASELINE).length} non-canonical value(s) baselined — each needs a ` +
+        `human decision (is "Quarantined" a skip? does a "Deprecated" case still run?), so they are not auto-mapped.`,
+    );
+  }
+  if (status.caseVariants.length > 0) {
+    console.error(`[suites:lint] FAIL — ${status.caseVariants.length} case-variant(s) of a canonical Automation_Status:`);
+    for (const v of status.caseVariants) {
+      console.error(`  - "${v.value}" (${v.count} case(s)) should be "${v.canonical}"`);
+    }
+    console.error(`Per-case lane routing treats an exact "Manual" as the explicit opt-out, so a value that`);
+    console.error(`only LOOKS canonical routes differently from the one it appears to be. Changing case is`);
+    console.error(`value-preserving, so this is never baselined — fix it.`);
+    process.exit(1);
+  }
+  if (status.newOrGrown.length > 0) {
+    console.error(`[suites:lint] FAIL — ${status.newOrGrown.length} Automation_Status value(s) new or grown:`);
+    for (const v of status.newOrGrown) {
+      console.error(
+        `  - "${v.value}": ${v.count} case(s)` +
+          (v.allowed > 0 ? ` (baseline allows ${v.allowed})` : ` — not a canonical value and not baselined`),
+      );
+    }
+    console.error(`Legal values: ${[...AUTOMATION_STATUSES].join(", ")} (or empty).`);
+    console.error(`If this value is genuinely needed, add it to AUTOMATION_STATUSES in lint-test-cases.ts`);
+    console.error(`— the ONE place the vocabulary is declared — not to the baseline.`);
     process.exit(1);
   }
 

@@ -28,6 +28,7 @@
 
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from "fs";
 import { resolve, join, basename, dirname } from "path";
+import { fileURLToPath } from "url";
 import { config as loadDotenv } from "dotenv";
 import { resolveTestEnv } from "../lib/resolve-test-env.js";
 import { parse as parseCsv } from "csv-parse/sync";
@@ -352,7 +353,23 @@ interface CaseRow {
   Automation_Status: string;
 }
 
-function loadCase(caseRef: string): { csvPath: string; row: CaseRow } {
+/**
+ * Load one case row by id.
+ *
+ * `bom: true` is load-bearing, and its absence was an asymmetry with this runner's OWN
+ * linter: `review-graphql-labels.ts` (the GQL-1 lint) already passes `bom: true`, so a
+ * BOM-prefixed suite linted clean and then failed here — with `columns: true` the first
+ * header becomes `\uFEFFID`, every row's `.ID` is `undefined`, and the lookup below reports
+ * `Case <id> not found` while pointing at nothing. 12 suite CSVs carry a BOM.
+ *
+ * It became reachable with per-case lane routing: before that, a suite reached this runner
+ * only if EVERY case was runner-native, and none of the BOM suites qualified. Now a single
+ * machine-classified case in a BOM file is enough. The fail-closed reroute in
+ * `scripts/regression/machine-lane.ts` contains the damage (the case goes back to the
+ * browser lane), so the cost is a permanently lost fast path plus a misleading error —
+ * not a wrong verdict. One option fixes it.
+ */
+export function loadCase(caseRef: string): { csvPath: string; row: CaseRow } {
   const [csvPath, caseId] = caseRef.split(":");
   if (!csvPath || !caseId) {
     throw new Error(`--case must be <csv-path>:<ID>, got "${caseRef}"`);
@@ -364,6 +381,7 @@ function loadCase(caseRef: string): { csvPath: string; row: CaseRow } {
     columns: true,
     skip_empty_lines: true,
     relax_column_count: false,
+    bom: true, // suite CSVs are frequently saved with a UTF-8 BOM — strip it, don't mis-key on it
   }) as CaseRow[];
   const row = rows.find((r) => r.ID === caseId);
   if (!row) throw new Error(`Case ${caseId} not found in ${csvPath}`);
@@ -1329,7 +1347,14 @@ async function main() {
   process.exit(exitCode);
 }
 
-main().catch((e) => {
-  console.error(`\nFATAL: ${e instanceof Error ? e.message : String(e)}`);
-  process.exit(3);
-});
+// Same CLI guard as the rest of scripts/ (`plan-lanes.ts`, `sync-test-suites.ts`,
+// `plan-run.ts`): importing this module must not run it. Without the guard, a unit test that
+// imports `loadCase` — or any consumer that wants the parser without the process — launches a
+// whole run and exits, which is why the parser had no test until now.
+const isCli = !!process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+if (isCli) {
+  main().catch((e) => {
+    console.error(`\nFATAL: ${e instanceof Error ? e.message : String(e)}`);
+    process.exit(3);
+  });
+}

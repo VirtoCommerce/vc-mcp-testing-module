@@ -121,7 +121,15 @@ const KNOWN_VARS = deriveKnownVars();
 const CANONICAL_PRIORITIES = new Set(["Critical", "High", "Medium", "Low"]);
 const ALIAS_PRIORITIES = new Set(["P0", "P1", "P2", "P3"]);
 const HIGH_PRIORITIES = new Set(["Critical", "High", "P0", "P1"]);
-const AUTOMATION_STATUSES = new Set([
+/**
+ * The canonical `Automation_Status` vocabulary — exported, because it is now enforced in two
+ * places and a second copy is how two enforcers come to disagree. `lint-test-cases.ts` checks
+ * it per file (S-006); `sync-test-suites.ts` ratchets it across the whole corpus, which is the
+ * check that was missing while 22 distinct values accumulated. An empty value is legal
+ * (unset); `Manual` additionally carries ROUTING weight since per-case lane classification
+ * treats it as the explicit opt-out (`scripts/lib/case-classifier.ts` EX-200).
+ */
+export const AUTOMATION_STATUSES = new Set([
   "Draft", "Reviewed", "Automated", "Manual", "Semi-Automated",
   // "Deprecated" — a case explicitly retired (superseded/redundant, kept only for
   // traceability) but not deleted, e.g. 050m SR-GQL-038 (superseded by SR-GQL-011,
