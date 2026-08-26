@@ -33,7 +33,7 @@ import { parseSteps, validateStepBlocks, type StepBlock } from "./graphql-case-p
 import { classifyPredicateScoreability, parseAssertions } from "./graphql-assertions.js";
 import {
   classifyUiScoreability,
-  isUiDriver,
+  hasUiDriverTag,
   parseUiAssertions,
   parseUiSteps,
   validateUiSteps,
@@ -200,10 +200,13 @@ export function classifyCase(row: ClassifiableRow): CaseVerdict {
     return { id, lane: "browser", blockers: [{ code: "EX-002", detail: "empty Steps" }], family: "none" };
   }
 
-  // Family is decided by which driver tags are present, and a UI driver wins: a case that both
-  // clicks and queries is a UI case with GraphQL setup, which is the intended shape.
-  const uiSteps = parseUiSteps(row.Steps);
-  if (uiSteps.some(isUiDriver)) return classifyUiCase(id, row, uiSteps);
+  // Family is decided by which driver TAGS are present — not by whether their operands parse.
+  // Deciding it from a successful parse made family membership depend on authoring quality, so
+  // the worst-written cases were filed under the wrong grammar and reported with the wrong
+  // blocker codes (042's checkout, payment and GA4 cases, measured). A UI driver wins over
+  // GraphQL steps: a case that both clicks and queries is a UI case with GraphQL setup, which is
+  // the intended shape.
+  if (hasUiDriverTag(row.Steps)) return classifyUiCase(id, row, parseUiSteps(row.Steps));
 
   const blocks = parseSteps(row.Steps);
 

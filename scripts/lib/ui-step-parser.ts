@@ -447,15 +447,38 @@ export function parseUiSteps(cell: string): UiStep[] {
   return steps;
 }
 
+/** Tags that drive a browser. Family membership is decided by these, and only by these. */
+const UI_DRIVER_TAGS = new Set(["NAV", "ACT", "KEY"]);
+
 /**
- * A step that drives the browser. This is what makes a case belong to the UI family, and it is
- * exported so the classifier asks this module rather than keeping a second copy of the rule.
+ * A step that drives the browser, i.e. one whose operand ALSO parsed.
  *
- * A `[GQL]` step is deliberately NOT a driver: a case whose only actions are GraphQL belongs to
+ * A `[GQL]` step is deliberately not a driver: a case whose only actions are GraphQL belongs to
  * the GraphQL family and its existing runner, not to a browser.
  */
 export function isUiDriver(step: UiStep): boolean {
-  return step.tag === "ACT" || step.tag === "NAV" || step.tag === "KEY";
+  return UI_DRIVER_TAGS.has(step.tag);
+}
+
+/**
+ * Does this cell CLAIM to drive a browser — judged by the tag alone, before any operand is parsed?
+ *
+ * This is the family question, and it must be answered from the tag, never from whether the
+ * operand compiled. Using `isUiDriver` for it made family membership depend on AUTHORING QUALITY:
+ * `[ACT] complete the card form per SMK-014` is prose, so it parses to UNKNOWN, so the case had no
+ * driver, so it fell through to the GraphQL family and was reported with GraphQL blocker codes.
+ * Measured on 042: SMK-013/014/015/034 were misfiled exactly that way — four of the suite's most
+ * important cases (checkout, payment ×2, GA4), and the ones most in need of authoring were the
+ * ones the backlog counted in the wrong column.
+ *
+ * The rule is therefore: the tag decides the family, the operand decides whether it compiles.
+ */
+export function hasUiDriverTag(cell: string): boolean {
+  for (const line of (cell ?? "").split(/\r?\n/)) {
+    const m = TAG_RE.exec(line.trim());
+    if (m && UI_DRIVER_TAGS.has(m[1])) return true;
+  }
+  return false;
 }
 
 /**

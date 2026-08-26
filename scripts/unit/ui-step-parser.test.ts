@@ -26,6 +26,7 @@ import {
   parseUiAssertionLine,
   parseUiAssertions,
   classifyUiScoreability,
+  hasUiDriverTag,
   parsePreconditions,
   classifyCrossLayer,
 } from "../lib/ui-step-parser.ts";
@@ -536,4 +537,45 @@ test("delegated: the block pattern does not turn a spaced UI tag into a valid ta
 test("delegated: REST blocks are delegated on the same rule as GQL", () => {
   const steps = parseUiSteps("[REST-OP get]\n  GET /api/x\n[REST-EXEC get]\n[NAV] /cart\n[ACT] click role=link name='Cart'");
   assert.deepEqual(steps.map((s) => s.tag), ["GQL", "GQL", "NAV", "ACT"]);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Family membership is decided by the TAG, never by whether the operand compiled
+// ---------------------------------------------------------------------------------------------
+
+test("hasUiDriverTag: a prose [ACT] still claims the UI family", () => {
+  // The bug this closes: isUiDriver only sees a step whose operand PARSED, so a case written
+  // entirely in prose had no driver and fell through to the GraphQL family — meaning family
+  // membership depended on authoring quality, and the worst-written cases were reported with the
+  // wrong grammar's blocker codes. Real line from 042's SMK-013.
+  assert.equal(hasUiDriverTag("[ACT] complete the card form per SMK-014"), true);
+  assert.equal(parseUiStepLine("[ACT] complete the card form per SMK-014").tag, "UNKNOWN");
+});
+
+test("hasUiDriverTag: a prose [NAV] still claims the UI family", () => {
+  assert.equal(hasUiDriverTag("[NAV] {{FRONT_URL}}/cart with one item in cart"), true);
+});
+
+test("hasUiDriverTag: GraphQL-only steps do not claim it", () => {
+  assert.equal(hasUiDriverTag("[GQL-OP q]\n  query { cart { id } }\n[GQL-EXEC q]"), false);
+});
+
+test("hasUiDriverTag: untagged prose claims nothing", () => {
+  assert.equal(hasUiDriverTag("Open the cart page\nClick Checkout"), false);
+});
+
+test("hasUiDriverTag: a [WAIT]/[ASSERT]-only cell is not a driver", () => {
+  // Observing without acting is the hidden-coupling shape; it must not claim the family on the
+  // strength of a wait.
+  assert.equal(hasUiDriverTag("[WAIT] networkidle\n[ASSERT] [DOM] css='.x' visible"), false);
+});
+
+test("the tag decides the family, the operand decides whether it compiles", () => {
+  // Both halves of the rule, stated as one assertion pair so they cannot drift apart.
+  const prose = "[NAV] {{FRONT_URL}}/cart\n[ACT] click the big green button";
+  assert.equal(hasUiDriverTag(prose), true, "claims the family");
+  assert.ok(
+    parseUiSteps(prose).some((s) => s.tag === "UNKNOWN"),
+    "and still does not compile",
+  );
 });

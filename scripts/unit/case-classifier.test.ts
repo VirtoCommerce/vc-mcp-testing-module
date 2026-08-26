@@ -411,3 +411,40 @@ test("CORPUS: 768 cases are UI-family and ZERO compile — the authoring bottlen
   assert.ok(family > 700, `expected >700 UI-family cases, got ${family}`);
   assert.equal(ready, 0, "no suite is authored into the UI grammar yet");
 });
+
+test("family: a UI case written entirely in prose is still UI-family, not GraphQL", () => {
+  // Regression: family used to be decided from a SUCCESSFUL parse, so 042's SMK-013/014/015/034
+  // — checkout, payment x2 and GA4, the cases most in need of authoring — were filed under the
+  // GraphQL grammar and reported with its blocker codes. The tag decides the family.
+  const v = classifyCase({
+    ID: "SMK-013-like",
+    Steps: "[WAIT] cart page with payment section visible\n[ACT] complete the card form per SMK-014\n[ACT] click 'Place Order'",
+    Assertions: "[DOM] order confirmation visible",
+  });
+  assert.equal(v.family, "ui");
+  assert.equal(v.lane, "browser");
+  assert.ok(v.blockers.some((b) => b.code === "EX-010"), JSON.stringify(v.blockers));
+});
+
+test("CORPUS: no case that reaches the machine lane was reclassified into the UI family", () => {
+  // The guard on the guard. A GraphQL case carrying an [ACT] tag would now be judged by the UI
+  // grammar and could LOSE its machine status — a silent determinism regression the per-suite
+  // ratchet would only catch in aggregate.
+  const files = manifest.suites.map((x) => x.file).filter((f) => existsSync(f));
+  for (const file of files) {
+    const raw = readFileSync(file, "utf-8");
+    if (!isCanonicalHeader(raw)) continue;
+    for (const row of parseSuite(raw).rows) {
+      if (!row.ID) continue;
+      const v = classifyCase({
+        ID: row.ID,
+        Steps: row.Steps ?? "",
+        Assertions: row.Assertions ?? "",
+        Automation_Status: row.Automation_Status,
+      });
+      if (v.lane === "machine") {
+        assert.equal(v.family, "gql", `${row.ID} in ${file} reached the machine lane as family=${v.family}`);
+      }
+    }
+  }
+});
