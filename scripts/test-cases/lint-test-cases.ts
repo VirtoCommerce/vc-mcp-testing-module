@@ -51,10 +51,10 @@ import { COLUMNS, parseSuite, type Row } from "./append-test-cases-to-suite.js";
 import { parseSteps, validateStepBlocks } from "../lib/graphql-case-parser.js";
 import { classifyPredicateScoreability, parseAssertions } from "../lib/graphql-assertions.js";
 
-type Severity = "Blocker" | "Critical" | "High" | "Medium" | "Informational";
+export type Severity = "Blocker" | "Critical" | "High" | "Medium" | "Informational";
 const SEVERITY_ORDER: Severity[] = ["Informational", "Medium", "High", "Critical", "Blocker"];
 
-interface Finding {
+export interface Finding {
   rule: string;
   severity: Severity;
   caseId: string;
@@ -325,7 +325,7 @@ function isRunnerGraphql(row: Row): boolean {
   return /\[GQL-OP\b/i.test(row.Steps);
 }
 
-function lintRow(row: Row, idx: number, seenIds: Map<string, number>): Finding[] {
+export function lintRow(row: Row, idx: number, seenIds: Map<string, number>): Finding[] {
   const f: Finding[] = [];
   const id = row.ID || `<row ${idx + 1}>`;
   const push = (rule: string, sev: Severity, msg: string) => f.push(find(rule, sev, id, msg));

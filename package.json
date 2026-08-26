@@ -137,6 +137,8 @@
     "tc:audit:collect": "npx tsx scripts/test-cases/lint-test-cases.ts --json",
     "tc:audit:queue": "npx tsx scripts/test-cases/audit-queue.ts",
     "tc:audit:source": "npx tsx scripts/test-cases/suite-source-map.ts",
+    "tc:promote": "npx tsx scripts/test-cases/promote-cases.ts",
+    "tc:promote:apply": "npx tsx scripts/test-cases/promote-cases.ts --apply",
     "bl:lint": "npx tsx scripts/knowledge/lint-bl.ts",
     "bl:audit:collect": "npx tsx scripts/knowledge/lint-bl.ts --json",
     "ecl:lint": "npx tsx scripts/knowledge/lint-ecl.ts",

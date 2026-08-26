@@ -110,7 +110,7 @@ export interface RunEntry {
   mode?: "ci" | "interactive";
 }
 
-interface TriageEntry {
+export interface TriageEntry {
   /** Per-CASE identity `env|suiteId|caseId` — signature-independent, so a PASS and
    * a FAIL of the same case land in ONE entry and oscillation is detectable. */
   caseKey: string;
@@ -124,7 +124,7 @@ interface TriageEntry {
   outcomes: Record<string, Verdict>; // runId -> PASS|FAIL (both statuses recorded)
 }
 
-interface TriageStore {
+export interface TriageStore {
   version: number;
   updatedAt: string;
   entries: Record<string, TriageEntry>;
@@ -264,7 +264,7 @@ function loadCsvRow(suiteId: string, caseId: string): Record<string, string> | n
 // Reading a completed run
 // ---------------------------------------------------------------------------
 
-interface RawCase {
+export interface RawCase {
   id: string;
   title: string;
   status: Verdict;
@@ -273,9 +273,16 @@ interface RawCase {
   trace: string | null;
   /** The case's own elapsed time, when the writer recorded one. See RawSuite's note. */
   durationMs?: number;
+  /**
+   * Which lane produced the verdict — `suite-results-merge.ts` stamps every merged row.
+   * Load-bearing for promotion: a PASS on the `manual`/`deprecated` lane is INCOHERENT
+   * evidence (those lanes never dispatch), so `tc:promote` refuses it rather than merely
+   * discounting it.
+   */
+  lane?: string;
 }
 
-interface RawSuite {
+export interface RawSuite {
   suiteId: string;
   suiteName: string;
   environment: string;
@@ -316,6 +323,7 @@ function normalizeSuiteRaw(raw: any, suiteIdFromFileName?: string): RawSuite {
       ...(Number.isFinite(Number(c.durationMs)) && Number(c.durationMs) >= 0
         ? { durationMs: Number(c.durationMs) }
         : {}),
+      ...(typeof c.lane === "string" && c.lane ? { lane: c.lane } : {}),
     });
   }
   const tally = { pass: 0, fail: 0, blocked: 0, skipped: 0 };
