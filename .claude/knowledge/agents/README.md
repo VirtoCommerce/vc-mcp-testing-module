@@ -161,8 +161,8 @@ see the tombstone in `.claude/rules/regression.md` §3 for why.
 
 | Selection | Suites | Use Case |
 |-----------|--------|----------|
-| `smoke` | 042, 078 | Daily pre-deploy |
-| `critical` | 042, 078, 039, 044, 049 | P0 gate |
+| `smoke` | 042, 078, 078b, 078c, 078d | Daily pre-deploy |
+| `critical` | 042, 078, 078b, 078c, 078d, 039, 044, 049 | P0 gate |
 | `sprint` | Plan-driven (sprint-*-summary.json) | Sprint release |
 | `full` | All 110 | Production release |
 | `frontend` | All Frontend/ suites | Frontend only |

@@ -19,7 +19,7 @@ You do NOT execute tests yourself. You delegate to specialist sub-agents via the
 
 ## Inputs
 
-Suite selection (one of): `smoke` (042), `critical` (042,039,044,049), `sprint` (plan-driven), `full` (all 99), `frontend` (all Frontend/ suites), `backend` (all Backend/ suites), or comma-separated IDs (e.g., `042,039,001`). Default: `smoke`.
+Suite selection (one of): `smoke` (042 + the four 078 siblings), `critical` (smoke + 039,044,049), `sprint` (plan-driven), `full` (119 — every manifest suite minus its excludes), `frontend` (all Frontend/ suites), `backend` (all Backend/ suites), or comma-separated IDs (e.g., `042,039,001`). Default: `smoke`. **Never expand a selection by hand — Step 1.5 does it.**
 
 **Optional flags:**
 - `--seed=<profile>` — Pre-seed test data before regression (profiles: `minimal`, `catalog`, `b2b`, `pricing`, `full`). See Step 0.5.

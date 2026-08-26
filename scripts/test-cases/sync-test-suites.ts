@@ -13,6 +13,8 @@
  *     silently never run
  *   - **globally unique case IDs**: hard-fails if one case ID appears in more
  *     than one suite CSV (`findDuplicateCaseIds`)
+ *   - hard-fails (XREF-001, ratcheted) when a case's Preconditions depend on a case
+ *     that lives in a DIFFERENT suite CSV (`findCrossFileCaseRefs`)
  *   - strict-parses every suite CSV against a burn-down baseline
  *
  * Usage:
@@ -233,6 +235,121 @@ export function findDuplicateCaseIds(root?: string): string[] {
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([id, files]) => `case ID "${id}" appears in ${files.length} suites: ${files.join(", ")}`);
 }
+
+/**
+ * XREF-001 — a case's `Preconditions` must not depend on a case that lives in a
+ * DIFFERENT suite CSV.
+ *
+ * Why this is a gate and not a style note. A suite is the unit of dispatch: the
+ * scheduler hands one CSV to one runner, and two suites can run on different
+ * browser lanes, in either order, or one without the other (`smoke` runs 042 and
+ * not 029). So "Admin logged in (BSM-001 passed)" written in a suite that does
+ * NOT contain BSM-001 is not a precondition at all — it is a wish. The case runs
+ * with whatever state the lane happens to hold, and the failure surfaces as a
+ * BLOCKED or, worse, as a pass that depended on luck.
+ *
+ * `check-smoke-gates.ts` structurally cannot catch this: it builds its case-ID
+ * set as the UNION of the sibling CSVs in a directory, precisely so a checklist
+ * can span them — which means a reference from one sibling into another passes
+ * SG-001 as valid. This rule is the dual of `findDuplicateCaseIds` above: that
+ * one says an ID belongs to exactly one file, this one says a DEPENDENCY may not
+ * leave it.
+ *
+ * A token is only treated as a reference when it resolves to a real case ID
+ * somewhere in the corpus, so prose that merely looks like an ID (`BL-AUTH-005`,
+ * `ECL-13.2`, `VCST-5089`) can never produce a false positive.
+ *
+ * Rows are read BY HEADER NAME, never by position: 11 suites still carry a
+ * legacy 11-column header, and a positional read would silently score their
+ * `Expected Result` column as `Preconditions`.
+ */
+const XREF_CASE_REF_RE = /\b([A-Z][A-Z0-9]*(?:-[A-Z][A-Z0-9]*)*)-(\d{2,4})\b/g;
+
+export interface CrossFileRef {
+  file: string;
+  caseId: string;
+  ref: string;
+  refFile: string;
+}
+
+export function findCrossFileCaseRefs(root?: string): CrossFileRef[] {
+  const files = allSuiteCsvs(root);
+  const owner = new Map<string, string>();
+  for (const file of files) {
+    for (const id of extractExistingIds(readFileSync(file, "utf-8"))) owner.set(id, file);
+  }
+
+  const out: CrossFileRef[] = [];
+  for (const file of files) {
+    let rows: Array<Record<string, string>>;
+    try {
+      rows = parseCsv(readFileSync(file, "utf-8"), {
+        columns: true,
+        bom: true,
+        skip_empty_lines: true,
+        relax_column_count: true,
+      }) as Array<Record<string, string>>;
+    } catch {
+      continue; // unparsable CSVs are reported by lintSuiteCsvs, not here
+    }
+    for (const row of rows) {
+      const pre = String(row.Preconditions ?? "");
+      if (!pre) continue;
+      const caseId = String(row.ID ?? "").trim();
+      for (const m of pre.matchAll(XREF_CASE_REF_RE)) {
+        const ref = `${m[1]}-${m[2]}`;
+        if (ref === caseId) continue;
+        const refFile = owner.get(ref);
+        if (!refFile || refFile === file) continue;
+        out.push({ file, caseId: caseId || "<no id>", ref, refFile });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * XREF-001 burn-down baseline: per-file count of PRE-EXISTING cross-file
+ * dependencies. A ratchet, not an exemption — the same shape and the same reason
+ * as `CSV_LINT_BASELINE` above. 101 of these were already in the corpus when the
+ * rule was written, so hard-failing on day one would have meant everyone runs
+ * `--warn-only` and the signal dies. A file NOT listed here must have ZERO, and
+ * a listed file may never grow. Goal: keep this empty.
+ */
+const XREF_BASELINE: Record<string, number> = {
+  "regression/suites/Backend/configurable-products/052-configurable-products-admin.csv": 2,
+  "regression/suites/Backend/customer/027-customer-orgs-invites.csv": 2,
+  "regression/suites/Backend/customer/027b-customer-org-roles.csv": 1,
+  "regression/suites/Backend/graphql/050b2-graphql-xcart-items.csv": 1,
+  "regression/suites/Backend/graphql/050b5-graphql-xcart-validation.csv": 2,
+  "regression/suites/Backend/graphql/050d-graphql-xprofile.csv": 3,
+  "regression/suites/Backend/graphql/050h-graphql-wishlist.csv": 4,
+  "regression/suites/Backend/graphql/050l-graphql-push.csv": 1,
+  "regression/suites/Backend/graphql/050m-graphql-sales-rep.csv": 3,
+  "regression/suites/Backend/loyalty/075c-loyalty-product-points-earning.csv": 1,
+  "regression/suites/Backend/marketing/025-marketing-coupons-api.csv": 3,
+  "regression/suites/Backend/news/084-news-articles.csv": 2,
+  "regression/suites/Backend/page-builder/060-page-builder-design-content.csv": 2,
+  "regression/suites/Backend/pricing/054-pricing-logic.csv": 1,
+  "regression/suites/Backend/sales-rep/092-sales-rep-admin.csv": 1,
+  "regression/suites/Backend/sales-rep/092b-sales-rep-admin-embedded-app.csv": 2,
+  "regression/suites/Backend/smoke/078-backend-smoke-tests.csv": 1,
+  "regression/suites/Backend/whitelabeling/067-whitelabeling-admin.csv": 10,
+  "regression/suites/Frontend/b2b/011b-b2b-company-e2e.csv": 1,
+  "regression/suites/Frontend/cart/028-cart-core.csv": 1,
+  "regression/suites/Frontend/configurable-products/072-configurable-products-ui.csv": 1,
+  "regression/suites/Frontend/cross-cutting/043-google-analytics.csv": 1,
+  "regression/suites/Frontend/customer-reviews/088-customer-reviews-storefront.csv": 1,
+  "regression/suites/Frontend/loyalty/083-loyalty-catalog.csv": 3,
+  "regression/suites/Frontend/loyalty/083b-loyalty-mixed-cart-order.csv": 3,
+  "regression/suites/Frontend/payment/040a-payment-skyflow.csv": 2,
+  "regression/suites/Frontend/sales-rep/089-sales-rep-my-customers-storefront.csv": 7,
+  "regression/suites/Frontend/sales-rep/090-sales-rep-my-sales-reps-storefront.csv": 1,
+  "regression/suites/Frontend/sales-rep/091-sales-rep-customer-profile-storefront.csv": 28,
+  "regression/suites/Frontend/sales-rep/093-sales-rep-hub-dashboard-storefront.csv": 7,
+  "regression/suites/Frontend/search/004-search-core.csv": 1,
+  "regression/suites/Frontend/smoke/042-smoke-tests.csv": 2,
+};
 
 /**
  * Strict-parse every suite CSV that EXISTS, with the repo's canonical settings
@@ -464,6 +581,61 @@ function main(): void {
     console.error(
       `CATA-*, ORDA-*, SRCHA-*) or renumbering into a free range when both suites share one domain.`,
     );
+    process.exit(1);
+  }
+
+  // XREF-001: a dependency may not leave its suite CSV. Ratcheted against
+  // XREF_BASELINE — a file absent from the baseline must have zero.
+  const xrefs = findCrossFileCaseRefs();
+  const xrefByFile = new Map<string, CrossFileRef[]>();
+  for (const x of xrefs) xrefByFile.set(x.file, [...(xrefByFile.get(x.file) ?? []), x]);
+  const xrefNew: string[] = [];
+  const xrefStale: string[] = [];
+  for (const [file, refs] of xrefByFile) {
+    const allowed = XREF_BASELINE[file] ?? 0;
+    if (refs.length > allowed) {
+      for (const r of refs.slice(0, 6)) {
+        xrefNew.push(
+          `${r.file}: ${r.caseId} depends on ${r.ref}, which lives in ${r.refFile}` +
+            (allowed > 0 ? ` (baseline allows ${allowed}, found ${refs.length})` : ""),
+        );
+      }
+      if (refs.length > 6) xrefNew.push(`${file}: … and ${refs.length - 6} more`);
+    } else if (refs.length < allowed) {
+      xrefStale.push(`${file} (baseline ${allowed}, now ${refs.length})`);
+    }
+  }
+  for (const file of Object.keys(XREF_BASELINE)) {
+    if (!xrefByFile.has(file)) xrefStale.push(`${file} (baseline ${XREF_BASELINE[file]}, now 0)`);
+  }
+  if (xrefStale.length > 0) {
+    console.warn(
+      `[suites:lint] XREF-001 burn-down progress — lower these XREF_BASELINE entries: ${xrefStale.join(", ")}`,
+    );
+  }
+  if (Object.keys(XREF_BASELINE).length > 0) {
+    const total = Object.values(XREF_BASELINE).reduce((a, b) => a + b, 0);
+    console.warn(
+      `[suites:lint] XREF-001 backlog: ${total} pre-existing cross-suite dependency(ies) baselined across ` +
+        `${Object.keys(XREF_BASELINE).length} suite(s) — fix + de-baseline to shrink.`,
+    );
+  }
+  if (xrefNew.length > 0) {
+    console.error(`[suites:lint] FAIL — XREF-001: ${xrefNew.length} new cross-suite dependency(ies):`);
+    for (const e of xrefNew) console.error(`  - ${e}`);
+    console.error(
+      `A suite is the unit of dispatch: two suites can run on different lanes, in either order, or`,
+    );
+    console.error(
+      `one without the other. A precondition naming a case from another CSV is therefore never`,
+    );
+    console.error(
+      `established — the case runs on whatever state the lane happens to hold. Fix by restating the`,
+    );
+    console.error(
+      `requirement as STATE the runner can establish itself ("Admin logged in as {{ADMIN}} (suite`,
+    );
+    console.error(`setup)"), or by moving the depended-on case into the same suite.`);
     process.exit(1);
   }
 

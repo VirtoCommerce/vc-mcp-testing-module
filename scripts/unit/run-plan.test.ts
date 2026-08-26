@@ -56,7 +56,7 @@ test("known selections resolve to a non-empty set", () => {
 
 test("full resolves to the manifest minus its exclude list", () => {
   const { ids } = resolveSelection(manifest, "full");
-  assert.equal(ids.length, 116, "manifest drift: full's suite count changed");
+  assert.equal(ids.length, 119, "manifest drift: full's suite count changed");
   const excluded = (manifest.selections.full as { exclude?: string[] }).exclude ?? [];
   for (const id of excluded) assert.ok(!ids.includes(id), `${id} is excluded from full but resolved`);
 });
@@ -197,17 +197,43 @@ test("formatRunPlan renders every non-empty lane and the honest comparison", () 
   assert.match(text, /fixed-batch barrier/);
 });
 
-test("formatRunPlan on smoke does NOT claim a saving it did not make", () => {
-  // smoke is two suites and 078 alone is the critical path, so the pool cannot beat the
-  // barrier. The plan must say 0%, not round it into a win.
+test("smoke has no single suite that IS its critical path", () => {
+  // This assertion replaces one that asserted the opposite, and the history matters.
+  //
+  // `smoke` used to be two suites where `078` (115 cases, 83 min) alone was the whole
+  // critical path: the pool had nothing to pack, so it could not beat the fixed-batch
+  // barrier and the plan correctly printed "0% saved". Reordering was never the lever
+  // there — the lever was that one suite.
+  //
+  // Row-range sharding was the proposed fix and was measured to be unusable: 99 of
+  // 078's 115 cases declared a dependency in their Preconditions, 46 of them on a
+  // non-bootstrap case, so a row slice would have cut real chains
+  // (BSM-005 → 006 → 007, BSM-015 → 042 → 043, …) and turned a slow pass into a fast
+  // cascade of BLOCKED. The `[PRE:*]` gate that was supposed to guard it is also
+  // unsatisfiable for this suite by design: `test-execution-preflight.md` exempts
+  // Admin SPA and API suites, and 078 carries zero `[PRE:*]` tags.
+  //
+  // 078 was therefore split along its dependency components into four sibling suites
+  // (078/078b/078c/078d — the same convention as 092b, 072b/c/d), each self-contained.
+  // So what this test now guards is the property that made smoke slow in the first
+  // place: no suite may again grow into the entire critical path.
   const plan = buildRunPlan(plannableFor("smoke"), CONCURRENCY);
   const browser = plan.lanes.find((l) => l.lane === "browser")!;
-  assert.equal(
-    browser.makespanMinutes,
-    plan.browserBarrierMinutes,
-    "smoke has no reordering win — sharding is what would help, and it is not implemented",
+  const longest = Math.max(...browser.suites.map((s) => s.estimatedMinutes));
+
+  assert.ok(
+    longest <= 25,
+    `a smoke suite grew to ${longest}m — at that size it becomes the critical path again ` +
+      `and no amount of scheduling helps; split it along its dependency components`,
   );
-  assert.match(formatRunPlan(plan), /0% saved/);
+  assert.ok(
+    browser.makespanMinutes < 50,
+    `smoke makespan ${browser.makespanMinutes}m — it was 83m before the 078 split`,
+  );
+  assert.ok(
+    browser.makespanMinutes <= plan.browserBarrierMinutes,
+    "the pool must never be slower than the barrier it replaced",
+  );
 });
 
 test("an empty suite list plans cleanly instead of throwing", () => {

@@ -55,23 +55,38 @@ function selection(name: string): ManifestSuite[] {
 // has cases) and a 10-minute timeout (12% of its estimate), and reported the resulting
 // truncation as "not a real failure".
 
-test("078: turn cap exceeds its case count instead of falling short of it", () => {
-  const s = suite("078");
+// These two were originally pinned to suite 078 (115 cases / 83 min). 078 has since been
+// split into four dependency-closed siblings, and the pinned numbers failed — correctly,
+// as manifest-drift guards. They are now aimed at whatever the corpus's heaviest suite
+// actually IS, derived from the manifest rather than transcribed, so the worked example
+// tracks the corpus instead of dating it. The historical numbers stay in the comment
+// above: 100 turns for a 115-case suite, and 10 minutes for an 83-minute one.
+
+/** The suite with the most cases — the one a turn cap fails first. */
+function heaviestByCases() {
+  return manifest.suites.reduce((a, b) => (b.testCount > a.testCount ? b : a));
+}
+
+/** The suite with the longest estimate — the one a timeout ceiling kills first. */
+function heaviestByMinutes() {
+  return manifest.suites.reduce((a, b) => (minutesOf(b) > minutesOf(a) ? b : a));
+}
+
+test("the heaviest suite's turn cap exceeds its case count instead of falling short of it", () => {
+  const s = heaviestByCases();
   const turns = maxTurnsFor(s);
-  assert.equal(s.testCount, 115, "manifest drift: 078's case count changed");
+  assert.ok(s.testCount >= 100, `expected a triple-digit suite to exercise this, got ${s.testCount}`);
   assert.equal(turns, SETUP_TURNS + s.testCount * TURNS_PER_CASE);
-  assert.ok(turns >= 690, `expected >= 690 turns, got ${turns}`);
-  assert.ok(turns > s.testCount, "a turn cap below the case count guarantees truncation");
-  assert.ok(turns > 100, "must beat the old global MAX_TURNS=100");
+  assert.ok(turns > s.testCount, `${s.id}: a turn cap below the case count guarantees truncation`);
+  assert.ok(turns > 100, `${s.id}: must beat the old global MAX_TURNS=100`);
 });
 
-test("078: timeout exceeds its own estimate instead of cutting it at 12%", () => {
-  const s = suite("078");
+test("the longest suite's timeout exceeds its own estimate instead of cutting it at 12%", () => {
+  const s = heaviestByMinutes();
   const minutes = timeoutMsFor(s) / 60_000;
-  assert.equal(s.estimatedMinutes, 83, "manifest drift: 078's estimate changed");
-  assert.ok(minutes > s.estimatedMinutes, "a timeout below the estimate is a guaranteed kill");
-  assert.ok(minutes >= 175, `expected the ceiling to apply, got ${minutes}`);
-  assert.ok(minutes > 10, "must beat the old global 10-minute SUITE_TIMEOUT_MS");
+  assert.ok(minutesOf(s) >= 60, `expected a long suite to exercise this, got ${minutesOf(s)}`);
+  assert.ok(minutes > minutesOf(s), `${s.id}: a timeout below the estimate is a guaranteed kill`);
+  assert.ok(minutes > 10, `${s.id}: must beat the old global 10-minute SUITE_TIMEOUT_MS`);
 });
 
 // The invariant, checked across the WHOLE manifest rather than the suites we thought of.
@@ -110,7 +125,7 @@ test("EVERY manifest suite gets more turns than it has cases", () => {
 test("full: derived global budget covers the selection, unlike the old $80 default", () => {
   const suites = selection("full");
   const minutes = suites.reduce((sum, s) => sum + minutesOf(s), 0);
-  assert.equal(suites.length, 116, "manifest drift: full's suite count changed");
+  assert.equal(suites.length, 119, "manifest drift: full's suite count changed");
   assert.equal(minutes, 2775, "manifest drift: full's total estimate changed");
 
   const budget = globalBudgetFor(suites);

@@ -4,7 +4,7 @@
     "version": "3.0",
     "description": "Regression test suite manifest for parallel orchestration with module-aligned directories under Frontend/Backend layers",
     "generated": "2026-08-26",
-    "totalSuites": 123,
+    "totalSuites": 126,
     "csvFormat": "Enriched Agent-Native CSV (ID, Title, Section, Priority, Business_Rule, Edge_Case_Refs, Preconditions, Test_Data, Steps, Assertions, Cross_Layer_Checks, Failure_Signals, Cleanup, References, Automation_Status)",
     "domains": [
       "purchase-flow",
@@ -58,7 +58,7 @@
       "browserName": "firefox",
       "channel": null,
       "status": "available",
-      "constraint": "READ-ONLY / NAVIGATION-LIGHT PASSES ONLY — do NOT schedule click-driven suites here (cart, checkout, merge, PDP interaction, sign-in, any Admin SPA suite). browser_click times out on the actionability 'stable' gate; browser_type and navigation work fine. If both Chromium slots are busy, QUEUE the suite for the next free chrome/edge slot rather than placing it on firefox — a firefox placement costs a full wasted attempt, not a degraded one."
+      "constraint": "READ-ONLY / NAVIGATION-LIGHT PASSES ONLY \u2014 do NOT schedule click-driven suites here (cart, checkout, merge, PDP interaction, sign-in, any Admin SPA suite). browser_click times out on the actionability 'stable' gate; browser_type and navigation work fine. If both Chromium slots are busy, QUEUE the suite for the next free chrome/edge slot rather than placing it on firefox \u2014 a firefox placement costs a full wasted attempt, not a degraded one."
     },
     {
       "slot": 3,
@@ -1016,7 +1016,7 @@
       ],
       "envRiskGate": "staging",
       "customerApplicability": "universal",
-      "notes": "Datatrans is the only redirect processor. Redirect to /checkout/payment is the DESIGNED flow — never mark cases BLOCKED on the redirect.",
+      "notes": "Datatrans is the only redirect processor. Redirect to /checkout/payment is the DESIGNED flow \u2014 never mark cases BLOCKED on the redirect.",
       "clickDriven": true
     },
     {
@@ -1202,7 +1202,7 @@
       "agent": "none",
       "runner": "layout-runner",
       "runnerCommand": "npm run layout:run",
-      "browserRequirementReason": "Executed deterministically by scripts/layout/layout-runner.ts (Playwright/Chromium) — NOT by a browser agent. Fresh BrowserContext per case, CLS observer installed pre-paint via addInitScript, CDP network throttling, viewport declared per case. Thresholds derive from scripts/lib/measure-layout.ts (npm run tokens:sync).",
+      "browserRequirementReason": "Executed deterministically by scripts/layout/layout-runner.ts (Playwright/Chromium) \u2014 NOT by a browser agent. Fresh BrowserContext per case, CLS observer installed pre-paint via addInitScript, CDP network throttling, viewport declared per case. Thresholds derive from scripts/lib/measure-layout.ts (npm run tokens:sync).",
       "tags": [
         "layout",
         "cls",
@@ -1283,7 +1283,7 @@
     },
     {
       "id": "050b1",
-      "name": "GraphQL xCart — Basic CRUD & Quantity",
+      "name": "GraphQL xCart \u2014 Basic CRUD & Quantity",
       "file": "regression/suites/Backend/graphql/050b1-graphql-xcart-basic.csv",
       "domain": "purchase-flow",
       "layer": "backend",
@@ -1303,7 +1303,7 @@
     },
     {
       "id": "050b2",
-      "name": "GraphQL xCart — Item Selection & Coupons",
+      "name": "GraphQL xCart \u2014 Item Selection & Coupons",
       "file": "regression/suites/Backend/graphql/050b2-graphql-xcart-items.csv",
       "domain": "purchase-flow",
       "layer": "backend",
@@ -1323,7 +1323,7 @@
     },
     {
       "id": "050b3",
-      "name": "GraphQL xCart — Shipment, Payment, Merge, Remove",
+      "name": "GraphQL xCart \u2014 Shipment, Payment, Merge, Remove",
       "file": "regression/suites/Backend/graphql/050b3-graphql-xcart-lifecycle.csv",
       "domain": "purchase-flow",
       "layer": "backend",
@@ -1343,7 +1343,7 @@
     },
     {
       "id": "050b4",
-      "name": "GraphQL xCart — Cross-Domain & Schema Coverage",
+      "name": "GraphQL xCart \u2014 Cross-Domain & Schema Coverage",
       "file": "regression/suites/Backend/graphql/050b4-graphql-xcart-cross-domain.csv",
       "domain": "purchase-flow",
       "layer": "backend",
@@ -1364,7 +1364,7 @@
     },
     {
       "id": "050b5",
-      "name": "GraphQL xCart — Per-RuleSet Validation & Line-Item Validity",
+      "name": "GraphQL xCart \u2014 Per-RuleSet Validation & Line-Item Validity",
       "file": "regression/suites/Backend/graphql/050b5-graphql-xcart-validation.csv",
       "domain": "purchase-flow",
       "layer": "backend",
@@ -1564,7 +1564,7 @@
     },
     {
       "id": "050l",
-      "name": "GraphQL xAPI — Push Messages",
+      "name": "GraphQL xAPI \u2014 Push Messages",
       "file": "regression/suites/Backend/graphql/050l-graphql-push.csv",
       "domain": "communication",
       "layer": "backend",
@@ -1586,7 +1586,7 @@
     },
     {
       "id": "050m",
-      "name": "GraphQL xAPI — Sales Rep (scoped /graphql/sales-rep)",
+      "name": "GraphQL xAPI \u2014 Sales Rep (scoped /graphql/sales-rep)",
       "file": "regression/suites/Backend/graphql/050m-graphql-sales-rep.csv",
       "domain": "sales-rep",
       "layer": "backend",
@@ -1849,7 +1849,7 @@
     },
     {
       "id": "060",
-      "name": "Page Builder — Design & Content",
+      "name": "Page Builder \u2014 Design & Content",
       "file": "regression/suites/Backend/page-builder/060-page-builder-design-content.csv",
       "domain": "content-cms",
       "layer": "backend",
@@ -2377,7 +2377,7 @@
     },
     {
       "id": "077b",
-      "name": "Coupons & Promotions — Cart Sidebar (VCST-4896)",
+      "name": "Coupons & Promotions \u2014 Cart Sidebar (VCST-4896)",
       "file": "regression/suites/Frontend/marketing/077-smoke-cart-sidebar.csv",
       "domain": "marketing",
       "layer": "frontend",
@@ -2398,14 +2398,14 @@
     },
     {
       "id": "078",
-      "name": "Backend Smoke Tests",
+      "name": "Backend Smoke \u2014 Platform, API & GraphQL",
       "file": "regression/suites/Backend/smoke/078-backend-smoke-tests.csv",
       "domain": "cross-cutting",
       "layer": "backend",
       "concern": "functional",
       "priority": "P0",
-      "testCount": 115,
-      "estimatedMinutes": 83,
+      "testCount": 27,
+      "estimatedMinutes": 20,
       "agent": "qa-backend-expert",
       "tags": [
         "smoke",
@@ -2415,11 +2415,74 @@
         "admin",
         "api",
         "graphql",
-        "orders",
+        "auth",
+        "regression"
+      ],
+      "customerApplicability": "universal",
+      "clickDriven": true
+    },
+    {
+      "id": "078b",
+      "name": "Backend Smoke \u2014 Catalog, Search & Pricing Admin",
+      "file": "regression/suites/Backend/smoke/078b-backend-smoke-catalog-pricing.csv",
+      "domain": "cross-cutting",
+      "layer": "backend",
+      "concern": "functional",
+      "priority": "P0",
+      "testCount": 31,
+      "estimatedMinutes": 22,
+      "agent": "qa-backend-expert",
+      "tags": [
+        "smoke",
+        "daily",
+        "pre-deploy",
+        "admin",
         "catalog",
         "pricing",
         "inventory",
-        "auth",
+        "regression"
+      ],
+      "customerApplicability": "universal",
+      "clickDriven": true
+    },
+    {
+      "id": "078c",
+      "name": "Backend Smoke \u2014 Orders, Customers & Marketing Admin",
+      "file": "regression/suites/Backend/smoke/078c-backend-smoke-commerce.csv",
+      "domain": "cross-cutting",
+      "layer": "backend",
+      "concern": "functional",
+      "priority": "P0",
+      "testCount": 29,
+      "estimatedMinutes": 21,
+      "agent": "qa-backend-expert",
+      "tags": [
+        "smoke",
+        "daily",
+        "pre-deploy",
+        "admin",
+        "orders",
+        "regression"
+      ],
+      "customerApplicability": "universal",
+      "clickDriven": true
+    },
+    {
+      "id": "078d",
+      "name": "Backend Smoke \u2014 Content & Admin Workflows",
+      "file": "regression/suites/Backend/smoke/078d-backend-smoke-content-workflows.csv",
+      "domain": "cross-cutting",
+      "layer": "backend",
+      "concern": "functional",
+      "priority": "P0",
+      "testCount": 28,
+      "estimatedMinutes": 20,
+      "agent": "qa-backend-expert",
+      "tags": [
+        "smoke",
+        "daily",
+        "pre-deploy",
+        "admin",
         "regression"
       ],
       "customerApplicability": "universal",
@@ -2653,7 +2716,7 @@
     },
     {
       "id": "089",
-      "name": "Sales Rep — My Customers (storefront UI/E2E)",
+      "name": "Sales Rep \u2014 My Customers (storefront UI/E2E)",
       "file": "regression/suites/Frontend/sales-rep/089-sales-rep-my-customers-storefront.csv",
       "domain": "sales-rep",
       "layer": "frontend",
@@ -2677,7 +2740,7 @@
     },
     {
       "id": "090",
-      "name": "Sales Rep — My Sales Reps (storefront, buyer-facing)",
+      "name": "Sales Rep \u2014 My Sales Reps (storefront, buyer-facing)",
       "file": "regression/suites/Frontend/sales-rep/090-sales-rep-my-sales-reps-storefront.csv",
       "domain": "sales-rep",
       "layer": "frontend",
@@ -2701,7 +2764,7 @@
     },
     {
       "id": "091",
-      "name": "Sales Rep — Customer Profile (storefront)",
+      "name": "Sales Rep \u2014 Customer Profile (storefront)",
       "file": "regression/suites/Frontend/sales-rep/091-sales-rep-customer-profile-storefront.csv",
       "domain": "sales-rep",
       "layer": "frontend",
@@ -2725,7 +2788,7 @@
     },
     {
       "id": "092",
-      "name": "Sales Rep — Admin / VC-Shell App (rep management)",
+      "name": "Sales Rep \u2014 Admin / VC-Shell App (rep management)",
       "file": "regression/suites/Backend/sales-rep/092-sales-rep-admin.csv",
       "domain": "sales-rep",
       "layer": "backend",
@@ -2749,7 +2812,7 @@
     },
     {
       "id": "092b",
-      "name": "Sales Rep — Admin Embedded App (back-office)",
+      "name": "Sales Rep \u2014 Admin Embedded App (back-office)",
       "file": "regression/suites/Backend/sales-rep/092b-sales-rep-admin-embedded-app.csv",
       "domain": "sales-rep",
       "layer": "backend",
@@ -2774,7 +2837,7 @@
     },
     {
       "id": "093",
-      "name": "Sales Rep — Hub Dashboard (storefront)",
+      "name": "Sales Rep \u2014 Hub Dashboard (storefront)",
       "file": "regression/suites/Frontend/sales-rep/093-sales-rep-hub-dashboard-storefront.csv",
       "domain": "sales-rep",
       "layer": "frontend",
@@ -2822,11 +2885,11 @@
         "VirtoCommerce.OpenTelemetry",
         "VirtoCommerce.ApplicationInsights"
       ],
-      "notes": "VCST-5544. Needs App Insights READ access (AAD via Connect-AzAccount, or APPINSIGHTS_API_KEY_BACKEND) — without it every telemetry assertion is unverifiable, not failing. Adaptive sampling on the AI resource (~1-in-8) means a single request may leave no telemetry: repeat >=14x or disable sampling before concluding a signal is absent. 4 cases are Manual (InputCaptureMode matrix + bridge-off + breaking-change communication) and need an ISOLATED stand: the settings bind through a cached IOptions and are read only at startup, so each change is an appsettings edit + platform restart. Excluded from the backend/full selections until /qa-test 5g promotion — 19 cases are still Draft and UCPO-005/014/018 intentionally document defects that are OPEN."
+      "notes": "VCST-5544. Needs App Insights READ access (AAD via Connect-AzAccount, or APPINSIGHTS_API_KEY_BACKEND) \u2014 without it every telemetry assertion is unverifiable, not failing. Adaptive sampling on the AI resource (~1-in-8) means a single request may leave no telemetry: repeat >=14x or disable sampling before concluding a signal is absent. 4 cases are Manual (InputCaptureMode matrix + bridge-off + breaking-change communication) and need an ISOLATED stand: the settings bind through a cached IOptions and are read only at startup, so each change is an appsettings edit + platform restart. Excluded from the backend/full selections until /qa-test 5g promotion \u2014 19 cases are still Draft and UCPO-005/014/018 intentionally document defects that are OPEN."
     },
     {
       "id": "095",
-      "name": "Background Jobs — Hangfire Migration",
+      "name": "Background Jobs \u2014 Hangfire Migration",
       "file": "regression/suites/Backend/background-jobs/095-background-jobs-migration.csv",
       "domain": "background-jobs",
       "layer": "backend",
@@ -2848,7 +2911,7 @@
       ],
       "envRiskGate": "staging",
       "customerApplicability": "reference",
-      "notes": "VCST-5490. _COVERAGE-GAP (2026-08-17): RefundChangedJobHandler and CancelPaymentJobHandler have REGISTRATION + SECURITY-GATE coverage only (BGJ-006 flags both triggerable=false; BGJ-009 enqueue-refused for CancelPaymentJobHandler; BGJ-010 enqueue-refused for RefundChangedJobHandler) — their BUSINESS OUTCOME is NOT covered on any environment. Two cases (former BGJ-030 CancelPaymentJobHandler trigger path, former BGJ-031 RefundChangedJobHandler via Return resolution) were authored, evidence-checked live, and REMOVED rather than left permanently BLOCKED. Why: (1) no void/cancel REST route exists at all — only capture/refund; (2) neither payment gateway on this env supports refund — DefaultManualPaymentMethod returns 200 {succeeded:false, errorCode:\"PAYMENT_FAILED\"} (a leaked EF DbUpdateException), SkyflowPaymentMethod returns 200 {succeeded:false, errorCode:\"INVALID_REQUEST_ERROR\", errorMessage:\"Payment method does not support refund\"}; (3) seeded fixtures carry 0 payment transactions (paymentStatus=Paid was set directly by the seeder, nothing to refund against); (4) the only other candidate trigger — VirtoCommerce.Return's resolution field — does NOT create a payment refund: `resolution` is a free-text nullable string (not an enum), all 4 pre-existing returns with resolution=\"refund\" have orders with refunds=0 (two still payment-status New), and neither Return creation nor Return approval (New->Approved) raises an order event (confirmed live: modifiedDate/changelog/all Hangfire queues unchanged). There is no reachable path to either handler's business outcome on any environment available to this suite. What a future environment would need to re-add these cases: a refund-capable payment gateway (neither DefaultManualPaymentMethod nor Skyflow qualifies) PLUS an order whose payment carries a real captured transaction (not a directly-seeded PaymentStatus=Paid with no transaction history) — that precondition should gate re-authoring, not just re-running. IDs BGJ-030/BGJ-031 are retired, not reused."
+      "notes": "VCST-5490. _COVERAGE-GAP (2026-08-17): RefundChangedJobHandler and CancelPaymentJobHandler have REGISTRATION + SECURITY-GATE coverage only (BGJ-006 flags both triggerable=false; BGJ-009 enqueue-refused for CancelPaymentJobHandler; BGJ-010 enqueue-refused for RefundChangedJobHandler) \u2014 their BUSINESS OUTCOME is NOT covered on any environment. Two cases (former BGJ-030 CancelPaymentJobHandler trigger path, former BGJ-031 RefundChangedJobHandler via Return resolution) were authored, evidence-checked live, and REMOVED rather than left permanently BLOCKED. Why: (1) no void/cancel REST route exists at all \u2014 only capture/refund; (2) neither payment gateway on this env supports refund \u2014 DefaultManualPaymentMethod returns 200 {succeeded:false, errorCode:\"PAYMENT_FAILED\"} (a leaked EF DbUpdateException), SkyflowPaymentMethod returns 200 {succeeded:false, errorCode:\"INVALID_REQUEST_ERROR\", errorMessage:\"Payment method does not support refund\"}; (3) seeded fixtures carry 0 payment transactions (paymentStatus=Paid was set directly by the seeder, nothing to refund against); (4) the only other candidate trigger \u2014 VirtoCommerce.Return's resolution field \u2014 does NOT create a payment refund: `resolution` is a free-text nullable string (not an enum), all 4 pre-existing returns with resolution=\"refund\" have orders with refunds=0 (two still payment-status New), and neither Return creation nor Return approval (New->Approved) raises an order event (confirmed live: modifiedDate/changelog/all Hangfire queues unchanged). There is no reachable path to either handler's business outcome on any environment available to this suite. What a future environment would need to re-add these cases: a refund-capable payment gateway (neither DefaultManualPaymentMethod nor Skyflow qualifies) PLUS an order whose payment carries a real captured transaction (not a directly-seeded PaymentStatus=Paid with no transaction history) \u2014 that precondition should gate re-authoring, not just re-running. IDs BGJ-030/BGJ-031 are retired, not reused."
     }
   ],
   "selections": {
@@ -2856,13 +2919,19 @@
     "smoke": {
       "include": [
         "042",
-        "078"
+        "078",
+        "078b",
+        "078c",
+        "078d"
       ]
     },
     "critical": {
       "include": [
         "042",
         "078",
+        "078b",
+        "078c",
+        "078d",
         "039",
         "044",
         "049"

@@ -169,7 +169,7 @@ Use an agent by name: `Use the qa-backend-expert to test the Platform API`.
 
 ```bash
 npm run env:check          # Validate env vars (active TEST_ENV)
-npm run ci:smoke           # CI smoke (042, 078)   ·  ci:critical / ci:frontend / ci:backend / ci:full
+npm run ci:smoke           # CI smoke (042, 078, 078b-d)   ·  ci:critical / ci:frontend / ci:backend / ci:full
 npm run ci:cycle           # Full pipeline: sync → review → regression
 npm run seed[:minimal|:catalog|:full|:teardown]   # Test-data seeding (Postman MCP)
 npm run graphql:validate   # Run GraphQL fixtures  ·  schema:check (drift gate)
