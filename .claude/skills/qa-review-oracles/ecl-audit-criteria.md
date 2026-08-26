@@ -199,3 +199,34 @@ Points"), and every gate passed. That semantic call belongs to `/qa-review-tests
 — the same split as GRD-001 (a provenance tag is present) vs Dimension 11 (the tag is true).
 When an audit notices a semantically wrong citation, **report it for Dimension 6**; do not fix
 it here, and do not treat a green `ecl:lint` as evidence the citations are correct.
+
+## 9. Significance — which sections are worth the audit budget
+
+Same purpose as `bl-audit-criteria.md` §6 (and the same code, `scripts/knowledge/oracle-significance.ts`,
+via `npm run oracles:rank -- --axis=ecl`), with the signals a pattern row actually carries:
+
+| Signal | Points | Why |
+|---|---|---|
+| **Demand** — cases citing the section | 0 / 10 / 20 / 30 / 40 at 0 / 1 / 3 / 10 / 30+ | Same ladder as BL |
+| **`[OBSERVED]` SHARE of the section's classified rows** | ≥75% → 25 · some → 15 · `[THEORETICAL]`-only → 5 | Scored by share, not presence: 175 of 213 rows in the library are `[OBSERVED]`, so "has at least one" discriminates nothing. A predominantly-confirmed section is release-walk material (`/qa-checklist`); a predominantly-theoretical one is charter material (`/qa-exploratory`) — a real difference in what it buys |
+| **Max row `Frequency`** | High 20 · Low-High 14 · Medium 12 · Low-Medium 7 · Low 4 | The one closed vocabulary in the row schema |
+| **BL-linked row** | +8 | A pattern that maps to a `BL-*` invariant is normatively testable, not just describable |
+
+**`Impact` is deliberately unscored.** It is free prose ("Double charge, order duplication"); scoring
+it would mean a regex judging severity. Same rule as everywhere else here — value comes from closed
+vocabularies or not at all. A `Frequency` cell outside the vocabulary (`Low/Medium/High`) resolves to
+`null` **with a reason**, contributes zero, and is reported as unresolved; it is never guessed from
+its first token. A section whose table cannot be read at all is capped at `T3` — unassessable, not
+significant.
+
+**Read the ECL tiers as an ORDER, not as a prune list.** The library is small (54 sections) and
+densely cited: only two sections are uncited and exactly one lands below the bar — `ECL-14.8`
+(module version/schema drift), which §6b had already reasoned to the same place by hand, as
+legitimately never suite-coverable. So on this axis the tier discriminates weakly and the useful
+output is the head of the queue, whereas on the BL axis a third of the corpus sits below the bar.
+That asymmetry is the finding, not a defect in the model.
+
+The gate itself is identical to §6 rule 3: only a **new section** (MISSING) has to clear `T2`; a
+DRIFT correction to an existing section applies at any tier. And §0's deletion bar is untouched — a
+`T3` section is still not a RETIRE candidate without positive evidence the pattern is structurally
+impossible.

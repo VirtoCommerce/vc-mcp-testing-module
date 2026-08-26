@@ -113,3 +113,55 @@ all present axes describe the same behavior and match the BL `Rule` text.
 The proposals file format is the existing `PROPOSED-BL-<DOMAIN>-<NNN>` draft shape
 (see `.claude/commands/ba-analyze.md`), so `/ba-analyze` and `/qa-review-bl`
 unconfirmed items land in the same place for one human pass.
+
+## 6. Significance — which confirmed invariants are worth promoting, and in what order
+
+The bar in §1 answers *is this TRUE?*. It never answered *is this WORTH CARRYING?*, and the oracle
+grew under the truth gate alone. Measured on the corpus (2026-08-26): of **211 invariants, 45 sit
+below the bar** below and **22 are cited by no test case at all**; of the **50 ids the suites cite
+but the oracle lacks, 3** clear it on demand alone. Meanwhile single dangling clusters had
+accumulated 51 and 92 citing cases waiting for an entry that did not exist. Auditing in file order
+spends the budget where the value is not.
+
+Scoring is deterministic and lives in one place, `scripts/knowledge/oracle-significance.ts`, driven
+by `npm run oracles:rank -- --axis=bl`. Every score prints the contributions that produced it, so a
+promotion decision is re-derivable rather than remembered.
+
+| Signal | Points | Why |
+|---|---|---|
+| **Demand** — test cases citing the id | 0 / 10 / 20 / 30 / 40 at 0 / 1 / 3 / 10 / 30+ | Promoting an entry at a cited id retroactively makes every one of those citations true. **Laddered, not linear**, so a 92-case cluster cannot outrank the whole model by arithmetic |
+| **Severity tag** | `P0-security` 40 · `P0-revenue` 35 · `P1-data` 20 · `P1-ux` 12 · `P2-ux` 4 | The oracle's own vocabulary — the one closed value scale it already declares |
+| **`BL-CROSS` premium** | +10 | The file's own claim: cross-domain invariants "catch the bugs that single-domain testing misses" |
+
+**Tiers:** `T1` ≥ 55 (audit and promote first) · `T2` ≥ 30 (**the promotion bar**) · `T3` < 30
+(record, do not grow the oracle) · `EXCLUDED` (never).
+
+Four rules make the number trustworthy rather than merely tidy:
+
+1. **A P0 never falls below `T2`**, however little cites it. An uncited P0-security invariant is not
+   low-value; it is under-covered, which is a BLC-004 coverage gap for `/qa-test-lifecycle` Phase 3,
+   not a prune candidate.
+2. **Unclassified caps the tier.** An entry with no severity tag (BLL-002) is capped at `T3` no
+   matter how many cases cite it — unassessable is never "significant", and the fix is to tag it,
+   never to infer a tag. A **candidate** (a cited id with no entry yet) has no tag by construction,
+   so it rides demand to `T2` and is **ceilinged there** until triangulation assigns one; re-score
+   with that tag before reading the gate: `npm run oracles:rank -- --explain=<ID> --severity=<tag>`.
+3. **The bar governs GROWTH, not CORRECTION.** Only a **MISSING** verdict has to clear it. A DRIFT
+   fix, a CONFIRMED provenance refresh and a DUPLICATE merge apply at any tier — holding back a
+   correction would leave a known-false rule in a file other skills judge against, which is strictly
+   worse than carrying a low-value true one.
+4. **Some prefixes are not invariants at all** and are `EXCLUDED` at any demand. Each was declined on
+   a real audit (BL-AUDIT-2026-08-24) *after* citations had accumulated against it — demand alone
+   would have promoted all three:
+
+   | Prefix | Why it is not an invariant | Where the traceability goes instead |
+   |---|---|---|
+   | `BL-PERF` | performance budgets are environment- and hardware-specific; an entry would violate the oracle's own env-agnostic rule | `.claude/knowledge/execution/performance-thresholds.md` |
+   | `BL-COMPAT` | browser-engine quirks are tooling facts, not platform invariants | `.claude/knowledge/automation/browser-quirks.md` |
+   | `BL-API` | a coverage tag, not a normative rule — heterogeneous cases sharing one label | the owning domain's own `BL-*` invariant |
+
+   Exclusion **moves** the citations (Step 4, `/qa-review-tests --fix`), it never destroys them.
+
+**A `T3` entry is not a delete list.** Low significance is a reason not to spend audit budget and
+not to add more of the same — it is not positive evidence the entry is dead, which §5/§0's deletion
+bar still requires. Retiring stays a human proposal.
