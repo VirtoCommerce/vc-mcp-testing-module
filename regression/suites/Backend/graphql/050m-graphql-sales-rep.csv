@@ -759,8 +759,7 @@ query { salesRepCustomerCartStatistics { period { count } } }
 [GQL-OP main]
 query { salesRepCustomerCartStatistics { period { count total { amount } } } }
 [GQL-EXEC main]","[ERRORS label=main] errors[] empty {OBSERVED}
-[DATA label=main] data.salesRepCustomerCartStatistics.period.count = 0 {SPEC}
-[DATA label=main] data.salesRepCustomerCartStatistics.period.total.amount = 0 {SPEC}","none","a permissioned-but-zero-served rep gets an authorization error instead of a clean empty result (cross-ref SR-GQL-041); count/total > 0 despite zero org memberships (leak)","none (read-only)","Generated: VCST-5362 gap-fill (TLC-2026-07-23-1943 restore), 2026-07-28 — mirrors SR-GQL-041's verified-live zero-served contract","Draft"
+[DATA label=main] data.salesRepCustomerCartStatistics is null {OBSERVED}","none","a permissioned-but-zero-served rep gets an authorization error instead of a clean empty result (cross-ref SR-GQL-041); count/total > 0 despite zero org memberships (leak)","none (read-only)","Generated: VCST-5362 gap-fill (TLC-2026-07-23-1943 restore), 2026-07-28 — mirrors SR-GQL-041's verified-live zero-served contract","Draft"
 "SR-GQL-068","salesRepCustomerCounts — assignedCustomers Is Period-Independent; Period Counts Never Exceed It","GraphQL > Sales Rep > Query > salesRepCustomerCounts","High","BL-SR-007","","Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment (VCST-5362). Caller is SALES_REP (= SR_REP_PRIMARY), serves >=4 orgs (@td(ORG_ACME.id), @td(ORG_TECHFLOW.id), @td(ORG_BUILDRIGHT.id), @td(ORG_ACMEWEST.id) — established fixture facts, SR-GQL-009/014). `organizationId` on `salesRepCustomerCounts` is omitted here (cross-customer, the natural use for a per-rep counter). Requests the SAME field twice with different period args (aliased) to prove `assignedCustomers` doesn't vary with the period arg, per BL-SR-007.","","[GQL-ENDPOINT /graphql/sales-rep]
 [AUTH role=SALES_REP]
 [GQL-OP main]
@@ -810,9 +809,7 @@ query { salesRepCustomerCounts { assignedCustomers } }
 [GQL-OP main]
 query { salesRepCustomerCounts { assignedCustomers period { orderingCustomers newCustomers } } }
 [GQL-EXEC main]","[ERRORS label=main] errors[] empty {OBSERVED}
-[DATA label=main] data.salesRepCustomerCounts.assignedCustomers = 0 {OBSERVED}
-[DATA label=main] data.salesRepCustomerCounts.period.orderingCustomers = 0 {SPEC}
-[DATA label=main] data.salesRepCustomerCounts.period.newCustomers = 0 {SPEC}","none","a permissioned-but-zero-served rep gets an authorization error instead of a clean zero result; assignedCustomers/period counters > 0 despite zero org memberships (leak)","none (read-only)","Generated: VCST-5362 gap-fill (TLC-2026-07-23-1943 restore), 2026-07-28 — mirrors SR-GQL-041/067's verified zero-served contract","Draft"
+[DATA label=main] data.salesRepCustomerCounts is null {OBSERVED}","none","a permissioned-but-zero-served rep gets an authorization error instead of a clean zero result; assignedCustomers/period counters > 0 despite zero org memberships (leak)","none (read-only)","Generated: VCST-5362 gap-fill (TLC-2026-07-23-1943 restore), 2026-07-28 — mirrors SR-GQL-041/067's verified zero-served contract","Draft"
 "SR-GQL-072","salesRepCustomerCounts — filter=""All"" Is Equivalent to Omitted (Single Baseline Segment)","GraphQL > Sales Rep > Query > salesRepCustomerCounts","Medium","BL-SR-009","","Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY). LIVE-CONFIRMED 2026-07-23 (TLC-2026-07-23-1943 live-api-probe): `salesRepCustomerFilterRules` ships a SINGLE baseline rule (discovered fresh here rather than hardcoded, in case the name ever changes). Applying that discovered name as `period.filter` must equal the unfiltered result.","","[GQL-ENDPOINT /graphql/sales-rep]
 [AUTH role=SALES_REP]
 [GQL-OP discover]

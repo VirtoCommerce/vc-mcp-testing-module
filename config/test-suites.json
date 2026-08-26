@@ -1316,9 +1316,10 @@
       ],
       "customerApplicability": "universal",
       "lanes": {
-        "machine": 20,
+        "machine": 19,
         "browser": 1,
-        "manual": 0
+        "manual": 0,
+        "deprecated": 1
       }
     },
     {
@@ -1697,9 +1698,10 @@
       ],
       "customerApplicability": "reference",
       "lanes": {
-        "machine": 119,
+        "machine": 116,
         "browser": 0,
-        "manual": 0
+        "manual": 0,
+        "deprecated": 3
       }
     },
     {

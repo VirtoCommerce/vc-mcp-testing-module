@@ -40,11 +40,12 @@ export interface ManifestSuite {
   clickDriven?: boolean;
   /**
    * DERIVED by `suites:sync`: how the suite's cases split between the machine lane, a browser
-   * agent, and explicit Manual. Present only when the suite has at least one machine case, so
-   * a plain browser suite carries nothing. Lets the planner and the executability report read
-   * one recorded answer instead of re-classifying 127 CSVs.
+   * agent, explicit Manual, and explicit Deprecated (retired — dispatched nowhere). Present
+   * only when the suite has at least one machine case, so a plain browser suite carries
+   * nothing; `deprecated` is itself omitted when zero. Lets the planner and the executability
+   * report read one recorded answer instead of re-classifying 127 CSVs.
    */
-  lanes?: { machine: number; browser: number; manual: number };
+  lanes?: { machine: number; browser: number; manual: number; deprecated?: number };
 }
 
 export type WhereFilter = {

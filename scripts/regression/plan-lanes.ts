@@ -127,7 +127,12 @@ interface LanesFile {
   machineSourceCsv: string;
   /** The filtered CSV the browser agent gets. Empty when there are no browser rows. */
   browserCsv: string;
-  counts: { total: number; machine: number; browser: number; manual: number };
+  /**
+   * `machine + browser` is what actually runs. `manual` and `deprecated` are the two
+   * non-executing lanes and are counted SEPARATELY — folding a retired case into `manual`
+   * would claim a human is expected to run it.
+   */
+  counts: { total: number; machine: number; browser: number; manual: number; deprecated: number };
   planned: Array<{ id: string; lane: CaseLane }>;
   /** Why each non-machine case is not machine — the burn-down input. */
   blockers: Array<{ id: string; codes: string[]; details: string[] }>;
@@ -161,6 +166,7 @@ function planOne(suite: { id: string; file: string; name: string }, args: Args):
       machine: result.machine.length,
       browser: result.browser.length,
       manual: result.manual.length,
+      deprecated: result.deprecated.length,
     },
     planned: result.verdicts.map((v) => ({ id: v.id, lane: v.lane })),
     blockers: result.verdicts
@@ -191,14 +197,21 @@ function main(): void {
 
   if (args.all) {
     // Corpus survey: which suites would gain from per-case routing. Writes nothing.
-    const rows: Array<{ id: string; machine: number; browser: number; manual: number; name: string }> = [];
+    const rows: Array<{ id: string; machine: number; browser: number; manual: number; deprecated: number; name: string }> = [];
     for (const s of manifest.suites) {
       try {
         const raw = readFileSync(s.file, "utf-8").replace(/^\uFEFF/, "");
         if (!isCanonicalHeader(raw)) continue;
         const r = classifySuiteCases(parseSuite(raw).rows as unknown as ClassifiableRow[]);
-        if (r.machine.length > 0 && r.browser.length + r.manual.length > 0) {
-          rows.push({ id: s.id, machine: r.machine.length, browser: r.browser.length, manual: r.manual.length, name: s.name });
+        if (r.machine.length > 0 && r.browser.length + r.manual.length + r.deprecated.length > 0) {
+          rows.push({
+            id: s.id,
+            machine: r.machine.length,
+            browser: r.browser.length,
+            manual: r.manual.length,
+            deprecated: r.deprecated.length,
+            name: s.name,
+          });
         }
       } catch {
         /* unparsable suites are reported by suites:lint, not here */
@@ -211,10 +224,11 @@ function main(): void {
     }
     const stranded = rows.reduce((sum, r) => sum + r.machine, 0);
     console.log(`Mixed suites: ${rows.length} — ${stranded} machine-ready cases share a file with prose cases\n`);
-    console.log("  suite   machine  browser  manual  name");
+    console.log("  suite   machine  browser  manual  deprec  name");
     for (const r of rows) {
       console.log(
-        `  ${r.id.padEnd(7)} ${String(r.machine).padStart(7)} ${String(r.browser).padStart(8)} ${String(r.manual).padStart(7)}  ${r.name.slice(0, 40)}`,
+        `  ${r.id.padEnd(7)} ${String(r.machine).padStart(7)} ${String(r.browser).padStart(8)} ` +
+          `${String(r.manual).padStart(7)} ${String(r.deprecated).padStart(7)}  ${r.name.slice(0, 40)}`,
       );
     }
     return;
@@ -239,11 +253,18 @@ function main(): void {
     return;
   }
 
-  const { total, machine, browser, manual } = lanes.counts;
+  const { total, machine, browser, manual, deprecated } = lanes.counts;
   console.log(`=== Lane plan: ${lanes.suiteId} ${lanes.suiteName} ===`);
-  console.log(`${total} cases → ${machine} machine · ${browser} browser · ${manual} manual`);
+  console.log(
+    `${total} cases → ${machine} machine · ${browser} browser · ${manual} manual · ${deprecated} deprecated`,
+  );
   if (browser === 0 && machine > 0) {
-    console.log(`This suite needs NO browser slot: every case is runner-native or explicitly Manual.`);
+    console.log(`This suite needs NO browser slot: every case is runner-native or an explicit opt-out.`);
+  }
+  if (deprecated > 0) {
+    console.log(
+      `${deprecated} retired case(s) are excluded from BOTH lanes (EX-201) and will be merged as SKIPPED.`,
+    );
   }
   if (lanes.blockers.length > 0) {
     console.log(`\nWhy the rest are not machine-executable (cases per code):`);

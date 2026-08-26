@@ -40,14 +40,16 @@ function suiteFile(rows: string[], header: readonly string[] = COLUMNS): string 
 }
 
 /** A runner-native row in the grammar the runner actually parses. */
-function machineRow(id: string): string {
+function machineRow(id: string, status = "Automated"): string {
   const c = COLUMNS.map(() => "");
   c[0] = id;
   c[1] = "t";
   c[3] = "High";
   c[8] = `"[GQL-OP a]\n  query { cart { id } }\n[GQL-EXEC a]"`;
   c[9] = '"[ERRORS label=a] errors[] empty"';
-  c[14] = "Automated";
+  // Overridable so the Deprecated/Manual opt-outs can be exercised on a row that WOULD
+  // otherwise be machine-executable — the whole point is that the status overrules the grammar.
+  c[14] = status;
   return c.join(",");
 }
 
@@ -91,8 +93,8 @@ test("totals include unroutable in the denominator", () => {
   // Otherwise determinism would be computed against a corpus that quietly excludes the cases
   // nothing can read — flattering, and wrong.
   const t = totals([
-    { id: "a", name: "", file: "", machine: 10, browser: 10, manual: 0, unroutable: 0, hasOwnRunner: false, verdicts: [] },
-    { id: "b", name: "", file: "", machine: 0, browser: 0, manual: 0, unroutable: 20, hasOwnRunner: false, verdicts: [] },
+    { id: "a", name: "", file: "", machine: 10, browser: 10, manual: 0, deprecated: 0, unroutable: 0, hasOwnRunner: false, verdicts: [] },
+    { id: "b", name: "", file: "", machine: 0, browser: 0, manual: 0, deprecated: 0, unroutable: 20, hasOwnRunner: false, verdicts: [] },
   ]);
   assert.equal(t.cases, 40);
   assert.equal(t.determinismPct, 25);
@@ -111,6 +113,37 @@ test("a prose-on-both-sides case lands in `both`, not in a cheap bucket", () => 
 test("an explicitly Manual case is its own bucket — never counted as convertible backlog", () => {
   const r = analyseSuite({ id: "X", name: "x", file: suiteFile([proseRow("A-001", "Manual")]) });
   assert.equal(burnDownBuckets([r]).manual, 1);
+});
+
+test("a Deprecated case is its own bucket and its own count, never folded into Manual", () => {
+  // Two different facts: `manual` is "a person runs this" (out of scope by intent), `deprecated`
+  // is "nobody runs this" (out of scope by definition — converting one would be effort spent on
+  // a case scheduled for deletion). Adding them would make both numbers unusable.
+  const r = analyseSuite({
+    id: "X",
+    name: "x",
+    file: suiteFile([machineRow("A-001"), proseRow("A-002", "Manual"), machineRow("A-003", "Deprecated")]),
+  });
+  assert.equal(r.machine, 1, "a retired row must NOT be counted as machine-executable");
+  assert.equal(r.manual, 1);
+  assert.equal(r.deprecated, 1);
+  assert.equal(r.browser, 0);
+  const b = burnDownBuckets([r]);
+  assert.equal(b.deprecated, 1);
+  assert.equal(b.manual, 1);
+  assert.equal(b.assertionsOnly + b.stepsOnly + b.both, 0, "a retired case is never convertible backlog");
+});
+
+test("totals include deprecated in the denominator, so determinism is not flattered", () => {
+  // Dropping retired cases out of `cases` entirely would RAISE the reported determinism
+  // percentage — the same flattery the unroutable guard above exists to prevent.
+  const t = totals([
+    { id: "a", name: "", file: "", machine: 10, browser: 10, manual: 0, deprecated: 0, unroutable: 0, hasOwnRunner: false, verdicts: [] },
+    { id: "b", name: "", file: "", machine: 0, browser: 0, manual: 0, deprecated: 20, unroutable: 0, hasOwnRunner: false, verdicts: [] },
+  ]);
+  assert.equal(t.cases, 40);
+  assert.equal(t.deprecated, 20);
+  assert.equal(t.determinismPct, 25);
 });
 
 test("the real corpus's cheap tranche is small — a finding, not an under-count", () => {
@@ -213,12 +246,12 @@ test("a suite with its own runner is NOT counted as UI authoring backlog", () =>
     blockers: [{ code: "EX-010" as const, detail: "" }],
   };
   const withRunner = totals([
-    { id: "048c", name: "", file: "", machine: 0, browser: 1, manual: 0, unroutable: 0, hasOwnRunner: true, verdicts: [uiVerdict] },
+    { id: "048c", name: "", file: "", machine: 0, browser: 1, manual: 0, deprecated: 0, unroutable: 0, hasOwnRunner: true, verdicts: [uiVerdict] },
   ]);
   assert.equal(withRunner.uiFamily, 0);
 
   const without = totals([
-    { id: "042", name: "", file: "", machine: 0, browser: 1, manual: 0, unroutable: 0, hasOwnRunner: false, verdicts: [uiVerdict] },
+    { id: "042", name: "", file: "", machine: 0, browser: 1, manual: 0, deprecated: 0, unroutable: 0, hasOwnRunner: false, verdicts: [uiVerdict] },
   ]);
   assert.equal(without.uiFamily, 1);
 });

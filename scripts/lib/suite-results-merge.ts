@@ -25,7 +25,21 @@
  * That is the same failure shape as a dropped test, and it is the reason `lane_lost` exists.
  */
 
-export type CaseLane = "machine" | "browser" | "manual";
+export type CaseLane = "machine" | "browser" | "manual" | "deprecated";
+
+/**
+ * The lanes that never dispatch anything, and the note each one earns in the results.
+ *
+ * A planned case with no fragment row is normally `lane_lost` — a lane died before writing.
+ * For these two it is the EXPECTED state: nothing was ever sent, so the row must be
+ * materialised here or the case would read as lost. They are kept apart deliberately: a
+ * retired case labelled `Automation_Status=Manual (explicit)` would tell a reader a human is
+ * expected to run it, which is the opposite of what Deprecated means.
+ */
+const NON_EXECUTING_LANES: Partial<Record<CaseLane, string>> = {
+  manual: "Automation_Status=Manual (explicit)",
+  deprecated: "Automation_Status=Deprecated (retired — excluded from execution, EX-201)",
+};
 
 /** Statuses the recomputed counts recognise. Anything else stays untallied — see below. */
 const COUNTED = new Set(["PASS", "FAIL", "BLOCKED", "SKIPPED"]);
@@ -114,10 +128,11 @@ export function mergeSuiteResults(input: MergeInput): MergeResult {
   // Every planned case must exist. Absent = the lane never reported it.
   for (const [id, lane] of plannedLane) {
     if (merged.has(id)) continue;
-    if (lane === "manual") {
+    const nonExecuting = NON_EXECUTING_LANES[lane];
+    if (nonExecuting) {
       // Visible as a deliberate non-run, never as a quiet absence.
       merged.set(id, {
-        row: { id, status: "SKIPPED", lane, notes: "Automation_Status=Manual (explicit)" },
+        row: { id, status: "SKIPPED", lane, notes: nonExecuting },
         source: "(plan)",
       });
       continue;

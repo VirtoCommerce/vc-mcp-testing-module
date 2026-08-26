@@ -118,7 +118,7 @@ test("050h's plan is EXHAUSTIVE and writes both artefacts — counts derived, no
     classifierVersion: string;
     machineSourceCsv: string;
     browserCsv: string;
-    counts: { total: number; machine: number; browser: number; manual: number };
+    counts: { total: number; machine: number; browser: number; manual: number; deprecated: number };
     planned: Array<{ id: string; lane: string }>;
     blockers: Array<{ id: string; codes: string[] }>;
   };
@@ -128,8 +128,8 @@ test("050h's plan is EXHAUSTIVE and writes both artefacts — counts derived, no
   // i.e. it failed on an improvement. What has to hold is that the split is exhaustive and
   // self-consistent, because that is what the merger trusts: a case missing from the plan is
   // reported BLOCKED/lane_lost rather than quietly dropped.
-  const { total, machine, browser, manual } = lanes.counts;
-  assert.equal(machine + browser + manual, total, "every case lands in exactly one lane");
+  const { total, machine, browser, manual, deprecated } = lanes.counts;
+  assert.equal(machine + browser + manual + deprecated, total, "every case lands in exactly one lane");
   assert.equal(lanes.planned.length, total, "the plan must name every case — the merger trusts it");
   assert.ok(total > 0);
   assert.ok(manual >= 1, "050h keeps its explicitly-Manual case (WISH-009), which is why it is the reference");

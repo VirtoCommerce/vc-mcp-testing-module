@@ -6,7 +6,8 @@
 // suites — so 22 distinct values accumulated behind a rule that was already written down.
 //
 // It stopped being cosmetic when per-case lane routing started reading the column: an exact
-// `Manual` is the explicit opt-out (case-classifier.ts EX-200). A value that only LOOKS
+// `Manual` is an explicit opt-out (case-classifier.ts EX-200), and so is an exact
+// `Deprecated` (EX-201 — dispatched to neither lane). A value that only LOOKS
 // canonical therefore routes differently from the one it appears to be, which is why a
 // case-variant is fatal with no baseline while the 325 semantic stragglers are ratcheted.
 //

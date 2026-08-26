@@ -76,6 +76,88 @@ test("EX-200: an explicit Manual is respected, not overruled by the compiler", (
   assert.notEqual(classifyCase(machineRow({ Automation_Status: "Draft (was Manual)" })).lane, "manual");
 });
 
+test("EX-201: an explicit Deprecated is excluded from BOTH lanes, not executed", () => {
+  // Measured failure, 050m in REG-2026-08-26-1631: three Deprecated rows were dispatched and
+  // scored like live cases. SR-GQL-053 ("UNREACHABLE at API layer") FAILed against the suite's
+  // pass rate and was triaged as a fixable assertion defect; SR-GQL-029 ("statuses[] arg
+  // removed") and SR-GQL-038 "PASSed" while asserting nothing anyone intends to support.
+  const v = classifyCase(machineRow({ Automation_Status: "Deprecated" }));
+  assert.equal(v.lane, "deprecated", "a retired case must not be dispatched to a runner OR an agent");
+  assert.deepEqual(v.blockers.map((b) => b.code), ["EX-201"]);
+  assert.match(v.blockers[0].detail, /Deprecated/, "it must carry its reason, never a bare exclusion");
+  assert.equal(v.family, "none", "family is not judged: the row's grammar is never parsed");
+  // Whitespace/case tolerance matches EX-200 — the corpus ratchet normalises spellings, and a
+  // lowercase `deprecated` was one of the 39 case-variants it fixed.
+  assert.equal(classifyCase(machineRow({ Automation_Status: " deprecated " })).lane, "deprecated");
+});
+
+test("EX-201 is EXACT-match only — excluding a case runs against fail-closed", () => {
+  // Every other doubt in this module routes to `browser`, which costs a slot and no coverage.
+  // This one direction DELETES coverage, so a fuzzy match here is the expensive kind of wrong:
+  // a live case whose status merely mentions the word would silently stop being tested.
+  for (const status of [
+    "Deprecated pending review",
+    "Not Deprecated",
+    "Draft (was Deprecated)",
+    "Semi-Automated",
+    "Quarantined",
+  ]) {
+    const v = classifyCase(machineRow({ Automation_Status: status }));
+    assert.notEqual(v.lane, "deprecated", `"${status}" must fall through to the compiler`);
+    assert.equal(v.lane, "machine", `"${status}" is a runner-native case and must still run`);
+  }
+});
+
+test("Manual and Deprecated stay SEPARATE lanes — one expects a human, the other nobody", () => {
+  // Folding Deprecated into `manual` would make the manual count (838 corpus-wide, quoted in
+  // the burn-down) claim a person is expected to run a retired case. Same rule that keeps
+  // UNROUTABLE out of `browser`.
+  const rows: ClassifiableRow[] = [
+    machineRow({ ID: "A-001" }),
+    machineRow({ ID: "A-002", Automation_Status: "Manual" }),
+    machineRow({ ID: "A-003", Automation_Status: "Deprecated" }),
+    machineRow({ ID: "A-004", Steps: "[ACT] click the 'Sign up' button" }),
+  ];
+  const r = classifySuiteCases(rows);
+  assert.deepEqual(r.machine, ["A-001"]);
+  assert.deepEqual(r.manual, ["A-002"]);
+  assert.deepEqual(r.deprecated, ["A-003"]);
+  assert.deepEqual(r.browser, ["A-004"]);
+  // Exhaustive: the merger derives its planned set from these four lists, so a case in none of
+  // them would be a case nothing can report on.
+  assert.equal(
+    r.machine.length + r.browser.length + r.manual.length + r.deprecated.length,
+    rows.length,
+    "every case lands in exactly one lane",
+  );
+});
+
+test("the corpus's Deprecated cases are all excluded, and none of them is silent", () => {
+  // Derived, not pinned to 050m: a test naming a suite goes red when someone fixes that suite.
+  // What must hold is that no `Deprecated` row anywhere is left executable, and that every one
+  // carries EX-201 so the lanes file can explain the exclusion.
+  let seen = 0;
+  for (const suite of loadManifest().suites) {
+    if (!existsSync(suite.file)) continue;
+    const raw = readFileSync(suite.file, "utf-8").replace(/^﻿/, "");
+    if (!isCanonicalHeader(raw)) continue;
+    let rows;
+    try {
+      rows = parseSuite(raw).rows;
+    } catch {
+      continue;
+    }
+    for (const row of rows) {
+      if ((row.Automation_Status ?? "").trim().toLowerCase() !== "deprecated") continue;
+      seen++;
+      const v = classifyCase(row as never);
+      assert.equal(v.lane, "deprecated", `${suite.id} ${row.ID} is retired but still routable`);
+      assert.deepEqual(v.blockers.map((b) => b.code), ["EX-201"], `${suite.id} ${row.ID}`);
+    }
+  }
+  assert.ok(seen > 0, "no Deprecated case in the corpus — retire this test or point it at a fixture");
+});
+
 test("EX-002: an empty Steps cell is browser, never machine", () => {
   assert.deepEqual(codesOf(machineRow({ Steps: "   " })), ["EX-002"]);
   assert.equal(classifyCase(machineRow({ Steps: "" })).lane, "browser");
@@ -170,7 +252,7 @@ test("classifySuiteCases partitions every case exactly once, in CSV order", () =
 
 test("an empty suite classifies cleanly instead of throwing", () => {
   const r = classifySuiteCases([]);
-  assert.deepEqual(r, { machine: [], browser: [], manual: [], verdicts: [] });
+  assert.deepEqual(r, { machine: [], browser: [], manual: [], deprecated: [], verdicts: [] });
 });
 
 test("blockerHistogram counts each case once per distinct code", () => {

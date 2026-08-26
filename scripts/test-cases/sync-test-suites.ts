@@ -68,13 +68,15 @@ interface Suite {
   clickDriven?: boolean;
   /**
    * DERIVED (never hand-authored): how this suite's cases split between the machine lane, a
-   * browser agent, and explicit Manual — per `scripts/lib/case-classifier.ts`. Reconciled from
-   * the CSV by `regenerate()` below, the same way `testCount` and `clickDriven` are, so the
-   * planner and the executability report read one recorded answer instead of re-classifying
-   * 127 CSVs. Present only when a suite has at least one machine case; a suite that is 100%
-   * browser carries nothing, for the same reason `clickDriven` is present only when true.
+   * browser agent, explicit Manual, and explicit Deprecated — per
+   * `scripts/lib/case-classifier.ts`. Reconciled from the CSV by `regenerate()` below, the same
+   * way `testCount` and `clickDriven` are, so the planner and the executability report read one
+   * recorded answer instead of re-classifying 127 CSVs. Present only when a suite has at least
+   * one machine case; a suite that is 100% browser carries nothing, for the same reason
+   * `clickDriven` is present only when true. `deprecated` is omitted when zero, so recording it
+   * does not manufacture drift on the ~120 suites that have retired no case.
    */
-  lanes?: { machine: number; browser: number; manual: number };
+  lanes?: { machine: number; browser: number; manual: number; deprecated?: number };
 }
 
 type WhereFilter = Partial<Pick<Suite, "domain" | "layer" | "concern" | "priority">> & {
@@ -340,17 +342,20 @@ export function findCrossFileCaseRefs(root?: string): CrossFileRef[] {
  * `'Draft (SERIAL — isolate; restore ALL after)'` that encodes real execution semantics
  * nothing reads.
  *
- * This matters more than tidiness now: per-case lane routing treats an exact `Manual` as the
- * explicit opt-out (`case-classifier.ts` EX-200), so the column carries routing weight. A
- * value that merely LOOKS like a canonical one is the dangerous case, which is why a
- * case-variant is fatal with no baseline: the 39 that existed (`manual` ×22, `deprecated` ×11,
- * `automated` ×6) were normalised, since changing case is definitionally value-preserving.
+ * This matters more than tidiness now: per-case lane routing treats an exact `Manual` (EX-200)
+ * or an exact `Deprecated` (EX-201) as an explicit opt-out from execution, so the column
+ * carries routing weight. A value that merely LOOKS like a canonical one is the dangerous
+ * case, which is why a case-variant is fatal with no baseline: the 39 that existed
+ * (`manual` ×22, `deprecated` ×11, `automated` ×6) were normalised, since changing case is
+ * definitionally value-preserving.
  *
  * The remaining 325 are NOT mechanical. Whether `Semi-Automated` means Manual or Draft,
- * whether a `Deprecated` case should still run, whether `Quarantined` is a skip — each is a
- * decision with test-coverage consequences, and this repo's own rule is that deprecation and
- * authoring stay human. So they are baselined per value: a listed value may not GROW, and an
- * unlisted one fails. Same ratchet shape as `CSV_LINT_BASELINE` / `XREF_BASELINE`.
+ * whether `Quarantined` is a skip — each is a decision with test-coverage consequences, and
+ * this repo's own rule is that deprecation and authoring stay human. So they are baselined per
+ * value: a listed value may not GROW, and an unlisted one fails. Same ratchet shape as
+ * `CSV_LINT_BASELINE` / `XREF_BASELINE`. (One of these questions HAS since been decided:
+ * whether a `Deprecated` case should still run — it must not, per EX-201. That is a decision
+ * about the canonical value, though, so it changes nothing in this baseline.)
  */
 const AUTOMATION_STATUS_BASELINE: Record<string, number> = {
   "Draft (SERIAL — isolate; restore ALL after)": 1,
@@ -555,13 +560,16 @@ const ACT_IS_UI_RE =
  */
 export function derivesLaneCounts(
   file: string,
-): { machine: number; browser: number; manual: number } | null {
+): { machine: number; browser: number; manual: number; deprecated?: number } | null {
   if (!existsSync(file)) return null;
   const raw = readFileSync(file, "utf-8").replace(/^\uFEFF/, "");
   if (!isCanonicalHeader(raw)) return null;
   try {
     const r = classifySuiteCases(parseSuite(raw).rows as unknown as ClassifiableRow[]);
-    return { machine: r.machine.length, browser: r.browser.length, manual: r.manual.length };
+    const counts = { machine: r.machine.length, browser: r.browser.length, manual: r.manual.length };
+    // Omitted when zero: adding `deprecated: 0` to every suite would rewrite ~120 manifest
+    // entries that retired no case, so the drift report would say nothing about the change.
+    return r.deprecated.length > 0 ? { ...counts, deprecated: r.deprecated.length } : counts;
   } catch {
     return null;
   }
@@ -636,7 +644,8 @@ function regenerate(manifest: Manifest): { next: Manifest; drift: string[] } {
         declared &&
         declared.machine === lanes.machine &&
         declared.browser === lanes.browser &&
-        declared.manual === lanes.manual;
+        declared.manual === lanes.manual &&
+        (declared.deprecated ?? 0) === (lanes.deprecated ?? 0);
       if (lanes.machine === 0) {
         if (declared) {
           laneDrift.push(`${s.id}: lanes dropped (no machine cases)`);
@@ -644,10 +653,9 @@ function regenerate(manifest: Manifest): { next: Manifest; drift: string[] } {
           next = rest as Suite;
         }
       } else if (!same) {
-        laneDrift.push(
-          `${s.id}: lanes ${declared ? `${declared.machine}/${declared.browser}/${declared.manual}` : "(none)"} ` +
-            `-> ${lanes.machine}/${lanes.browser}/${lanes.manual}`,
-        );
+        const show = (l: { machine: number; browser: number; manual: number; deprecated?: number }) =>
+          `${l.machine}/${l.browser}/${l.manual}${l.deprecated ? `/${l.deprecated}dep` : ""}`;
+        laneDrift.push(`${s.id}: lanes ${declared ? show(declared) : "(none)"} -> ${show(lanes)}`);
         next = { ...next, lanes };
       }
     }
@@ -825,7 +833,8 @@ function main(): void {
     console.warn(
       `[suites:lint] Automation_Status backlog: ${statusBacklog} case(s) across ` +
         `${Object.keys(AUTOMATION_STATUS_BASELINE).length} non-canonical value(s) baselined — each needs a ` +
-        `human decision (is "Quarantined" a skip? does a "Deprecated" case still run?), so they are not auto-mapped.`,
+        `human decision (is "Quarantined" a skip? is "Semi-Automated" Manual or Draft?), so they are not ` +
+        `auto-mapped. Note the canonical "Deprecated" IS decided: it runs nowhere (EX-201).`,
     );
   }
   if (status.caseVariants.length > 0) {

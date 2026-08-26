@@ -74,6 +74,52 @@ test("an explicitly Manual case is SKIPPED with its reason, never quietly missin
   assert.match(String(manual.notes), /Automation_Status=Manual/);
 });
 
+test("a Deprecated case is SKIPPED with its OWN reason, never lane_lost and never 'Manual'", () => {
+  // The merge invariant this guards: `planned` is authoritative, so a newly-excluded case must
+  // be materialised here or it reads as `lane_lost` — a lane that died — which is exactly the
+  // alarm the deprecation is NOT. And it must not borrow the Manual note: telling a reader a
+  // person is expected to run a retired case is the same lie, one step later.
+  const r = mergeSuiteResults(
+    input({
+      planned: [
+        { id: "SR-GQL-011", lane: "machine" },
+        { id: "SR-GQL-029", lane: "deprecated" },
+        { id: "WISH-009", lane: "manual" },
+      ],
+      fragments: [frag("machine", [{ id: "SR-GQL-011", status: "PASS" }])],
+    }),
+  );
+  assert.deepEqual(r.errors, []);
+  const dep = byId(r.envelope, "SR-GQL-029")!;
+  assert.equal(dep.status, "SKIPPED");
+  assert.equal(dep.lane, "deprecated", "the row must name its own lane, not machine or manual");
+  assert.match(String(dep.notes), /Deprecated/);
+  assert.match(String(dep.notes), /EX-201/, "the reason code makes the exclusion traceable to the classifier");
+  assert.doesNotMatch(String(dep.notes), /lane_lost/);
+  assert.doesNotMatch(String(dep.notes), /Manual/);
+
+  // Counted as a skip, and visible in the per-lane counts a determinism trend is read from.
+  assert.equal(r.envelope.totalCases, 3);
+  assert.equal(r.envelope.skipped, 2, "the Manual and the Deprecated case both count as skips");
+  assert.deepEqual(r.envelope.lanes, { machine: 1, deprecated: 1, manual: 1 });
+});
+
+test("a fragment that reports a Deprecated case anyway is kept and WARNED about, not dropped", () => {
+  // A stale lanes plan, or a browser CSV written before the exclusion landed. A case that
+  // actually ran is more trustworthy than a plan; but the disagreement must be visible, because
+  // it means an agent spent a slot on a retired row.
+  const r = mergeSuiteResults(
+    input({
+      planned: [{ id: "SR-GQL-029", lane: "deprecated" }],
+      fragments: [frag("browser", [{ id: "SR-GQL-029", status: "FAIL" }])],
+    }),
+  );
+  assert.deepEqual(r.errors, []);
+  const row = byId(r.envelope, "SR-GQL-029")!;
+  assert.equal(row.status, "FAIL", "the real verdict is not overwritten by the plan");
+  assert.equal(row.lane, "browser", "the row is stamped with the lane that actually ran it");
+});
+
 // ---- invariant 2: no case may be counted twice ------------------------------------
 
 test("a case reported by two lanes is a HARD error and names both sources", () => {

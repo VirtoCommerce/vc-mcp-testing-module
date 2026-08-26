@@ -126,15 +126,18 @@ const HIGH_PRIORITIES = new Set(["Critical", "High", "P0", "P1"]);
  * places and a second copy is how two enforcers come to disagree. `lint-test-cases.ts` checks
  * it per file (S-006); `sync-test-suites.ts` ratchets it across the whole corpus, which is the
  * check that was missing while 22 distinct values accumulated. An empty value is legal
- * (unset); `Manual` additionally carries ROUTING weight since per-case lane classification
- * treats it as the explicit opt-out (`scripts/lib/case-classifier.ts` EX-200).
+ * (unset); `Manual` and `Deprecated` additionally carry ROUTING weight, since per-case lane
+ * classification reads them as the two explicit opt-outs
+ * (`scripts/lib/case-classifier.ts` EX-200 / EX-201) — both on an EXACT match of the whole
+ * cell, which is the other reason the case-variant ratchet is fatal.
  */
 export const AUTOMATION_STATUSES = new Set([
   "Draft", "Reviewed", "Automated", "Manual", "Semi-Automated",
   // "Deprecated" — a case explicitly retired (superseded/redundant, kept only for
   // traceability) but not deleted, e.g. 050m SR-GQL-038 (superseded by SR-GQL-011,
   // VCST-5304/5469 sync 2026-07-17). Never PROMOTED_STATUSES — it's excluded from
-  // regression-eligibility by definition, not merely un-reviewed.
+  // regression-eligibility by definition, not merely un-reviewed, and since EX-201 it is
+  // excluded from EXECUTION too: it is dispatched to neither lane and reported SKIPPED.
   "Deprecated",
 ]);
 // A promoted case (past Draft) must have every assertion grounded (Dim 10 / GRD-001).

@@ -48,6 +48,12 @@ interface SuiteReport {
   machine: number;
   browser: number;
   manual: number;
+  /**
+   * Retired cases (`Automation_Status: Deprecated`, EX-201). Its own count, never folded into
+   * `manual` — both mean "does not run", but one expects a human and the other expects nobody.
+   * Same rule that keeps `unroutable` out of `browser`.
+   */
+  deprecated: number;
   /** Cases nothing can classify: the file carries a legacy header or will not parse. */
   unroutable: number;
   /**
@@ -82,7 +88,7 @@ const MIN_PER_STEP_CASE = 6;
 function analyseSuite(suite: { id: string; name: string; file: string; hasOwnRunner?: boolean }): SuiteReport {
   const base = { id: suite.id, name: suite.name, file: suite.file, hasOwnRunner: suite.hasOwnRunner === true };
   if (!existsSync(suite.file)) {
-    return { ...base, machine: 0, browser: 0, manual: 0, unroutable: 0, verdicts: [] };
+    return { ...base, machine: 0, browser: 0, manual: 0, deprecated: 0, unroutable: 0, verdicts: [] };
   }
   const raw = readFileSync(suite.file, "utf-8").replace(/^﻿/, "");
 
@@ -94,7 +100,7 @@ function analyseSuite(suite: { id: string; name: string; file: string; hasOwnRun
   if (!isCanonicalHeader(raw)) {
     let count = 0;
     for (const line of raw.split(/\r?\n/)) if (/^\s*"?[A-Z0-9]+(?:-[A-Z0-9]+)*-\d+"?\s*,/.test(line)) count++;
-    return { ...base, machine: 0, browser: 0, manual: 0, unroutable: count, verdicts: [] };
+    return { ...base, machine: 0, browser: 0, manual: 0, deprecated: 0, unroutable: count, verdicts: [] };
   }
 
   try {
@@ -105,13 +111,14 @@ function analyseSuite(suite: { id: string; name: string; file: string; hasOwnRun
       machine: r.machine.length,
       browser: r.browser.length,
       manual: r.manual.length,
+      deprecated: r.deprecated.length,
       unroutable: 0,
       verdicts: r.verdicts,
     };
   } catch {
     let count = 0;
     for (const line of raw.split(/\r?\n/)) if (/^\s*"?[A-Z0-9]+(?:-[A-Z0-9]+)*-\d+"?\s*,/.test(line)) count++;
-    return { ...base, machine: 0, browser: 0, manual: 0, unroutable: count, verdicts: [] };
+    return { ...base, machine: 0, browser: 0, manual: 0, deprecated: 0, unroutable: count, verdicts: [] };
   }
 }
 
@@ -136,7 +143,7 @@ function analyseCorpus(): SuiteReport[] {
 }
 
 function totals(reports: SuiteReport[]) {
-  const t = { machine: 0, browser: 0, manual: 0, unroutable: 0 };
+  const t = { machine: 0, browser: 0, manual: 0, deprecated: 0, unroutable: 0 };
   // Two numbers about the UI family, reported because they answer "what would a ui-runner buy"
   // BEFORE one is built. `uiFamily` counts cases that drive a browser at all; `uiReady` counts
   // the ones that already compile under the UI grammar and are waiting only on an executor.
@@ -148,6 +155,7 @@ function totals(reports: SuiteReport[]) {
     t.machine += r.machine;
     t.browser += r.browser;
     t.manual += r.manual;
+    t.deprecated += r.deprecated;
     t.unroutable += r.unroutable;
     if (r.hasOwnRunner) continue; // already deterministic — not UI backlog
     for (const v of r.verdicts) {
@@ -156,7 +164,7 @@ function totals(reports: SuiteReport[]) {
       if (isUiReady(v)) uiReady++;
     }
   }
-  const cases = t.machine + t.browser + t.manual + t.unroutable;
+  const cases = t.machine + t.browser + t.manual + t.deprecated + t.unroutable;
   return { ...t, cases, uiFamily, uiReady, determinismPct: cases > 0 ? (t.machine / cases) * 100 : 0 };
 }
 
@@ -166,12 +174,19 @@ function burnDownBuckets(reports: SuiteReport[]) {
   let stepsOnly = 0;
   let both = 0;
   let manual = 0;
+  let deprecated = 0;
   for (const r of reports) {
     for (const v of r.verdicts) {
       if (v.lane === "machine") continue;
       const codes = new Set(v.blockers.map((b) => b.code));
       if (codes.has("EX-200")) {
         manual++;
+        continue;
+      }
+      // Retired: out of scope by DEFINITION, not by intent — converting one would be work
+      // spent on a case that is scheduled for deletion. Its own bucket for that reason.
+      if (codes.has("EX-201")) {
+        deprecated++;
         continue;
       }
       const hasAssertion = ASSERTION_CODES.some((c) => codes.has(c));
@@ -181,7 +196,7 @@ function burnDownBuckets(reports: SuiteReport[]) {
       else if (hasStep) stepsOnly++;
     }
   }
-  return { assertionsOnly, stepsOnly, both, manual };
+  return { assertionsOnly, stepsOnly, both, manual, deprecated };
 }
 
 /**
@@ -227,7 +242,10 @@ function main(): void {
       return;
     }
     console.log(`=== ${r.id} ${r.name} ===`);
-    console.log(`${r.verdicts.length} cases → ${r.machine} machine · ${r.browser} browser · ${r.manual} manual`);
+    console.log(
+      `${r.verdicts.length} cases → ${r.machine} machine · ${r.browser} browser · ${r.manual} manual · ` +
+        `${r.deprecated} deprecated`,
+    );
     if (r.unroutable > 0) {
       console.log(`${r.unroutable} case(s) UNROUTABLE — legacy header or unparsable; needs migration first.`);
       return;
@@ -269,6 +287,9 @@ function main(): void {
       console.error(`A case that stops being runner-executable goes back to a browser agent, where the`);
       console.error(`measured ~29% artefactual-BLOCKED rate applies again. If the loss is intended, run`);
       console.error(`\`npm run suites:sync\` and say why in the commit.`);
+      console.error(`Not every drop is a regression: a case RETIRED to \`Automation_Status: Deprecated\``);
+      console.error(`(EX-201) leaves the machine lane by design and runs nowhere at all. Check`);
+      console.error(`\`--suite <ID>\` for an EX-201 before treating the drop as lost determinism.`);
       process.exit(1);
     }
     console.log(
@@ -299,6 +320,9 @@ function main(): void {
     );
     console.log(`  ${String(b.both).padStart(5)}  prose on both sides — not a project, take it suite by suite`);
     console.log(`  ${String(b.manual).padStart(5)}  explicitly Manual — out of scope by intent`);
+    if (b.deprecated > 0) {
+      console.log(`  ${String(b.deprecated).padStart(5)}  explicitly Deprecated — retired; out of scope by definition, never converted`);
+    }
     if (t.unroutable > 0) {
       console.log(`  ${String(t.unroutable).padStart(5)}  UNROUTABLE — legacy 11-column header; a suite-level migration, and authoring`);
     }
@@ -338,7 +362,7 @@ function main(): void {
   console.log(`=== Executability (classifier ${CLASSIFIER_VERSION}) ===`);
   console.log(
     `${t.cases} cases across ${reports.length} suites: ${t.machine} machine · ${t.browser} browser · ` +
-      `${t.manual} manual · ${t.unroutable} unroutable`,
+      `${t.manual} manual · ${t.deprecated} deprecated · ${t.unroutable} unroutable`,
   );
   console.log(`Determinism: ${t.determinismPct.toFixed(1)}%`);
   // Reported unconditionally, including when uiReady is 0: a zero here IS the finding.
@@ -348,12 +372,13 @@ function main(): void {
   );
   console.log("");
 
-  console.log(`  suite   machine  browser  manual  unroutable  name`);
+  console.log(`  suite   machine  browser  manual  deprec  unroutable  name`);
   for (const r of reports) {
     if (r.machine === 0 && r.unroutable === 0) continue; // pure-browser suites are the norm
     console.log(
       `  ${r.id.padEnd(7)} ${String(r.machine).padStart(7)} ${String(r.browser).padStart(8)} ` +
-        `${String(r.manual).padStart(7)} ${String(r.unroutable || "").padStart(11)}  ${r.name.slice(0, 38)}`,
+        `${String(r.manual).padStart(7)} ${String(r.deprecated || "").padStart(7)} ` +
+        `${String(r.unroutable || "").padStart(11)}  ${r.name.slice(0, 38)}`,
     );
   }
 

@@ -44,9 +44,15 @@ import {
  * Bumped whenever a routing decision changes. Recorded in every lanes file so a stale
  * plan can be detected rather than silently followed.
  */
-export const CLASSIFIER_VERSION = "1.1.0";
+export const CLASSIFIER_VERSION = "1.2.0";
 
-export type CaseLane = "machine" | "browser" | "manual";
+/**
+ * Where a case is dispatched. `machine` and `browser` EXECUTE; `manual` and `deprecated` do
+ * not — they are the two opt-out lanes, kept apart because they mean different things and a
+ * merged count would lie. `manual` is "a person runs this"; `deprecated` is "nobody runs
+ * this, ever again". Same reason `report-executability.ts` keeps UNROUTABLE out of `browser`.
+ */
+export type CaseLane = "machine" | "browser" | "manual" | "deprecated";
 
 /** Reason codes — a closed vocabulary, deliberately not prose. */
 export type BlockerCode =
@@ -57,6 +63,7 @@ export type BlockerCode =
   | "EX-101" // no scoreable assertion: the runner would have nothing to judge
   | "EX-102" // an assertion the runner cannot score
   | "EX-200" // explicitly Manual — a human decision, respected
+  | "EX-201" // explicitly Deprecated — retired, so it must not be executed OR scored
   | "EX-300"; // compiles under the UI grammar, but no executor is wired for that family yet
 
 /**
@@ -110,15 +117,25 @@ const RUNNER_OP_KINDS = new Set<StepBlock["kind"]>([
 ]);
 
 /**
- * `Manual` is the ONE field value that routes a case, and only in the opt-out direction.
- * `Automation_Status` carries 23 distinct values across the corpus (case-dupes, free text
- * like `'Draft (SERIAL — isolate; restore ALL after)'`), so it cannot be trusted to route
- * anything positively — but an explicit `Manual` is a human saying "a person runs this",
- * and overriding that with a compiler verdict would be the wrong kind of clever.
- * Suite 050h's WISH-009 is the worked example.
+ * `Manual` and `Deprecated` are the ONLY field values that route a case, and only in the
+ * opt-out direction. `Automation_Status` carries 23 distinct values across the corpus
+ * (case-dupes, free text like `'Draft (SERIAL — isolate; restore ALL after)'`), so it cannot
+ * be trusted to route anything positively — but an explicit `Manual` is a human saying "a
+ * person runs this", and overriding that with a compiler verdict would be the wrong kind of
+ * clever. Suite 050h's WISH-009 is the worked example.
+ *
+ * Matching is EXACT (trim + case-fold), never a substring or a prefix, because excluding a
+ * case is the one decision this module makes that runs AGAINST fail-closed: everywhere else
+ * doubt costs a browser slot, here it would cost coverage. `'Draft (was Manual)'` and
+ * `'Deprecated pending review'` are therefore not matches — they fall through to the compiler,
+ * which is the safe direction. `lint-test-cases.ts` S-006 + the `suites:lint` case-variant
+ * ratchet are what keep the column to the canonical spellings in the first place.
  */
-function isExplicitlyManual(row: ClassifiableRow): boolean {
-  return (row.Automation_Status ?? "").trim().toLowerCase() === "manual";
+function statusOptOut(row: ClassifiableRow): "manual" | "deprecated" | null {
+  const v = (row.Automation_Status ?? "").trim().toLowerCase();
+  if (v === "manual") return "manual";
+  if (v === "deprecated") return "deprecated";
+  return null;
 }
 
 /**
@@ -191,8 +208,23 @@ export function classifyCase(row: ClassifiableRow): CaseVerdict {
   const id = (row.ID ?? "").trim();
   const blockers: CaseVerdict["blockers"] = [];
 
-  if (isExplicitlyManual(row)) {
+  // Both opt-outs are checked BEFORE any parsing: a retired case's steps and assertions may
+  // describe an API that no longer exists (050m's SR-GQL-029 says so in its own title —
+  // "statuses[] arg removed"), so compiling them is at best wasted work and at worst a verdict
+  // about a surface nobody intends to support. Measured on 050m: three Deprecated rows ran, two
+  // "passed" while asserting nothing meaningful and one FAILed against the suite's pass rate and
+  // was triaged as a fixable assertion defect.
+  const optOut = statusOptOut(row);
+  if (optOut === "manual") {
     return { id, lane: "manual", blockers: [{ code: "EX-200", detail: "Automation_Status=Manual" }], family: "none" };
+  }
+  if (optOut === "deprecated") {
+    return {
+      id,
+      lane: "deprecated",
+      blockers: [{ code: "EX-201", detail: "Automation_Status=Deprecated" }],
+      family: "none",
+    };
   }
 
   const steps = (row.Steps ?? "").trim();
@@ -247,6 +279,8 @@ export interface SuiteLanes {
   machine: string[];
   browser: string[];
   manual: string[];
+  /** Retired cases: dispatched nowhere, but LISTED — a plan must still account for them. */
+  deprecated: string[];
   verdicts: CaseVerdict[];
 }
 
@@ -257,6 +291,7 @@ export function classifySuiteCases(rows: readonly ClassifiableRow[]): SuiteLanes
     machine: verdicts.filter((v) => v.lane === "machine").map((v) => v.id),
     browser: verdicts.filter((v) => v.lane === "browser").map((v) => v.id),
     manual: verdicts.filter((v) => v.lane === "manual").map((v) => v.id),
+    deprecated: verdicts.filter((v) => v.lane === "deprecated").map((v) => v.id),
     verdicts,
   };
 }

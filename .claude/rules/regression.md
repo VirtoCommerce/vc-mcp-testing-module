@@ -244,9 +244,10 @@ not pattern-match tags with a private regex, because a static verdict derived fr
 similar-looking implementation is exactly how a classifier and a runtime drift apart. Reason codes
 are a closed vocabulary (`EX-002` no steps · `EX-003` invalid op structure · `EX-010` a step line
 the parser cannot type · `EX-011` no runner op · `EX-101` nothing scoreable to assert · `EX-102` an
-assertion the runner cannot score · `EX-200` explicitly `Manual`).
+assertion the runner cannot score · `EX-200` explicitly `Manual` · `EX-201` explicitly
+`Deprecated` · `EX-300` compiles under the UI grammar but no `ui-runner` exists yet).
 
-Four rules make it safe rather than merely faster:
+Five rules make it safe rather than merely faster:
 
 - **Fail-closed in one direction only.** Any doubt routes to `browser`, which is the status quo —
   so a classifier bug costs the saving, never a verdict. If `graphql-runner` still exits 2
@@ -259,10 +260,24 @@ Four rules make it safe rather than merely faster:
   "silence is never a pass" rule as `layout-runner.ts`, applied one step earlier. This is what
   catches suite `050a`'s `CAT-GQL-131`, whose assertion reads
   `data.products.sortings[0].name is non-null OR is null` — vacuously true.
-- **An explicit `Manual` is respected, never overruled.** It is the only positive use of
+- **An explicit `Manual` is respected, never overruled.** It is one of two opt-out uses of
   `Automation_Status` (which carries 23 distinct values corpus-wide, so it cannot route anything
   else). `050h`'s `WISH-009` is the worked example; it lands in the results as `SKIPPED` with its
   reason, never as a quiet absence.
+- **An explicit `Deprecated` is EXCLUDED from both lanes (`EX-201`), on its own count.** A retired
+  case still parsed, still ran and was still scored — `050m` in `REG-2026-08-26-1631` dispatched
+  all three of its `Deprecated` rows: `SR-GQL-053` (titled *"UNREACHABLE at API layer"*) FAILed
+  against the suite's pass rate and was first triaged as a fixable assertion defect, while
+  `SR-GQL-029` (*"OBSOLETE (statuses[] arg removed)"*) and `SR-GQL-038` "PASSed" while asserting
+  nothing anyone intends to support. Both directions are wrong, so the status is now read BEFORE
+  any parsing, and — exactly like `Manual` — the case lands as `SKIPPED` with its reason, never as
+  a quiet absence (`suite-results-merge.ts` materialises it from the plan). It is a **fourth lane**,
+  not a variant of `manual`: `manual` means *a person runs this*, `deprecated` means *nobody does*,
+  and folding them would make the `manual` count lie — the same rule that keeps UNROUTABLE out of
+  `browser`. Corpus-wide this excludes **35 cases in 10 suites** (4 of them previously on the
+  machine lane: `050m` ×3, `050b1` ×1; the other 31 were riding browser agents). Because excluding
+  a case runs AGAINST fail-closed, the match is **exact** (trim + case-fold on the whole cell) —
+  `'Deprecated pending review'` is not a match and falls through to the compiler.
 - **A legacy 11-column header is REFUSED (exit 2), never classified.** `parseSuite` maps fields
   positionally, so on those 11 suites the legacy `Steps` lands in `Test_Data` and `Expected Result`
   lands in `Steps` — routing would score real cases on the wrong columns. None of the 10 mixed
@@ -277,7 +292,11 @@ Its invariants, each unit-tested in `scripts/unit/suite-results-merge.test.ts`:
 
 1. **No case can be lost.** The planned set comes from the lanes file, not from the fragments — so a
    lane that dies before writing surfaces as `BLOCKED` / `lane_lost: the <lane> lane did not report
-   this case`, instead of producing a smaller, greener, faster-looking suite.
+   this case`, instead of producing a smaller, greener, faster-looking suite. The two
+   **non-executing** lanes are the deliberate exception and are materialised from the plan as
+   `SKIPPED` with their own note (`manual` → `Automation_Status=Manual (explicit)`, `deprecated` →
+   `Automation_Status=Deprecated (retired …, EX-201)`) — a planned lane that never dispatches must
+   not read as a lane that died, and a retired case must not be labelled as awaiting a human.
 2. **No case can be counted twice.** The same id in two fragments is a hard error naming both, and
    **nothing is written** — that means the split leaked.
 3. **Every row carries its `lane`**, and the envelope carries per-lane counts. Without it no
@@ -398,10 +417,14 @@ drop**, so a change that makes cases unroutable cannot ride in behind a routine 
 LLM agent drives, and most should stay that way. A gate that failed on "not machine-executable"
 would be red forever, everyone would learn to pass `--warn-only`, and the signal would be dead.
 
-**Per-suite lane counts are recorded in the manifest** (`lanes: {machine, browser, manual}`,
-reconciled by `suites:sync` exactly like `testCount` and `clickDriven`, present only when a suite has
-at least one machine case). So the planner and the report read one recorded answer instead of each
-re-classifying 127 CSVs — and a drop shows up as manifest drift as well as a ratchet failure.
+**Per-suite lane counts are recorded in the manifest** (`lanes: {machine, browser, manual}` plus
+`deprecated` when non-zero, reconciled by `suites:sync` exactly like `testCount` and `clickDriven`,
+present only when a suite has at least one machine case). So the planner and the report read one
+recorded answer instead of each re-classifying 127 CSVs — and a drop shows up as manifest drift as
+well as a ratchet failure. **Not every drop is lost determinism:** a case retired to `Deprecated`
+(EX-201) leaves the machine lane by design, so `--check` naming a suite whose only loss is an
+EX-201 is drift to *record*, not a regression to fix — which is why the failure text says so and
+why `deprecated` is recorded separately rather than melted into `manual`.
 
 **UNROUTABLE is its own count, never folded into `browser`.** The 11 surviving legacy 11-column
 suites (274 cases) are not "browser suites" — they are suites nothing can classify, because
@@ -410,15 +433,16 @@ browser would hide 274 cases behind a number that reads like a deliberate choice
 
 ### The measured correction to the burn-down economics
 
-Determinism is **554 / 4,230 = 13.1%**. The backlog splits, against the grammar the GraphQL/REST
+Determinism is **555 / 4,231 = 13.1%**. The backlog splits, against the grammar the GraphQL/REST
 runner actually parses:
 
 | cases | bucket |
 |---|---|
 | **2** | steps compile, assertions are prose |
-| **54** | assertions compile, steps need normalising |
-| **2,508** | prose on both sides — not a project; taken suite by suite in `/qa-review-tests` |
+| **46** | assertions compile, steps need normalising |
+| **2,481** | prose on both sides — not a project; taken suite by suite in `/qa-review-tests` |
 | **838** | explicitly `Manual` — out of scope by intent |
+| **35** | explicitly `Deprecated` — retired; out of scope by *definition*, never converted (EX-201) |
 | **274** | UNROUTABLE — legacy header; a suite-level migration, and authoring |
 
 **Read the small number as a finding, not an under-count.** An earlier estimate put ~365 cases one
