@@ -18,14 +18,26 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { COLUMNS, parseSuite } from "../test-cases/append-test-cases-to-suite.ts";
 import { evidenceFileFrom, failedAssertionFrom } from "../regression/machine-lane.ts";
 
 const scratch = mkdtempSync(join(tmpdir(), "lane-planner-"));
 const PLANNER = join("scripts", "regression", "plan-lanes.ts");
 
+/**
+ * Run a `.ts` CLI portably.
+ *
+ * NOT `spawnSync("npx", …)`: on Windows the executable is `npx.cmd`, so a bare "npx" ENOENTs
+ * and every CLI test fails on that leg only. The repo already documents this trap
+ * (`scripts/test-data/author-fixtures.ts`) and its own tests use `process.execPath`
+ * (`ado-form-visibility.test.mjs`). Invoking tsx's CLI entry directly keeps that convention
+ * and needs no shell, so a temp path with a space cannot be re-split by one.
+ */
+const TSX_CLI = fileURLToPath(new URL("../../node_modules/tsx/dist/cli.mjs", import.meta.url));
+
 function runCli(args: string[]) {
-  return spawnSync("npx", ["tsx", PLANNER, ...args], { encoding: "utf-8", env: process.env });
+  return spawnSync(process.execPath, [TSX_CLI, PLANNER, ...args], { encoding: "utf-8", env: process.env });
 }
 
 // ---- the legacy-header refusal ----------------------------------------------------

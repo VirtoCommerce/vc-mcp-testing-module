@@ -30,7 +30,7 @@ import { readFileSync, writeFileSync, existsSync, readdirSync } from "fs";
 import { join, sep } from "path";
 import { fileURLToPath } from "url";
 import { parse as parseCsv } from "csv-parse/sync";
-import { COLUMNS, extractExistingIds, headerFields, parseSuite } from "./append-test-cases-to-suite.js";
+import { COLUMNS, extractExistingIds, isCanonicalHeader, parseSuite } from "./append-test-cases-to-suite.js";
 import { AUTOMATION_STATUSES } from "./lint-test-cases.js";
 import { classifySuiteCases, type ClassifiableRow } from "../lib/case-classifier.js";
 
@@ -382,7 +382,7 @@ export function findAutomationStatusDrift(root?: string): StatusDrift {
     const raw = readFileSync(file, "utf-8").replace(/^\uFEFF/, "");
     // A legacy-header suite is skipped, not guessed at: `parseSuite` maps positionally, so on
     // an 11-column file this column would read whatever sits at index 14.
-    if (headerFields(raw).join(",") !== COLUMNS.join(",")) continue;
+    if (!isCanonicalHeader(raw)) continue;
     let rows;
     try {
       rows = parseSuite(raw).rows;
@@ -558,7 +558,7 @@ export function derivesLaneCounts(
 ): { machine: number; browser: number; manual: number } | null {
   if (!existsSync(file)) return null;
   const raw = readFileSync(file, "utf-8").replace(/^\uFEFF/, "");
-  if (headerFields(raw).join(",") !== COLUMNS.join(",")) return null;
+  if (!isCanonicalHeader(raw)) return null;
   try {
     const r = classifySuiteCases(parseSuite(raw).rows as unknown as ClassifiableRow[]);
     return { machine: r.machine.length, browser: r.browser.length, manual: r.manual.length };

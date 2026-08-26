@@ -60,3 +60,30 @@ test("a malformed --case reference is rejected before any file read", () => {
 test("a missing CSV is reported as a missing CSV", () => {
   assert.throws(() => loadCase(`${join(scratch, "nope.csv")}:GQL-001`), /Suite CSV not found/);
 });
+
+// ---- the Windows drive-letter regression ------------------------------------------
+
+test("a path containing a colon still parses — a Windows drive letter is not a separator", () => {
+  // `--case` used to `split(":")` and take [0] as the path, so on Windows
+  // `D:\a\repo\suite.csv:GQL-001` yielded csvPath="D" and the error `Suite CSV not found: D`
+  // — pointing nowhere near the cause. `--case` could never work on that platform, and it
+  // took running the parser on the Windows leg of CI to notice. Asserted on every platform so
+  // the fix cannot regress on a Linux-only run.
+  const path = writeSuite("colon.csv", false);
+  const drivey = `C:${path}`; // shaped like a Windows absolute path, valid to construct anywhere
+  assert.throws(
+    () => loadCase(`${drivey}:GQL-001`),
+    (e: Error) => /Suite CSV not found/.test(e.message) && e.message.includes(drivey),
+    "the whole path up to the LAST colon must be treated as the path",
+  );
+  // And the ordinary form keeps working.
+  assert.equal(loadCase(`${path}:GQL-001`).row.ID, "GQL-001");
+});
+
+test("a reference with no colon at all is still rejected", () => {
+  assert.throws(() => loadCase("suite.csv"), /--case must be <csv-path>:<ID>/);
+});
+
+test("a trailing colon with no id is rejected rather than read as an empty id", () => {
+  assert.throws(() => loadCase("suite.csv:"), /--case must be <csv-path>:<ID>/);
+});

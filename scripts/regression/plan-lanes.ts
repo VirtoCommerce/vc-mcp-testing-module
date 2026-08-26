@@ -43,7 +43,14 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
-import { COLUMNS, headerFields, parseSuite, serialiseRows, type Row } from "../test-cases/append-test-cases-to-suite.js";
+import {
+  COLUMNS,
+  describeHeaderMismatch,
+  isCanonicalHeader,
+  parseSuite,
+  serialiseRows,
+  type Row,
+} from "../test-cases/append-test-cases-to-suite.js";
 import { loadManifest, type ManifestSuite } from "../../ci/lib/suite-manifest.js";
 import {
   blockerHistogram,
@@ -91,25 +98,23 @@ function resolveSuite(target: string, manifest: ReturnType<typeof loadManifest>)
 }
 
 /**
- * A legacy 11-column header is FATAL here, not a warning. `parseSuite` maps fields
- * POSITIONALLY onto the canonical 15 columns, so on an 11-column file the legacy `Steps`
- * lands in `Test_Data` and `Expected Result` lands in `Steps` — the classifier would then
- * confidently route rows on the strength of the wrong cells. Eleven suites still carry that
- * header; none of them is one of the ten mixed suites this exists for, so refusing costs
- * nothing and guessing would cost correctness.
+ * A legacy 11-column header is FATAL here, not a warning. The shared
+ * `describeHeaderMismatch` owns the comparison (and the BOM strip); this wrapper owns only the
+ * reaction, which for a lane planner is to refuse: `parseSuite` maps fields POSITIONALLY, so on
+ * such a file the legacy `Steps` lands in `Test_Data` and `Expected Result` lands in `Steps`,
+ * and the classifier would confidently route rows on the strength of the wrong cells. Eleven
+ * suites still carry that header; none of them is one of the ten mixed suites this exists for,
+ * so refusing costs nothing and guessing would cost correctness.
  */
-function assertCanonicalHeader(raw: string, file: string): void {
-  const header = headerFields(raw.replace(/^\uFEFF/, ""));
-  if (header.join(",") !== COLUMNS.join(",")) {
-    console.error(
-      `[suites:lanes] ${file} is not the canonical 15-column enriched format (found ${header.length} columns).`,
-    );
-    console.error(
-      `parseSuite maps fields positionally, so classifying this file would route cases on the wrong columns.`,
-    );
-    console.error(`Migrate the header first — never route a legacy-header suite.`);
-    process.exit(2);
-  }
+function refuseLegacyHeader(raw: string, file: string): void {
+  const mismatch = describeHeaderMismatch(raw);
+  if (!mismatch) return;
+  console.error(`[suites:lanes] ${file} ${mismatch}`);
+  console.error(
+    `parseSuite maps fields positionally, so classifying this file would route cases on the wrong columns.`,
+  );
+  console.error(`Migrate the header first — never route a legacy-header suite.`);
+  process.exit(2);
 }
 
 interface LanesFile {
@@ -129,13 +134,13 @@ interface LanesFile {
 
 function planOne(suite: { id: string; file: string; name: string }, args: Args): { lanes: LanesFile; rows: Row[] } {
   const sourceRaw = readFileSync(suite.file, "utf-8");
-  assertCanonicalHeader(sourceRaw, suite.file);
+  refuseLegacyHeader(sourceRaw, suite.file);
 
   // Classification reads the tag grammar, which resolution does not change — so it can run
   // on either copy. The browser CSV must come from the RESOLVED one when given.
   const browserSourcePath = args.csv ?? suite.file;
   const browserRaw = readFileSync(browserSourcePath, "utf-8");
-  assertCanonicalHeader(browserRaw, browserSourcePath);
+  refuseLegacyHeader(browserRaw, browserSourcePath);
 
   const rows = parseSuite(browserRaw.replace(/^\uFEFF/, "")).rows;
   const result = classifySuiteCases(rows as unknown as ClassifiableRow[]);
@@ -189,7 +194,7 @@ function main(): void {
     for (const s of manifest.suites) {
       try {
         const raw = readFileSync(s.file, "utf-8").replace(/^\uFEFF/, "");
-        if (headerFields(raw).join(",") !== COLUMNS.join(",")) continue;
+        if (!isCanonicalHeader(raw)) continue;
         const r = classifySuiteCases(parseSuite(raw).rows as unknown as ClassifiableRow[]);
         if (r.machine.length > 0 && r.browser.length + r.manual.length > 0) {
           rows.push({ id: s.id, machine: r.machine.length, browser: r.browser.length, manual: r.manual.length, name: s.name });
@@ -255,4 +260,4 @@ function main(): void {
 const isCli = !!process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isCli) main();
 
-export { planOne, assertCanonicalHeader, type LanesFile };
+export { planOne, refuseLegacyHeader, type LanesFile };

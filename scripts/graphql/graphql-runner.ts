@@ -370,7 +370,14 @@ interface CaseRow {
  * not a wrong verdict. One option fixes it.
  */
 export function loadCase(caseRef: string): { csvPath: string; row: CaseRow } {
-  const [csvPath, caseId] = caseRef.split(":");
+  // Split on the LAST colon, not the first. A Windows path carries its own colon
+  // (`D:\a\repo\suite.csv`), so `split(":")` yielded csvPath="D" and a caseId of the rest —
+  // `--case` could never work on Windows, and the error it produced ("Suite CSV not found: D")
+  // pointed nowhere near the cause. Found by the BOM test, which is the first thing to run
+  // this parser on the Windows leg of CI.
+  const sep = caseRef.lastIndexOf(":");
+  const csvPath = sep > 0 ? caseRef.slice(0, sep) : "";
+  const caseId = sep > 0 ? caseRef.slice(sep + 1) : "";
   if (!csvPath || !caseId) {
     throw new Error(`--case must be <csv-path>:<ID>, got "${caseRef}"`);
   }

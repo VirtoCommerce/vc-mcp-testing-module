@@ -159,6 +159,41 @@ export function headerFields(rawText: string): string[] {
 }
 
 /**
+ * Is this file's header the canonical 15-column enriched format?
+ *
+ * WHY EVERY CONSUMER MUST ASK. `parseSuite` maps fields POSITIONALLY, so on one of the 11
+ * surviving legacy 11-column suites the legacy `Steps` lands in `Test_Data` and
+ * `Expected Result` lands in `Steps`. A consumer that reads a column by name then scores
+ * confidently derived nonsense — and nothing downstream can tell.
+ *
+ * A PREDICATE, NOT AN ASSERT. Six call sites need three different reactions to a
+ * non-canonical header: skip the file (`continue` / `return null`), count its rows as
+ * unroutable, or refuse loudly (`fail` / exit 2). What is duplicated is the COMPARISON, not
+ * the reaction, so the shared piece stops here and the caller keeps its own behaviour. A
+ * throwing `assertCanonicalHeader` would be unusable by four of the six.
+ *
+ * BOM is stripped inside (`headerFields` handles the first line), so callers must not do it
+ * again — two of the six used to and two did not, which reads like a meaningful difference.
+ */
+export function isCanonicalHeader(rawText: string): boolean {
+  return headerFields(rawText).join(",") === COLUMNS.join(",");
+}
+
+/**
+ * `null` when the header is canonical; otherwise a printable reason naming both shapes, for
+ * the call sites that report rather than skip.
+ */
+export function describeHeaderMismatch(rawText: string): string | null {
+  const header = headerFields(rawText);
+  if (header.join(",") === COLUMNS.join(",")) return null;
+  return (
+    `header is not the canonical 15-column enriched format (found ${header.length} column(s)).\n` +
+    `  expected: ${COLUMNS.join(",")}\n` +
+    `  found:    ${header.join(",")}`
+  );
+}
+
+/**
  * Validate new rows for structure and against the existing suite. Pure (no I/O)
  * so it is unit-testable and reusable by the linter.
  *
@@ -325,12 +360,8 @@ function main(): void {
 
   const targetText = readFileSync(args.target, "utf-8");
 
-  const header = headerFields(targetText);
-  if (header.join(",") !== COLUMNS.join(",")) {
-    fail(
-      `Target suite header does not match the 15-column schema.\n  expected: ${COLUMNS.join(",")}\n  found:    ${header.join(",")}`,
-    );
-  }
+  const mismatch = describeHeaderMismatch(targetText);
+  if (mismatch) fail(`Target suite ${mismatch}`);
 
   const existingIds = extractExistingIds(targetText);
   const existingTitleSection = tryExtractTitleSections(targetText);

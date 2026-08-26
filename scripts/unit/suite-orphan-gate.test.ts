@@ -28,10 +28,14 @@ function corpus(declared: string[], onDisk: string[]): { root: string; manifest:
     mkdirSync(join(abs, ".."), { recursive: true });
     writeFileSync(abs, "ID,Title\nX-001,t\n");
   }
+  // `allSuiteCsvs` normalises to forward slashes, so the fixture manifest must too: on Windows
+  // `root` carries backslashes and a naive `${root}/${rel}` would never match what the walker
+  // returns, making every declared file look absent and every real file look orphaned.
+  const asPosix = (p: string) => p.split("\\").join("/");
   return {
     root,
     manifest: {
-      suites: declared.map((rel, i) => ({ id: String(i).padStart(3, "0"), file: `${root}/${rel}` })),
+      suites: declared.map((rel, i) => ({ id: String(i).padStart(3, "0"), file: `${asPosix(root)}/${rel}` })),
       selections: {},
     },
   };

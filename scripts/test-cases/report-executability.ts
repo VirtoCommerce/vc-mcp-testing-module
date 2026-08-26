@@ -29,7 +29,7 @@
  */
 import { existsSync, readFileSync } from "fs";
 import { fileURLToPath } from "url";
-import { COLUMNS, headerFields, parseSuite } from "./append-test-cases-to-suite.js";
+import { isCanonicalHeader, parseSuite } from "./append-test-cases-to-suite.js";
 import { allSuiteCsvs } from "./sync-test-suites.js";
 import {
   blockerHistogram,
@@ -82,7 +82,7 @@ function analyseSuite(suite: { id: string; name: string; file: string }): SuiteR
   // `Expected Result` lands in `Steps`; classifying it would produce a confident verdict
   // derived from the wrong cells. Reporting it as unroutable keeps the backlog honest —
   // these suites need a header migration, which is authoring, not hygiene.
-  if (headerFields(raw).join(",") !== COLUMNS.join(",")) {
+  if (!isCanonicalHeader(raw)) {
     let count = 0;
     for (const line of raw.split(/\r?\n/)) if (/^\s*"?[A-Z0-9]+(?:-[A-Z0-9]+)*-\d+"?\s*,/.test(line)) count++;
     return { ...base, machine: 0, browser: 0, manual: 0, unroutable: count, verdicts: [] };

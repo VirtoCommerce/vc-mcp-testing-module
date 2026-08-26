@@ -17,6 +17,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   analyseCorpus,
   analyseSuite,
@@ -128,11 +129,15 @@ test("the real corpus's cheap tranche is small — a finding, not an under-count
 
 // ---- the ratchet ------------------------------------------------------------------
 
+/** See lane-planner.test.ts: a bare "npx" ENOENTs on win32, so run tsx's CLI via node. */
+const TSX_CLI = fileURLToPath(new URL("../../node_modules/tsx/dist/cli.mjs", import.meta.url));
+
 function runCheck() {
-  return spawnSync("npx", ["tsx", join("scripts", "test-cases", "report-executability.ts"), "--check"], {
-    encoding: "utf-8",
-    env: process.env,
-  });
+  return spawnSync(
+    process.execPath,
+    [TSX_CLI, join("scripts", "test-cases", "report-executability.ts"), "--check"],
+    { encoding: "utf-8", env: process.env },
+  );
 }
 
 test("--check passes when the manifest matches the live classification", () => {
