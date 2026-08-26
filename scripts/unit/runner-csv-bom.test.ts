@@ -73,7 +73,16 @@ test("a path containing a colon still parses — a Windows drive letter is not a
   const drivey = `C:${path}`; // shaped like a Windows absolute path, valid to construct anywhere
   assert.throws(
     () => loadCase(`${drivey}:GQL-001`),
-    (e: Error) => /Suite CSV not found/.test(e.message) && e.message.includes(drivey),
+    (e: Error) =>
+      // It got past reference-parsing, so the LAST colon was taken as the separator ...
+      /Suite CSV not found/.test(e.message) &&
+      // ... and the path it reports is the whole thing, not a truncated drive letter.
+      // Asserted on the BASENAME, not on the literal `drivey`: the message reports
+      // `resolve(csvPath)`, and resolve() rewrites a drive-relative win32 path, so the
+      // literal survives on POSIX and does not on Windows. Under the old first-colon
+      // split csvPath was "C", whose resolved form carries no basename at all — so the
+      // basename still discriminates the bug on both platforms.
+      e.message.includes("colon.csv"),
     "the whole path up to the LAST colon must be treated as the path",
   );
   // And the ordinary form keeps working.
