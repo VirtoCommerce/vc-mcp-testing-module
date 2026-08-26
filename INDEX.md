@@ -4,7 +4,7 @@ Agentic QA system for the **Virto Commerce B2B e-commerce platform**. Tests are 
 natural language prompts via MCP servers (Playwright, Chrome DevTools, Atlassian, …) — LLM-powered
 browser automation with AI agents, **not** traditional `.spec.js` files.
 
-> **Authoritative counts** (verified 2026-08-24): 19 agents · 40 skills · 31 commands ·
+> **Authoritative counts** (verified 2026-08-26): 17 agents · 40 skills · 31 commands ·
 > 32 knowledge files · 123 regression suites (4,123 cases). Single sources of truth:
 > [`config/test-suites.json`](config/test-suites.json) for suites, [`.claude/rules/`](.claude/rules/) for everything else.
 
@@ -36,7 +36,7 @@ vc-mcp-testing-module/
 ├── config.js                       # Layered env loader (TEST_ENV-keyed)
 │
 ├── .claude/
-│   ├── agents/                     # 19 agents — qa/ (11) + ba/ (4) + developers/ (4), each w/ shared-instructions.md
+│   ├── agents/                     # 17 agents — qa/ (9) + ba/ (4) + developers/ (4), each w/ shared-instructions.md
 │   │   └── knowledge/              # 32 shared reference files (business-logic, graphql-schema, sitemap, …)
 │   ├── skills/                     # 40 skills (1 vc-knowledge, 12 testing, 18 qa-methodology, 6 development, 3 root-level)
 │   ├── commands/                   # 31 slash commands
@@ -108,8 +108,6 @@ Three teams; full reference in [.claude/rules/agents.md](.claude/rules/agents.md
 | test-management-specialist | sonnet | Test planning, case writing, coverage tracking |
 | ui-ux-expert | sonnet | Storybook, WCAG 2.x AA, design system |
 | regression-orchestrator | sonnet | Parallel regression, retries, consolidated reports |
-| autonomous-regression-orchestrator | sonnet | Agent Teams regression: token bucket, recovery, JIRA |
-| autonomous-test-runner | sonnet | Agent Teams suite-execution template |
 | test-runner-agent | sonnet | Standard suite-execution template |
 | test-data-engineer | opus | Owns test-data end-to-end: designs, authors, and runs seeders/fixtures/validators |
 

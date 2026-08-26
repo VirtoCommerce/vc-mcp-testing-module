@@ -179,6 +179,30 @@ Discard any free-form prose — all detail belongs in the results files.
 | Auth failure | Retry once, then mark failed | 30s |
 | Environment unreachable | Mark ALL remaining as blocked, stop | 0 |
 
+**Backoff is a ladder, not a flat delay.** A retry that fires at the same interval as the attempt
+that just failed tends to fail the same way; and a suite whose first retry hit a rate limit is the
+least likely to succeed 30 seconds later.
+
+| Attempt | Delay | Browser |
+|---|---|---|
+| 1 (original) | — | assigned slot |
+| 2 (retry 1) | 30s | same slot |
+| 3 (retry 2) | 60s | next in `defaults.fallbackChain` **that the suite is allowed on** |
+
+A retry NEVER lands on a server the plan marked `NOT ON` for that suite. The fallback chain is
+`playwright-chrome → playwright-edge → playwright-firefox` — chromium-family first, firefox LAST,
+because firefox cannot click here and a placement there burns the retry rather than spending it.
+
+**Rate-limit guard.** Rate limits are a property of the whole run, not of one suite, so treat them
+globally rather than retrying into the wall:
+
+| Signal | Action |
+|---|---|
+| 1 suite reports a rate limit | wait 60s before the next dispatch |
+| 2 suites report rate limits | wait 90s between dispatches |
+| 3+ suites report rate limits | pause ALL dispatch for 120s |
+| cumulative hits > 10 | drop browser concurrency from 3 to 2 for the rest of the run |
+
 **Fast-path specific failures:**
 
 | Failure Type | Action | Delay |

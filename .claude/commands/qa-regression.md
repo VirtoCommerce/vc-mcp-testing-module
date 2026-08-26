@@ -1,6 +1,6 @@
 ---
 description: "Run regression test suites in parallel. Supports scope selection: smoke, critical, sprint, full, frontend, backend, or comma-separated suite IDs. Correlates App Insights logs for the run window. Optional --seed=<profile> pre-seeds test data; --teardown removes AGENT-TEST-* entities after run."
-argument-hint: "[smoke|critical|sprint|sprint:XX-YY|full|frontend|backend|01,04,06] [--autonomous] [--seed=...] [--teardown] [--no-plan] [--frontend|--backend]"
+argument-hint: "[smoke|critical|sprint|sprint:XX-YY|full|frontend|backend|01,04,06] [--seed=...] [--teardown] [--no-plan] [--frontend|--backend]"
 disable-model-invocation: true
 ---
 
@@ -23,8 +23,6 @@ You are the **Regression Orchestrator** for Virto Commerce. When invoked, you ex
 /qa-regression frontend                    # All Frontend/ suites
 /qa-regression backend                     # All Backend/ suites
 /qa-regression 01,04,06                    # Specific suite IDs
-/qa-regression critical --autonomous       # Agent Teams mode (failure recovery + JIRA)
-/qa-regression full --autonomous           # Full regression with autonomous orchestration
 /qa-regression b2b --seed=b2b              # Seed B2B data before b2b suites
 /qa-regression purchase-flow --seed=full --teardown   # Seed full, run, then teardown
 /qa-regression marketing --seed=pricing    # Seed price lists before marketing suites
@@ -32,10 +30,18 @@ You are the **Regression Orchestrator** for Virto Commerce. When invoked, you ex
 
 ### Execution Modes
 
-- **Standard mode (default):** Uses `regression-orchestrator` agent with Task dispatch. Simpler, faster for small runs.
-- **Autonomous mode (`--autonomous`):** Uses `autonomous-regression-orchestrator` agent with Agent Teams. Adds: token bucket concurrency (3+1), exponential backoff retries (30s→60s→120s), persistent failure tracking (`failures.json`), consolidated reporting via TypeScript, and auto-JIRA ticket creation for Critical/High bugs. Results written to `results/{RUN_ID}/`.
+There is **one** orchestrator: `regression-orchestrator`, dispatched via the Task tool.
 
-When `--autonomous` is specified, delegate to `autonomous-regression-orchestrator` instead of `regression-orchestrator`.
+> A second `--autonomous` mode (Agent Teams, `results/{RUN_ID}/`) was removed 2026-08-26. It was a
+> parallel stack whose output no tooling read: no live dashboard, no `/qa-triage-results`, no
+> `history.json` flakiness feed, no `reap-stalled-run` backstop, no `compute-metrics` gate. It had
+> also drifted — its fallback chain still put firefox second (the order fixed on 2026-08-05 because
+> firefox cannot click here), and it assigned firefox as the *preferred* browser for Smoke and
+> Payment. Its two genuinely useful pieces — the graduated rate-limit guard and the 30/60s backoff
+> ladder — were folded into `regression-orchestrator.md` Step 5. Its auto-JIRA filing was dropped
+> deliberately: `/qa-triage-results` and `/qa-monitoring` both stop short of filing, and a
+> regression run should not be the one thing that does.
+
 
 ### Optional Flags
 
@@ -179,7 +185,7 @@ record: `.claude/agents/regression-orchestrator.md` Steps 1.5–4.
 
 ### Step 5.5 — Correlate App Insights logs (run window)
 
-Catch backend errors the suites *triggered but didn't surface* — 5xx, failed dependencies, server exceptions, GraphQL `errors[]` inside a 200. This reuses `/qa-monitoring`'s machinery scoped to the run window: **query → dedup → triage**, no separate live-repro phase (the suite agents were already live — an error in-window *is* the repro). Applies in both standard and `--autonomous` modes.
+Catch backend errors the suites *triggered but didn't surface* — 5xx, failed dependencies, server exceptions, GraphQL `errors[]` inside a 200. This reuses `/qa-monitoring`'s machinery scoped to the run window: **query → dedup → triage**, no separate live-repro phase (the suite agents were already live — an error in-window *is* the repro). Applies to every run.
 
 1. **Pre-flight.** Confirm App Insights access as `/qa-monitoring` Phase 0 does (Azure MCP `applicationinsights`, **or** `APPINSIGHTS_APP_ID_*` + `APPINSIGHTS_API_KEY_*` set). If neither is configured → **skip with a one-line note**; never block the run on it.
 2. **Query the window.** Run the probe queries from `ci/monitoring/queries/` over the Step 4 window (relative `ago()` covering first dispatch → last batch complete, +2 min buffer). Query both layers (regression spans frontend + backend suites); resolve each resource from `APPINSIGHTS_*` env vars, never hardcode.
