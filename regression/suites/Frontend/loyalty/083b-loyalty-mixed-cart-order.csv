@@ -97,8 +97,8 @@ Depends on vc-module-loyalty#10 (ProcessOrdersAsync earn + redeem handlers), con
 [CONSOLE] no JS errors
 [NETWORK] no 4xx/5xx on the points-history query",History page empty or unreachable; Redeemed entry absent (LoyaltyProgramHandler not running); Earned entry absent; amounts displayed in USD instead of PTS; rows in wrong order,Sign out,VCST-5104; vc-module-loyalty#10 (ProcessOrdersAsync earn+redeem per order); BL-LOY-005,automated
 MCO-E2E-002,Cart UI — a zero loyalty balance blocks checkout pre-emptively: insufficient-balance message shown and PLACE ORDER disabled [VALIDATION],Loyalty > Mixed Cart > Cart Validation > Insufficient Balance > [VALIDATION],Critical,BL-LOY-008,ECL-13.3; ECL-7.3,"[PRE:CLEAR_SESSION]
-[PRE:SEED] npm run seed:loyalty:zero-user   # provisions a FRESH zero-balance user -> @td(LOYALTY_ZERO_USER.email)
-[PRE:SIGNIN] @td(LOYALTY_ZERO_USER.email) / {{DEFAULT_TEST_PASSWORD}}  (type the NAME so Playwright --secrets redacts it)
+SEED FIRST (no runner support for a seed primitive — run this by hand before the suite): npm run seed:loyalty:zero-user provisions a FRESH zero-balance user -> @td(LOYALTY_ZERO_USER.email)
+[PRE:SIGNIN_AS] @td(LOYALTY_ZERO_USER.email) / {{DEFAULT_TEST_PASSWORD}}  (type the NAME so Playwright --secrets redacts it)
 [PRE:RESET_CART]
 Store in Mixed Cart mode, Loyalty.Enable=true, Loyalty.Currency=PTS.
 DETERMINISM: the user is created per run with a loyalty balance of EXACTLY 0, so ANY points-priced line at qty 1 is a guaranteed shortfall. This replaces the shared LOYALTY_NOBAL_USER, whose balance drifted upward on every earning run (1,044 PTS by 2026-08-05) until no catalog PTS item could exceed it and the case silently PASSED while testing nothing.

@@ -3,7 +3,7 @@
   "_meta": {
     "version": "3.0",
     "description": "Regression test suite manifest for parallel orchestration with module-aligned directories under Frontend/Backend layers",
-    "generated": "2026-08-24",
+    "generated": "2026-08-26",
     "totalSuites": 123,
     "csvFormat": "Enriched Agent-Native CSV (ID, Title, Section, Priority, Business_Rule, Edge_Case_Refs, Preconditions, Test_Data, Steps, Assertions, Cross_Layer_Checks, Failure_Signals, Cleanup, References, Automation_Status)",
     "domains": [
@@ -86,7 +86,8 @@
         "categories",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "002",
@@ -105,7 +106,8 @@
         "product-detail",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "003",
@@ -125,7 +127,8 @@
         "range-facets",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "004",
@@ -144,7 +147,8 @@
         "results",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "005",
@@ -163,7 +167,8 @@
         "advanced",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "006",
@@ -186,7 +191,8 @@
         "b2b",
         "hybrid"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "007",
@@ -205,7 +211,8 @@
         "shared-lists",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "008",
@@ -230,7 +237,8 @@
         "b2b",
         "hybrid"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "009",
@@ -249,7 +257,8 @@
         "configurations",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "010",
@@ -273,7 +282,8 @@
         "b2b",
         "hybrid"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "011",
@@ -293,7 +303,8 @@
         "sprint"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "011b",
@@ -317,7 +328,8 @@
         "b2b",
         "hybrid"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "012",
@@ -340,7 +352,8 @@
         "b2c",
         "hybrid"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "013",
@@ -363,7 +376,8 @@
         "b2b"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "014",
@@ -384,7 +398,8 @@
         "sprint"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "015",
@@ -404,7 +419,8 @@
         "sprint"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "017",
@@ -428,7 +444,8 @@
         "orders"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "018",
@@ -495,7 +512,8 @@
         "sprint"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "021",
@@ -514,7 +532,8 @@
         "sprint"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "023",
@@ -633,7 +652,8 @@
         "customer"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "027b",
@@ -661,7 +681,8 @@
         "customer"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "028",
@@ -682,7 +703,8 @@
         "revenue-critical",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "029",
@@ -701,7 +723,8 @@
         "persistence",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "030",
@@ -720,7 +743,8 @@
         "anonymous",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "031",
@@ -739,7 +763,8 @@
         "register",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "032",
@@ -759,7 +784,8 @@
         "permissions",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "033",
@@ -778,7 +804,8 @@
         "account-menu",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "034",
@@ -802,7 +829,8 @@
         "store"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "035",
@@ -826,7 +854,8 @@
         "store"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "036",
@@ -845,7 +874,8 @@
         "pickup",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "037",
@@ -864,7 +894,8 @@
         "pickup",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "038",
@@ -883,7 +914,8 @@
         "pickup",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "039",
@@ -908,7 +940,8 @@
         "cybersource"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "040a",
@@ -933,7 +966,8 @@
       "customerApplicability": "universal",
       "references": [
         "VCST-5009"
-      ]
+      ],
+      "clickDriven": true
     },
     {
       "id": "040b",
@@ -958,7 +992,8 @@
       "customerApplicability": "universal",
       "references": [
         "VCST-5162"
-      ]
+      ],
+      "clickDriven": true
     },
     {
       "id": "040c",
@@ -981,7 +1016,8 @@
       ],
       "envRiskGate": "staging",
       "customerApplicability": "universal",
-      "notes": "Datatrans is the only redirect processor. Redirect to /checkout/payment is the DESIGNED flow — never mark cases BLOCKED on the redirect."
+      "notes": "Datatrans is the only redirect processor. Redirect to /checkout/payment is the DESIGNED flow — never mark cases BLOCKED on the redirect.",
+      "clickDriven": true
     },
     {
       "id": "041",
@@ -1009,7 +1045,8 @@
         "datatrans"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "042",
@@ -1034,7 +1071,8 @@
         "security",
         "regression"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "043",
@@ -1052,7 +1090,8 @@
         "ga4",
         "tracking"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "044",
@@ -1072,7 +1111,8 @@
         "csrf",
         "daily"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "045",
@@ -1090,7 +1130,8 @@
         "wcag",
         "a11y"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "046",
@@ -1108,7 +1149,8 @@
         "localization",
         "languages"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "047",
@@ -1126,7 +1168,8 @@
         "core-web-vitals",
         "load-time"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "048",
@@ -1143,7 +1186,8 @@
         "cross-browser",
         "compatibility"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "048c",
@@ -1193,7 +1237,8 @@
         "homepage",
         "cross-cutting"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "049",
@@ -1452,7 +1497,8 @@
         "wishlist",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "050i",
@@ -1603,7 +1649,8 @@
         "catalog"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "052",
@@ -1626,7 +1673,8 @@
         "catalog"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "053",
@@ -1650,7 +1698,8 @@
         "catalog"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "054",
@@ -1673,7 +1722,8 @@
         "pricing"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "055",
@@ -1697,7 +1747,8 @@
         "pricing"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "056",
@@ -1720,7 +1771,8 @@
         "inventory"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "057",
@@ -1743,7 +1795,8 @@
         "notifications"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "058",
@@ -1766,7 +1819,8 @@
         "notifications"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "059",
@@ -1790,7 +1844,8 @@
         "cms"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "060",
@@ -1814,7 +1869,8 @@
         "cms"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "061",
@@ -1979,7 +2035,8 @@
         "whitelabeling"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "068",
@@ -2001,7 +2058,8 @@
         "push-messages"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "069",
@@ -2044,7 +2102,8 @@
         "responsive",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "071",
@@ -2064,7 +2123,8 @@
         "favicon",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "072",
@@ -2084,7 +2144,8 @@
         "widget",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "072b",
@@ -2103,7 +2164,8 @@
         "admin-to-storefront",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "072c",
@@ -2123,7 +2185,8 @@
         "security",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "072d",
@@ -2143,7 +2206,8 @@
         "validation",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "073",
@@ -2214,7 +2278,8 @@
         "loyalty"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "075b",
@@ -2239,7 +2304,8 @@
         "loyalty"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "075c",
@@ -2306,7 +2372,8 @@
         "sprint"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "077b",
@@ -2326,7 +2393,8 @@
         "storefront",
         "VCST-4896"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "078",
@@ -2354,7 +2422,8 @@
         "auth",
         "regression"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "079",
@@ -2380,7 +2449,8 @@
         "marketing"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "081",
@@ -2404,7 +2474,8 @@
         "PR-129",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "082",
@@ -2424,7 +2495,8 @@
         "security",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "083",
@@ -2444,7 +2516,8 @@
         "currency-override",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "083b",
@@ -2464,7 +2537,8 @@
         "multi-currency",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "084",
@@ -2483,7 +2557,8 @@
         "cms",
         "admin",
         "sprint"
-      ]
+      ],
+      "clickDriven": true
     },
     {
       "id": "085",
@@ -2505,7 +2580,8 @@
       "requiresModules": [
         "task-management"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "086",
@@ -2549,7 +2625,8 @@
         "customer-reviews"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "088",
@@ -2571,7 +2648,8 @@
         "customer-reviews"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "089",
@@ -2594,7 +2672,8 @@
       "requiresModules": [
         "sales-rep"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "090",
@@ -2617,7 +2696,8 @@
       "requiresModules": [
         "sales-rep"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "091",
@@ -2640,7 +2720,8 @@
       "requiresModules": [
         "sales-rep"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "092",
@@ -2663,7 +2744,8 @@
       "requiresModules": [
         "sales-rep"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "092b",
@@ -2687,7 +2769,8 @@
       "requiresModules": [
         "sales-rep"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "093",
@@ -2711,7 +2794,8 @@
       "requiresModules": [
         "sales-rep"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "094",

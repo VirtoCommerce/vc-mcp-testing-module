@@ -257,6 +257,33 @@ export function auditStaleness(rows: Row[], now: Date, staleDays = DEFAULT_STALE
   return { unstamped, stale, fresh, oldestStamp };
 }
 
+/**
+ * The CLOSED `[PRE:*]` vocabulary — the seven primitives defined in
+ * `.claude/knowledge/execution/test-execution-preflight.md`, each with a live-verified
+ * selector set and idempotent DOM-based state detection.
+ *
+ * A tag outside this set is not a smaller version of a real primitive: it is a no-op. The
+ * runner has no implementation for it, so the precondition it describes is simply never
+ * established, and the case runs against whatever state the previous case left behind. That
+ * is the 048b failure mode (47 of 161 cases BLOCKED by cart contamination) arriving through
+ * the front door.
+ *
+ * The preflight doc's own Future Work names four more (`ADD_PRODUCTS`,
+ * `SET_SHIPPING_ADDRESS`, `SET_PAYMENT_METHOD`, `SEED_ORDER`) and says explicitly: "Do not
+ * use these tags in CSVs yet — they have no runner support. Until then, encode such
+ * requirements as plain-text preconditions." So they are deliberately NOT in this set —
+ * add one here only when a runner actually implements it.
+ */
+const PRE_PRIMITIVES = new Set([
+  "SIGNOUT",
+  "SIGNIN_AS",
+  "SWITCH_ORG",
+  "RESET_CART",
+  "CLEAR_SESSION",
+  "CLEAR_CACHE",
+  "VERIFY_AUTH",
+]);
+
 const find = (rule: string, severity: Severity, caseId: string, message: string): Finding => ({
   rule, severity, caseId, message,
 });
@@ -314,6 +341,23 @@ function lintRow(row: Row, idx: number, seenIds: Map<string, number>): Finding[]
 
   const stepLines = lines(row.Steps);
   const assertionLines = lines(row.Assertions);
+
+  // --- PRE-001: `[PRE:*]` must name a real primitive -------------------------------
+  // Scans Preconditions AND Steps, because both carry the tags in practice.
+  for (const cell of [row.Preconditions, row.Steps]) {
+    for (const m of (cell ?? "").matchAll(/\[PRE:([A-Za-z_]+)/g)) {
+      const name = m[1].toUpperCase();
+      if (!PRE_PRIMITIVES.has(name)) {
+        push(
+          "PRE-001",
+          "High",
+          `unknown preflight primitive "[PRE:${m[1]}]" — the runner has no implementation, so this ` +
+            `precondition is silently never established. Legal: ${[...PRE_PRIMITIVES].join(", ")}. ` +
+            `For an unimplemented one, write the requirement as plain prose instead.`,
+        );
+      }
+    }
+  }
 
   // --- Dimension 2: Determinism ---
   if (isRunnerGraphql(row)) {

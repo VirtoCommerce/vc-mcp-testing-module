@@ -18,6 +18,9 @@ Execute a single regression test suite against Virto Commerce. Run autonomously 
 - `{{RUN_ID}}`, `{{SUITE_ID}}`, `{{SUITE_NAME}}`
 - `{{SUITE_CSV_PATH}}` — resolved CSV (orchestrator has pre-substituted `@td()` tokens)
 - `{{BROWSER_SERVER}}` — use ONLY this Playwright MCP server
+- `{{LANE_ID}}` — this run's lane index. Selects the credential slot (see Phase 1 step 2) and
+  scopes the lane's own MCP output paths, so two concurrent lanes never share an account, a HAR
+  archive or a screenshot directory.
 - `{{ENVIRONMENT_URL}}` (frontend), `{{BACKEND_URL}}`
 - `{{OUTPUT_FILE}}`
 
@@ -102,7 +105,21 @@ For each case: emit the same `▶ Suite…` announce line as Phase 2 (before spa
 ## Phase 1: Setup
 
 1. Read `{{SUITE_CSV_PATH}}` once. Parse test cases.
-2. Read `test-data/users/agent-user-pool.csv`, find row where `server_name` = `{{BROWSER_SERVER}}`, store slot credentials.
+2. Read `test-data/users/agent-user-pool.csv` and take the row whose **`slot`** equals `{{LANE_ID}}`
+   (fall back to matching `server_name` = `{{BROWSER_SERVER}}` when the caller passes no lane id).
+   Store that row's credentials.
+
+   **Why `slot` and not `server_name`.** The pool has one row per slot and binds each to a browser
+   only as a convention — `server_name` is advisory. Keying on the browser silently breaks the
+   moment two lanes share one browser (which is exactly the headless CI case: every lane is
+   Chromium), because both lanes would then take the SAME account. Two agents on one account
+   produce cross-contaminated sessions and BLOCKED cascades that read as product failures — the
+   class `scripts/seed-data/validate-credentials.mjs` exists to catch.
+
+   **There are only 3 seeded slots** (plus `personal`). That, not the scheduler, is why
+   concurrency is capped at 3: raising it requires seeding new accounts first
+   (`npm run seed:company-users`) and adding their rows. Never reuse a slot across two
+   concurrent lanes to get more parallelism.
 3. Substitute `{{VAR}}` placeholders in `Test_Data`/`Steps`/`Assertions`/`Cross_Layer_Checks` using slot creds + env vars.
 4. Navigate to `{{ENVIRONMENT_URL}}` on `{{BROWSER_SERVER}}`. Confirm load.
 5. Authenticate using slot credentials (personal or B2B, per suite type). Verify success.

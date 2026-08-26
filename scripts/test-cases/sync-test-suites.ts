@@ -53,6 +53,11 @@ interface Suite {
   estimatedMinutes: number;
   agent: string;
   tags: string[];
+  /**
+   * DERIVED (never hand-authored): the suite performs clicks, so `playwright-firefox`
+   * cannot run it. Reconciled from the CSV by `regenerate()` below.
+   */
+  clickDriven?: boolean;
 }
 
 type WhereFilter = Partial<Pick<Suite, "domain" | "layer" | "concern" | "priority">> & {
@@ -283,6 +288,60 @@ function actualCaseCount(file: string): number | null {
   }
 }
 
+/**
+ * Does this suite click? DERIVED from the CSV, because the rule it feeds is currently prose
+ * in three separate places (`.claude/rules/agents.md`, the manifest's
+ * `defaults._comment_fallbackChain`, and `browserPool[1].constraint`) and is therefore
+ * re-derived by hand on every scheduling decision.
+ *
+ * The rule: `playwright-firefox` cannot click on this storefront or the AngularJS Admin SPA —
+ * `browser_click` resolves the element and then times out on Playwright's actionability gate,
+ * on fully-visible non-moving elements. Confirmed 6x independently; the root cause is in the
+ * `@playwright/mcp` layer, not Firefox (raw playwright-core + firefox clicks the same
+ * reproducer fine). So a firefox placement on a click-driven suite costs a WHOLE wasted
+ * attempt, and the scheduler must queue for a chromium lane rather than downgrade.
+ *
+ * `[ACT]` ALONE IS NOT THE SIGNAL. The tag is overloaded: in a storefront suite it means
+ * click/fill (`test-runner-tags.md` maps it to browser_click/fill/select), but in an API suite
+ * it means "perform this HTTP request" — suite 049 (Platform API) has 37 `[ACT]` lines and
+ * every one of them is a REST call (`[ACT] POST {{BACK_URL}}/api/pricing/evaluate ...`).
+ * A bare presence test therefore marks the whole API layer click-driven and needlessly bars it
+ * from a perfectly usable firefox lane. The recorded run REG-2026-08-24-1806 has a human
+ * making exactly this call by hand and getting it right: suite 049 on firefox, noted
+ * "REST/HTTP tags only, no clicking - safe on firefox". This derivation must agree with them.
+ *
+ * So: an `[ACT]` line counts only when it reads as a UI interaction and NOT as an HTTP call.
+ * `[PRE:*]` primitives that drive the UI (sign-in, org switch, cart reset, sign-out) count
+ * unconditionally — those always click.
+ *
+ * Returns null when the CSV cannot be read, so the declared value is kept rather than cleared
+ * — same discipline as `actualCaseCount`.
+ */
+const UI_PREFLIGHT_RE = /\[PRE:(SIGNIN_AS|SWITCH_ORG|RESET_CART|SIGNOUT)\b/i;
+/** An `[ACT]` whose payload is an HTTP request, not a UI gesture. */
+const ACT_IS_HTTP_RE = /^\[ACT[\]:]?\s*(?:GET|POST|PUT|PATCH|DELETE|HEAD)\b|^\[ACT[\]:]?[^\n]*(?:\{\{BACK_URL\}\}|\/api\/|graphql)/i;
+/** An `[ACT]` that names a UI gesture. */
+const ACT_IS_UI_RE =
+  /^\[ACT[\]:]?[^\n]*\b(click|tap|fill|type|enter|select|choose|hover|check|uncheck|toggle|drag|drop|upload|press|scroll|open|expand|collapse|submit|add to cart|sign in|log in)\b/i;
+
+export function derivesClickDriven(file: string): boolean | null {
+  if (!existsSync(file)) return null;
+  let csv: string;
+  try {
+    csv = readFileSync(file, "utf-8");
+  } catch {
+    return null;
+  }
+  if (UI_PREFLIGHT_RE.test(csv)) return true;
+  for (const line of csv.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!/^\[ACT[\]:]/i.test(trimmed)) continue;
+    if (ACT_IS_HTTP_RE.test(trimmed)) continue;
+    if (ACT_IS_UI_RE.test(trimmed)) return true;
+  }
+  return false;
+}
+
 function regenerate(manifest: Manifest): { next: Manifest; drift: string[] } {
   const sortedSuites = [...manifest.suites].sort((a, b) => a.id.localeCompare(b.id));
   const today = new Date().toISOString().slice(0, 10);
@@ -295,11 +354,35 @@ function regenerate(manifest: Manifest): { next: Manifest; drift: string[] } {
   // Unparseable / missing CSVs (the CSV_LINT_BASELINE burn-down set) return null and
   // keep their declared value, so this guard never zeroes a suite it cannot read.
   const countDrift: string[] = [];
+  const clickDrift: string[] = [];
   const reconciled = sortedSuites.map((s) => {
+    let next = s;
+
     const actual = actualCaseCount(s.file);
-    if (actual === null || actual === s.testCount) return s;
-    countDrift.push(`${s.id}: testCount ${s.testCount} -> ${actual}`);
-    return { ...s, testCount: actual };
+    if (actual !== null && actual !== s.testCount) {
+      countDrift.push(`${s.id}: testCount ${s.testCount} -> ${actual}`);
+      next = { ...next, testCount: actual };
+    }
+
+    // clickDriven is derived, so the manifest carries the answer and the scheduler does not
+    // have to re-read 124 CSVs (or re-derive the firefox rule from prose) on every run.
+    //
+    // Convention: the field is PRESENT only when true. Writing an explicit `false` on the 39
+    // firefox-safe suites would be 39 lines of noise, and a manifest where one suite says
+    // `false` while 38 say nothing invites a reader to think the difference means something.
+    // So a true->false transition DELETES the key rather than setting it.
+    const clicks = derivesClickDriven(s.file);
+    if (clicks !== null && clicks !== (s.clickDriven ?? false)) {
+      clickDrift.push(`${s.id}: clickDriven ${s.clickDriven ?? false} -> ${clicks}`);
+      if (clicks) {
+        next = { ...next, clickDriven: true };
+      } else {
+        const { clickDriven: _dropped, ...rest } = next;
+        next = rest as Suite;
+      }
+    }
+
+    return next;
   });
 
   const next: Manifest = {
@@ -324,6 +407,13 @@ function regenerate(manifest: Manifest): { next: Manifest; drift: string[] } {
       countDrift.length <= 6
         ? countDrift.join(", ")
         : `${countDrift.length} suites with stale testCount (${countDrift.slice(0, 4).join(", ")}, …)`,
+    );
+  }
+  if (clickDrift.length > 0) {
+    drift.push(
+      clickDrift.length <= 6
+        ? clickDrift.join(", ")
+        : `${clickDrift.length} suites with stale clickDriven (${clickDrift.slice(0, 4).join(", ")}, …)`,
     );
   }
 
