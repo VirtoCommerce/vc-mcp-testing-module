@@ -32,6 +32,7 @@ import { fileURLToPath } from "url";
 import { parse as parseCsv } from "csv-parse/sync";
 import { COLUMNS, extractExistingIds, isCanonicalHeader, parseSuite } from "./append-test-cases-to-suite.js";
 import { AUTOMATION_STATUSES } from "./lint-test-cases.js";
+import { CLASSIFIER_VERSION } from "../lib/case-classifier.js";
 import { classifySuiteCases, type ClassifiableRow } from "../lib/case-classifier.js";
 
 const MANIFEST_PATH = join("config", "test-suites.json");
@@ -96,6 +97,17 @@ interface Manifest {
     description: string;
     generated: string;
     totalSuites: number;
+    /**
+     * The `CLASSIFIER_VERSION` the per-suite `lanes` counts were recorded under.
+     *
+     * Without it the executability ratchet cannot tell a determinism REGRESSION from a
+     * legitimate RE-BASELINE. It compares live counts against the manifest, so a commit that
+     * both changes the classifier and refreshes the counts moves the baseline down alongside the
+     * fact, and the drop becomes invisible: classifier 1.1.0 -> 1.2.0 with machine 559 -> 555
+     * reported `OK`. Recording the version makes the re-baseline a visible decision instead of a
+     * side effect.
+     */
+    classifierVersion?: string;
     [k: string]: unknown;
   };
   defaults: Record<string, unknown>;
@@ -669,6 +681,9 @@ function regenerate(manifest: Manifest): { next: Manifest; drift: string[] } {
       ...manifest._meta,
       generated: today,
       totalSuites: reconciled.length,
+      // Stamped alongside the lane counts it describes, so the two can never disagree about
+      // which classifier produced them.
+      classifierVersion: CLASSIFIER_VERSION,
     },
     suites: reconciled,
   };
@@ -676,6 +691,11 @@ function regenerate(manifest: Manifest): { next: Manifest; drift: string[] } {
   const drift: string[] = [];
   if (manifest._meta.totalSuites !== next._meta.totalSuites) {
     drift.push(`_meta.totalSuites (${manifest._meta.totalSuites} -> ${next._meta.totalSuites})`);
+  }
+  if (manifest._meta.classifierVersion !== next._meta.classifierVersion) {
+    drift.push(
+      `_meta.classifierVersion (${manifest._meta.classifierVersion ?? "unrecorded"} -> ${next._meta.classifierVersion})`,
+    );
   }
   const idsBefore = manifest.suites.map((s) => s.id).join(",");
   const idsAfter = next.suites.map((s) => s.id).join(",");

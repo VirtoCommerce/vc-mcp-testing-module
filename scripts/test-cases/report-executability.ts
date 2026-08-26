@@ -204,6 +204,43 @@ function burnDownBuckets(reports: SuiteReport[]) {
  * the corpus happening to be clean today. A gate whose only test is the current state passes
  * just as happily when it stops checking anything.
  */
+/**
+ * Lines describing a RE-BASELINE, or none when the classifier has not moved.
+ *
+ * Extracted so the behaviour is testable without asserting on the implementation's own source
+ * text — a test that greps the file it tests breaks on any rewording and proves nothing about
+ * what the tool does.
+ *
+ * A version change is deliberately NOT a failure. Failing on every legitimate bump would teach
+ * everyone to bypass the gate; the per-suite drop check remains the thing that exits non-zero.
+ * What this adds is visibility: the ratchet compares live counts against the manifest, so a
+ * commit that changes the classifier AND refreshes the counts lowers the baseline alongside the
+ * fact and the drop disappears. It happened on this branch — classifier 1.1.0 to 1.2.0 with
+ * machine 559 to 555, reported `OK`.
+ */
+export function describeRebaseline(
+  recordedVersion: string | undefined,
+  currentVersion: string,
+  declaredTotal: number,
+  liveTotal: number,
+): string[] {
+  if (recordedVersion === currentVersion) return [];
+  const delta = liveTotal - declaredTotal;
+  const lines = [
+    `[suites:executability] classifier ${recordedVersion ?? "unrecorded"} -> ${currentVersion}: ` +
+      `machine ${declaredTotal} -> ${liveTotal} (${delta >= 0 ? "+" : ""}${delta})`,
+  ];
+  if (delta < 0) {
+    lines.push(
+      `  A version bump that LOWERS the total is a re-baseline, not a caught regression: the ` +
+        `per-suite check below compares against counts recorded under the old classifier. ` +
+        `Confirm the loss is intended (a case retired to Deprecated, a rule made stricter) ` +
+        `before merging — \`--suite <ID>\` shows the blocker codes.`,
+    );
+  }
+  return lines;
+}
+
 export function findDeterminismDrops(
   live: ReadonlyArray<Pick<SuiteReport, "id" | "machine">>,
   declared: ReadonlyMap<string, number>,
@@ -277,6 +314,27 @@ function main(): void {
     const manifest = loadManifest();
     const declared = new Map(manifest.suites.map((s) => [s.id, s.lanes?.machine ?? 0]));
     const { drops, gains } = findDeterminismDrops(reports, declared);
+
+    // A RE-BASELINE is not a regression, but it must not be silent either.
+    //
+    // This ratchet compares live counts against the manifest, so a commit that both changes the
+    // classifier and refreshes the counts lowers the baseline alongside the fact — and the drop
+    // disappears. That happened: classifier 1.1.0 -> 1.2.0 with machine 559 -> 555, reported
+    // `OK`. The loss was legitimate (the classifier got stricter and split `deprecated` out of
+    // `manual`), but nothing said so.
+    //
+    // The fix is NOT to fail on a version change — that would fire on every legitimate bump and
+    // teach everyone to pass `--warn-only`. It is to print the aggregate delta whenever the
+    // recorded version differs, so a reviewer sees the trade instead of a green line.
+    const recordedVersion = (manifest._meta as { classifierVersion?: string } | undefined)?.classifierVersion;
+    for (const line of describeRebaseline(
+      recordedVersion,
+      CLASSIFIER_VERSION,
+      [...declared.values()].reduce((n, v) => n + v, 0),
+      t.machine,
+    )) {
+      console.log(line);
+    }
     if (gains.length > 0) {
       console.log(`[suites:executability] ${gains.length} suite(s) gained machine cases — run \`npm run suites:sync\` to record it:`);
       for (const g of gains.slice(0, 8)) console.log(`  + ${g.id}: ${g.was} -> ${g.now}`);
@@ -285,8 +343,9 @@ function main(): void {
       console.error(`[suites:executability] FAIL — ${drops.length} suite(s) LOST machine cases:`);
       for (const d of drops) console.error(`  - ${d.id}: machine cases ${d.was} -> ${d.now}`);
       console.error(`A case that stops being runner-executable goes back to a browser agent, where the`);
-      console.error(`measured ~29% artefactual-BLOCKED rate applies again. If the loss is intended, run`);
-      console.error(`\`npm run suites:sync\` and say why in the commit.`);
+      console.error(`measured artefactual-BLOCKED rate applies again — 19.9% corpus-wide, and 28.6% on`);
+      console.error(`suites of 81+ cases (history.json, 19 runs, 3991 cases). If the loss is intended,`);
+      console.error(`run \`npm run suites:sync\` and say why in the commit.`);
       console.error(`Not every drop is a regression: a case RETIRED to \`Automation_Status: Deprecated\``);
       console.error(`(EX-201) leaves the machine lane by design and runs nowhere at all. Check`);
       console.error(`\`--suite <ID>\` for an EX-201 before treating the drop as lost determinism.`);

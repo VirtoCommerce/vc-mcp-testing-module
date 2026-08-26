@@ -27,7 +27,8 @@
       "non-functional",
       "api",
       "admin"
-    ]
+    ],
+    "classifierVersion": "1.2.0"
   },
   "defaults": {
     "preferredBrowser": "playwright-chrome",

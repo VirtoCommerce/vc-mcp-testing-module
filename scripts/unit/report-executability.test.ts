@@ -13,6 +13,8 @@
 // Run: `npx tsx --test scripts/unit/report-executability.test.ts` / `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+
+import { CLASSIFIER_VERSION } from "../lib/case-classifier.ts";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,6 +24,7 @@ import {
   analyseCorpus,
   analyseSuite,
   burnDownBuckets,
+  describeRebaseline,
   findDeterminismDrops,
   totals,
 } from "../test-cases/report-executability.ts";
@@ -254,4 +257,51 @@ test("a suite with its own runner is NOT counted as UI authoring backlog", () =>
     { id: "042", name: "", file: "", machine: 0, browser: 1, manual: 0, deprecated: 0, unroutable: 0, hasOwnRunner: false, verdicts: [uiVerdict] },
   ]);
   assert.equal(without.uiFamily, 1);
+});
+
+test("the manifest records the classifier version its lane counts were measured under", () => {
+  // Without this the ratchet cannot tell a determinism REGRESSION from a legitimate RE-BASELINE.
+  // It compares live counts against the manifest, so a commit that changes the classifier AND
+  // refreshes the counts lowers the baseline alongside the fact and the drop vanishes. That
+  // happened on this branch: classifier 1.1.0 -> 1.2.0 with machine 559 -> 555, reported `OK`.
+  const meta = (loadManifest() as unknown as { _meta: { classifierVersion?: string } })._meta;
+  assert.equal(
+    meta.classifierVersion,
+    CLASSIFIER_VERSION,
+    "run `npm run suites:sync` — the recorded classifier version must match the code's",
+  );
+});
+
+test("an unchanged classifier says nothing — no noise on a routine run", () => {
+  assert.deepEqual(describeRebaseline("1.2.0", "1.2.0", 555, 555), []);
+});
+
+test("a version bump that LOWERS the total says so, and names both numbers", () => {
+  // The case that went silent on this branch: 1.1.0 -> 1.2.0, machine 559 -> 555.
+  const lines = describeRebaseline("1.1.0", "1.2.0", 559, 555);
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /classifier 1\.1\.0 -> 1\.2\.0: machine 559 -> 555 \(-4\)/);
+  assert.match(lines[1], /re-baseline, not a caught regression/);
+});
+
+test("a version bump that RAISES the total is reported without the warning", () => {
+  const lines = describeRebaseline("1.1.0", "1.2.0", 555, 559);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /machine 555 -> 559 \(\+4\)/);
+});
+
+test("an unrecorded baseline is named as such, not treated as a match", () => {
+  // A manifest predating the stamp must not silently pass as though it agreed.
+  const lines = describeRebaseline(undefined, "1.2.0", 555, 555);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /classifier unrecorded -> 1\.2\.0/);
+});
+
+test("reporting a re-baseline did NOT replace the gate — a per-suite drop still fails", () => {
+  // The reporting is additive. findDeterminismDrops is what exits non-zero, and it still does.
+  const { drops } = findDeterminismDrops(
+    [{ id: "050m", machine: 116 }],
+    new Map([["050m", 123]]),
+  );
+  assert.deepEqual(drops, [{ id: "050m", was: 123, now: 116 }]);
 });
