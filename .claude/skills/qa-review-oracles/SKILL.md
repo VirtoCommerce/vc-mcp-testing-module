@@ -28,7 +28,7 @@ Omitting the axis means `all`. **`/qa-review-bl` is a retained alias** for `/qa-
 ## Supporting Files
 
 - **bl-audit-criteria.md** — BL axis: the evidence bar per axis (incl. the §1a `docs: N/A` allowance), which VirtoOZ tool / which repo to use per domain, the verdict decision table, and the edit-safety rules.
-- **The significance model** — `scripts/knowledge/oracle-significance.ts` (scoring + tiers + the gate) driven by `npm run oracles:rank` (`scripts/knowledge/rank-oracles.ts`). The evidence bar answers *is this TRUE?*; this answers *is this WORTH CARRYING?* — it sets the audit ORDER (Step 0) and the promotion BAR (Step 3). Per-axis signals are documented in the two criteria files (bl §6, ecl §9).
+- **The value model** — `scripts/knowledge/oracle-significance.ts` (the two value axes + the gate) driven by `npm run oracles:rank` (`scripts/knowledge/rank-oracles.ts`). The evidence bar answers *is this TRUE?*; this answers *is this WORTH CARRYING?*, on **two axes an entry must satisfy together** — **business** (what a violation costs) and **product** (how much of the tested product leans on it). It sets the audit ORDER (Step 0), the promotion RULE (Step 3), and the **Value** column the proposals file and the audit report carry. Per-axis signals: bl-audit-criteria §6, ecl-audit-criteria §9.
 - **ecl-audit-criteria.md** — ECL axis: the same, adapted to pattern rows — chapter→evidence-source map, the generic-vs-VC-specific table shapes, the **never-renumber** ID contract, Appendix D coherence, and when a dangling citation means ADD-a-section vs REMAP-the-citation.
 
 ## Axis contract — what differs, and only this
@@ -43,7 +43,8 @@ Omitting the axis means `all`. **`/qa-review-bl` is a retained alias** for `/qa-
 | Dangling-citation rule | **BLC-002** | **ECLC-001** |
 | Uncovered-entry rule | **BLC-004** | **ECLC-002** |
 | Unparsable-suite rule | **BLC-005** | **ECLC-003** |
-| Significance signals | severity tag · citing-case demand · `BL-CROSS` premium · non-invariant exclusions (bl-audit-criteria §6) | `[OBSERVED]` share · max row `Frequency` · citing-case demand · BL-linked rows (ecl-audit-criteria §9) |
+| Business value (what a violation costs) | the entry's own **severity tag** (`P0-*` high · `P1-*` medium · `P2-ux` low · absent unknown) | the severity of the **`BL-*` invariant its rows link to**; links none ⇒ `unknown` (never proxied from prose or `Frequency`) |
+| Product value (what leans on it) | citing-case demand + a `BL-CROSS` level | citing-case demand + `[OBSERVED]` share + a High-`Frequency` level (exposure, not cost) |
 | Promotion queue | `npm run oracles:rank -- --axis=bl` | `npm run oracles:rank -- --axis=ecl` |
 | Proposals file | `reports/ba/bl-proposals-<date>.md` | `reports/ba/ecl-proposals-<date>.md` |
 | Audit report | `reports/knowledge/BL-AUDIT-<date>.md` | `reports/knowledge/ECL-AUDIT-<date>.md` |
@@ -94,13 +95,14 @@ Everything below applies to **both** axes unless a row above says otherwise.
 
 3. Rank the axis, and **scope the run from the head of the queue** rather than in file order:
    ```
-   npm run oracles:rank -- --axis=bl                # tier + score + the gate decision per entry/candidate
-   npm run oracles:rank -- --axis=bl --candidates   # dangling cited ids only, by demand
-   npm run oracles:rank -- --axis=ecl --tier=T3     # what is NOT worth promoting (the prune shortlist)
+   npm run oracles:rank -- --axis=bl                # Value + business + product + the gate, per entry/candidate
+   npm run oracles:rank -- --axis=bl --candidates   # dangling cited ids only
+   npm run oracles:rank -- --axis=ecl --tier=T3     # the low end of the queue
    ```
-   Order is **tier → score → demand**, so the entries whose correctness the most test cases depend on
-   are audited first and the budget is never spent walking the file top-to-bottom. The queue is
-   **input, not verdict**: everything in it still has to clear the evidence bar below.
+   Order is **business value → product value → score → demand**, so what the business pays most for
+   and the product leans on hardest is audited first, and the budget is never spent walking the file
+   top-to-bottom. The queue is **input, not verdict**: everything in it still has to clear the
+   evidence bar below.
 
 > **A dangling citation means ADD or REMAP — and the cluster size tells you which.** When many cases reach for the same non-existent ID, the likely story is that the **oracle is missing content the authors expected to find**, not that every author independently mis-cited. Read the citing cases and decide per cluster: **ADD** the entry at that exact ID when the content belongs and the number is free — this retroactively makes every existing citation true, the cheapest correct fix — or **REMAP** when an existing entry already covers it. Worked example (2026-08-06): 24 layout-stability cases citing `ECL-1.4`–`1.8` and 20 smoke cases citing `ECL-10.4`–`10.8` were ADDs; a lone `ECL-13.4` was a REMAP onto a newly-added `ECL-6.4`. **This skill never edits a CSV** — remapping is handed to `/qa-review-tests --fix` at Step 4.
 
@@ -124,19 +126,27 @@ Apply the taxonomy above using the decision table in the axis's criteria file, i
 
 Collect the verdicts from all parallel agents, then apply **serially, one entry at a time, in this one orchestrator process**. Concurrent writes to an oracle race and corrupt the file — the parallel agents returned proposed edits, they did not write. For MISSING, re-read the current max ID immediately before each insert so two parallel-discovered entries can't claim the same one.
 
-- **MISSING (a NEW entry)** → apply only when it also clears the **significance bar** (`T2`):
-  re-score the candidate with the severity tag the triangulation just assigned and read the gate
-  verbatim —
+- **MISSING (a NEW entry)** → apply only when it is valuable **for the business AND for the
+  product**. Re-score the candidate with the severity tag the triangulation just assigned (for ECL,
+  with the `BL-*` invariant the pattern endangers linked in its row) and read the gate verbatim —
   ```
   npm run oracles:rank -- --explain=BL-L10N-001 --severity=P1-ux
   ```
+
+  | Business (what a violation costs) | Promotes when | Value label |
+  |---|---|---|
+  | `high` — `P0-revenue` / `P0-security` | **always** — uncited means untested, not unimportant, and the oracle is what test authoring reads | `high` (product `medium`+) / `qualified` |
+  | `medium` — `P1-data` / `P1-ux` | product value is `medium`+ (≥3 citing cases, or ≥1 with cross-domain reach / predominantly-`[OBSERVED]` rows) | `qualified` |
+  | `low` — `P2-ux` | **never.** Demand cannot buy a cosmetic rule into a file whose purpose is judging PASS/FAIL | `low` |
+  | `unknown` — no tag (BL) / no linked invariant (ECL) | **never.** Declaring what a violation costs is the price of entry | `undeclared` |
+
   `APPLY` ⇒ insert it. `HOLD` ⇒ **do not write it**; record it in the audit report's *Held* section
-  with its score, tier and demand, so the decision is re-derivable and the entry can be promoted
-  later if demand grows or a higher severity is established. `EXCLUDED` ⇒ never promote: name the
-  redirect (`performance-thresholds.md` / `browser-quirks.md` / the owning domain's own invariant)
-  and hand the citations to Step 4 so traceability MOVES rather than being destroyed.
-- **CONFIRMED / DRIFT / DUPLICATE on an entry that already exists** → **auto-apply at any tier**
-  (the bar governs growth, never correction).
+  with both axes and its demand, so the decision is re-derivable and the entry can be promoted later
+  once the missing half is established. `EXCLUDED` ⇒ never promote: name the redirect
+  (`performance-thresholds.md` / `browser-quirks.md` / the owning domain's own invariant) and hand
+  the citations to Step 4 so traceability MOVES rather than being destroyed.
+- **CONFIRMED / DRIFT / DUPLICATE on an entry that already exists** → **auto-apply whatever its
+  value** (the gate governs growth, never correction).
 - **All applied edits:**
   - Edit the **entry body only** — never rewrite a meta/summary table as a side effect (BL: the Severity-Tags table; ECL: **Appendix D is updated deliberately, as its own coherent edit**, never incidentally).
   - Stamp `Amended: <date> (auto-applied, triangulated — <BL|ECL>-AUDIT-<date>)` and refresh the `Source:` anchor.
@@ -153,17 +163,24 @@ Feed the audit back into the test-case review flow:
 
 ### Step 5: Re-run the gate, then write the audit report
 
-Re-run the axis's lint (`npm run bl:lint` / `npm run ecl:lint`) — **it is the acceptance check for your own edits**, and its High count belongs in the report. Then write the audit report (`.claude/rules/reports.md` — knowledge-maintenance artifact, target 15–40 / cap ~100 lines): per-entry verdict table with 3-axis evidence refs **and its tier** · **Applied** (one line before→after each; the full diff is in `git diff`) · **Held** (confirmed but below the significance bar — id, tier, score, citing-case count, and what would promote it) · **Excluded** (non-invariant class + the redirect) · **Not applied** (link the proposals file) · citation reconciliation summary · the gate's before/after counts.
+Re-run the axis's lint (`npm run bl:lint` / `npm run ecl:lint`) — **it is the acceptance check for your own edits**, and its High count belongs in the report. Then write the audit report (`.claude/rules/reports.md` — knowledge-maintenance artifact, target 15–40 / cap ~100 lines): per-entry verdict table with 3-axis evidence refs and a **Value** column (`business · product → label`, from `oracles:rank`) · **Applied** (one line before→after each; the full diff is in `git diff`) · **Held** (confirmed but not valuable enough — id, both axes, citing-case count, and which half is missing) · **Excluded** (non-invariant class + the redirect) · **Not applied** (link the proposals file) · citation reconciliation summary · the gate's before/after counts.
 
 ## Rules
 
 - **Auto-apply is gated by evidence, never by silence.** A change lands ONLY as CONFIRMED/DRIFT/MISSING/DUPLICATE with concrete, agreeing evidence from every applicable axis. No evidence on an applicable axis ⇒ not confirmed ⇒ proposals file. (This deliberately replaces the former "never auto-edit business-logic.md / human per-entry approval" rule: safety comes from the evidence bar, not a human gate.)
-- **Truth and significance are separate gates, in that order.** Evidence decides whether an entry is
-  real; significance decides whether a real one is worth carrying. Significance NEVER promotes an
-  unconfirmed entry, and it NEVER blocks a correction to an existing one — it bounds growth only.
-- **Rank before you scope.** Auditing in file order spends the budget where the value is not. The
-  queue is deterministic (`oracle-significance.ts`), so a promotion decision is re-derivable rather
-  than argued from memory; every score carries its contributions, caps and unresolved cells.
+- **Truth and value are separate gates, in that order.** Evidence decides whether an entry is real;
+  value decides whether a real one is worth carrying — and value has **two axes an entry must satisfy
+  together**, business and product. The value gate NEVER promotes an unconfirmed entry, and it NEVER
+  blocks a correction to an existing one — it bounds growth only.
+- **No entry enters an oracle without a declared business value.** A BL invariant declares it with
+  its severity tag; an ECL pattern declares it by naming the `BL-*` invariant it endangers. Undeclared
+  is not a formality — an entry nobody can price is one no downstream skill can weigh either.
+- **Rank before you scope, and carry the Value column.** Auditing in file order spends the budget
+  where the value is not. The queue is deterministic (`oracle-significance.ts`), so a promotion
+  decision is re-derivable rather than argued from memory. The **Value** column is mandatory in the
+  proposals file and the audit report — and **derived there, never stored in the oracle**: product
+  value moves with every suite edit, so a number transcribed into `business-logic.md` would be wrong
+  by the next commit and wrong silently (`.claude/rules/test-data.md` §GOLDEN RULE).
 - **Never infer a value signal from prose.** Only closed vocabularies score — the BL severity tag,
   the ECL `Frequency`/`Status` columns. An unreadable cell contributes ZERO and caps the tier; it is
   never guessed. (The ECL `Impact` column is free text and is deliberately unscored.)

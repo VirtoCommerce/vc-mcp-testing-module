@@ -12,6 +12,19 @@
  * audit budget was being spent in file order rather than in value order, and every
  * confirmed candidate landed regardless of whether anything would ever read it.
  *
+ * Value has TWO axes and an entry has to earn both — that is what "valuable" means here:
+ *
+ *   - **business value** — what a violation COSTS: revenue, a security boundary, data
+ *     integrity, a legal/UX commitment. Read from the entry's own declared severity tag
+ *     (BL) or from the BL invariants its rows map to (ECL).
+ *   - **product value** — how much of the tested PRODUCT leans on it: how many test cases
+ *     cite it, whether it reaches across domains, whether it is confirmed on this platform.
+ *
+ * They are scored separately and combined by CONJUNCTION, not by sum: high demand can no
+ * longer buy a `P2-ux` display rule into the oracle, and an unclassified candidate cannot
+ * be promoted at all — declaring the business value is the price of entry. The blended
+ * score survives only as the ORDER within a tier.
+ *
  * The model is deliberately small, integer, and fully attributable: every score carries
  * the contributions that produced it, so a promotion decision can be re-derived and
  * argued with rather than trusted. Three rules keep it honest:
@@ -46,9 +59,22 @@ export interface Contribution {
   note: string;
 }
 
+/** What a violation costs. Declared by the entry, never inferred from prose. */
+export type BusinessValue = "high" | "medium" | "low" | "unknown";
+/** How much of the tested product leans on the entry. Derived from citations + reach. */
+export type ProductValue = "high" | "medium" | "low" | "none";
+
+export const BUSINESS_ORDER: BusinessValue[] = ["unknown", "low", "medium", "high"];
+export const PRODUCT_ORDER: ProductValue[] = ["none", "low", "medium", "high"];
+
 export interface Score {
   score: number;
   tier: Tier;
+  /** The promotion axes. `tier`/`score` order the queue; these two decide the gate. */
+  business: BusinessValue;
+  businessNote: string;
+  product: ProductValue;
+  productNote: string;
   contributions: Contribution[];
   /** Tier ceilings that fired, each with its reason. A cap is never silent. */
   caps: string[];
@@ -119,6 +145,28 @@ export const NON_INVARIANT_PREFIXES: Readonly<Record<string, { reason: string; r
   },
 };
 
+/** Severity tag → business value. The tag IS the business declaration; nothing else is. */
+export const BUSINESS_OF_SEVERITY: Readonly<Record<string, BusinessValue>> = {
+  "P0-security": "high",
+  "P0-revenue": "high",
+  "P1-data": "medium",
+  "P1-ux": "medium",
+  "P2-ux": "low",
+};
+
+/**
+ * Citing-case demand → product value, with a one-level bump for a cross-domain entry
+ * (`BL-CROSS` reaches the whole product by construction) and for an ECL section that is
+ * predominantly `[OBSERVED]` here.
+ */
+export function productValueOf(citingCases: number, bump = 0): { value: ProductValue; note: string } {
+  const base: ProductValue = citingCases >= 10 ? "high" : citingCases >= 3 ? "medium" : citingCases >= 1 ? "low" : "none";
+  const idx = Math.max(0, Math.min(PRODUCT_ORDER.length - 1, PRODUCT_ORDER.indexOf(base) + bump));
+  const value = PRODUCT_ORDER[idx];
+  const moved = value !== base ? ` (${base} → ${value})` : "";
+  return { value, note: `${citingCases} citing case(s)${moved}` };
+}
+
 export interface BlInput {
   id: string;
   /** Raw severity tag, `""` when absent/malformed (BLL-002). */
@@ -139,6 +187,10 @@ export function scoreBl(input: BlInput): Score {
     return {
       score: 0,
       tier: "EXCLUDED",
+      business: "unknown",
+      businessNote: `${prefix} is a non-invariant class — it has no business value AS AN INVARIANT`,
+      product: productValueOf(input.citingCases).value,
+      productNote: productValueOf(input.citingCases).note,
       contributions: [demandPoints(input.citingCases)],
       caps: [`${prefix} is a non-invariant class — ${excluded.reason}`],
       unresolved: [],
@@ -184,7 +236,26 @@ export function scoreBl(input: BlInput): Score {
     : undefined;
   const floor: Tier | undefined = input.severity.startsWith("P0-") ? P0_FLOOR_TIER : undefined;
 
-  return { score, tier: tierFor(score, { cap, floor }), contributions, caps, unresolved };
+  const business = BUSINESS_OF_SEVERITY[input.severity] ?? "unknown";
+  const businessNote =
+    business === "unknown"
+      ? input.severity
+        ? `severity tag "${input.severity}" is outside the oracle vocabulary — business value undeclared`
+        : "no severity tag — business value undeclared"
+      : `${input.severity}`;
+  const { value: product, note: productNote } = productValueOf(input.citingCases, prefix === "BL-CROSS" ? 1 : 0);
+
+  return {
+    score,
+    tier: tierFor(score, { cap, floor }),
+    business,
+    businessNote,
+    product,
+    productNote: prefix === "BL-CROSS" ? `${productNote}, cross-domain reach` : productNote,
+    contributions,
+    caps,
+    unresolved,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -232,6 +303,49 @@ export interface EclInput {
   id: string;
   citingCases: number;
   rows: EclRow[];
+  /**
+   * Resolver for the severity tag of a BL invariant a row links to, so an ECL section's
+   * BUSINESS value is read from the normative oracle rather than from its own prose.
+   * Omitted ⇒ the frequency proxy below is used.
+   */
+  blSeverityOf?: (id: string) => string | undefined;
+}
+
+/**
+ * Business value of an ECL section — read ONLY from the `BL Invariant` column.
+ *
+ * A pattern that maps to a `P0-revenue` invariant costs what that invariant costs: a real
+ * cross-reference into the normative oracle, not a second opinion about the same behavior.
+ * A section that links none stays `unknown`, and `unknown` never promotes — so adding a NEW
+ * pattern means naming the invariant it endangers, which is the discipline the library
+ * already practises in prose (several rows read `— (gap; see bl_proposals)`) and which
+ * Appendix D's whole ECL↔BL cross-reference exists to keep coherent.
+ *
+ * `Frequency` deliberately does NOT feed this axis. It answers "how often does this bite",
+ * which is exposure, not cost — it belongs to the product axis, and treating a
+ * frequent-but-cheap pattern as business-critical is exactly the inference this model
+ * refuses everywhere else.
+ */
+export function eclBusinessValue(
+  rows: EclRow[],
+  blSeverityOf?: (id: string) => string | undefined,
+): { value: BusinessValue; note: string } {
+  const linked = rows.flatMap((r) => r.blRefs);
+  if (!linked.length) return { value: "unknown", note: "no BL invariant linked — business value undeclared (name the invariant this pattern endangers)" };
+  if (!blSeverityOf) return { value: "unknown", note: `links ${linked.length} BL invariant(s) but no severity resolver was supplied` };
+
+  let best: BusinessValue = "unknown";
+  let via = "";
+  for (const ref of linked) {
+    const mapped = BUSINESS_OF_SEVERITY[blSeverityOf(ref) ?? ""] ?? "unknown";
+    if (BUSINESS_ORDER.indexOf(mapped) > BUSINESS_ORDER.indexOf(best)) {
+      best = mapped;
+      via = ref;
+    }
+  }
+  return best === "unknown"
+    ? { value: "unknown", note: `links ${linked.join(", ")}, none of which carries a severity tag in the BL oracle` }
+    : { value: best, note: `via ${via} (${blSeverityOf(via)})` };
 }
 
 export function scoreEcl(input: EclInput): Score {
@@ -290,9 +404,27 @@ export function scoreEcl(input: EclInput): Score {
   }
 
   const score = contributions.reduce((n, c) => n + c.points, 0);
+  const business = eclBusinessValue(input.rows, input.blSeverityOf);
+  // Product value = how much of the tested product is exposed to the pattern. A
+  // predominantly-confirmed section is worth one more level than its raw citation count says;
+  // a purely theoretical one, one less — it describes a risk nobody has seen here yet, which
+  // is charter material rather than coverage. A High-frequency pattern adds one more: it bites
+  // often, which is exposure — the axis `Frequency` genuinely belongs to.
+  const classifiedRows = input.rows.filter((r) => /OBSERVED|THEORETICAL/i.test(r.status)).length;
+  const observedRows = input.rows.filter((r) => /OBSERVED/i.test(r.status)).length;
+  const statusBump = classifiedRows === 0 ? 0 : observedRows / classifiedRows >= 0.75 ? 1 : observedRows === 0 ? -1 : 0;
+  const frequencyBump = best === "High" || best === "Low-High" ? 1 : 0;
+  const bump = statusBump + frequencyBump;
+  const product = productValueOf(input.citingCases, bump);
+  const bumpNotes = [statusBump > 0 ? "predominantly [OBSERVED]" : statusBump < 0 ? "[THEORETICAL] only" : "", frequencyBump ? `Frequency ${best}` : ""].filter(Boolean);
+
   return {
     score,
     tier: tierFor(score, { cap: input.rows.length === 0 ? "T3" : undefined }),
+    business: business.value,
+    businessNote: business.note,
+    product: product.value,
+    productNote: bumpNotes.length ? `${product.note}, ${bumpNotes.join(" + ")}` : product.note,
     contributions,
     caps,
     unresolved,
@@ -332,32 +464,89 @@ export interface GateDecision {
   apply: boolean;
   /** Human-readable justification — goes verbatim into the audit report row. */
   reason: string;
+  /** `high` only when BOTH axes are strong — the label the report's Value column carries. */
+  label: ValueLabel;
+}
+
+export type ValueLabel = "high" | "qualified" | "low" | "undeclared" | "excluded";
+
+/**
+ * The promotion rule, in one place.
+ *
+ * A new entry has to be worth carrying for the BUSINESS **and** for the PRODUCT, so the two
+ * axes are combined by conjunction rather than by sum:
+ *
+ *   business `high`   (a P0 — revenue or a security boundary)  → promote at any demand.
+ *       An uncited P0 is not low-value; nothing tests it YET, and the oracle is the input
+ *       test authoring reads. Blocking it would be circular.
+ *   business `medium` (a P1) → promote only when product value is `medium`+ (≥3 citing
+ *       cases, or ≥1 with cross-domain reach / predominantly-observed rows). A P1 nothing
+ *       leans on is a note, not an invariant.
+ *   business `low`    (a P2 display/UX rule) → never promoted by demand. This is the
+ *       loophole the sum-based model had: 30 citations could carry a cosmetic rule into a
+ *       file whose whole purpose is judging PASS/FAIL.
+ *   business `unknown` → never. Declaring what a violation costs is the price of entry;
+ *       an unclassified entry cannot be judged by anyone downstream either.
+ *
+ * `label` is what the **Value** column of the proposals file and the audit report carries:
+ * `high` when both axes are strong, `qualified` when it promotes on the medium+demand path,
+ * and `low` / `undeclared` / `excluded` for the three ways an entry does not promote.
+ */
+export function valueGate(business: BusinessValue, product: ProductValue): GateDecision {
+  const p = PRODUCT_ORDER.indexOf(product);
+  const mediumProduct = p >= PRODUCT_ORDER.indexOf("medium");
+
+  if (business === "high")
+    return {
+      apply: true,
+      label: mediumProduct ? "high" : "qualified",
+      reason: `business ${business} · product ${product} — a P0 promotes at any demand (uncited means untested, not unimportant)`,
+    };
+  if (business === "medium")
+    return mediumProduct
+      ? { apply: true, label: "qualified", reason: `business ${business} · product ${product} — a P1 the product demonstrably leans on` }
+      : { apply: false, label: "low", reason: `business ${business} · product ${product} — a P1 nothing leans on is a note, not an invariant; HELD` };
+  if (business === "low")
+    return { apply: false, label: "low", reason: `business ${business} · product ${product} — demand cannot buy a low-cost rule into the oracle; HELD` };
+  return {
+    apply: false,
+    label: "undeclared",
+    reason: "business value undeclared — assign the severity tag (BL) or link the BL invariant (ECL) before promoting; HELD",
+  };
 }
 
 /**
  * Decide whether a triangulated verdict may be written to the oracle.
  *
- * The significance bar governs GROWTH, never CORRECTION. A DRIFT verdict on an entry that
- * already exists is a fix to something the oracle currently states wrongly — holding it back
- * because the entry scored low would leave a known-false rule in a file other skills judge
- * against, which is strictly worse than a low-value-but-true one. Same for a CONFIRMED
- * provenance refresh and a DUPLICATE merge (which shrinks the oracle). Only MISSING — a NEW
- * entry — has to clear the bar, because that is the only verdict that makes the oracle bigger.
+ * The value gate governs GROWTH, never CORRECTION. A DRIFT verdict on an entry that already
+ * exists is a fix to something the oracle currently states wrongly — holding it back because
+ * the entry scored low would leave a known-false rule in a file other skills judge against,
+ * which is strictly worse than a low-value-but-true one. Same for a CONFIRMED provenance
+ * refresh and a DUPLICATE merge (which shrinks the oracle). Only MISSING — a NEW entry — has
+ * to clear the bar, because that is the only verdict that makes the oracle bigger.
  */
-export function gate(verdict: Verdict, tier: Tier, bar: Tier = PROMOTION_BAR): GateDecision {
+export function gate(verdict: Verdict, score: Score): GateDecision {
   if (verdict === "CONTRADICTORY" || verdict === "UNGROUNDED" || verdict === "RETIRE")
-    return { apply: false, reason: `${verdict} — unconfirmed or destructive; routes to the proposals file (evidence bar, unchanged)` };
+    return {
+      apply: false,
+      label: "undeclared",
+      reason: `${verdict} — unconfirmed or destructive; routes to the proposals file (evidence bar, unchanged)`,
+    };
 
-  if (tier === "EXCLUDED")
-    return { apply: false, reason: "EXCLUDED — a non-invariant class; record the redirect, never promote" };
+  if (score.tier === "EXCLUDED")
+    return { apply: false, label: "excluded", reason: "EXCLUDED — a non-invariant class; record the redirect, never promote" };
 
   if (verdict === "MISSING") {
-    return meetsBar(tier, bar)
-      ? { apply: true, reason: `MISSING · ${tier} — confirmed and at/above the ${bar} significance bar` }
-      : { apply: false, reason: `MISSING · ${tier} — confirmed but below the ${bar} bar; HELD, not written (report it, do not grow the oracle)` };
+    const decision = valueGate(score.business, score.product);
+    return { ...decision, reason: `MISSING · ${decision.reason}` };
   }
 
-  return { apply: true, reason: `${verdict} · ${tier} — correction to an existing entry; the bar governs growth, not correction` };
+  const label = valueGate(score.business, score.product).label;
+  return {
+    apply: true,
+    label,
+    reason: `${verdict} · business ${score.business} · product ${score.product} — correction to an existing entry; the bar governs growth, not correction`,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -369,12 +558,18 @@ export interface Ranked<T> {
   score: Score;
 }
 
-/** Audit/promotion order: tier, then score, then demand, then id — total and stable. */
+/**
+ * Audit/promotion order: business value, then product value, then the blended score, then
+ * demand, then id — total and stable. Business leads because that is the axis the promotion
+ * rule keys on; the blended score only breaks ties inside a business × product cell.
+ */
 export function rankOrder<T extends { id: string; citingCases: number }>(rows: Ranked<T>[]): Ranked<T>[] {
-  const tierRank = (t: Tier) => (t === "EXCLUDED" ? -1 : TIER_ORDER.indexOf(t));
+  const excluded = (s: Score) => (s.tier === "EXCLUDED" ? 1 : 0);
   return [...rows].sort(
     (a, b) =>
-      tierRank(b.score.tier) - tierRank(a.score.tier) ||
+      excluded(a.score) - excluded(b.score) ||
+      BUSINESS_ORDER.indexOf(b.score.business) - BUSINESS_ORDER.indexOf(a.score.business) ||
+      PRODUCT_ORDER.indexOf(b.score.product) - PRODUCT_ORDER.indexOf(a.score.product) ||
       b.score.score - a.score.score ||
       b.item.citingCases - a.item.citingCases ||
       a.item.id.localeCompare(b.item.id),

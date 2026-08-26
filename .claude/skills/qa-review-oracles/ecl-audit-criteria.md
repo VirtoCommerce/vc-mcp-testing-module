@@ -200,33 +200,44 @@ Points"), and every gate passed. That semantic call belongs to `/qa-review-tests
 When an audit notices a semantically wrong citation, **report it for Dimension 6**; do not fix
 it here, and do not treat a green `ecl:lint` as evidence the citations are correct.
 
-## 9. Significance — which sections are worth the audit budget
+## 9. Value — which sections are worth the audit budget, and what a new one must declare
 
-Same purpose as `bl-audit-criteria.md` §6 (and the same code, `scripts/knowledge/oracle-significance.ts`,
-via `npm run oracles:rank -- --axis=ecl`), with the signals a pattern row actually carries:
+Same purpose and the same code as `bl-audit-criteria.md` §6 (`scripts/knowledge/oracle-significance.ts`,
+via `npm run oracles:rank -- --axis=ecl`), with the signals a pattern row actually carries.
 
-| Signal | Points | Why |
-|---|---|---|
-| **Demand** — cases citing the section | 0 / 10 / 20 / 30 / 40 at 0 / 1 / 3 / 10 / 30+ | Same ladder as BL |
-| **`[OBSERVED]` SHARE of the section's classified rows** | ≥75% → 25 · some → 15 · `[THEORETICAL]`-only → 5 | Scored by share, not presence: 175 of 213 rows in the library are `[OBSERVED]`, so "has at least one" discriminates nothing. A predominantly-confirmed section is release-walk material (`/qa-checklist`); a predominantly-theoretical one is charter material (`/qa-exploratory`) — a real difference in what it buys |
-| **Max row `Frequency`** | High 20 · Low-High 14 · Medium 12 · Low-Medium 7 · Low 4 | The one closed vocabulary in the row schema |
-| **BL-linked row** | +8 | A pattern that maps to a `BL-*` invariant is normatively testable, not just describable |
+**Business value — what a violation costs — comes ONLY from the `BL Invariant` column.** A pattern
+that maps to a `P0-revenue` invariant costs what that invariant costs: a real cross-reference into
+the normative oracle rather than a second opinion about the same behavior. A section that links none
+is `unknown`, and `unknown` never promotes.
 
-**`Impact` is deliberately unscored.** It is free prose ("Double charge, order duplication"); scoring
-it would mean a regex judging severity. Same rule as everywhere else here — value comes from closed
-vocabularies or not at all. A `Frequency` cell outside the vocabulary (`Low/Medium/High`) resolves to
-`null` **with a reason**, contributes zero, and is reported as unresolved; it is never guessed from
-its first token. A section whose table cannot be read at all is capped at `T3` — unassessable, not
-significant.
+That is a deliberate, load-bearing consequence: **adding a NEW section means naming the invariant the
+pattern endangers.** The library already practises this in prose — several rows read
+`— (gap; see bl_proposals)` — and Appendix D's whole ECL↔BL cross-reference exists to keep it
+coherent. Measured today, **9 of 54 sections link an invariant**; the other 45 are `undeclared`,
+which is a finding about the library, not a verdict on those sections (see below).
 
-**Read the ECL tiers as an ORDER, not as a prune list.** The library is small (54 sections) and
-densely cited: only two sections are uncited and exactly one lands below the bar — `ECL-14.8`
-(module version/schema drift), which §6b had already reasoned to the same place by hand, as
-legitimately never suite-coverable. So on this axis the tier discriminates weakly and the useful
-output is the head of the queue, whereas on the BL axis a third of the corpus sits below the bar.
-That asymmetry is the finding, not a defect in the model.
+**Product value — how much of the tested product is exposed — is demand plus two one-level bumps:**
+`[OBSERVED]` share ≥75% lifts it (a predominantly-confirmed section is release-walk material for
+`/qa-checklist`), `[THEORETICAL]`-only drops it (charter material for `/qa-exploratory`), and a
+`High` / `Low-High` max `Frequency` lifts it.
 
-The gate itself is identical to §6 rule 3: only a **new section** (MISSING) has to clear `T2`; a
-DRIFT correction to an existing section applies at any tier. And §0's deletion bar is untouched — a
-`T3` section is still not a RETIRE candidate without positive evidence the pattern is structurally
-impossible.
+**`Frequency` scores the PRODUCT axis, never the business one.** It answers "how often does this
+bite" — exposure, not cost. An earlier draft of this model used it as a business proxy and produced
+exactly the inference this file refuses everywhere else: a frequent-but-cheap pattern reading as
+business-critical. **`Impact` is unscored entirely** — it is free prose ("Double charge, order
+duplication"), and scoring it would mean a regex judging severity. A `Frequency` cell outside the
+closed vocabulary (`Low/Medium/High`) resolves to `null` **with a reason**, contributes zero, and is
+reported as unresolved; it is never guessed from its first token. A section whose table cannot be
+read at all is capped at the bottom tier — unassessable, not significant.
+
+The promotion rule is §6b's, unchanged: business `high` promotes at any demand, `medium` needs
+product `medium`+, `low` and `unknown` do not promote — and it applies to **new sections only**. A
+DRIFT correction to an existing section applies whatever its value.
+
+**Read the ECL numbers as an ORDER and a to-do, not as a prune list.** The library is small (54
+sections) and densely cited: only two sections are uncited, and the one section that lands at the
+very bottom of the queue is `ECL-14.8` (module version/schema drift) — which §6b above had already
+reasoned to the same place by hand, as legitimately never suite-coverable. The 45 `undeclared`
+sections are not low-value; they are sections whose business exposure nobody has written down yet,
+and the fix is to link the invariant (or file the `bl_proposals` gap), not to delete anything. §0's
+deletion bar is untouched.

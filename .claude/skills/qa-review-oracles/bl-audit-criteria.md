@@ -114,43 +114,50 @@ The proposals file format is the existing `PROPOSED-BL-<DOMAIN>-<NNN>` draft sha
 (see `.claude/commands/ba-analyze.md`), so `/ba-analyze` and `/qa-review-bl`
 unconfirmed items land in the same place for one human pass.
 
-## 6. Significance — which confirmed invariants are worth promoting, and in what order
+## 6. Value — which confirmed invariants are worth promoting, and in what order
 
 The bar in §1 answers *is this TRUE?*. It never answered *is this WORTH CARRYING?*, and the oracle
-grew under the truth gate alone. Measured on the corpus (2026-08-26): of **211 invariants, 45 sit
-below the bar** below and **22 are cited by no test case at all**; of the **50 ids the suites cite
-but the oracle lacks, 3** clear it on demand alone. Meanwhile single dangling clusters had
-accumulated 51 and 92 citing cases waiting for an entry that did not exist. Auditing in file order
-spends the budget where the value is not.
+grew under the truth gate alone. Measured on the corpus (2026-08-26): of **211 invariants, 70 carry
+`low` value and 22 are cited by no test case at all**; of the **50 ids the suites cite but the oracle
+lacks, ZERO** can be promoted as they stand, because not one of them declares what a violation costs.
+Meanwhile single dangling clusters had accumulated 51 and 92 citing cases waiting for an entry that
+did not exist, and the audit walked the file top-to-bottom regardless.
 
-Scoring is deterministic and lives in one place, `scripts/knowledge/oracle-significance.ts`, driven
-by `npm run oracles:rank -- --axis=bl`. Every score prints the contributions that produced it, so a
-promotion decision is re-derivable rather than remembered.
+Scoring is deterministic and lives in one place, `scripts/knowledge/oracle-significance.ts`, driven by
+`npm run oracles:rank -- --axis=bl`. Every result prints the signals that produced it, so a promotion
+decision is re-derivable rather than remembered.
 
-| Signal | Points | Why |
+### 6a. The two axes
+
+**Business value — what a violation COSTS.** Read from the entry's own severity tag, and from nothing
+else. `P0-security` / `P0-revenue` → `high` · `P1-data` / `P1-ux` → `medium` · `P2-ux` → `low` ·
+absent or malformed (BLL-002) → `unknown`.
+
+**Product value — how much of the tested PRODUCT leans on it.** Citing-case demand — `none` (0) /
+`low` (1–2) / `medium` (3–9) / `high` (10+) — lifted one level for a `BL-CROSS` entry, which reaches
+across domains by construction and is the class the oracle's own preamble calls highest-value.
+
+### 6b. The promotion rule (growth only)
+
+| Business | Promotes | Why |
 |---|---|---|
-| **Demand** — test cases citing the id | 0 / 10 / 20 / 30 / 40 at 0 / 1 / 3 / 10 / 30+ | Promoting an entry at a cited id retroactively makes every one of those citations true. **Laddered, not linear**, so a 92-case cluster cannot outrank the whole model by arithmetic |
-| **Severity tag** | `P0-security` 40 · `P0-revenue` 35 · `P1-data` 20 · `P1-ux` 12 · `P2-ux` 4 | The oracle's own vocabulary — the one closed value scale it already declares |
-| **`BL-CROSS` premium** | +10 | The file's own claim: cross-domain invariants "catch the bugs that single-domain testing misses" |
+| `high` | **at any product value** | An uncited P0 is not low-value — nothing tests it YET, and the oracle is the input test authoring reads. Blocking it would be circular |
+| `medium` | only at product `medium`+ | A P1 nothing leans on is a note, not an invariant |
+| `low` | **never** | This closes the loophole a blended score had: 30 citations could carry a cosmetic `P2-ux` rule into a file whose whole purpose is judging PASS/FAIL |
+| `unknown` | **never** | Declaring the cost is the price of entry. A candidate is unclassified by construction — assign the tag during triangulation, then re-score: `npm run oracles:rank -- --explain=<ID> --severity=<tag>` |
 
-**Tiers:** `T1` ≥ 55 (audit and promote first) · `T2` ≥ 30 (**the promotion bar**) · `T3` < 30
-(record, do not grow the oracle) · `EXCLUDED` (never).
+The resulting label — `high` (both axes strong) / `qualified` / `low` / `undeclared` / `excluded` —
+is the **Value** column the proposals file and the audit report carry. It is **derived at decision
+time and never stored in the oracle**: product value moves with every suite edit, so a transcribed
+number would be wrong by the next commit and wrong silently (`.claude/rules/test-data.md` §GOLDEN RULE).
 
-Four rules make the number trustworthy rather than merely tidy:
+Two rules bound the gate itself:
 
-1. **A P0 never falls below `T2`**, however little cites it. An uncited P0-security invariant is not
-   low-value; it is under-covered, which is a BLC-004 coverage gap for `/qa-test-lifecycle` Phase 3,
-   not a prune candidate.
-2. **Unclassified caps the tier.** An entry with no severity tag (BLL-002) is capped at `T3` no
-   matter how many cases cite it — unassessable is never "significant", and the fix is to tag it,
-   never to infer a tag. A **candidate** (a cited id with no entry yet) has no tag by construction,
-   so it rides demand to `T2` and is **ceilinged there** until triangulation assigns one; re-score
-   with that tag before reading the gate: `npm run oracles:rank -- --explain=<ID> --severity=<tag>`.
-3. **The bar governs GROWTH, not CORRECTION.** Only a **MISSING** verdict has to clear it. A DRIFT
-   fix, a CONFIRMED provenance refresh and a DUPLICATE merge apply at any tier — holding back a
+1. **It governs GROWTH, not CORRECTION.** Only a **MISSING** verdict must clear it. A DRIFT fix, a
+   CONFIRMED provenance refresh and a DUPLICATE merge apply whatever the value — holding back a
    correction would leave a known-false rule in a file other skills judge against, which is strictly
    worse than carrying a low-value true one.
-4. **Some prefixes are not invariants at all** and are `EXCLUDED` at any demand. Each was declined on
+2. **Some prefixes are not invariants at all** and are `EXCLUDED` at any demand. Each was declined on
    a real audit (BL-AUDIT-2026-08-24) *after* citations had accumulated against it — demand alone
    would have promoted all three:
 
@@ -162,6 +169,12 @@ Four rules make the number trustworthy rather than merely tidy:
 
    Exclusion **moves** the citations (Step 4, `/qa-review-tests --fix`), it never destroys them.
 
-**A `T3` entry is not a delete list.** Low significance is a reason not to spend audit budget and
-not to add more of the same — it is not positive evidence the entry is dead, which §5/§0's deletion
-bar still requires. Retiring stays a human proposal.
+### 6c. What a `low` value does NOT mean
+
+It is **not a delete list**. Low value is a reason not to spend audit budget and not to add more of
+the same — it is not positive evidence the entry is dead, which §5/§0's deletion bar still requires.
+Retiring stays a human proposal. A `low` entry is also still corrected when it drifts.
+
+The blended integer score (`T1`/`T2`/`T3` tiers, demand laddered 0/10/20/30/40 so a 92-case cluster
+cannot outrank the model by arithmetic) survives only as the **order inside a business × product
+cell** — it decides what to audit first, never what may be written.
