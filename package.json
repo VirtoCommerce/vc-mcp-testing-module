@@ -145,6 +145,8 @@
     "scope:validate": "npx tsx scripts/maintenance/validate-critical-ui-scope.ts",
     "tokens:sync": "node scripts/maintenance/sync-design-tokens.mjs",
     "tokens:check": "node scripts/maintenance/sync-design-tokens.mjs --check",
+    "selectors:sync": "node scripts/maintenance/sync-storefront-selectors.mjs",
+    "selectors:check": "node scripts/maintenance/sync-storefront-selectors.mjs --check",
     "layout:run": "npx tsx scripts/layout/layout-runner.ts --suite regression/suites/Frontend/cross-cutting/048c-layout-stability.csv",
     "layout:list": "npx tsx scripts/layout/layout-runner.ts --list --suite regression/suites/Frontend/cross-cutting/048c-layout-stability.csv",
     "layout:author": "node scripts/layout/author-reference-suite.mjs",

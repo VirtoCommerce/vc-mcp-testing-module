@@ -271,6 +271,64 @@ them, `050c`'s `ORD-GQL-TODO-001`, says so in its own steps: *"[MANUAL-BLOCKED] 
 graphql-runner"*, and today the runner runs it and reports `EMPTY` → exit 1 → a FAIL on a
 placeholder row.
 
+## Storefront Selectors — generated, gated, and measured against the source
+
+`.claude/knowledge/automation/storefront-selectors.md` (455 lines) and
+`.claude/knowledge/execution/test-execution-preflight.md` hand-listed the storefront's
+`data-test-id` surface. Both were verified live on their capture dates and were correct then.
+Diffed against `vc-frontend@dev` (`17c99c7`, 2026-08-26): of the 78 distinct selectors they assert,
+**54 match exactly, 2 are plausible instantiations of a real template, 22 match nothing** — and
+**107 real selectors are undocumented**.
+
+**The drift landed on the load-bearing document.** `test-execution-preflight.md`'s selector table
+specified the sign-in and sign-out controls, reached by `[PRE:SIGNIN_AS]` / `[PRE:SIGNOUT]` from
+~1,572 cases. `main-layout.top-header.account-menu-button` is now `account-menu`;
+`main-layout.top-header.account-menu.sign-out-button` is now `sign-out-button`; the `main-layout.`
+prefix survives in exactly one unrelated place in the whole source. An agent looking for an element
+that is no longer rendered either fails the precondition or falls back to guessing by text — a live
+contributor to the measured ~29% artefactual-BLOCKED rate.
+
+So the surface is generated, not transcribed — the same shape as `tokens:sync`, and for the same
+reason (`.claude/rules/test-data.md` §GOLDEN RULE):
+
+| Command | Does |
+|---|---|
+| `npm run selectors:sync` | rewrite the committed `scripts/lib/storefront-selectors.generated.ts` |
+| `npm run selectors:sync -- --from ../vc-frontend` | read a local checkout instead of cloning |
+| `npm run selectors:check` | CI drift gate — **exit 2 on an unreachable source, never a silent pass** |
+
+Four rules make it trustworthy rather than another list:
+
+- **It clones; it cannot fetch files.** Unlike `sync-design-tokens.mjs`, which reads four named
+  files, this has to ENUMERATE a tree (454 `.vue` + 916 `.ts`) — `raw.githubusercontent.com` cannot
+  list a directory. So the source is a shallow, blobless, sparse clone, or `--from`. (Incidentally
+  this makes `selectors:check` usable where `tokens:check` is not: the git proxy serves clones while
+  `raw.githubusercontent`/`unpkg` are policy-blocked.)
+- **A template is a PREFIX, never a literal.** `:data-test-id="`filter-${facet.paramName}`"` yields
+  the prefix `filter-`, and `SELECTOR_PATTERNS` records the template. Writing `filter-price` as a
+  literal is the transcription error this file exists to stop — and `filter-price` is in the docs.
+  Conversely, `isKnownSelector("filter-price")` is **true**: it is a plausible instantiation, so
+  calling it a phantom (as a naive diff against static values does) is the same overreach reversed.
+- **`isKnownSelector` false means UNVERIFIED, not invalid.** Nineteen bindings are bare expressions
+  (`:data-test-id="item.dataTestId"`) whose runtime value cannot be read statically, and ten UI-kit
+  components take an optional test-id prop. `UNRESOLVED_BINDINGS` records each with its reason and
+  location, so the gap is visible rather than silently absent.
+- **A missing test id is not a naming problem.** `vc-input.vue` renders
+  `:data-test-id="testIdInput"`, but `sign-in-form.vue`, `sign-up.vue` and `search-bar.vue` do not
+  pass it — so the sign-in email/password fields, all six sign-up inputs, and the search query input
+  render no test id at all. Those are located by label / `name` / role. No naming discipline
+  conjures an attribute that was never rendered.
+
+**`data-testid` (no dash) does not exist.** `test-execution-preflight.md` used to say "a few legacy
+spots may use `data-testid` … either should work with Playwright locators". Measured across
+`client-app/`: zero occurrences, static or bound. The hedge was not a safe fallback; it was a way to
+write a locator that always fails.
+
+**Still hand-maintained:** the ~400 rows of `storefront-selectors.md` covering the non-`data-test-id`
+layers (`.vc-*` component classes, page-scoped BEM). The generator cannot see those, and re-pointing
+them needs a live re-check per row — authoring, not mechanics. The file now carries an audit header
+saying so.
+
 ## Executability — what a runner can execute, and what would move it
 
 `npm run suites:executability` is the reporting half of `scripts/lib/case-classifier.ts`. It adds
