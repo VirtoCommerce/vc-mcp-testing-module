@@ -144,6 +144,12 @@ export interface SelectionResult {
   readonly unmappedPaths: readonly string[];
   /** True when a mapping gap forced the wider net. */
   readonly widened: boolean;
+  /**
+   * How many of the predicted minutes come from suites whose `estimatedMinutes` is known to be
+   * unreliable. Reported so a target overrun does not read as "too much was selected" when the
+   * real cause is a number that is ×18–×88 out.
+   */
+  readonly unreliableEstimateMinutes: number;
 }
 
 const RISK_TAGS = new Set(["critical-ui-scope"]);
@@ -151,6 +157,26 @@ const DEFAULT_ROTATION_COUNT = 3;
 
 function minutesOf(s: SelectableSuite): number {
   return s.estimatedMinutes ?? 0;
+}
+
+/**
+ * Suites whose `estimatedMinutes` is known to be unreliable, and must therefore not be trimmed
+ * for being "expensive".
+ *
+ * Measured: suite `050m` declares 245 minutes and ran in **2.77** (`REG-2026-08-26-1631`), and the
+ * overstatement is ×18–×88 across every runner-native suite. Trimming sorts by value per minute
+ * with `estimatedMinutes` as the denominator, so `--target 60` excluded `050m` — a suite that
+ * costs under three minutes — as too costly to fit. That is not a rounding problem, it is the
+ * selector acting on a number that is wrong by two orders of magnitude.
+ *
+ * A suite with its own runner (`fastpath`/`deterministic`) does not spend an agent session, and
+ * its cost is dominated by network round-trips rather than by anything the manifest models. Until
+ * `npm run regression:recalibrate` has three runs per suite to propose real numbers, such a suite
+ * is treated as effectively free by the trimmer: keeping it costs a couple of minutes, and
+ * dropping it costs whatever it was going to catch.
+ */
+function estimateIsUnreliable(s: SelectableSuite): boolean {
+  return s.lane === "fastpath" || s.lane === "deterministic" || Boolean(s.runner);
 }
 
 /**
@@ -385,6 +411,9 @@ export function selectSuites(input: SelectionInput): SelectionResult {
     const trimmable = () =>
       chosen
         .filter((s) => !riskFloor.has(s.id))
+        // A runner-native suite is never trimmed for cost: see estimateIsUnreliable. It is still
+        // trimmable in principle, just not on the strength of a number known to be ×18–×88 out.
+        .filter((s) => !estimateIsUnreliable(s))
         .sort((a, b) => {
           const va = valuePerMinute(a, reasons.get(a.id) ?? [], rotationIndexOf.get(a.id) ?? -1);
           const vb = valuePerMinute(b, reasons.get(b.id) ?? [], rotationIndexOf.get(b.id) ?? -1);
@@ -422,6 +451,7 @@ export function selectSuites(input: SelectionInput): SelectionResult {
     fullMakespanMinutes: makespanOf(suites, concurrency),
     unmappedPaths: [...new Set(unmappedPaths)].sort(),
     widened,
+    unreliableEstimateMinutes: chosen.filter(estimateIsUnreliable).reduce((n, s) => n + minutesOf(s), 0),
   };
 }
 
@@ -436,6 +466,16 @@ export function formatSelection(r: SelectionResult): string {
   );
   if (r.widened) {
     lines.push(`WIDENED — a changed path matched no manifest vocabulary, so the net was cast wider on purpose.`);
+  }
+  if (r.unreliableEstimateMinutes > 0) {
+    // Otherwise a target overrun looks like too much work was selected, when in fact a
+    // known-wrong number is dominating the prediction. 050m declares 245 min and runs in 2.77.
+    lines.push(
+      `NOTE — ${r.unreliableEstimateMinutes} of those predicted minutes come from runner-native ` +
+        `suites whose estimatedMinutes is measurably wrong (x18-x88 overstated). They are not ` +
+        `trimmed for cost, and the prediction above overstates them too. ` +
+        `Run \`npm run regression:recalibrate\` for the evidence.`,
+    );
   }
   lines.push("");
   lines.push("  suite   min  why");

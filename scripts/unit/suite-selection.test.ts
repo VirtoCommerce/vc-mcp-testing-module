@@ -491,3 +491,41 @@ test("an empty diff still produces a run — the risk floor, and it says so", ()
   assert.match(text, /1 suite\(s\) selected/);
   assert.equal(r.selected.every((s) => s.reasons.every((x) => x.kind === "risk-floor")), true);
 });
+
+test("a runner-native suite is NOT trimmed for cost, and the overrun explains itself", () => {
+  // The live defect this closes: 050m declares 245 minutes and ran in 2.77
+  // (REG-2026-08-26-1631). Trimming sorts by value per minute with estimatedMinutes as the
+  // denominator, so `--target 60` excluded a suite that costs under three minutes as too
+  // expensive. Keeping it means the target may now be unreachable — which is reported, not hidden.
+  const withRunner: SelectableSuite[] = [
+    suite({ id: "050m", lane: "fastpath", runner: undefined, estimatedMinutes: 245, domain: "sales-rep" }),
+    suite({ id: "099", lane: "browser", estimatedMinutes: 25, domain: "marketing" }),
+    suite({ id: "042", lane: "browser", priority: "P0", estimatedMinutes: 18, domain: "cross-cutting" }),
+  ];
+  const idx = new Map<string, readonly string[]>([["050m", ["vc-module-order"]], ["099", ["vc-module-order"]]]);
+  const r = selectSuites({
+    suites: withRunner,
+    changed: [{ repo: "vc-module-order", path: "src/X.cs" }],
+    suiteRepos: idx,
+    concurrency: CONCURRENCY,
+    rotationCount: 0,
+    targetMinutes: 30,
+  });
+  assert.ok(r.selected.some((s) => s.id === "050m"), "the cheap-but-mis-estimated suite survives");
+  assert.ok(r.excluded.every((e) => e.id !== "050m"));
+  assert.equal(r.unreliableEstimateMinutes, 245, "and the report can say where the minutes came from");
+  assert.match(formatSelection(r), /estimatedMinutes is measurably wrong/);
+});
+
+test("a browser suite is still trimmable — the exemption is narrow", () => {
+  const r = selectSuites({
+    suites: SUITES,
+    changed: [{ repo: "vc-frontend", path: "client-app/shared/utils/x.ts" }],
+    suiteRepos: REPOS,
+    concurrency: CONCURRENCY,
+    rotationCount: 0,
+    targetMinutes: 20,
+  });
+  assert.ok(r.excluded.length > 0, "browser suites are ordinary trim candidates");
+  assert.equal(r.unreliableEstimateMinutes, 0, "and none of these estimates is flagged unreliable");
+});
