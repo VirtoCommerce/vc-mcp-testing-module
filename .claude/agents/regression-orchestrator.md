@@ -67,12 +67,11 @@ do not improvise around it**.
 **Why a command instead of doing this yourself.** Every part of this used to be hand-derived, and
 each part was got wrong at least once on the record:
 
-- Lane classification by grepping CSVs. The rule is "every non-empty `Steps` cell carries a runner
-  op tag" — and it is stricter than it looks: suite `050d` has 46 runner-native cases out of 49, so
-  it belongs on the browser lane, because handing the other 3 to a runner that cannot parse them
-  manufactures BLOCKED cases that look like product failures. The command applies the rule from
-  `ci/lib/lane-classifier.ts`, which also knows that `[REST-OP]` counts (suite `050l` is
-  runner-native and a GraphQL-only test misses it).
+- Lane classification by grepping CSVs. `regression:plan` decides the SUITE lane from
+  `ci/lib/lane-classifier.ts` (which knows, for instance, that `[REST-OP]` counts — suite `050l`
+  is runner-native and a GraphQL-only grep misses it). Step 3 then splits a mixed suite's cases
+  with `suites:lanes`, so `050d`'s 46 runner-native rows no longer ride a browser slot on account
+  of its other 3.
 - The firefox rule, which lived as prose in three files. `playwright-firefox` **cannot click** on
   this storefront or the Admin SPA. The plan marks each suite `NOT ON playwright-firefox` from the
   manifest's derived `clickDriven` field. Note `[ACT]` alone does not mean clicking — suite `049`'s
@@ -88,6 +87,7 @@ The three lanes do **not** share slots.
 |---|---|---|
 | **browser** | 3 — `playwright-chrome`, `playwright-firefox`, `playwright-edge` | fallback chain per `defaults.fallbackChain` |
 | **fastpath** | up to 4 concurrent | runner-native GraphQL/REST — **no browser slot at all** |
+| **split** | machine part: no slot · browser part: 1 slot | a MIXED suite. `suites:lanes` divides its cases; the machine part runs first with no slot, the browser part takes one slot for a much smaller file. Its browser-slot demand is the size of its browser list, so packing improves for free |
 | **deterministic** | up to 2 concurrent | a manifest `runner` (e.g. `048c` → `layout-runner`); it drives its own browser |
 
 **Slot rules:**
@@ -108,7 +108,37 @@ The three lanes do **not** share slots.
 1. Read the suite CSV from the manifest's `file` path.
 2. Resolve every `@td(ALIAS.field)` token against `test-data/aliases.json` + the referenced data CSVs.
 3. Write the resolved CSV to `reports/regression/{RUN_ID}/suite-{ID}-resolved.csv`.
-4. Pass that PATH as `{{SUITE_CSV_PATH}}`. **Never embed CSV content in a prompt** — suite `027` is
+4. **Split the suite's cases between the machine lane and the agent — one command:**
+
+   ```bash
+   npm run suites:lanes -- <ID> --run-id {RUN_ID} --csv reports/regression/{RUN_ID}/suite-{ID}-resolved.csv
+   ```
+
+   It writes `suite-{ID}-lanes.json` (the authoritative list of what should run, and where) and
+   `suite-{ID}-resolved.browser.csv` (only the rows an agent must drive). Exit 2 means the suite
+   still has a legacy 11-column header — **stop, do not classify it**; `parseSuite` maps fields
+   positionally, so routing it would score real cases on the wrong columns.
+
+   Then, **in this order**:
+
+   a. If `counts.machine > 0` → `npm run suites:machine -- <ID> --run-id {RUN_ID}`. No browser
+      slot, no sub-agent, no tokens. It may report cases `REROUTE`d back to the browser lane —
+      that is a classifier bug being contained, and it is why the machine lane runs FIRST:
+      nothing has been dispatched yet, so the browser CSV is simply extended.
+   b. If `counts.browser > 0` → dispatch the sub-agent with
+      `{{SUITE_CSV_PATH}} = suite-{ID}-resolved.browser.csv`. **If it is 0, dispatch nothing** —
+      suite `087` is 12 machine + 3 explicitly Manual, and under the old all-or-nothing rule it
+      occupied a browser slot to run zero browser cases.
+   c. When both lanes have reported → `npm run suites:merge -- <ID> --run-id {RUN_ID}`. This is
+      what produces the canonical `suite-{ID}-results.json` every reader expects. **Exit 1 means
+      an invariant failed and nothing was written** — do not hand-edit around it, report it.
+
+   Why per-case and not per-suite: the all-or-nothing rule strands **169 machine-ready rows in 10
+   suites** on the browser lane (050d sends 46 runner-native cases through an agent because 3 of
+   its 49 are prose). The bigger prize is verdict quality — at the measured ~29% artefactual-BLOCKED
+   rate for long agent sessions, roughly 54 of those rows currently come back BLOCKED for reasons
+   about HOW they ran, not about the product.
+5. Pass that PATH as `{{SUITE_CSV_PATH}}`. **Never embed CSV content in a prompt** — suite `027` is
    282 KB (~78k tokens) against a 200k window, and a single `browser_snapshot` costs 10-30k, so an
    inlined suite starves the very evidence the run exists to collect.
 
@@ -130,8 +160,10 @@ Run the three lanes concurrently — a fastpath suite must never wait on a brows
 > first — a third of the run was pure waiting. `npm run regression:plan` prints both numbers, so
 > the comparison is checkable rather than asserted.
 >
-> Note where it does NOT help: `smoke` is two suites and `078` alone is the critical path, so
-> reordering saves nothing there. The plan honestly reports `0% saved` in that case.
+> Note where it does NOT help: a selection whose critical path IS one suite. `smoke` used to be
+> exactly that (`078`, 83 min, was the whole path) until `078` was split into four
+> dependency-closed siblings; the plan honestly reports `0% saved` whenever reordering cannot
+> win, so read that line rather than assuming a saving.
 
 **Per sub-agent:**
 - **subagent_type**: the `agent` field from the manifest (`qa-testing-expert`, `qa-frontend-expert`,
@@ -139,9 +171,13 @@ Run the three lanes concurrently — a fastpath suite must never wait on a brows
 - **prompt**: fill the `agents/test-runner-agent.md` template with `{{RUN_ID}}`, `{{SUITE_ID}}`,
   `{{SUITE_NAME}}`, `{{SUITE_CSV_PATH}}` (the resolved path from above), `{{BROWSER_SERVER}}`,
   `{{LANE_ID}}` (the slot index — this is what selects the credential slot, see below),
-  `{{ENVIRONMENT_URL}}`, `{{BACKEND_URL}}`, `{{OUTPUT_FILE}}`
-  (`reports/regression/{RUN_ID}/suite-{ID}-results.json`). Keep the prompt lean — no extra prose,
-  no knowledge pre-loading, no inline CSV.
+  `{{ENVIRONMENT_URL}}`, `{{BACKEND_URL}}`, `{{OUTPUT_FILE}}`. Keep the prompt lean — no extra
+  prose, no knowledge pre-loading, no inline CSV.
+- **`{{OUTPUT_FILE}}` is a FRAGMENT for any suite with a machine part**:
+  `reports/regression/{RUN_ID}/suite-{ID}-results.browser.json`. Only a suite that is 100%
+  browser writes `suite-{ID}-results.json` directly. Two writers on one results file is a race,
+  and the agent's own contract is "overwrite the whole file" — so the fragment name is what keeps
+  the machine lane's rows from being erased.
 - **`{{LANE_ID}}` is load-bearing.** `test-data/users/agent-user-pool.csv` has one credential slot
   per lane, and there are only **3 seeded slots**. Two agents on one account produce
   cross-contaminated sessions and BLOCKED cascades that read as product failures. Never reuse a
@@ -161,7 +197,15 @@ Discard any free-form prose — all detail belongs in the results files.
    dashboard show `● RUNNING`.
 1. **Wait for the FIRST suite to settle, not for a batch.** `Promise.race`-style: react to whichever
    finishes first.
-2. Read that suite's results file, set it `status: "done"`, fill `pass`/`fail`/`blocked` from its
+1b. **For a split suite, re-run `npm run suites:merge -- <ID> --run-id {RUN_ID}` on each poll.** It
+   is idempotent by design, and it is what keeps the live dashboard honest mid-run: until it runs
+   there is no canonical `suite-{ID}-results.json` for the watcher to read, so the suite would
+   render as frozen while both lanes were in fact working. The merge leaves `completedAt` empty
+   while any fragment is still open, which is exactly what lets the watcher keep folding the
+   per-case JSONL.
+2. Read that suite's **merged** `suite-{ID}-results.json` (never a `.machine.json` /
+   `.browser.json` fragment — a fragment is one writer's view and its header counts are its own
+   claim about itself), set it `status: "done"`, fill `pass`/`fail`/`blocked` from its
    `suite-{ID}-results.json` (recomputing the counts from the case rows rather than trusting a
    summary the agent wrote).
 3. Free its slot and **immediately dispatch the next eligible suite** (Step 3). Check whether the

@@ -35,72 +35,32 @@ Execute a single regression test suite against Virto Commerce. Run autonomously 
 
 For BL-* / ECL-* IDs, look up the specific ID in `knowledge/oracles/business-logic.md` or `knowledge/oracles/e-commerce-edge-cases-library.md` ONLY if meaning is ambiguous.
 
-## Phase 0: Mode Detection
+## Phase 0: Your CSV already contains only your cases
 
-Before Phase 1, inspect the `Steps` column in `{{SUITE_CSV_PATH}}`. If **every** non-empty Steps cell contains at least one `[GQL-OP ` or `[GQL-EXEC ` tag, this is a **runner-native GraphQL suite** — take the **GraphQL Runner Fast Path** below instead of Phase 1–5. No browser needed.
+`{{SUITE_CSV_PATH}}` has been filtered for you. Before dispatch, the orchestrator ran
+`npm run suites:lanes` — a deterministic per-case classifier — and every row a runner could
+execute was already run by `npm run suites:machine`. What you were handed is the remainder:
+the rows that genuinely need a browser.
 
-Mixed suites (some runner-native, some legacy GraphiQL UI) → use the browser path (Phase 1–5); the runner-native cases execute normally via MCP against `{{BACK_URL}}/ui/graphiql`. Migrate the legacy cases separately.
+So there is **no mode to detect and nothing to skip**. Read `{{SUITE_CSV_PATH}}` and drive every
+row in it through Phase 1-5.
 
-## GraphQL Runner Fast Path (browserless — runner-native GraphQL suites only)
+Three consequences, all of which used to be your job and are not any more:
 
-**Why:** `[GQL-OP]`/`[GQL-EXEC]` cases execute via `scripts/graphql/graphql-runner.ts` (direct `fetch` to `/graphql`), ~10-30× faster than the GraphiQL UI flow. Schema-validate-before-send catches DV-006…DV-011 at lint time, **zero browser slots consumed** — GraphQL suites run in parallel to browser suites without competing for the 3-slot pool.
+- **Do not invoke `graphql-runner.ts`, and do not lint the suite.** The machine lane owns runner
+  execution and its exit-code mapping (`scripts/regression/machine-lane.ts`). That mapping is
+  deterministic, so it lives in code rather than being re-derived from a table each run.
+- **Do not compute suite totals.** Your results file is a FRAGMENT
+  (`suite-{{SUITE_ID}}-results.browser.json`); `npm run suites:merge` recomputes every count from
+  the rows of both lanes and writes the canonical `suite-{{SUITE_ID}}-results.json`. Summing your
+  header with another writer's would double-count exactly what the merge reconciles.
+- **Pre-seed PENDING rows only for the cases in YOUR file.** A row you were not given is not yours
+  to report; the merge step fills it from the plan, and a case nobody reported becomes a visible
+  `BLOCKED` with `lane_lost` rather than an absence.
 
-### GQL-1. Structural lint (DV-019 / S-007)
-
-```bash
-npm run graphql:lint-labels -- {{SUITE_CSV_PATH}}
-```
-
-- Exit 0 → proceed to GQL-2.
-- Exit 1 → **all runner-native rows BLOCKED**. Record the linter output verbatim in suite-level `errors[]`. Skip to Phase 5 (Write Results) and exit.
-
-### GQL-2. Execute each case
-
-For every row with a non-empty `Steps` column (the linter has already confirmed they are structurally valid runner-native cases):
-
-```bash
-npx tsx scripts/graphql/graphql-runner.ts --case {{SUITE_CSV_PATH}}:<CASE_ID> --evidence-dir reports/regression/{{RUN_ID}}/graphql-evidence
-```
-
-The runner handles token acquisition (`[AUTH role=X]` via `TokenCache`), schema validation, `{{VAR}}` + `@td()` substitution, POST to `{{BACKEND_URL}}/graphql`, capture chaining, assertion evaluation, and best-effort cleanup (parses the `Cleanup` column for `[AUTH]` + `[REST METHOD path]` blocks and executes them after the verdict; cleanup failures never alter the verdict). Per-case evidence JSON lands at `reports/regression/{{RUN_ID}}/graphql-evidence/<CASE_ID>-<ts>.json`.
-
-Exit codes:
-
-| Code | Meaning | Map to |
-|------|---------|--------|
-| 0 | All assertions passed | `PASS` |
-| 1 | At least one assertion failed (but ops ran) | `FAIL` — read the evidence JSON, populate `failedAssertion` with the first `assertions[]` entry where `passed=false` |
-| 2 | Structural / parse / usage error | `BLOCKED` — put the stderr into `notes` |
-| 3 | Runtime fatal (network, auth, unexpected) | `BLOCKED` — stderr into `notes` |
-
-Preserve the evidence path in each test case result:
-
-```json
-{
-  "id": "GQL-030",
-  "status": "PASS",
-  "graphqlEvidence": "reports/regression/{{RUN_ID}}/graphql-evidence/GQL-030-<ts>.json"
-}
-```
-
-### GQL-3. Announce + record
-
-For each case: emit the same `▶ Suite…` announce line as Phase 2 (before spawning the runner). Do NOT attempt screenshots on FAIL — GraphQL cases produce JSON evidence, not visual evidence. `consoleErrors` / `networkErrors` are not applicable (no browser).
-
-### GQL-4. Teardown & Results
-
-- Skip Phase 4 browser teardown (no browser was opened).
-- Emit the Phase 5 JSON normally. All GraphQL test-case entries carry `graphqlEvidence` paths instead of screenshot/console/network fields.
-- Cleanup runs inside each `graphql-runner.ts` invocation (best-effort): the runner parses the `Cleanup` column, executes `[AUTH role=…]` token acquisition + `[REST <METHOD> <path>]` blocks against `{{BACKEND_URL}}`, and records each block's outcome under `cleanup.blocks[]` in the evidence JSON (`{kind, method, path, status, ok}` for REST, `{kind, role, ok}` for AUTH, `{kind, ok: false, error}` on exception). A 403/404/timeout is recorded but does **not** change the test verdict. Non-`AUTH`/`REST` blocks inside Cleanup are skipped with a log line.
-
-### GQL-5. Failure handling
-
-| Condition | Handling |
-|-----------|----------|
-| Lint (GQL-1) fails | Suite-level BLOCKED; exit immediately |
-| All 3+ cases BLOCKED with runtime error 3 | Suite-level `errors[]` gets `graphql_runtime_fatal`; continue to Phase 5 with partial results |
-| Schema introspection fails (runner exit 3 with "Introspection HTTP …") | Mark cases BLOCKED; populate `errors[]`: `schema_introspection_failed`. Orchestrator may retry after schema refresh |
-| Token acquisition fails (runner exit 3 with "Token acquisition failed") | Same as browser-path auth failure — all cases BLOCKED, populate `errors[]: ["authentication_failure"]`, exit |
+If a row in your file turns out to be runner-native after all, still drive it through the browser —
+say so in `notes` and let the classifier be fixed. Guessing your way onto the other lane risks two
+writers claiming one case, which the merge step refuses outright.
 
 ## Phase 1: Setup
 
@@ -298,4 +258,4 @@ On unrecoverable error: write partial `{{OUTPUT_FILE}}`, populate `errors[]`, cl
 7. BL-* overrides DOM assertions.
 8. Preliminary bugs only (`confirmed: false`).
 9. No prose narration — results go to JSON.
-10. **Phase 0 is mandatory** — never open a browser for a runner-native GraphQL suite; never skip the fast-path lint for a runner-native suite.
+10. **Never invoke `graphql-runner.ts` and never lint the suite.** The machine lane already ran every runner-executable row before you were dispatched (`npm run suites:machine`), and it owns the exit-code mapping. Your file is the browser remainder — drive all of it, compute no suite totals, and pre-seed PENDING only for the rows you were given.

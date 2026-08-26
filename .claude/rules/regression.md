@@ -186,6 +186,91 @@ Each run audits **one** suite and opens **one draft PR** — the unit of work is
 
 The audit's own run artifacts (`reports/suite-audit/TCA-*/`) are gitignored pipeline working data — `.claude/rules/reports.md` has no report category for a test-case review, so the narrative ships in the PR body and the only durable artifact is the CSV diff.
 
+## Per-Case Lane Routing — a suite is no longer the unit of execution
+
+Lane routing used to be all-or-nothing: a suite reached the runner only if **every** non-empty
+`Steps` cell carried a runner op tag. That rule is right about its own risk — handing a runner a
+row it cannot parse manufactures BLOCKED cases that read as product failures — but its cost is
+measurable: **169 machine-ready rows in 10 suites** ride the browser lane because a handful of
+their siblings are prose. Suite `050d` sends 46 runner-native cases through a browser agent on
+account of the other 3; suite `087` occupies a browser slot to run **zero** browser cases (12
+machine + 3 explicitly `Manual`).
+
+**The bigger prize is verdict quality, not wall-clock.** At the measured ~29% artefactual-BLOCKED
+rate for long agent sessions (`layout-runner.ts`'s header records 47 of 161 cases BLOCKED by "cart
+contaminated by earlier cases in the same session"), roughly 54 of those 169 rows currently come
+back BLOCKED for reasons about *how* they ran. Those become real verdicts. The nine biggest mixed
+suites also shrink their agent session by 80–95%, which removes the long-session context decay
+that produces blanket-status JSON.
+
+Three commands, run in this order by `regression-orchestrator` Step 3:
+
+| Command | Does |
+|---|---|
+| `npm run suites:lanes -- <ID> --run-id <R> [--csv <resolved>]` | classify every case → `suite-{ID}-lanes.json` + `suite-{ID}-resolved.browser.csv` |
+| `npm run suites:machine -- <ID> --run-id <R>` | run the machine rows via `graphql-runner.ts --case` → `suite-{ID}-results.machine.json` |
+| `npm run suites:merge -- <ID> --run-id <R>` | fold the fragments → the canonical `suite-{ID}-results.json` |
+
+`npm run suites:lanes:all` surveys the corpus and writes nothing.
+
+**The classifier delegates to the executor's own parser.** `scripts/lib/case-classifier.ts` calls
+`parseSteps`/`validateStepBlocks` (the modules `graphql-runner.ts` itself uses) and
+`parseAssertions`/`classifyPredicateScoreability` (the modules that score its verdicts) — it does
+not pattern-match tags with a private regex, because a static verdict derived from a second
+similar-looking implementation is exactly how a classifier and a runtime drift apart. Reason codes
+are a closed vocabulary (`EX-002` no steps · `EX-003` invalid op structure · `EX-010` a step line
+the parser cannot type · `EX-011` no runner op · `EX-101` nothing scoreable to assert · `EX-102` an
+assertion the runner cannot score · `EX-200` explicitly `Manual`).
+
+Four rules make it safe rather than merely faster:
+
+- **Fail-closed in one direction only.** Any doubt routes to `browser`, which is the status quo —
+  so a classifier bug costs the saving, never a verdict. If `graphql-runner` still exits 2
+  (structure), `machine-lane.ts` **returns the case to the browser lane** and records the
+  disagreement in `errors[]`. That is cheap precisely because the machine lane runs FIRST, before
+  any agent is dispatched.
+- **ALL assertions must be scoreable, not one of them.** The runner's verdict is
+  `failed === 0 && results.length > 0`, so a case mixing one parseable predicate with three prose
+  ones would PASS on the strength of the one — a green earned by not understanding the rest. Same
+  "silence is never a pass" rule as `layout-runner.ts`, applied one step earlier. This is what
+  catches suite `050a`'s `CAT-GQL-131`, whose assertion reads
+  `data.products.sortings[0].name is non-null OR is null` — vacuously true.
+- **An explicit `Manual` is respected, never overruled.** It is the only positive use of
+  `Automation_Status` (which carries 23 distinct values corpus-wide, so it cannot route anything
+  else). `050h`'s `WISH-009` is the worked example; it lands in the results as `SKIPPED` with its
+  reason, never as a quiet absence.
+- **A legacy 11-column header is REFUSED (exit 2), never classified.** `parseSuite` maps fields
+  positionally, so on those 11 suites the legacy `Steps` lands in `Test_Data` and `Expected Result`
+  lands in `Steps` — routing would score real cases on the wrong columns. None of the 10 mixed
+  suites has that header, so refusing costs nothing.
+
+**Fragments plus one deterministic merger, never a shared file.** Once a suite's cases span two
+writers, a shared `suite-*-results.json` is a race — and the agent's own contract is "overwrite the
+whole file", so asking it to preserve another writer's rows is a rule it will break under context
+pressure, at which point a real failure disappears. So: one writer per fragment
+(`…-results.machine.json`, `…-results.browser.json`) and `scripts/lib/suite-results-merge.ts`.
+Its invariants, each unit-tested in `scripts/unit/suite-results-merge.test.ts`:
+
+1. **No case can be lost.** The planned set comes from the lanes file, not from the fragments — so a
+   lane that dies before writing surfaces as `BLOCKED` / `lane_lost: the <lane> lane did not report
+   this case`, instead of producing a smaller, greener, faster-looking suite.
+2. **No case can be counted twice.** The same id in two fragments is a hard error naming both, and
+   **nothing is written** — that means the split leaked.
+3. **Every row carries its `lane`**, and the envelope carries per-lane counts. Without it no
+   determinism trend can be read off history.
+4. **Counts are recomputed from the rows**, never summed from the fragment headers (a header is one
+   writer's claim about itself). A status outside PASS/FAIL/BLOCKED/SKIPPED stays untallied, so the
+   four counts summing to less than `totalCases` is how an incomplete suite stays visibly
+   incomplete.
+5. **Idempotent** — the orchestrator re-merges on every poll so the live dashboard is not frozen
+   while both lanes work. `completedAt` stays empty until every fragment closes.
+
+Determinism moves **9.3% → 13.3%** of the corpus (385 → 554 of 4,155 cases). It also pulls four
+cases OFF the fast path that are currently fed to a runner which cannot fully parse them — one of
+them, `050c`'s `ORD-GQL-TODO-001`, says so in its own steps: *"[MANUAL-BLOCKED] … Do NOT run via
+graphql-runner"*, and today the runner runs it and reports `EMPTY` → exit 1 → a FAIL on a
+placeholder row.
+
 ## Post-Run Results Triage — `/qa-triage-results`
 
 A regression run tells you *which* tests failed; **`/qa-triage-results [RUN_ID|latest] [--fix] [--verify]`** works out *why* each one failed and what to do. **Owned by `qa-lead-orchestrator`** (orchestrate-only Triage Orchestrator — delegates classification to `regression-triage-agent`, live verification to `qa-frontend/backend-expert`, test fixes to `/qa-review-tests`, bug drafts to `/qa-bug`; never edits a CSV, files a ticket, or calls `/qa-fix`). It reads a completed run under `reports/regression/{RUN_ID}/`, and — cloning the `/qa-monitoring` skeleton (collect → dedup → triage → live-verify → report → STOP) — classifies every FAIL into **real product bug** vs a **test defect** (`TEST_STEPS_DEFECT` / `ASSERTION_DEFECT` / `TEST_DATA_DEFECT` / `STALE_TEST`) vs `FLAKY` / `ENV` / `KNOWN_ISSUE`.

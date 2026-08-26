@@ -26,7 +26,7 @@ The second plugin is **`vc-perf`** (`plugins/vc-perf/`) — the three-layer perf
 
 ## Commands
 
-All runnable commands live in `package.json` `scripts` (153 of them) — read it rather than a copy here.
+All runnable commands live in `package.json` `scripts` (178 of them) — read it rather than a copy here.
 The `ci:*` family drives the pipelines; `npm run env:check` validates env vars before anything else.
 
 ## Environment
