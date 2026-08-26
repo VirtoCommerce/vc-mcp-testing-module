@@ -42,6 +42,18 @@ import { fileURLToPath } from "url";
 import { COLUMNS, parseSuite, serialiseRows, type Row } from "../test-cases/append-test-cases-to-suite.js";
 import type { CaseLane } from "../lib/suite-results-merge.js";
 
+/**
+ * tsx's CLI entry, invoked through `process.execPath`.
+ *
+ * NOT `spawnSync("npx", …)`: on Windows the executable is `npx.cmd`, so a bare "npx" ENOENTs
+ * and EVERY case comes back BLOCKED with `exited null` — a whole-lane outage that reads like
+ * an environment problem rather than a spawn bug (observed on REG-2026-08-26-1600: 29/29
+ * BLOCKED, 2ms each). Same trap, same fix as `scripts/unit/lane-planner.test.ts` and
+ * `scripts/test-data/author-fixtures.ts`; needs no shell, so a path containing a space
+ * cannot be re-split by one.
+ */
+const TSX_CLI = fileURLToPath(new URL("../../node_modules/tsx/dist/cli.mjs", import.meta.url));
+
 interface LanesFile {
   suiteId: string;
   suiteName?: string;
@@ -129,8 +141,15 @@ function main(): void {
   for (const id of machineIds) {
     const t0 = Date.now();
     const proc = spawnSync(
-      "npx",
-      ["tsx", "scripts/graphql/graphql-runner.ts", "--case", `${lanes.machineSourceCsv}:${id}`, "--run-id", runId],
+      process.execPath,
+      [
+        TSX_CLI,
+        "scripts/graphql/graphql-runner.ts",
+        "--case",
+        `${lanes.machineSourceCsv}:${id}`,
+        "--run-id",
+        runId,
+      ],
       { encoding: "utf-8", env: process.env },
     );
     const durationMs = Date.now() - t0;
