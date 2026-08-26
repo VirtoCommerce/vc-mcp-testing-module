@@ -75,12 +75,17 @@ export const UI_PARSER_VERSION = "1.0.0";
 /**
  * A locator the runner can hand to Playwright without guessing.
  *
- * `role`/`label`/`placeholder`/`text` come FIRST in the grammar on purpose. Measured against
- * vc-frontend@dev: only 113 cases corpus-wide mention `data-test-id` at all, and several
- * storefront controls render NO test id — `vc-input.vue` exposes `:data-test-id="testIdInput"`
- * but `sign-in-form.vue`, `sign-up.vue` and `search-bar.vue` never pass it, so the sign-in
- * email/password fields and all six sign-up inputs have none. A test-id-first grammar would be
- * unable to express the single most important flow in the suite.
+ * Six keys, none of them privileged. An earlier revision of this comment argued for
+ * role/name-first on the grounds that the sign-in and sign-up form controls "render no test id" —
+ * that was WRONG, and the error came from this repo's own selector generator reading only the
+ * `data-test-id` attribute and not the UI-kit `test-id-input` prop that those forms actually use.
+ * All of them carry a test id. See `.claude/rules/regression.md` §Storefront Selectors.
+ *
+ * What survives the correction is narrower and still worth encoding: prefer `testid=` where one
+ * exists, then `name=` (locale-independent), and reach for `label=`/`text=` last, because a label
+ * is an i18n key (`common.labels.email`) and the language selector is itself under test — so a
+ * label-based locator is one locale switch away from failing. `role=` stays for controls that are
+ * genuinely best addressed by their accessible role and name.
  */
 export type UiLocator =
   | { readonly kind: "role"; readonly role: string; readonly name?: string; readonly nth?: number }
@@ -88,6 +93,13 @@ export type UiLocator =
   | { readonly kind: "placeholder"; readonly text: string; readonly nth?: number }
   | { readonly kind: "text"; readonly text: string; readonly nth?: number }
   | { readonly kind: "testid"; readonly name: string; readonly known: boolean; readonly nth?: number }
+  /**
+   * The form control's `name` attribute. Locale-INDEPENDENT, which is why it is a first-class key
+   * rather than something an author has to spell as `css='[name="email"]'`: vc-frontend's inputs
+   * carry `name="email"`, `name="firstName"`, `name="organizationName"` while their labels are
+   * i18n keys, so a `name=` locator survives a language switch and a `label=` one does not.
+   */
+  | { readonly kind: "name"; readonly attr: string; readonly nth?: number }
   | { readonly kind: "css"; readonly selector: string; readonly nth?: number };
 
 /** ARIA roles the grammar accepts. Closed: an unknown role is a typo, not a new capability. */
@@ -98,7 +110,7 @@ const ROLES = new Set([
   "spinbutton", "switch", "menu", "menuitem", "menubar", "region", "group", "separator",
 ]);
 
-const LOCATOR_KEYS = ["role", "label", "placeholder", "text", "testid", "css"] as const;
+const LOCATOR_KEYS = ["role", "label", "placeholder", "text", "testid", "name", "css"] as const;
 
 /** `key='quoted value'` — single or double quotes, no escape handling (none needed; see tests). */
 const KV = /([a-z]+)\s*=\s*(?:'([^']*)'|"([^"]*)"|([^\s]+))/g;
@@ -140,9 +152,16 @@ export function parseLocator(text: string): LocatorParse {
     found.delete("nth");
   }
 
-  // `name=` is the modifier for `role=`, never a locator of its own.
-  const name = found.get("name");
-  found.delete("name");
+  // `name=` is overloaded on purpose: it is the accessible-name modifier when `role=` is present
+  // (`role=button name='Sign up'`), and a locator in its own right when it is not
+  // (`name='email'` → the form control's name attribute). Resolving the ambiguity by looking for
+  // `role=` keeps both readings available without a second keyword, and the two never co-occur in
+  // a way that could mean either: a role plus an accessible name is one control, and a bare name
+  // is one control.
+  const nameValue = found.get("name");
+  const nameIsRoleModifier = found.has("role");
+  const name = nameIsRoleModifier ? nameValue : undefined;
+  if (nameIsRoleModifier) found.delete("name");
 
   const keys = [...found.keys()].filter((k) => (LOCATOR_KEYS as readonly string[]).includes(k));
   const unknown = [...found.keys()].filter((k) => !(LOCATOR_KEYS as readonly string[]).includes(k));
@@ -169,6 +188,8 @@ export function parseLocator(text: string): LocatorParse {
       return { locator: { kind: "placeholder", text: value, ...(nth !== undefined ? { nth } : {}) } };
     case "text":
       return { locator: { kind: "text", text: value, ...(nth !== undefined ? { nth } : {}) } };
+    case "name":
+      return { locator: { kind: "name", attr: value, ...(nth !== undefined ? { nth } : {}) } };
     case "testid":
       // `known: false` means UNVERIFIED, not invalid — 19 bindings in vc-frontend are bare
       // expressions whose runtime value cannot be read statically, and 10 UI-kit components take

@@ -109,22 +109,25 @@ test("the REAL auth selectors are present — the pair the preflight doc got wro
 });
 
 test("the structurally impossible selectors are REJECTED — the whole point", () => {
-  // Each of these is asserted by a knowledge file today and matches nothing in the source:
-  // no static value and no template prefix. The first eight are the ENTIRE authentication
-  // surface the preflight document specifies — `[PRE:SIGNIN_AS]` / `[PRE:SIGNOUT]` and the
-  // sign-up provisioning flow all cite locators that cannot match.
+  // Each of these is asserted by a knowledge file today and matches nothing in the source: no
+  // static value, no template prefix, and no UI-kit test-id prop either.
+  //
+  // SIX entries were removed from this list on 2026-08-26 because they were never phantoms:
+  // sign-up-first-name-input, sign-up-email-input, sign-up-confirm-password-input,
+  // global-search-query-input, search-keyword-input and payment-method-selector are all declared
+  // via UI-kit props (`test-id-input=`, `test-id-dropdown=`), which the generator did not read.
+  // So this test was PINNING the generator's blind spot in place and calling it a finding — the
+  // most expensive shape of wrong, because it makes the error look verified. What remains below
+  // is genuinely absent, and note the pattern in it: the `main-layout.` and `sign-in-page.`
+  // entries are real controls under the WRONG PREFIX (the live ids are `account-menu`,
+  // `sign-out-button`, `email-input`, `password-input`, `login-button`), which is a different
+  // defect from "no test id exists" and needs a different fix in the case that cites it.
   const impossible = [
     "main-layout.top-header.account-menu-button",
     "main-layout.top-header.account-menu.sign-out-button",
     "sign-in-page.email-input",
     "sign-in-page.password-input",
     "sign-in-page.login-button",
-    "sign-up-first-name-input",
-    "sign-up-email-input",
-    "sign-up-confirm-password-input",
-    "global-search-query-input",
-    "search-keyword-input",
-    "payment-method-selector",
     "pickup-locations-modal",
   ];
   for (const p of impossible) {

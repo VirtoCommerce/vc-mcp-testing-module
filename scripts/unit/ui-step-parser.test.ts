@@ -82,7 +82,7 @@ test("locator: prose is rejected, and the error says what was expected", () => {
   const { locator, error } = parseLocator("the hero banner primary CTA");
   assert.equal(locator, undefined);
   assert.match(error ?? "", /no locator key found/);
-  assert.match(error ?? "", /role\|label\|placeholder\|text\|testid\|css/);
+  assert.match(error ?? "", /role\|label\|placeholder\|text\|testid\|name\|css/);
 });
 
 test("locator: an unknown test id is UNVERIFIED, not invalid", () => {
@@ -578,4 +578,50 @@ test("the tag decides the family, the operand decides whether it compiles", () =
     parseUiSteps(prose).some((s) => s.tag === "UNKNOWN"),
     "and still does not compile",
   );
+});
+
+// ---------------------------------------------------------------------------------------------
+// name= — overloaded on purpose, and locale-independent
+// ---------------------------------------------------------------------------------------------
+
+test("locator: bare name= is the form control's name attribute", () => {
+  // Locale-independent, which is the point: vc-frontend's inputs carry name="email" /
+  // name="firstName" while their labels are i18n keys, and the language selector is under test.
+  const { locator, error } = parseLocator("name='email'");
+  assert.equal(error, undefined);
+  assert.deepEqual(locator, { kind: "name", attr: "email" });
+});
+
+test("locator: name= beside role= is still the accessible-name modifier", () => {
+  const { locator } = parseLocator("role=button name='Sign up'");
+  assert.deepEqual(locator, { kind: "role", role: "button", name: "Sign up" });
+});
+
+test("locator: name= carries nth like any other key", () => {
+  assert.equal(parseLocator("name='email' nth=1").locator?.nth, 1);
+});
+
+test("locator: name= plus another locator key is still rejected", () => {
+  assert.match(parseLocator("name='email' css='.x'").error ?? "", /exactly one of/);
+});
+
+test("locator: the generated surface now covers the UI-kit prop form", () => {
+  // Regression for a generator gap that inverted a documented finding: 39 test ids reach the DOM
+  // through UI-kit props (test-id-input, test-id-dropdown) rather than the data-test-id
+  // attribute, and scanning only the attribute hid all of them — then the absence was written up
+  // as "sign-up.vue does not pass it", which is false. These five are prop-declared.
+  for (const id of [
+    "sign-up-password-input",
+    "sign-up-email-input",
+    "email-input",
+    "password-input",
+    "global-search-query-input",
+  ]) {
+    const { locator } = parseLocator(`testid='${id}'`);
+    assert.equal(
+      locator && "known" in locator ? locator.known : undefined,
+      true,
+      `${id} should be a known selector — it is declared via a UI-kit test-id prop`,
+    );
+  }
 });

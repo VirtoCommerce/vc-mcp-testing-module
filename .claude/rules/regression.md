@@ -277,8 +277,20 @@ placeholder row.
 `.claude/knowledge/execution/test-execution-preflight.md` hand-listed the storefront's
 `data-test-id` surface. Both were verified live on their capture dates and were correct then.
 Diffed against `vc-frontend@dev` (`17c99c7`, 2026-08-26): of the 78 distinct selectors they assert,
-**54 match exactly, 2 are plausible instantiations of a real template, 22 match nothing** — and
-**107 real selectors are undocumented**.
+most match exactly, a couple are plausible instantiations of a real template, and a minority match
+nothing — while over a hundred real selectors are undocumented.
+
+> **The precise split first published here (54 / 2 / 22) was measured before the generator read
+> the UI-kit prop form, so the "matches nothing" figure was an over-count by at least six.**
+> `sign-up-first-name-input`, `sign-up-email-input`, `sign-up-confirm-password-input`,
+> `global-search-query-input`, `search-keyword-input` and `payment-method-selector` were all real
+> the whole time — declared via `test-id-input=` / `test-id-dropdown=` rather than the
+> `data-test-id` attribute (see the two-ways bullet below). Reading both forms took the static
+> surface from 161 to **194**. The exact re-split is deliberately not restated: the original 78
+> was a careful hand harvest, and a fresh automated one picks up CSS classes, attribute names and
+> MCP server names, so a number from it would look more precise than it is. What is defensible and
+> load-bearing: the drift is real, the direction is right, and `isKnownSelector` is the check —
+> not any count written in prose.
 
 **The drift landed on the load-bearing document.** `test-execution-preflight.md`'s selector table
 specified the sign-in and sign-out controls, reached by `[PRE:SIGNIN_AS]` / `[PRE:SIGNOUT]` from
@@ -309,15 +321,26 @@ Four rules make it trustworthy rather than another list:
   literal is the transcription error this file exists to stop — and `filter-price` is in the docs.
   Conversely, `isKnownSelector("filter-price")` is **true**: it is a plausible instantiation, so
   calling it a phantom (as a naive diff against static values does) is the same overreach reversed.
-- **`isKnownSelector` false means UNVERIFIED, not invalid.** Nineteen bindings are bare expressions
-  (`:data-test-id="item.dataTestId"`) whose runtime value cannot be read statically, and ten UI-kit
-  components take an optional test-id prop. `UNRESOLVED_BINDINGS` records each with its reason and
-  location, so the gap is visible rather than silently absent.
-- **A missing test id is not a naming problem.** `vc-input.vue` renders
-  `:data-test-id="testIdInput"`, but `sign-in-form.vue`, `sign-up.vue` and `search-bar.vue` do not
-  pass it — so the sign-in email/password fields, all six sign-up inputs, and the search query input
-  render no test id at all. Those are located by label / `name` / role. No naming discipline
-  conjures an attribute that was never rendered.
+- **`isKnownSelector` false means UNVERIFIED, not invalid.** Twenty bindings are bare expressions
+  (`:data-test-id="item.dataTestId"`) whose runtime value cannot be read statically.
+  `UNRESOLVED_BINDINGS` records each with its reason and location, so the gap is visible rather
+  than silently absent.
+- **A test id reaches the DOM two ways, and reading only one of them is how a generator lies.**
+  There is the `data-test-id="literal"` **attribute**, and there is a UI-kit **prop**
+  (`test-id-input`, `test-id-dropdown`, …): `vc-input.vue` declares `testIdInput?: string` and
+  renders `:data-test-id="testIdInput"` on the inner `<input>`, so
+  `test-id-input="sign-up-password-input"` puts `data-test-id="sign-up-password-input"` in the DOM
+  — the prop value IS the rendered id, verbatim, and just as statically readable. The first version
+  of this generator scanned only the attribute, missing **39 real selectors** across the sign-in
+  form, the entire sign-up form, the search bar, the address form, the bank-card form and the
+  checkout method selectors — exactly the form controls a smoke suite drives. It then wrote the
+  absence up as a finding ("`sign-up.vue` does not pass it"), which was measurably false. Fixed
+  2026-08-26: 161 → **194** static ids, with a unit test pinning the prop coverage. A generator
+  that silently covers half its surface is the same failure as a hand-maintained list, only harder
+  to notice — which is the whole reason this section exists.
+- **Prefer a test id over a label.** A label is an i18n key (`common.labels.email`), so a
+  label-based locator is locale-dependent — and the language selector is itself under test. Where
+  no test id exists, `name="email"` is the next-best anchor because it is locale-independent too.
 
 **`data-testid` (no dash) does not exist.** `test-execution-preflight.md` used to say "a few legacy
 spots may use `data-testid` … either should work with Playwright locators". Measured across

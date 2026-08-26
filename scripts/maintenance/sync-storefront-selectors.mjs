@@ -141,6 +141,31 @@ const BOUND_RE = new RegExp(String.raw`:${ATTRIBUTE}="([^"]+)"`, "g");
 /** A template literal whose leading run is static: `filter-${x}` → prefix `filter-`. */
 const TEMPLATE_PREFIX_RE = /^`([^`$]*)\$\{/;
 
+/**
+ * `test-id-input="literal"` — a UI-kit PROP, not an attribute, and a second source of real
+ * rendered test ids that this generator originally missed entirely.
+ *
+ * Several UI-kit components take the test id as a prop and render it themselves:
+ * `vc-input.vue` declares `testIdInput?: string` and emits `:data-test-id="testIdInput"` on the
+ * inner `<input>`. So `test-id-input="sign-up-password-input"` puts
+ * `data-test-id="sign-up-password-input"` in the DOM — the prop value IS the rendered id,
+ * verbatim, and it is every bit as statically readable as the attribute form.
+ *
+ * Scanning only the attribute form cost 39 real selectors across the sign-in form, the whole
+ * sign-up form, the search bar, the address form, the bank-card form, and the checkout
+ * method selectors — i.e. exactly the form controls a smoke suite drives. Worse, the omission
+ * was then written up as a finding: the previous documentation stated that `sign-in-form.vue`,
+ * `sign-up.vue` and `search-bar.vue` "never pass it", which is measurably false — all three do.
+ * A generator that silently covers half its surface is the same failure as a hand-maintained
+ * list, just harder to notice.
+ *
+ * `test-id-dropdown`, `test-id-button`, … are the same shape, so the pattern accepts any
+ * `test-id-<word>` prop rather than enumerating the ones that happen to exist today.
+ */
+const PROP_STATIC_RE = /(?<![:\w-])test-id-[a-z]+="([^"]+)"/g;
+/** `:test-id-input="expr"` — bound prop; the value is an expression, same rules as BOUND_RE. */
+const PROP_BOUND_RE = /:test-id-[a-z]+="([^"]+)"/g;
+
 export function extractSelectors(files, readFile, rootForRel) {
   const staticNames = new Map(); // name -> first file that declares it
   const patterns = new Map(); // prefix -> {template, file}
@@ -150,13 +175,13 @@ export function extractSelectors(files, readFile, rootForRel) {
     const src = readFile(file);
     const rel = rootForRel ? file.slice(rootForRel.length).replace(/^[\\/]/, "").split("\\").join("/") : file;
 
-    for (const m of src.matchAll(STATIC_RE)) {
+    for (const m of [...src.matchAll(STATIC_RE), ...src.matchAll(PROP_STATIC_RE)]) {
       const name = m[1].trim();
       if (!name || name.includes("${")) continue;
       if (!staticNames.has(name)) staticNames.set(name, rel);
     }
 
-    for (const m of src.matchAll(BOUND_RE)) {
+    for (const m of [...src.matchAll(BOUND_RE), ...src.matchAll(PROP_BOUND_RE)]) {
       const expr = m[1].trim();
       const t = expr.match(TEMPLATE_PREFIX_RE);
       if (t && t[1]) {
