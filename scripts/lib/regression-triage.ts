@@ -271,6 +271,8 @@ interface RawCase {
   evidence: string;
   consoleErrors: string[];
   trace: string | null;
+  /** The case's own elapsed time, when the writer recorded one. See RawSuite's note. */
+  durationMs?: number;
 }
 
 interface RawSuite {
@@ -284,6 +286,15 @@ interface RawSuite {
   blocked: number;
   skipped: number;
   cases: RawCase[];
+  /**
+   * Envelope wall-clock. Both the agent contract (test-runner-agent.md Phase 1/5) and the lane
+   * merger already produce these, and dropping them here is why `estimatedMinutes` could not be
+   * recalibrated from 19 real runs: the history rows declared `duration_minutes` and nothing ever
+   * filled it in. The DATA was produced twice over — per case and per envelope — and discarded
+   * on the way into the row.
+   */
+  startedAt?: string;
+  completedAt?: string;
 }
 
 function normalizeSuiteRaw(raw: any, suiteIdFromFileName?: string): RawSuite {
@@ -302,6 +313,9 @@ function normalizeSuiteRaw(raw: any, suiteIdFromFileName?: string): RawSuite {
       evidence: parts.join(" — "),
       consoleErrors: Array.isArray(c.consoleErrors) ? c.consoleErrors.map(String) : [],
       trace: typeof c.trace === "string" && c.trace.trim() ? c.trace : null,
+      ...(Number.isFinite(Number(c.durationMs)) && Number(c.durationMs) >= 0
+        ? { durationMs: Number(c.durationMs) }
+        : {}),
     });
   }
   const tally = { pass: 0, fail: 0, blocked: 0, skipped: 0 };
@@ -338,6 +352,8 @@ function normalizeSuiteRaw(raw: any, suiteIdFromFileName?: string): RawSuite {
     blocked: recorded > 0 ? tally.blocked : Number(raw.blocked ?? 0),
     skipped: recorded > 0 ? tally.skipped : Number(raw.skipped ?? 0),
     cases,
+    ...(typeof raw.startedAt === "string" && raw.startedAt.trim() ? { startedAt: raw.startedAt } : {}),
+    ...(typeof raw.completedAt === "string" && raw.completedAt.trim() ? { completedAt: raw.completedAt } : {}),
   };
 }
 
@@ -704,6 +720,35 @@ export function mergeHistoryRows(rows: RunEntry[]): number {
  * from the run's suite-*-results.json (accurate case-level counts). Idempotent
  * per (runId, suiteId).
  */
+/**
+ * `duration_minutes` for a history row — the field that unblocks recalibrating
+ * `estimatedMinutes`, which is a hand-maintained constant this repo's own GOLDEN RULE forbids.
+ *
+ * WALL-CLOCK FIRST, and the distinction is not pedantic. The envelope span
+ * (`startedAt`→`completedAt`) includes setup, waits and the gaps between cases, which is exactly
+ * what `estimatedMinutes` is supposed to predict. The sum of per-case `durationMs` measures only
+ * time inside cases, so it systematically UNDER-states the thing being calibrated — using it
+ * where a span exists would bias every future estimate downward.
+ *
+ * Returns nothing at all when neither source is present. A `0` would read as "this suite ran
+ * instantly" and would then be averaged into the calibration as a real measurement, which is
+ * worse than a gap: an absent field is visibly absent, a zero is a lie that looks like data.
+ */
+export function durationField(s: {
+  startedAt?: string;
+  completedAt?: string;
+  cases: ReadonlyArray<{ durationMs?: number }>;
+}): { duration_minutes?: number } {
+  const start = s.startedAt ? Date.parse(s.startedAt) : NaN;
+  const end = s.completedAt ? Date.parse(s.completedAt) : NaN;
+  if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+    return { duration_minutes: Math.round(((end - start) / 60000) * 100) / 100 };
+  }
+  const summed = s.cases.reduce((n, c) => n + (Number.isFinite(c.durationMs) ? (c.durationMs as number) : 0), 0);
+  if (summed > 0) return { duration_minutes: Math.round((summed / 60000) * 100) / 100 };
+  return {};
+}
+
 export function appendSuiteHistory(runId: string, env: string, runDir: string): number {
   const suites = readRunSuites(runDir);
   // Date from the run id (REG-YYYY-MM-DD-HHMM) so trend ordering is chronological;
@@ -724,6 +769,7 @@ export function appendSuiteHistory(runId: string, env: string, runDir: string): 
       blocked: s.blocked,
       skipped: s.skipped,
       pass_rate: executed ? Math.round((s.passed / executed) * 10000) / 100 : 0,
+      ...durationField(s),
       mode: "interactive",
     };
   });
