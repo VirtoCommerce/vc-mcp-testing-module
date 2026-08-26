@@ -121,6 +121,7 @@
     "regression:reap:apply": "npx tsx scripts/regression/reap-stalled-run.ts --apply",
     "regression:plan": "npx tsx scripts/regression/plan-run.ts",
     "regression:select": "npx tsx scripts/regression/select-suites.ts",
+    "regression:recalibrate": "npx tsx scripts/regression/recalibrate-estimates.ts",
     "suites:sync": "npx tsx scripts/test-cases/sync-test-suites.ts",
     "suites:lint": "npx tsx scripts/test-cases/sync-test-suites.ts --check",
     "suites:append": "npx tsx scripts/test-cases/append-test-cases-to-suite.ts",
