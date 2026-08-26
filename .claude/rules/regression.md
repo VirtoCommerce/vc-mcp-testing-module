@@ -76,6 +76,18 @@ came to be documented for weeks after its CSV was deleted.
 
 - **Release suite**: none. The master release suite `080` (`_release/080-full-regression-release.csv`) was **retired on 2026-07-31** — its CSV was deleted in commit `9dd9f3e3` and the manifest entry plus the `release` selection were removed once it was found that `release` had been resolving to a missing file (running zero cases while reporting a valid selection). For a major release, use `full` (all 119 — the 126 manifest suites minus its 7 excludes) or a plan-driven `sprint` selection. `npm run suites:lint` now hard-fails on any declared-but-absent suite CSV, so this cannot recur silently.
 - **P0 suites**: 042 (Smoke), the four 078 siblings (Backend/API Smoke), 039 (CyberSource Payment), 044 (Security), 049 (Platform API)
+- **The split has empirical support beyond wall-clock, measured after the fact.** `history.json`
+  (108 suite rows, 19 runs, 3991 cases) shows BLOCKED rising with suite size: 13.5% at ≤15 cases,
+  17.9% at 16–40, 17.7% at 41–80, **28.6% at 81+**. `078` at 115 cases sat in the worst bucket;
+  four ~29-case siblings sit in the 17.9% one, so the split should recover ≈11 percentage points of
+  artefactual BLOCKED on the corpus's most-run selections. That is a stronger reason to have done it
+  than the 83 → 40 min it was justified by.
+  **A row-range split was also actually tried** — `REG-2026-08-03-1900` carries `078-p1/p2/p3` — and
+  it failed by TRUNCATION, not by dependency cascade: p1 accounted for 38 of 38 cases, p2 for 25 of
+  39, p3 for **8 of 38**, with only one BLOCKED between them. Cases that simply never reported are
+  the signature of a limit running out in order, which is the defect A1's derived caps exist to
+  remove. It is weak evidence against sharding as such; the case against that remains the 46
+  declared dependency edges and the unsatisfiable `[PRE:*]` gate.
 - **`078` is four sibling suites, and the reason generalizes.** It was one 115-case / 83-minute
   suite, which made it the ENTIRE critical path of both `smoke` and `critical`: the lane pool had
   nothing to pack, so the scheduler saved 0% there while saving 42% on `full`. Splitting it took
@@ -196,12 +208,24 @@ their siblings are prose. Suite `050d` sends 46 runner-native cases through a br
 account of the other 3; suite `087` occupies a browser slot to run **zero** browser cases (12
 machine + 3 explicitly `Manual`).
 
-**The bigger prize is verdict quality, not wall-clock.** At the measured ~29% artefactual-BLOCKED
-rate for long agent sessions (`layout-runner.ts`'s header records 47 of 161 cases BLOCKED by "cart
-contaminated by earlier cases in the same session"), roughly 54 of those 169 rows currently come
-back BLOCKED for reasons about *how* they ran. Those become real verdicts. The nine biggest mixed
-suites also shrink their agent session by 80–95%, which removes the long-session context decay
+**The bigger prize is verdict quality, not wall-clock.** Rows that ride a browser lane come back
+BLOCKED for reasons about *how* they ran — a contaminated cart, a drifted session — rather than
+about the product. Routing them to a runner turns those into real verdicts, and the nine biggest
+mixed suites shrink their agent session by 80–95%, which removes the long-session context decay
 that produces blanket-status JSON.
+
+> **Measured, 2026-08-26 — and it corrects the figure this paragraph used to quote.** The old
+> "~29% artefactual-BLOCKED" came from ONE run of suite 048b (47 of 161). That suite ran twice:
+> `REG-2026-07-14-0018` blocked **11.8%** and `REG-2026-07-24-2121` blocked **29.2%** — the same
+> 161 cases, 17 percentage points apart. So 29% was not a property of the suite, it was one run's
+> value, and the higher of two. Across all of `reports/regression/history.json` (108 suite rows,
+> 19 runs, 3991 cases) the BLOCKED rate is **19.9%**.
+>
+> The *mechanism* the figure was invoked for does hold, and more sharply than the headline: blocked
+> rate rises with suite size — **13.5%** (≤15 cases) · **17.9%** (16–40) · **17.7%** (41–80) ·
+> **28.6%** (81+). That gradient is the empirical case for splitting a large suite, independent of
+> wall-clock: 115 cases in one file sit in the 28.6% bucket, four ~29-case siblings in the 17.9%
+> one. Quote the gradient, not a single run.
 
 Three commands, run in this order by `regression-orchestrator` Step 3:
 
@@ -298,7 +322,8 @@ specified the sign-in and sign-out controls, reached by `[PRE:SIGNIN_AS]` / `[PR
 `main-layout.top-header.account-menu.sign-out-button` is now `sign-out-button`; the `main-layout.`
 prefix survives in exactly one unrelated place in the whole source. An agent looking for an element
 that is no longer rendered either fails the precondition or falls back to guessing by text — a live
-contributor to the measured ~29% artefactual-BLOCKED rate.
+contributor to the measured artefactual-BLOCKED rate (19.9% corpus-wide, 28.6% on suites of 81+
+cases — see the note under §Per-Case Lane Routing; the once-quoted flat 29% was a single run).
 
 So the surface is generated, not transcribed — the same shape as `tokens:sync`, and for the same
 reason (`.claude/rules/test-data.md` §GOLDEN RULE):

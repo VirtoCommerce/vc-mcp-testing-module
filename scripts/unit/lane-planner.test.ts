@@ -15,14 +15,55 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { COLUMNS, parseSuite } from "../test-cases/append-test-cases-to-suite.ts";
+import { COLUMNS, isCanonicalHeader, parseSuite } from "../test-cases/append-test-cases-to-suite.ts";
+import { classifySuiteCases } from "../lib/case-classifier.ts";
+import { loadManifest } from "../../ci/lib/suite-manifest.ts";
 import { evidenceFileFrom, failedAssertionFrom } from "../regression/machine-lane.ts";
 
 const scratch = mkdtempSync(join(tmpdir(), "lane-planner-"));
+
+/**
+ * Mixed suites, discovered from the corpus rather than named.
+ *
+ * A test that names a suite is a test that goes red when someone improves that suite — which is
+ * exactly what happened when 050h's four dead B2B cases were authored into the GraphQL grammar
+ * and took it from 29/4/1 to 33/0/1.
+ */
+function allMixedSuites(): Array<{ id: string; machine: number; browser: number; manual: number }> {
+  const out: Array<{ id: string; machine: number; browser: number; manual: number }> = [];
+  for (const suite of loadManifest().suites) {
+    if (!existsSync(suite.file)) continue;
+    const raw = readFileSync(suite.file, "utf-8");
+    if (!isCanonicalHeader(raw)) continue;
+    let rows;
+    try {
+      rows = parseSuite(raw).rows;
+    } catch {
+      continue;
+    }
+    const lanes = classifySuiteCases(rows as never);
+    if (lanes.machine.length > 0 && lanes.machine.length < rows.filter((r) => r.ID).length) {
+      out.push({
+        id: suite.id,
+        machine: lanes.machine.length,
+        browser: lanes.browser.length,
+        manual: lanes.manual.length,
+      });
+    }
+  }
+  return out;
+}
+
+/** The mixed suite with the largest browser fragment — the best exercise of the split. */
+function largestMixedSuite(): { id: string; machine: number; browser: number; manual: number } | null {
+  const mixed = allMixedSuites().filter((m) => m.browser > 0);
+  if (mixed.length === 0) return null;
+  return mixed.sort((a, b) => b.browser - a.browser || a.id.localeCompare(b.id))[0];
+}
 const PLANNER = join("scripts", "regression", "plan-lanes.ts");
 
 /**
@@ -66,7 +107,7 @@ test("an unknown suite id exits 1 rather than planning nothing silently", () => 
 
 // ---- planning a real suite --------------------------------------------------------
 
-test("050h plans 29 machine / 4 browser / 1 manual and writes both artefacts", () => {
+test("050h's plan is EXHAUSTIVE and writes both artefacts — counts derived, not pinned", () => {
   const dir = join(scratch, "050h");
   mkdirSync(dir, { recursive: true });
   const r = runCli(["050h", "--run-id", "TEST", "--out", dir, "--json"]);
@@ -82,8 +123,16 @@ test("050h plans 29 machine / 4 browser / 1 manual and writes both artefacts", (
     blockers: Array<{ id: string; codes: string[] }>;
   };
   assert.equal(lanes.suiteId, "050h");
-  assert.deepEqual(lanes.counts, { total: 34, machine: 29, browser: 4, manual: 1 });
-  assert.equal(lanes.planned.length, 34, "the plan must name every case — the merger trusts it");
+  // Counts are DERIVED from the plan, not pinned. This test used to assert 29/4/1, and it went
+  // red the moment 050h's four dead B2B cases were authored into the GraphQL grammar (33/0/1) —
+  // i.e. it failed on an improvement. What has to hold is that the split is exhaustive and
+  // self-consistent, because that is what the merger trusts: a case missing from the plan is
+  // reported BLOCKED/lane_lost rather than quietly dropped.
+  const { total, machine, browser, manual } = lanes.counts;
+  assert.equal(machine + browser + manual, total, "every case lands in exactly one lane");
+  assert.equal(lanes.planned.length, total, "the plan must name every case — the merger trusts it");
+  assert.ok(total > 0);
+  assert.ok(manual >= 1, "050h keeps its explicitly-Manual case (WISH-009), which is why it is the reference");
   assert.match(lanes.classifierVersion, /^\d+\.\d+\.\d+$/);
 
   // The machine lane runs the ORIGINAL csv: the runner resolves @td()/{{VAR}} itself, so an
@@ -96,21 +145,46 @@ test("050h plans 29 machine / 4 browser / 1 manual and writes both artefacts", (
 });
 
 test("the browser CSV carries the canonical header and exactly the browser rows", () => {
-  const dir = join(scratch, "050h-csv");
+  // Retargeted off 050h: authoring its four dead cases took it to zero browser rows, so this
+  // test would have been asserting the split path against a suite that no longer splits. Runs
+  // against whichever suite currently has the largest browser fragment, discovered rather than
+  // named, so it keeps exercising the real thing as the corpus moves.
+  const target = largestMixedSuite();
+  assert.ok(target, "no suite in the corpus is mixed — see the coverage guard below");
+
+  const dir = join(scratch, `${target.id}-csv`);
   mkdirSync(dir, { recursive: true });
-  const r = runCli(["050h", "--run-id", "TEST", "--out", dir]);
+  const r = runCli([target.id, "--run-id", "TEST", "--out", dir]);
   assert.equal(r.status, 0, r.stderr);
 
-  const csvPath = join(dir, "suite-050h-resolved.browser.csv");
+  const csvPath = join(dir, `suite-${target.id}-resolved.browser.csv`);
   const parsed = parseSuite(readFileSync(csvPath, "utf-8"));
   assert.deepEqual(parsed.header, COLUMNS, "the agent's own parser must accept this file");
-  assert.equal(parsed.rows.length, 4, "only the browser rows — the agent is handed a smaller file, not a filter rule");
 
-  const lanes = JSON.parse(readFileSync(join(dir, "suite-050h-lanes.json"), "utf-8")) as {
+  const lanes = JSON.parse(readFileSync(join(dir, `suite-${target.id}-lanes.json`), "utf-8")) as {
     planned: Array<{ id: string; lane: string }>;
   };
   const expected = lanes.planned.filter((p) => p.lane === "browser").map((p) => p.id).sort();
+  assert.ok(expected.length > 0, `${target.id} should have browser rows`);
+  // Only the browser rows: the agent is handed a smaller FILE, not a filter rule it has to obey.
   assert.deepEqual(parsed.rows.map((r) => r.ID).sort(), expected);
+  assert.equal(parsed.rows.length, expected.length);
+});
+
+test("COVERAGE GUARD: at least one suite is still mixed, or the split path is untested", () => {
+  // Applied to the test suite itself: as suites are authored into runner grammars, mixed suites
+  // disappear, and the per-case split would end up with no corpus case exercising it — passing
+  // silently while testing nothing. That is the failure this whole branch keeps closing, so it
+  // gets the same treatment here.
+  const mixed = allMixedSuites();
+  assert.ok(
+    mixed.length > 0,
+    "no mixed suite left in the corpus: retarget the split tests at a fixture, or retire the split",
+  );
+  assert.ok(
+    mixed.some((m) => m.browser > 0 && m.machine > 0),
+    "a suite with BOTH machine and browser rows is what the split and the merger need",
+  );
 });
 
 test("a suite with no browser rows writes no browser CSV and says so", () => {
