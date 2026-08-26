@@ -410,6 +410,59 @@ Rewriting assertions buys about **1 percentage point**; giving the browser lane 
 is what addresses the other 2,508. That reorders the plan: the authoring burn-down is a tail task,
 not the next step.
 
+## Change-Scoped Selection — not running a suite beats running it fast
+
+`npm run regression:select -- --repo <name> [--diff <range> | --changed-files <f> | --path <p>…]
+[--target <min>] [--json]` (core `scripts/lib/suite-selection.ts`, CLI
+`scripts/regression/select-suites.ts`) answers "which suites does this change need?" without an
+LLM. Measured on the real manifest: a single-module change selects ~24 of 127 suites, ~149
+predicted minutes against ~1010 for the whole corpus.
+
+**It exists to replace a hallucination.** `ci/run-full-cycle.ts` asked an agent to print
+`AFFECTED_SUITES: <ids>` and parsed it with a regex — and the `REG-2026-08-24-1806` notes carry 32
+claimed case ids that do not exist, each exactly the next sequential number after a real suite's
+maximum. A model asked to name ids names plausible ones. The selector cannot: every id it prints
+came out of `config/test-suites.json`, which is a unit-tested property. Phase 1 now uses the
+selector and reads the agent's line only to LOG a disagreement — an id the selector did not choose
+is either a hallucination or a mapping gap, and both want looking at rather than running on.
+
+Four rules, and the first inverts the discipline the rest of this file follows:
+
+- **It fails OPEN.** `case-classifier.ts` fails closed (doubt → the browser lane), because
+  claiming a case is machine-ready when it is not manufactures a BLOCKED that reads as a product
+  failure. Here the expensive direction reverses: an unnecessary suite costs its
+  `estimatedMinutes`, a missing one ships a regression. So doubt WIDENS — to the whole layer the
+  changed repo touches, with the unmatched paths reported in `unmappedPaths`.
+- **The complete signal is primary, the precise-looking one is a bonus.** `resolveSuiteSource`
+  yields modules for 117 of 127 suites but **repos for only 44**, because `reposForModule` reports
+  router-matched names only — `vc-frontend` names 7 suites while 53 carry `layer: frontend`. So
+  selection is driven by the manifest's own `domain`/`tags` vocabulary (present on every suite) and
+  the repo index only ADDS; it can never filter out a vocabulary hit. Gating the fail-open fallback
+  on the repo index having contributed was a real bug, caught by its own test: one hit from an
+  index that covers a third of the corpus is not evidence the index is complete.
+- **No hand-written path map.** `client-app/shared/checkout/…` → `checkout` because some suite is
+  tagged `checkout`; a `.NET` path is split on dots, `-`, `_`, CamelCase and the structural
+  `Module`/`Service`/`Controller` suffix, then matched EXACTLY (a prefix match would let `cart`
+  capture `cartridge`). A transcribed table would fail silently on a renamed directory — the
+  `.claude/rules/test-data.md` §GOLDEN RULE case, with a narrower selection as the failure mode.
+- **The risk floor is never trimmed.** P0 plus `critical-ui-scope` survive any `--target`, and an
+  unreachable target reports the overrun honestly instead of dropping the P0 gate. Everything the
+  target does drop is printed as **coverage debt**, the opposite of the budget guard that truncates
+  silently and reports the remainder as `blocked`.
+
+**An unplaceable change is refused, not guessed.** `ci/lib/affected-suites.ts` `placeChange` maps
+`module <name>` and `diff [range]`; a PR reference, a changelog version and a ticket key return
+**null**, so the caller keeps its configured `SUITE_SELECTION`. Resolving a PR's file list needs a
+GitHub call this module deliberately does not make, and an unplaceable change is exactly when a
+wrong-but-plausible selection is least likely to be questioned.
+
+**Not the default for anything, deliberately.** Whether a scoped selection catches what `full`
+catches is a question about MISSED regressions, and answering it needs run history that does not
+exist yet (`history.json` is un-ignored per A4, but no run has written one — so the history rule is
+a documented no-op and the CLI says so). Run it in shadow beside a periodic `full` for several
+cycles and compare what it would have skipped. Making it the default now would trade a measured
+cost for an unmeasured risk.
+
 ## Post-Run Results Triage — `/qa-triage-results`
 
 A regression run tells you *which* tests failed; **`/qa-triage-results [RUN_ID|latest] [--fix] [--verify]`** works out *why* each one failed and what to do. **Owned by `qa-lead-orchestrator`** (orchestrate-only Triage Orchestrator — delegates classification to `regression-triage-agent`, live verification to `qa-frontend/backend-expert`, test fixes to `/qa-review-tests`, bug drafts to `/qa-bug`; never edits a CSV, files a ticket, or calls `/qa-fix`). It reads a completed run under `reports/regression/{RUN_ID}/`, and — cloning the `/qa-monitoring` skeleton (collect → dedup → triage → live-verify → report → STOP) — classifies every FAIL into **real product bug** vs a **test defect** (`TEST_STEPS_DEFECT` / `ASSERTION_DEFECT` / `TEST_DATA_DEFECT` / `STALE_TEST`) vs `FLAKY` / `ENV` / `KNOWN_ISSUE`.
