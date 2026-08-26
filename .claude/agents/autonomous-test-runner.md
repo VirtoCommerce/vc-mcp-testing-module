@@ -156,13 +156,27 @@ SendMessage: to {{ORCHESTRATOR_NAME}}
 8. **Evidence** — **real FAIL only** (NOT `BLOCKED`/`SKIPPED`/`AMBIGUOUS`). PASS relies on HAR.
    - `browser_take_screenshot` **must** get an explicit full path `reports/regression/{{RUN_ID}}/screenshots/{TC-ID}-FAIL-{desc}.png` (naming per `.claude/rules/reports.md` §7) — **never a bare filename**, which resolves against the MCP server CWD (repo root) and drops loose PNGs there.
    - **Write a failure trace** (plain `Write`) to `reports/regression/{{RUN_ID}}/traces/{TC-ID}-FAIL-trace.json`, set the case's `trace` field to it. Capture, live: `networkFailures[]` (each 4xx/5xx + every 200 with GraphQL `errors[]` → `browser_network_request` for `{method,url,status,requestBodySnippet ≤500c,responseBodySnippet ≤1KB,graphqlErrors}`) and `consoleErrors[]` from `browser_console_messages` (level error) **with the full stack preserved and parsed** into `{level, message:<first line>, stack:[<frame>,…]}`. Add `failedAssertion`, `url`, `capturedAt`. **Redact** any Authorization header / token / password / PAN as `<redacted>` (gitignored, but the repo is public). Same shape as `test-runner-agent.md` §Failure trace file.
-9. **Record result** — PASS | FAIL | BLOCKED | SKIPPED — then **rewrite `{{OUTPUT_FILE}}` in place** (this case `PENDING` → verdict + evidence, summary counts refreshed). Overwrite the whole file; it is cheap and idempotent. Drives the live per-case dashboard.
+9. **Record result** — PASS | FAIL | BLOCKED | SKIPPED — then **append ONE line** to `reports/regression/{{RUN_ID}}/suite-{{SUITE_ID}}-cases.jsonl`:
+
+   ```
+   {"id":"CART-002","title":"Add to Cart - From Category List","status":"PASS","durationMs":41230,"notes":"","evidence":[],"trace":""}
+   ```
+
+   Append — do **not** rewrite `{{OUTPUT_FILE}}` mid-suite.
 
 **Do NOT send prose progress to orchestrator between tests beyond the announce.** Final summary only.
 
 ### Live incremental results (for the dashboard)
 
-The live HTML report re-reads `{{OUTPUT_FILE}}` each refresh, so cases appear one-by-one with live PASS/FAIL/BLOCKED/PENDING badges while the suite still runs. Pre-seed all cases `PENDING` (Phase 1 step 8), overwrite after every case (step 9), and keep the shape identical to Phase 6 — only `completedAt: ""` marks an in-flight file. Writing the file is a plain `Write`, not a browser action.
+The live HTML report shows cases flipping PASS/FAIL/BLOCKED/PENDING while the suite still runs.
+Pre-seed all cases `PENDING` ONCE (Phase 1 step 8), then **append** one JSONL line per case
+(step 9), and write the complete envelope once at Phase 6 with `completedAt` set and the counts
+recomputed from the case rows. The reporter folds the JSONL over the pre-seeded envelope while
+`completedAt` is `""`. Both writes are plain `Write`/append, not browser actions.
+
+> **Why append, not overwrite.** Rewriting a growing envelope after every case is **O(n²)**:
+> suite `050m` (119 cases) cost ~7,000 case-entry writes — roughly 285k output tokens spent on
+> bookkeeping instead of testing. Appending is O(n) and the dashboard is unchanged.
 
 ## Phase 3: Self-Recovery (before marking FAIL)
 

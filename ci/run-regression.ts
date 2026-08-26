@@ -21,8 +21,6 @@ import {
 import {
   BudgetLedger,
   runLanePool,
-  simulateBatchBarrierMakespan,
-  simulateMakespan,
   type LaneKind,
   type PoolSlot,
   type SchedulableSuite,
@@ -31,6 +29,8 @@ import { materializeLaneMcp } from "./lib/lane-mcp.ts";
 import { formatPreflightProblems, preflightManifest, type PreflightSuite } from "./lib/manifest-preflight.ts";
 import { runDeterministicSuite } from "./lib/deterministic-lane.ts";
 import { classifyLane, type LaneClassifiable } from "./lib/lane-classifier.ts";
+import { buildRunPlan, formatRunPlan } from "./lib/run-plan.ts";
+import { loadManifest, resolveSelection, selectionNames } from "./lib/suite-manifest.ts";
 
 // --- Configuration from environment variables ---
 //
@@ -82,6 +82,12 @@ const ENV_URLS: Record<string, { front: string; back: string }> = {
 };
 
 // --- Suite configuration (loaded from config/test-suites.json) ---
+//
+// The manifest types, selection expansion and multi-env filters now live in
+// `ci/lib/suite-manifest.ts`, shared with `scripts/regression/plan-run.ts`. They used to be a
+// local copy here, which meant the plan an operator was shown and the selection a run actually
+// executed were computed by two different pieces of code — and a plan that disagrees with its own
+// run is worse than no plan.
 
 /**
  * What the runner needs to know about a suite. Previously this carried only
@@ -105,62 +111,6 @@ export interface SuiteConfig {
   preferredBrowser?: string;
   /** Derived at manifest-sync time: the suite clicks, so it must never land on firefox. */
   clickDriven?: boolean;
-}
-
-interface ManifestSuite {
-  id: string;
-  name: string;
-  file: string;
-  domain: string;
-  layer: string;
-  concern: string;
-  priority: string;
-  testCount: number;
-  estimatedMinutes: number;
-  agent: string;
-  tags: string[];
-  storefrontProfile?: Array<"b2b" | "b2c" | "hybrid">;
-  requiresModules?: string[];
-  envRiskGate?: "dev" | "test" | "staging" | "production";
-  paymentProcessors?: string[];
-  /** Deterministic executor (e.g. `layout-runner`) — when set, no agent runs this suite. */
-  runner?: string;
-  /** Command the deterministic executor is invoked with (e.g. `npm run layout:run`). */
-  runnerCommand?: string;
-  /** Suite requires this browser server (cross-origin iframe suites 039/041 need Chromium). */
-  preferredBrowser?: string;
-  /** Derived by `suites:sync`: suite performs clicks, so firefox cannot run it. */
-  clickDriven?: boolean;
-}
-
-type WhereFilter = {
-  domain?: string;
-  layer?: string;
-  concern?: string;
-  priority?: string;
-  tag?: string;
-  tagAny?: string[];
-};
-
-type SelectionRule =
-  | { include: string[]; exclude?: string[] }
-  | { all: true; exclude?: string[] }
-  | { where: WhereFilter; include?: string[]; exclude?: string[] };
-
-interface Manifest {
-  _meta: { version: string; description: string; generated: string; totalSuites: number };
-  defaults: Record<string, unknown>;
-  browserPool: unknown[];
-  suites: ManifestSuite[];
-  selections: Record<string, SelectionRule>;
-}
-
-function loadManifest(): Manifest {
-  const manifestPath = join("config", "test-suites.json");
-  if (!existsSync(manifestPath)) {
-    throw new Error(`Suite manifest not found: ${manifestPath}`);
-  }
-  return JSON.parse(readFileSync(manifestPath, "utf-8")) as Manifest;
 }
 
 const manifest = loadManifest();
@@ -197,7 +147,6 @@ for (const suite of manifest.suites) {
 // committed template instead. Raising MAX_PARALLEL depends on this.
 
 // --- Validate required environment variables ---
-
 function validateEnv(): void {
   const required = ["ANTHROPIC_API_KEY"];
   const missing = required.filter((v) => !process.env[v]);
@@ -226,162 +175,30 @@ function validateEnv(): void {
   }
 }
 
+
 // --- Resolve suites from selection string ---
 
-function matchesWhere(suite: ManifestSuite, where: WhereFilter): boolean {
-  if (where.domain && suite.domain !== where.domain) return false;
-  if (where.layer && suite.layer !== where.layer) return false;
-  if (where.concern && suite.concern !== where.concern) return false;
-  if (where.priority && suite.priority !== where.priority) return false;
-  if (where.tag && !suite.tags.includes(where.tag)) return false;
-  if (where.tagAny && !where.tagAny.some((t) => suite.tags.includes(t))) return false;
-  return true;
-}
-
-function expandSelection(rule: SelectionRule): string[] {
-  // Order policy: include preserves author order; where/all use sorted suite order.
-  let ids: string[];
-  if ("include" in rule && !("where" in rule) && !("all" in rule)) {
-    ids = [...rule.include];
-  } else if ("all" in rule) {
-    ids = manifest.suites.map((s) => s.id);
-  } else if ("where" in rule) {
-    ids = manifest.suites.filter((s) => matchesWhere(s, rule.where)).map((s) => s.id);
-    if (rule.include) {
-      for (const id of rule.include) if (!ids.includes(id)) ids.push(id);
-    }
-  } else {
-    throw new Error(`Invalid selection rule: ${JSON.stringify(rule)}`);
-  }
-  if ("exclude" in rule && rule.exclude) {
-    const ex = new Set(rule.exclude);
-    ids = ids.filter((id) => !ex.has(id));
-  }
-  return ids;
-}
-
+/**
+ * Thin wrapper over the shared resolver: it reports problems, this decides to die on them.
+ * Identical selection semantics to `npm run regression:plan`, by construction.
+ */
 function resolveSuites(selection: string): string[] {
-  const rule = manifest.selections[selection];
-  let ids: string[];
-  if (rule) {
-    ids = expandSelection(rule);
-  } else {
-    // Comma-separated IDs like "01,02,03"
-    ids = selection.split(",").map((s) => s.trim().padStart(2, "0"));
+  const resolved = resolveSelection(manifest, selection);
 
-    const invalidIds = ids.filter((id) => !SUITE_MAP[id]);
-    if (invalidIds.length > 0) {
-      const validGroups = Object.keys(manifest.selections).filter((k) => !k.startsWith("_")).join(", ");
-      const validIds = Object.keys(SUITE_MAP).join(", ");
-      console.error(`Unknown suite ID(s): ${invalidIds.join(", ")}`);
-      console.error(`Valid selections: ${validGroups}`);
-      console.error(`Valid suite IDs: ${validIds}`);
-      process.exit(1);
-    }
+  if (resolved.unknownIds.length > 0) {
+    console.error(`Unknown suite ID(s): ${resolved.unknownIds.join(", ")}`);
+    console.error(`Valid selections: ${selectionNames(manifest).join(", ")}`);
+    console.error(`Valid suite IDs: ${Object.keys(SUITE_MAP).join(", ")}`);
+    process.exit(1);
   }
 
-  // Apply multi-env-aware filters (per feature/qa-agentic-standardization).
-  // Skip suites whose modules / storefront profile / env risk aren't satisfied
-  // by the active env. Each filter logs its skips so the user sees what was excluded.
-  return applyMultiEnvFilters(ids);
-}
-
-// --- Multi-env-aware suite filtering ---
-// Reads MODULES_ENABLED, STOREFRONT_PROFILE, ENV_RISK from the runtime env
-// (set by config.js or directly by CI). Empty/absent env values mean "no filter".
-
-const ENV_RISK_RANK: Record<string, number> = {
-  dev: 0,
-  test: 1,
-  staging: 2,
-  production: 3,
-};
-
-function applyMultiEnvFilters(ids: string[]): string[] {
-  const enabledModules = (process.env.MODULES_ENABLED || "")
-    .split(",")
-    .map((m) => m.trim())
-    .filter(Boolean);
-  const enabledProcessors = (process.env.PAYMENT_PROCESSORS_ENABLED || "")
-    .split(",")
-    .map((p) => p.trim().toLowerCase())
-    .filter(Boolean);
-  const activeProfile = (process.env.STOREFRONT_PROFILE || "").toLowerCase();
-  const activeRisk = (process.env.ENV_RISK || "dev").toLowerCase();
-  const activeRiskRank = ENV_RISK_RANK[activeRisk] ?? 0;
-
-  // Escape hatch for the envRiskGate: lets customer run admin-write suites
-  // against ENV_RISK=production. Honored via env var OR CLI flag (process.argv
-  // is checked once at module load so multiple calls don't re-parse).
-  const allowAdminWritesOnProd =
-    process.env.ALLOW_ADMIN_WRITES_ON_PROD === "true" ||
-    process.argv.includes("--allow-admin-writes-on-prod");
-  if (allowAdminWritesOnProd && activeRisk === "production") {
-    console.log(`[multi-env-filter] ⚠ --allow-admin-writes-on-prod active. Admin-write suites WILL run against production-risk env. Make sure you mean it.`);
+  if (resolved.skipped.length > 0) {
+    console.log(`[multi-env-filter] Skipped ${resolved.skipped.length} suite(s):`);
+    for (const s of resolved.skipped) console.log(`  - ${s.id}: ${s.reason}`);
   }
+  console.log(`[multi-env-filter] ${resolved.filterSummary}`);
 
-  const skipped: Array<{ id: string; reason: string }> = [];
-  const kept: string[] = [];
-
-  for (const id of ids) {
-    const suite = manifest.suites.find((s) => s.id === id);
-    if (!suite) {
-      kept.push(id); // unknown id — let downstream error handling take it
-      continue;
-    }
-
-    // Module gate: if MODULES_ENABLED is set and suite requires modules not in it, skip.
-    // Empty MODULES_ENABLED = no filter (run everything).
-    if (enabledModules.length > 0 && suite.requiresModules && suite.requiresModules.length > 0) {
-      const missing = suite.requiresModules.filter((m) => !enabledModules.includes(m));
-      if (missing.length > 0) {
-        skipped.push({ id, reason: `requires modules [${missing.join(", ")}] not in MODULES_ENABLED` });
-        continue;
-      }
-    }
-
-    // Storefront-profile gate: if STOREFRONT_PROFILE is set and suite declares profiles, must intersect.
-    if (activeProfile && suite.storefrontProfile && suite.storefrontProfile.length > 0) {
-      if (!suite.storefrontProfile.includes(activeProfile as "b2b" | "b2c" | "hybrid")) {
-        skipped.push({ id, reason: `storefrontProfile [${suite.storefrontProfile.join(", ")}] excludes active "${activeProfile}"` });
-        continue;
-      }
-    }
-
-    // Env-risk gate: suite refuses to run if active env risk exceeds the gate.
-    // Default gate = production (most permissive). Suite tagged "staging" refuses on production.
-    // Escape hatch: `ALLOW_ADMIN_WRITES_ON_PROD=true` env var (or --allow-admin-writes-on-prod
-    // CLI flag) overrides the gate. Use ONLY when you mean it; tagged-staging
-    // suites mutate production state.
-    const gate = (suite.envRiskGate || "production").toLowerCase();
-    const gateRank = ENV_RISK_RANK[gate] ?? 3;
-    if (activeRiskRank > gateRank && !allowAdminWritesOnProd) {
-      skipped.push({ id, reason: `envRiskGate "${gate}" exceeded by active ENV_RISK "${activeRisk}" (pass --allow-admin-writes-on-prod or set ALLOW_ADMIN_WRITES_ON_PROD=true to override)` });
-      continue;
-    }
-
-    // Payment-processor gate: if PAYMENT_PROCESSORS_ENABLED is set AND suite declares
-    // paymentProcessors, at least one must intersect. Empty env value = no filter.
-    if (enabledProcessors.length > 0 && suite.paymentProcessors && suite.paymentProcessors.length > 0) {
-      const overlap = suite.paymentProcessors.some((p) => enabledProcessors.includes(p.toLowerCase()));
-      if (!overlap) {
-        skipped.push({ id, reason: `paymentProcessors [${suite.paymentProcessors.join(", ")}] not in PAYMENT_PROCESSORS_ENABLED` });
-        continue;
-      }
-    }
-
-    kept.push(id);
-  }
-
-  if (skipped.length > 0) {
-    console.log(`[multi-env-filter] Skipping ${skipped.length} suite(s) due to env constraints:`);
-    for (const { id, reason } of skipped) {
-      console.log(`  - ${id}: ${reason}`);
-    }
-    console.log(`[multi-env-filter] Active env: TEST_ENV=${process.env.TEST_ENV || "(unset)"} ENV_RISK=${activeRisk} STOREFRONT_PROFILE=${activeProfile || "(any)"} MODULES_ENABLED=${enabledModules.length > 0 ? enabledModules.join(",") : "(all)"} PAYMENT_PROCESSORS_ENABLED=${enabledProcessors.length > 0 ? enabledProcessors.join(",") : "(all)"}`);
-  }
-
-  return kept;
+  return resolved.ids;
 }
 
 // --- Build the prompt for a suite ---
@@ -1185,35 +1002,34 @@ async function main() {
     deterministic: schedulable.filter((s) => s.lane === "deterministic"),
   };
 
-  const browserModel = simulateMakespan(byLane.browser, MAX_PARALLEL);
-  const fastpathModel = simulateMakespan(byLane.fastpath, MAX_PARALLEL_FASTPATH);
-  const deterministicModel = simulateMakespan(byLane.deterministic, MAX_PARALLEL_DETERMINISTIC);
-  PREDICTED_MAKESPAN_MINUTES =
-    Math.round(
-      Math.max(browserModel.makespanMinutes, fastpathModel.makespanMinutes, deterministicModel.makespanMinutes) * 100,
-    ) / 100;
-  const barrierMinutes = simulateBatchBarrierMakespan(byLane.browser, MAX_PARALLEL);
+  // ONE plan renderer, shared with `npm run regression:plan` (ci/lib/run-plan.ts). Keeping a
+  // second copy of the makespan math here is how the printed plan and the executed run drift.
+  const plan = buildRunPlan(
+    schedulable.map((s) => ({ ...s, description: s.config.description })),
+    { browser: MAX_PARALLEL, fastpath: MAX_PARALLEL_FASTPATH, deterministic: MAX_PARALLEL_DETERMINISTIC },
+    MAX_BUDGET_USD_OVERRIDE,
+  );
+  PREDICTED_MAKESPAN_MINUTES = plan.makespanMinutes;
 
   console.log("=== Virto Commerce CI Regression Runner ===");
   console.log(`Run ID: ${RUN_ID}`);
-  console.log(`Suite Selection: ${SUITE_SELECTION} (${validSuites.length} suites)`);
-  console.log(`Environment: ${TEST_ENVIRONMENT} | Model: ${MODEL}`);
+  console.log(`Selection: ${SUITE_SELECTION} | Environment: ${TEST_ENVIRONMENT} | Model: ${MODEL}`);
   console.log(
-    `Budget: $${globalBudget.toFixed(2)}${MAX_BUDGET_USD_OVERRIDE === null ? " (derived)" : " (override)"}`,
-  );
-  console.log(
-    `Caps: turns ${MAX_TURNS_OVERRIDE === null ? "derived per suite" : `forced ${MAX_TURNS_OVERRIDE}`}, ` +
+    `Caps: budget ${MAX_BUDGET_USD_OVERRIDE === null ? "derived" : "forced"}, ` +
+      `turns ${MAX_TURNS_OVERRIDE === null ? "derived per suite" : `forced ${MAX_TURNS_OVERRIDE}`}, ` +
       `timeout ${SUITE_TIMEOUT_MS_OVERRIDE === null ? "derived per suite" : `forced ${Math.round(SUITE_TIMEOUT_MS_OVERRIDE / 60000)}m`}`,
   );
-  console.log(
-    `Lanes: browser ${byLane.browser.length} suites @${MAX_PARALLEL} | ` +
-      `fastpath ${byLane.fastpath.length} @${MAX_PARALLEL_FASTPATH} | ` +
-      `deterministic ${byLane.deterministic.length} @${MAX_PARALLEL_DETERMINISTIC}`,
-  );
-  console.log(
-    `Predicted makespan: ${PREDICTED_MAKESPAN_MINUTES} min ` +
-      `(browser lane ${Math.round(browserModel.makespanMinutes)} min vs ${Math.round(barrierMinutes)} min under the old fixed-batch barrier)`,
-  );
+  console.log("");
+  console.log(formatRunPlan(plan));
+  console.log("");
+
+  // A cap that cannot let a suite finish is the defect the derived caps replaced. Refusing to
+  // dispatch is the point — the alternative is discovering it hours in, as a "failure".
+  if (plan.capAnomalies.length > 0) {
+    console.error("Refusing to dispatch: the caps above would guarantee truncation.");
+    process.exit(1);
+  }
+
   console.log(`Run dir: ${RUN_DIR}`);
   console.log("");
 

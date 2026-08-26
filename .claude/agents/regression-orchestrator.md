@@ -51,54 +51,123 @@ Suite selection (one of): `smoke` (042), `critical` (042,039,044,049), `sprint` 
 
    > **⚠ WATCHER OWNERSHIP — do NOT own the watcher if you are a dispatched sub-agent.** A sub-agent's background processes are reaped the moment its turn ends, but the run outlives it — so a watcher launched here dies mid-run and the dashboard freezes (stale HTML while `suite-*-results.json` keep updating). **The watcher must be owned by the PERSISTENT session that spans the whole run.** So: if you were dispatched via the Task tool by a top-level `/qa-regression` session, that session owns the watcher (per `commands/qa-regression.md` Step 3) — **do not launch it here** (a duplicate that will just die). Launch it here **only** when you ARE the top-level/persistent session (invoked directly, not as a sub-agent). Either way the owner must **self-heal**: while the run is `in_progress`, if `regression-report.html` mtime is >~60s stale, relaunch the watcher (or one-shot `npm run report:regression -- --run-id {RUN_ID}`).
 
-### Step 1.5: Categorize suites (browser vs. fast-path)
+### Step 1.5: Get the run plan (do NOT derive it by hand)
 
-For each resolved suite CSV (from Step 3 pre-dispatch), grep the Steps column for `[GQL-OP ` or `[GQL-EXEC `:
+Run **one command** and follow its output:
 
-| Detection | Category | Lane |
-|-----------|----------|------|
-| **Every** non-empty Steps cell contains `[GQL-OP ` or `[GQL-EXEC ` | **Runner-native GraphQL** | **Fast-path** — no browser slot |
-| Any row has `[GQL-OP ]` / `[GQL-EXEC]` AND any row has legacy `[NAV]`/`[ACT]`/`[GQL]` (UI tags) | **Mixed** | Browser pool (runner-native rows run via `test-runner-agent` Phase 0 fast path locally within the agent) |
-| No `[GQL-OP ]` / `[GQL-EXEC]` tags | **Browser-only** | Browser pool |
+```bash
+npm run regression:plan -- <selection> --json
+```
 
-Record the category per suite in `test-run-status.json` as `lane: "fast-path" | "browser"`. Fast-path suites do NOT compete for browser slots — they can run in parallel to any browser allocation.
+It returns, per lane, the suites to run in **dispatch order**, each with its case count, estimate,
+timeout, and any browser constraint. Exit code 1 means the selection cannot run as-is (unknown
+suite id, missing CSV, no executor, or a cap that would guarantee truncation) — **stop and report,
+do not improvise around it**.
 
-### Step 2: Browser Pool (3 slots — browser-lane suites only)
+**Why a command instead of doing this yourself.** Every part of this used to be hand-derived, and
+each part was got wrong at least once on the record:
 
-| Slot | Server | Fallback Chain |
-|------|--------|---------------|
-| 1 | `playwright-chrome` | → firefox → edge |
-| 2 | `playwright-firefox` | → chrome → edge |
-| 3 | `playwright-edge` | → chrome → firefox |
+- Lane classification by grepping CSVs. The rule is "every non-empty `Steps` cell carries a runner
+  op tag" — and it is stricter than it looks: suite `050d` has 46 runner-native cases out of 49, so
+  it belongs on the browser lane, because handing the other 3 to a runner that cannot parse them
+  manufactures BLOCKED cases that look like product failures. The command applies the rule from
+  `ci/lib/lane-classifier.ts`, which also knows that `[REST-OP]` counts (suite `050l` is
+  runner-native and a GraphQL-only test misses it).
+- The firefox rule, which lived as prose in three files. `playwright-firefox` **cannot click** on
+  this storefront or the Admin SPA. The plan marks each suite `NOT ON playwright-firefox` from the
+  manifest's derived `clickDriven` field. Note `[ACT]` alone does not mean clicking — suite `049`'s
+  37 `[ACT]` lines are all REST calls, and it IS firefox-safe.
+- Dispatch order, which was arbitrary.
 
-**Rules:** Round-robin assignment. Honor `preferredBrowser` from manifest. **Never assign two agents to the same server simultaneously.** Never use WebKit. **Fast-path suites bypass this pool entirely** — they run in a separate compute-only lane with unbounded parallelism (practical limit: 3-6 concurrent fast-path agents to avoid overwhelming `/graphql` or introspection cache refresh).
+Record each suite's lane in `test-run-status.json` as `lane: "browser" | "fastpath" | "deterministic"`.
+The three lanes do **not** share slots.
 
-### Step 3: Dispatch Sub-Agents in Parallel
+### Step 2: Lanes and slots
 
-**Pre-dispatch — resolve CSV once per suite (do NOT embed in prompt):**
+| Lane | Slots | Notes |
+|---|---|---|
+| **browser** | 3 — `playwright-chrome`, `playwright-firefox`, `playwright-edge` | fallback chain per `defaults.fallbackChain` |
+| **fastpath** | up to 4 concurrent | runner-native GraphQL/REST — **no browser slot at all** |
+| **deterministic** | up to 2 concurrent | a manifest `runner` (e.g. `048c` → `layout-runner`); it drives its own browser |
+
+**Slot rules:**
+
+- Never put two agents on the same browser server simultaneously.
+- **A suite the plan marks `NOT ON <server>` QUEUES for another slot — it is never downgraded onto
+  that server.** An idle lane is strictly cheaper than a firefox attempt on a clicking suite: the
+  click resolves the element and then times out on the actionability gate, so the whole attempt is
+  wasted and has to be redone. Confirmed six times independently.
+- A suite marked `REQUIRES <server>` (039/041 — cross-origin CyberSource iframes need Chromium)
+  waits for that server rather than taking a different one.
+- Never use WebKit.
+
+### Step 3: Dispatch — continuous refill, NOT fixed batches
+
+**Pre-dispatch, once per suite — resolve the CSV to disk, never into the prompt:**
+
 1. Read the suite CSV from the manifest's `file` path.
-2. Read `test-data/aliases.json`. For every `@td(ALIAS.field)` token in the CSV, read the referenced data CSV, filter to resolve the value, and substitute.
+2. Resolve every `@td(ALIAS.field)` token against `test-data/aliases.json` + the referenced data CSVs.
 3. Write the resolved CSV to `reports/regression/{RUN_ID}/suite-{ID}-resolved.csv`.
-4. Pass this resolved path as `{{SUITE_CSV_PATH}}` — the sub-agent reads it ONCE from disk. Never embed CSV content in the prompt.
+4. Pass that PATH as `{{SUITE_CSV_PATH}}`. **Never embed CSV content in a prompt** — suite `027` is
+   282 KB (~78k tokens) against a 200k window, and a single `browser_snapshot` costs 10-30k, so an
+   inlined suite starves the very evidence the run exists to collect.
 
-Dispatch up to 3 sub-agents per batch (matching browser slots) **from the browser lane**, PLUS up to 3 concurrent fast-path agents **from the fast-path lane** — the two lanes do not share slots. For each:
-- **subagent_type**: `agent` field from manifest (`qa-testing-expert`, `qa-frontend-expert`, `qa-backend-expert`)
-- **prompt**: Fill `agents/test-runner-agent.md` template with: `{{RUN_ID}}`, `{{SUITE_ID}}`, `{{SUITE_NAME}}`, `{{SUITE_CSV_PATH}}` (resolved path from step 3 above), `{{BROWSER_SERVER}}` (for browser lane; pass the value anyway for fast-path lane — the agent's Phase 0 will ignore it), `{{ENVIRONMENT_URL}}` (FRONT_URL), `{{BACKEND_URL}}` (BACK_URL), `{{OUTPUT_FILE}}` (`reports/regression/{RUN_ID}/suite-{ID}-results.json`). Keep the prompt lean — no extra prose, no knowledge pre-loading, no inline CSV.
-- **Fast-path suites:** the sub-agent's Phase 0 Mode Detection branches to the GraphQL Runner Fast Path (see `test-runner-agent.md`). The orchestrator does not need a separate template — a fast-path suite consumes CPU + network but not a browser slot.
+**Then dispatch by keeping every slot busy:**
 
-**Per-suite browser requirements:** If a suite defines `preferredBrowser` in the manifest (e.g., `playwright-chrome` for CyberSource suites 039/041), you MUST assign that browser slot regardless of round-robin distribution. If the preferred slot is unavailable, defer the suite to the next batch rather than using a different browser — falling back to Firefox/Edge will cause cross-origin iframe access failures (documented per suite in `browserRequirementReason`).
+1. Fill all free slots from the head of the lane's dispatch order (longest suite first).
+2. **The moment ONE suite finishes, immediately dispatch the next suite that the freed slot can
+   accept.** Do not wait for the others.
+3. If the freed slot cannot accept the head of the queue (a `NOT ON`/`REQUIRES` constraint), take
+   the first suite in the queue that it *can* accept, and leave the head for a slot that can.
+4. Repeat until the lane's queue is empty.
 
-Launch all 3 in a SINGLE message with 3 Agent tool calls for parallel execution.
+Run the three lanes concurrently — a fastpath suite must never wait on a browser slot.
 
-**Sub-agent reporting cap:** Sub-agents must return only the output-file path + one-line status. Discard any free-form prose sub-agents return — all detail lives in the JSON results file.
+> **This replaces fixed batches, and that is the single biggest wall-clock win available here.**
+> Dispatching in groups of 3 and waiting for the whole group means each group costs its SLOWEST
+> suite while the other two slots sit idle. Measured on the real manifest at 3 slots, `full`'s
+> browser lane is **21h 09m** under fixed batches and **14h 15m** under continuous refill + longest
+> first — a third of the run was pure waiting. `npm run regression:plan` prints both numbers, so
+> the comparison is checkable rather than asserted.
+>
+> Note where it does NOT help: `smoke` is two suites and `078` alone is the critical path, so
+> reordering saves nothing there. The plan honestly reports `0% saved` in that case.
+
+**Per sub-agent:**
+- **subagent_type**: the `agent` field from the manifest (`qa-testing-expert`, `qa-frontend-expert`,
+  `qa-backend-expert`).
+- **prompt**: fill the `agents/test-runner-agent.md` template with `{{RUN_ID}}`, `{{SUITE_ID}}`,
+  `{{SUITE_NAME}}`, `{{SUITE_CSV_PATH}}` (the resolved path from above), `{{BROWSER_SERVER}}`,
+  `{{LANE_ID}}` (the slot index — this is what selects the credential slot, see below),
+  `{{ENVIRONMENT_URL}}`, `{{BACKEND_URL}}`, `{{OUTPUT_FILE}}`
+  (`reports/regression/{RUN_ID}/suite-{ID}-results.json`). Keep the prompt lean — no extra prose,
+  no knowledge pre-loading, no inline CSV.
+- **`{{LANE_ID}}` is load-bearing.** `test-data/users/agent-user-pool.csv` has one credential slot
+  per lane, and there are only **3 seeded slots**. Two agents on one account produce
+  cross-contaminated sessions and BLOCKED cascades that read as product failures. Never reuse a
+  slot across two concurrent suites to squeeze in more parallelism — seed more accounts instead
+  (`npm run seed:company-users`).
+- **Deterministic-lane suites take no sub-agent at all.** Run the manifest's `runnerCommand`
+  (e.g. `npm run layout:run`) directly and map its exit code: `0` → pass, `1` → fail,
+  `2`/`3` → BLOCKED. It costs no tokens, no turns and no browser slot.
+
+**Sub-agent reporting cap:** sub-agents return only the output-file path and a one-line status.
+Discard any free-form prose — all detail belongs in the results files.
 
 ### Step 4: Monitor & Collect
 
-0. **On dispatch:** the moment a suite is dispatched in a batch, set its entry in `test-run-status.json` to `status: "running"` (with its assigned `browser`). This is what makes the live dashboard show `● RUNNING` for in-flight suites — do NOT wait until the batch completes to update.
-1. Wait for batch to complete
-2. Read output files, update `test-run-status.json`: set each finished suite to `status: "done"` and fill `pass`/`fail`/`blocked` from its `suite-{ID}-results.json`
-3. Free browser slots, check for failures needing retry
-4. Dispatch next batch of pending suites (mark them `running` per step 0)
+0. **On dispatch:** set that suite's entry in `test-run-status.json` to `status: "running"` with its
+   assigned `browser` and `lane`. Do this at dispatch, not at completion — it is what makes the live
+   dashboard show `● RUNNING`.
+1. **Wait for the FIRST suite to settle, not for a batch.** `Promise.race`-style: react to whichever
+   finishes first.
+2. Read that suite's results file, set it `status: "done"`, fill `pass`/`fail`/`blocked` from its
+   `suite-{ID}-results.json` (recomputing the counts from the case rows rather than trusting a
+   summary the agent wrote).
+3. Free its slot and **immediately dispatch the next eligible suite** (Step 3). Check whether the
+   finished suite needs a retry (Step 5) and, if so, put it back in the queue rather than blocking
+   the lane on it.
+4. Repeat until every lane's queue is empty and nothing is in flight.
 
 ### Step 5: Retry Logic
 

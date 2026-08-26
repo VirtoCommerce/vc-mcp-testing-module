@@ -342,6 +342,50 @@ function normalizeSuiteRaw(raw: any, suiteIdFromFileName?: string): RawSuite {
 }
 
 /** Read + de-duplicate the suite result files in a run dir (keep the richest per suite). */
+/**
+ * Fold the per-case append-only JSONL over a still-open envelope.
+ *
+ * The runner agents append one line per case to `suite-{ID}-cases.jsonl` and write the full
+ * `suite-{ID}-results.json` once at the end (the old contract rewrote the whole envelope after
+ * every case, which is O(n²) — suite 050m paid ~7,000 case-entry writes for it).
+ *
+ * That trade has one sharp edge, and this closes it: a run that is KILLED never reaches its final
+ * write, so its envelope is still the pre-seeded all-PENDING version. Without folding, triage on a
+ * killed run would see zero results where the old rewrite-per-case contract left real ones — a
+ * strict regression for exactly the runs most worth triaging. A completed envelope
+ * (`completedAt` set) is authoritative and is left alone.
+ */
+function foldCaseJsonl(raw: any, runDir: string, suiteId: string): void {
+  if (String(raw?.completedAt ?? "").trim() !== "") return;
+  const jsonlPath = join(runDir, `suite-${suiteId}-cases.jsonl`);
+  if (!existsSync(jsonlPath)) return;
+
+  const rows: any[] = [];
+  for (const line of readFileSync(jsonlPath, "utf-8").split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const row = JSON.parse(line);
+      if (row && typeof row.id === "string") rows.push(row);
+    } catch {
+      /* a torn last line is expected on a hard kill */
+    }
+  }
+  if (rows.length === 0) return;
+
+  const cases: any[] = Array.isArray(raw.testCases) ? raw.testCases : [];
+  const byId = new Map<string, any>();
+  for (const c of cases) if (typeof c?.id === "string") byId.set(c.id, c);
+  for (const row of rows) {
+    const existing = byId.get(row.id);
+    if (existing) Object.assign(existing, row, { title: row.title ?? existing.title });
+    else {
+      cases.push(row);
+      byId.set(row.id, row);
+    }
+  }
+  raw.testCases = cases;
+}
+
 export function readRunSuites(runDir: string): RawSuite[] {
   if (!existsSync(runDir)) return [];
   const files = readdirSync(runDir).filter((f) => /suite-.*results.*\.json$/i.test(f));
@@ -356,6 +400,7 @@ export function readRunSuites(runDir: string): RawSuite[] {
     }
     // `suite-050d-results.json` / `suite-042-trackA-batchB-results.json` → "050d" / "042"
     const fromName = /^suite-([^-]+)-/.exec(f)?.[1];
+    foldCaseJsonl(raw, runDir, String(raw?.suiteId ?? fromName ?? ""));
     const suite = normalizeSuiteRaw(raw, fromName);
     const cases = suite.cases.length;
     const mtime = statSync(full).mtimeMs;

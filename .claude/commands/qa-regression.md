@@ -137,22 +137,45 @@ Create `REG-YYYY-MM-DD-HHMM` and output directory `reports/regression/{RUN_ID}/`
    > - **Self-heal (check on every wake / task-notification while the run is `in_progress`):** if `regression-report.html`'s mtime is older than ~60s while `test-run-status.json` is still `in_progress` (or any `suite-*-results.json` still shows PENDING/running), the watcher has died — **relaunch it** (same command) or run the one-shot `npm run report:regression -- --run-id {RUN_ID}` to refresh, then relaunch the watcher. Do this without being asked.
    > - The watcher is a plain Node process; the durable owner is the main-loop `run_in_background` (it survives across turns and re-notifies on exit), never a Task-dispatched agent.
 
-### Step 4 — Dispatch Sub-Agents in Batches of 3
+### Step 4 — Get the plan, then dispatch with continuous refill
 
-**Record the run window start** — note the current timestamp before the first batch dispatch. The interval from here until the last batch completes defines the App Insights correlation window used in Step 5.5.
+**Record the run window start** — the current timestamp, before the first dispatch. From here until
+the last suite settles is the App Insights correlation window used in Step 5.5.
 
-With 3 browser slots (playwright-chrome, playwright-firefox, playwright-edge):
-1. Pick next 3 pending suites (P0 first, then P1, then P2)
-2. Assign each a browser slot
-3. Launch all 3 as parallel Task calls using the agent type from the manifest
-4. Fill in `agents/test-runner-agent.md` template with suite parameters
+1. **Get the plan** (do not derive lanes, order or browser constraints by hand):
+   ```bash
+   npm run regression:plan -- <selection> --json
+   ```
+   Exit code 1 = the selection cannot run as-is (unknown suite id, missing CSV, no executor, or a
+   cap that would guarantee truncation). Stop and report; do not improvise around it.
+
+2. **Dispatch in the plan's order, keeping every slot busy.** Three lanes that do not share slots:
+   `browser` (3 slots), `fastpath` (up to 4, no browser at all), `deterministic` (the manifest's
+   `runnerCommand`, no sub-agent and no tokens). Fill free slots from the head of each lane's
+   dispatch order; **the moment ONE suite finishes, dispatch the next suite the freed slot can
+   accept** — never wait for a group. A suite the plan marks `NOT ON <server>` queues for a
+   different slot rather than being downgraded onto it.
+
+3. Fill `agents/test-runner-agent.md` with the suite parameters, including **`{{LANE_ID}}`** — it
+   selects the credential slot, and there are only 3 seeded accounts, so two concurrent suites must
+   never share one.
+
+Full mechanics, including why each of these was a hand-derived decision that went wrong on the
+record: `.claude/agents/regression-orchestrator.md` Steps 1.5–4.
+
+> **Why not batches of 3.** Dispatching in fixed groups and waiting for the whole group means each
+> group costs its SLOWEST suite while the other slots idle. Measured on the real manifest:
+> `full`'s browser lane is **21h 09m** in fixed batches vs **14h 15m** with continuous refill and
+> longest-first order. `regression:plan` prints both, so it is checkable. (It does not help every
+> selection — `smoke` is two suites and `078` alone is the critical path; the plan says `0% saved`
+> there rather than pretending otherwise.)
 
 ### Step 5 — Monitor, Retry, Continue
-- Wait for batch to complete
-- Update status tracker
-- On failure: retry with next browser in fallback chain (max 2 retries)
-- Free browser slots and dispatch next batch
-- On environment unreachable: stop all remaining suites
+- **React to the first suite that settles, not to a batch.** Update the status tracker for that
+  suite, free its slot, and immediately dispatch the next eligible one.
+- On failure: retry with the next browser in the fallback chain (max 2 retries) — put the retry back
+  in the queue instead of blocking the lane on it.
+- On environment unreachable: stop all remaining suites.
 
 ### Step 5.5 — Correlate App Insights logs (run window)
 

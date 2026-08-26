@@ -124,7 +124,7 @@ For each case: emit the same `▶ Suite…` announce line as Phase 2 (before spa
 4. Navigate to `{{ENVIRONMENT_URL}}` on `{{BROWSER_SERVER}}`. Confirm load.
 5. Authenticate using slot credentials (personal or B2B, per suite type). Verify success.
 6. Record `startedAt` (ISO 8601). HAR capture is automatic — never disable.
-7. **Seed the live results file (for the dashboard).** Immediately write `{{OUTPUT_FILE}}` with the full Phase 5 envelope, `completedAt: ""`, and every planned case pre-listed as `{ "id": "<ID>", "title": "<Title>", "status": "PENDING" }`. This is what lets the live HTML dashboard show each case flip PASS/FAIL/BLOCKED **as it happens** (the orchestrator already flags the suite `running` in `test-run-status.json`; this file supplies the per-case detail). See **Live incremental results** below.
+7. **Seed the live results file — ONCE.** Write `{{OUTPUT_FILE}}` with the full Phase 5 envelope, `completedAt: ""`, and every planned case pre-listed as `{ "id": "<ID>", "title": "<Title>", "status": "PENDING" }`. This is the only time you write this file before Phase 5. Per-case updates go to the append-only JSONL instead — see **Live incremental results** below.
 
 If environment unreachable or auth fails → write all tests `BLOCKED`, populate `errors[]`, exit.
 
@@ -148,17 +148,36 @@ If environment unreachable or auth fails → write all tests `BLOCKED`, populate
         - Also record `failedAssertion`, page `url` at failure, and `capturedAt` (ISO).
         - **Redact secrets** before writing: replace any `Authorization` header, bearer token, password, or PAN with `<redacted>` (these traces are gitignored, but the repo is public — never persist a live token).
    - **PASS / BLOCKED / SKIPPED / AMBIGUOUS** → no screenshot, no trace (HAR covers PASS traffic; the others are not real failures).
-9. **Record result**: PASS | FAIL | BLOCKED | SKIPPED — then **rewrite `{{OUTPUT_FILE}}` in place** (update this case's entry from `PENDING` to its verdict + evidence, refresh the `passed`/`failed`/`blocked`/`skipped` counts). Overwrite the whole file each time; it is cheap and idempotent. This drives the live per-case dashboard.
+9. **Record result**: PASS | FAIL | BLOCKED | SKIPPED — then **append ONE line** to `reports/regression/{{RUN_ID}}/suite-{{SUITE_ID}}-cases.jsonl`:
+
+   ```
+   {"id":"CART-002","title":"Add to Cart - From Category List","status":"PASS","durationMs":41230,"notes":"","evidence":[],"trace":""}
+   ```
+
+   Append — do **not** rewrite `{{OUTPUT_FILE}}`, and do not buffer to the end. `durationMs` is this case's own elapsed time.
 
 **Do NOT narrate progress between tests beyond the announce line.** No prose summaries — results go to JSON.
 
 ### Live incremental results (for the dashboard)
 
-The live HTML report (`npm run report:regression:watch`) re-reads `{{OUTPUT_FILE}}` on every refresh, so the suite's cases appear one-by-one with live PASS/FAIL/BLOCKED/PENDING badges while the suite is still running — you do **not** wait for suite completion. Rules:
-- **Pre-seed** all planned cases as `PENDING` at Phase 1 step 7 (with `id` + `title`), `completedAt: ""`.
-- **After every case** (Phase 2 step 9) overwrite the file with that case updated and the summary counts recomputed. A case not yet reached stays `PENDING`.
-- Keep the shape identical to Phase 5 (same `testCases[]` envelope) — only `completedAt` being `""` distinguishes an in-flight file from the final one. At Phase 5 you set `completedAt` and write the final version; no separate format.
-- Writing the file is a plain `Write` — it is **not** a browser action and does not trip the real-user hook.
+The live HTML report (`npm run report:regression:watch`) shows each case flipping
+PASS/FAIL/BLOCKED/PENDING while the suite is still running — you do **not** wait for suite
+completion. Rules:
+
+- **Pre-seed once**: at Phase 1 step 7 write `{{OUTPUT_FILE}}` with all planned cases `PENDING`
+  and `completedAt: ""`.
+- **Per case: APPEND one line** to `suite-{{SUITE_ID}}-cases.jsonl` (Phase 2 step 9). Never rewrite
+  the envelope mid-suite.
+- **At Phase 5**: write `{{OUTPUT_FILE}}` once more, complete, with `completedAt` set and the counts
+  recomputed **from the case rows** (not tallied as you went). The reporter folds the JSONL over the
+  pre-seeded envelope while `completedAt` is `""`, so the dashboard is live either way.
+- Both writes are plain `Write`/append — **not** browser actions, so they do not trip the real-user hook.
+
+> **Why append instead of rewriting.** The old contract said to overwrite the whole envelope after
+> every case because it was "cheap and idempotent". Idempotent yes; cheap no — the payload grows
+> with each case, so writing it N times is **O(n²)**. Suite `050m` has 119 cases: ~7,000 case-entry
+> writes for one suite, ≈285k output tokens spent on bookkeeping rather than on testing. Appending
+> is O(n) and the dashboard behaves identically.
 
 ## Phase 3: Bug Entries (preliminary only)
 
