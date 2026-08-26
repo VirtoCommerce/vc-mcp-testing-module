@@ -91,8 +91,8 @@ test("totals include unroutable in the denominator", () => {
   // Otherwise determinism would be computed against a corpus that quietly excludes the cases
   // nothing can read — flattering, and wrong.
   const t = totals([
-    { id: "a", name: "", file: "", machine: 10, browser: 10, manual: 0, unroutable: 0, verdicts: [] },
-    { id: "b", name: "", file: "", machine: 0, browser: 0, manual: 0, unroutable: 20, verdicts: [] },
+    { id: "a", name: "", file: "", machine: 10, browser: 10, manual: 0, unroutable: 0, hasOwnRunner: false, verdicts: [] },
+    { id: "b", name: "", file: "", machine: 0, browser: 0, manual: 0, unroutable: 20, hasOwnRunner: false, verdicts: [] },
   ]);
   assert.equal(t.cases, 40);
   assert.equal(t.determinismPct, 25);
@@ -198,4 +198,27 @@ test("a suite whose machine cases fall to zero is still reported, not dropped fr
   // comparison the loss would read as "that suite was always browser".
   const { drops } = findDeterminismDrops([{ id: "087", machine: 0 }], new Map([["087", 12]]));
   assert.deepEqual(drops, [{ id: "087", was: 12, now: 0 }]);
+});
+
+test("a suite with its own runner is NOT counted as UI authoring backlog", () => {
+  // 048c declares `runner: layout-runner` and is already deterministic at the suite level, but
+  // its steps carry 29 [NAV] lines alongside the layout grammar ([VIEWPORT], [PROBE:*], [SNAP],
+  // [REFLOW]) — and [NAV] alone was enough to make the per-case family detector claim all 29 of
+  // its cases as UI work needing authoring. They need none. The manifest is the authority here,
+  // never the file's tags: the tags are exactly what produced the wrong answer.
+  const uiVerdict = {
+    id: "X-1",
+    lane: "browser" as const,
+    family: "ui" as const,
+    blockers: [{ code: "EX-010" as const, detail: "" }],
+  };
+  const withRunner = totals([
+    { id: "048c", name: "", file: "", machine: 0, browser: 1, manual: 0, unroutable: 0, hasOwnRunner: true, verdicts: [uiVerdict] },
+  ]);
+  assert.equal(withRunner.uiFamily, 0);
+
+  const without = totals([
+    { id: "042", name: "", file: "", machine: 0, browser: 1, manual: 0, unroutable: 0, hasOwnRunner: false, verdicts: [uiVerdict] },
+  ]);
+  assert.equal(without.uiFamily, 1);
 });

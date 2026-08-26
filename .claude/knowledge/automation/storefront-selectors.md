@@ -16,8 +16,16 @@ applicability_rationale: "vc-frontend stable selectors (data-test-id / role / ar
 > Call `isKnownSelector(name)` before trusting any selector below.
 >
 > Diffed against `vc-frontend@dev` (commit `17c99c7`): of the 78 distinct selectors these
-> knowledge files assert, **54 match the source exactly, 2 are plausible instantiations of a real
-> template pattern, and 22 match nothing at all** — while **107 real selectors are undocumented**.
+> knowledge files assert, most match the source exactly, a couple are plausible instantiations of a
+> real template pattern, and a minority match nothing — while over a hundred real selectors are
+> undocumented.
+>
+> **Correction (2026-08-26):** the precise split once published here (54 / 2 / 22) was measured
+> before the generator read the UI-kit **prop** form (`test-id-input=`, `test-id-dropdown=`), so
+> the "matches nothing" count was an over-count by at least six — `sign-up-first-name-input`,
+> `sign-up-email-input`, `sign-up-confirm-password-input`, `global-search-query-input`,
+> `search-keyword-input` and `payment-method-selector` were real all along. Reading both forms took
+> the static surface from 161 to **194**. Trust `isKnownSelector`, not a count in prose.
 >
 > **This is drift, not fabrication.** Every selector here was verified live on its capture date
 > with `querySelectorAll(...).length`, and was correct then. The storefront moved: the account

@@ -67,21 +67,35 @@ rate. Hence a generated module and a gate rather than another hand-verified tabl
 | Sign-out button (in the account popup) | `data-test-id="sign-out-button"` | `main-layout.top-header.account-menu.sign-out-button` |
 | Header root | `data-test-id="top-header"` | (unchanged — still correct) |
 | Sign-in page | URL `/sign-in` | (a URL, not a selector) |
-| Sign-in email field | **no test id** — locate by `name="email"` or the `common.labels.email` label | `sign-in-page.email-input` |
-| Sign-in password field | **no test id** — locate by `type="password"` or the `common.labels.password` label | `sign-in-page.password-input` |
+| Sign-in email field | `data-test-id="email-input"` (via the UI-kit `test-id-input` prop; `name="email"` also works and is locale-independent) | `sign-in-page.email-input` |
+| Sign-in password field | `data-test-id="password-input"` (via the `test-id-input` prop) | `sign-in-page.password-input` |
 | Sign-in submit | `data-test-id="login-button"` | `sign-in-page.login-button` |
 | Sign-in error | `data-test-id="sign-in-error-alert"` | — |
 | Registration link (on sign-in) | `data-test-id="sign-in-page.registration-button"` | — |
 | Sign-up page | URL `/sign-up` | (a URL, not a selector) |
-| Sign-up name / email / password fields | **no test id on any of the six inputs** — locate by label | `sign-up-first-name-input`, `sign-up-last-name-input`, `sign-up-email-input`, `sign-up-password-input`, `sign-up-confirm-password-input` |
+| Sign-up name / email / password fields | all eight DO carry one, via the `test-id-input` prop: `sign-up-first-name-input`, `sign-up-last-name-input`, `sign-up-email-input`, `sign-up-organization-name-input`, `sign-up-password-input`, `sign-up-confirm-password-input`, plus the two account-kind radios `sign-up-personal-registration-radio-button` / `sign-up-organization-registration-radio-button` | (these ids are REAL — an earlier revision of this table wrongly listed them as gone) |
 | Sign-up submit | `data-test-id="sign-up-submit-button"` | (unchanged — still correct) |
 | Sign-up error | pattern `` `sign-up-error-${error}-alert` `` — a PREFIX, never a whole literal | — |
 | Search submit | `data-test-id="global-search-apply-button"` | (unchanged) |
-| Search query input | **no test id** — the input dropped it; locate by role/placeholder | `global-search-query-input`, `search-keyword-input` |
+| Search query input | `data-test-id="global-search-query-input"` (via the `test-id-input` prop); the checkout address filter uses `search-keyword-input` | (both are REAL — wrongly listed as gone in an earlier revision) |
 | Cart page | URL `/cart` | (a URL, not a selector) |
 | Clear cart | `data-test-id="clear-cart-button"`, confirm `yes-button` / `no-button` | — |
 | Whoami (display name) | visible text inside the `account-menu` control. Personal: one display name. B2B single-org: `Org name / Member display name`. B2B multi-org: the ACTIVE org's name before the `/` | — |
 | Org switcher (B2B multi-org) | inside the account-menu popup, below the `Organizations` label: the current org is a checked radio, the others are buttons whose accessible name is the org name. Clicking one swaps context (cart reloads, many `/graphql` POSTs, **no** new `/connect/token` — one token spans orgs) | — |
+
+> **Correction, 2026-08-26 — four rows above used to say "no test id", and they were wrong.**
+> A test id reaches the DOM two ways, and the generator originally read only the first:
+> the `data-test-id="literal"` **attribute**, and a UI-kit **prop** (`test-id-input`,
+> `test-id-dropdown`, …). `vc-input.vue` declares `testIdInput?: string` and renders
+> `:data-test-id="testIdInput"` on the inner `<input>`, so `test-id-input="sign-up-password-input"`
+> puts `data-test-id="sign-up-password-input"` in the DOM — the prop value IS the rendered id.
+> Scanning only the attribute form hid **39 real selectors** across the sign-in form, the entire
+> sign-up form, the search bar, the address form, the bank-card form and the checkout method
+> selectors — precisely the form controls a smoke suite drives — and this table then recorded the
+> absence as a finding. `selectors:sync` now reads both forms (161 → 194 static ids) and a unit
+> test pins the prop coverage. Prefer the test id over a label: a label is an i18n key
+> (`common.labels.email`), so a label-based locator breaks the moment the locale changes, and the
+> language selector is itself under test.
 
 **The attribute is `data-test-id`. There is no `data-testid`.** This document previously said "a few
 legacy spots may use `data-testid` (no dash) … either should work with Playwright locators".

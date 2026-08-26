@@ -37,6 +37,7 @@ import {
   CLASSIFIER_VERSION,
   type BlockerCode,
   type CaseVerdict,
+  isUiReady,
 } from "../lib/case-classifier.js";
 import { loadManifest } from "../../ci/lib/suite-manifest.js";
 
@@ -49,6 +50,14 @@ interface SuiteReport {
   manual: number;
   /** Cases nothing can classify: the file carries a legacy header or will not parse. */
   unroutable: number;
+  /**
+   * The suite declares its own deterministic runner in the manifest (`runner: layout-runner`).
+   * Such a suite is ALREADY deterministic at the suite level, so its cases must not be counted
+   * into the UI-family backlog — `048c` uses the layout-runner grammar ([VIEWPORT], [PROBE:*],
+   * [SNAP], [REFLOW]) plus 29 [NAV] steps, and the [NAV] alone was enough to make the per-case
+   * family detector claim all 29 of its cases as UI work that needs authoring. They need none.
+   */
+  hasOwnRunner: boolean;
   verdicts: CaseVerdict[];
 }
 
@@ -70,8 +79,8 @@ const STEP_CODES: BlockerCode[] = ["EX-010", "EX-011", "EX-003", "EX-002"];
 const MIN_PER_ASSERTION_CASE = 4;
 const MIN_PER_STEP_CASE = 6;
 
-function analyseSuite(suite: { id: string; name: string; file: string }): SuiteReport {
-  const base = { id: suite.id, name: suite.name, file: suite.file };
+function analyseSuite(suite: { id: string; name: string; file: string; hasOwnRunner?: boolean }): SuiteReport {
+  const base = { id: suite.id, name: suite.name, file: suite.file, hasOwnRunner: suite.hasOwnRunner === true };
   if (!existsSync(suite.file)) {
     return { ...base, machine: 0, browser: 0, manual: 0, unroutable: 0, verdicts: [] };
   }
@@ -113,7 +122,14 @@ function analyseCorpus(): SuiteReport[] {
   for (const file of allSuiteCsvs()) {
     const declared = byFile.get(file);
     reports.push(
-      analyseSuite({ id: declared?.id ?? "(orphan)", name: declared?.name ?? file, file }),
+      analyseSuite({
+        id: declared?.id ?? "(orphan)",
+        name: declared?.name ?? file,
+        file,
+        // Read from the manifest, never guessed from the file's tags — the tags are exactly what
+        // fooled the family detector.
+        hasOwnRunner: Boolean((declared as { runner?: string } | undefined)?.runner),
+      }),
     );
   }
   return reports.sort((a, b) => b.machine - a.machine || a.id.localeCompare(b.id));
@@ -121,14 +137,27 @@ function analyseCorpus(): SuiteReport[] {
 
 function totals(reports: SuiteReport[]) {
   const t = { machine: 0, browser: 0, manual: 0, unroutable: 0 };
+  // Two numbers about the UI family, reported because they answer "what would a ui-runner buy"
+  // BEFORE one is built. `uiFamily` counts cases that drive a browser at all; `uiReady` counts
+  // the ones that already compile under the UI grammar and are waiting only on an executor.
+  // A `uiReady` of 0 alongside a large `uiFamily` says the bottleneck is authoring, not tooling —
+  // which is the opposite of what a runner-first plan assumes.
+  let uiFamily = 0;
+  let uiReady = 0;
   for (const r of reports) {
     t.machine += r.machine;
     t.browser += r.browser;
     t.manual += r.manual;
     t.unroutable += r.unroutable;
+    if (r.hasOwnRunner) continue; // already deterministic — not UI backlog
+    for (const v of r.verdicts) {
+      if (v.family !== "ui") continue;
+      uiFamily++;
+      if (isUiReady(v)) uiReady++;
+    }
   }
   const cases = t.machine + t.browser + t.manual + t.unroutable;
-  return { ...t, cases, determinismPct: cases > 0 ? (t.machine / cases) * 100 : 0 };
+  return { ...t, cases, uiFamily, uiReady, determinismPct: cases > 0 ? (t.machine / cases) * 100 : 0 };
 }
 
 /** Cases whose ONLY blockers are assertion-side, vs step-side, vs both. */
@@ -311,7 +340,13 @@ function main(): void {
     `${t.cases} cases across ${reports.length} suites: ${t.machine} machine · ${t.browser} browser · ` +
       `${t.manual} manual · ${t.unroutable} unroutable`,
   );
-  console.log(`Determinism: ${t.determinismPct.toFixed(1)}%\n`);
+  console.log(`Determinism: ${t.determinismPct.toFixed(1)}%`);
+  // Reported unconditionally, including when uiReady is 0: a zero here IS the finding.
+  console.log(
+    `UI family: ${t.uiFamily} case(s) drive a browser \u00b7 ${t.uiReady} already compile under the ` +
+      `UI grammar (awaiting a ui-runner). ${t.uiReady === 0 ? "Zero means the bottleneck is authoring, not the runner." : ""}`,
+  );
+  console.log("");
 
   console.log(`  suite   machine  browser  manual  unroutable  name`);
   for (const r of reports) {

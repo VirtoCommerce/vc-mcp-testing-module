@@ -282,7 +282,7 @@ export function auditStaleness(rows: Row[], now: Date, staleDays = DEFAULT_STALE
  * requirements as plain-text preconditions." So they are deliberately NOT in this set —
  * add one here only when a runner actually implements it.
  */
-const PRE_PRIMITIVES = new Set([
+export const PRE_PRIMITIVES = new Set([
   "SIGNOUT",
   "SIGNIN_AS",
   "SWITCH_ORG",

@@ -277,8 +277,20 @@ placeholder row.
 `.claude/knowledge/execution/test-execution-preflight.md` hand-listed the storefront's
 `data-test-id` surface. Both were verified live on their capture dates and were correct then.
 Diffed against `vc-frontend@dev` (`17c99c7`, 2026-08-26): of the 78 distinct selectors they assert,
-**54 match exactly, 2 are plausible instantiations of a real template, 22 match nothing** — and
-**107 real selectors are undocumented**.
+most match exactly, a couple are plausible instantiations of a real template, and a minority match
+nothing — while over a hundred real selectors are undocumented.
+
+> **The precise split first published here (54 / 2 / 22) was measured before the generator read
+> the UI-kit prop form, so the "matches nothing" figure was an over-count by at least six.**
+> `sign-up-first-name-input`, `sign-up-email-input`, `sign-up-confirm-password-input`,
+> `global-search-query-input`, `search-keyword-input` and `payment-method-selector` were all real
+> the whole time — declared via `test-id-input=` / `test-id-dropdown=` rather than the
+> `data-test-id` attribute (see the two-ways bullet below). Reading both forms took the static
+> surface from 161 to **194**. The exact re-split is deliberately not restated: the original 78
+> was a careful hand harvest, and a fresh automated one picks up CSS classes, attribute names and
+> MCP server names, so a number from it would look more precise than it is. What is defensible and
+> load-bearing: the drift is real, the direction is right, and `isKnownSelector` is the check —
+> not any count written in prose.
 
 **The drift landed on the load-bearing document.** `test-execution-preflight.md`'s selector table
 specified the sign-in and sign-out controls, reached by `[PRE:SIGNIN_AS]` / `[PRE:SIGNOUT]` from
@@ -309,15 +321,26 @@ Four rules make it trustworthy rather than another list:
   literal is the transcription error this file exists to stop — and `filter-price` is in the docs.
   Conversely, `isKnownSelector("filter-price")` is **true**: it is a plausible instantiation, so
   calling it a phantom (as a naive diff against static values does) is the same overreach reversed.
-- **`isKnownSelector` false means UNVERIFIED, not invalid.** Nineteen bindings are bare expressions
-  (`:data-test-id="item.dataTestId"`) whose runtime value cannot be read statically, and ten UI-kit
-  components take an optional test-id prop. `UNRESOLVED_BINDINGS` records each with its reason and
-  location, so the gap is visible rather than silently absent.
-- **A missing test id is not a naming problem.** `vc-input.vue` renders
-  `:data-test-id="testIdInput"`, but `sign-in-form.vue`, `sign-up.vue` and `search-bar.vue` do not
-  pass it — so the sign-in email/password fields, all six sign-up inputs, and the search query input
-  render no test id at all. Those are located by label / `name` / role. No naming discipline
-  conjures an attribute that was never rendered.
+- **`isKnownSelector` false means UNVERIFIED, not invalid.** Twenty bindings are bare expressions
+  (`:data-test-id="item.dataTestId"`) whose runtime value cannot be read statically.
+  `UNRESOLVED_BINDINGS` records each with its reason and location, so the gap is visible rather
+  than silently absent.
+- **A test id reaches the DOM two ways, and reading only one of them is how a generator lies.**
+  There is the `data-test-id="literal"` **attribute**, and there is a UI-kit **prop**
+  (`test-id-input`, `test-id-dropdown`, …): `vc-input.vue` declares `testIdInput?: string` and
+  renders `:data-test-id="testIdInput"` on the inner `<input>`, so
+  `test-id-input="sign-up-password-input"` puts `data-test-id="sign-up-password-input"` in the DOM
+  — the prop value IS the rendered id, verbatim, and just as statically readable. The first version
+  of this generator scanned only the attribute, missing **39 real selectors** across the sign-in
+  form, the entire sign-up form, the search bar, the address form, the bank-card form and the
+  checkout method selectors — exactly the form controls a smoke suite drives. It then wrote the
+  absence up as a finding ("`sign-up.vue` does not pass it"), which was measurably false. Fixed
+  2026-08-26: 161 → **194** static ids, with a unit test pinning the prop coverage. A generator
+  that silently covers half its surface is the same failure as a hand-maintained list, only harder
+  to notice — which is the whole reason this section exists.
+- **Prefer a test id over a label.** A label is an i18n key (`common.labels.email`), so a
+  label-based locator is locale-dependent — and the language selector is itself under test. Where
+  no test id exists, `name="email"` is the next-best anchor because it is locale-independent too.
 
 **`data-testid` (no dash) does not exist.** `test-execution-preflight.md` used to say "a few legacy
 spots may use `data-testid` … either should work with Playwright locators". Measured across
@@ -386,6 +409,59 @@ GraphQL-shaped case.
 Rewriting assertions buys about **1 percentage point**; giving the browser lane a runner of its own
 is what addresses the other 2,508. That reorders the plan: the authoring burn-down is a tail task,
 not the next step.
+
+## Change-Scoped Selection — not running a suite beats running it fast
+
+`npm run regression:select -- --repo <name> [--diff <range> | --changed-files <f> | --path <p>…]
+[--target <min>] [--json]` (core `scripts/lib/suite-selection.ts`, CLI
+`scripts/regression/select-suites.ts`) answers "which suites does this change need?" without an
+LLM. Measured on the real manifest: a single-module change selects ~24 of 127 suites, ~149
+predicted minutes against ~1010 for the whole corpus.
+
+**It exists to replace a hallucination.** `ci/run-full-cycle.ts` asked an agent to print
+`AFFECTED_SUITES: <ids>` and parsed it with a regex — and the `REG-2026-08-24-1806` notes carry 32
+claimed case ids that do not exist, each exactly the next sequential number after a real suite's
+maximum. A model asked to name ids names plausible ones. The selector cannot: every id it prints
+came out of `config/test-suites.json`, which is a unit-tested property. Phase 1 now uses the
+selector and reads the agent's line only to LOG a disagreement — an id the selector did not choose
+is either a hallucination or a mapping gap, and both want looking at rather than running on.
+
+Four rules, and the first inverts the discipline the rest of this file follows:
+
+- **It fails OPEN.** `case-classifier.ts` fails closed (doubt → the browser lane), because
+  claiming a case is machine-ready when it is not manufactures a BLOCKED that reads as a product
+  failure. Here the expensive direction reverses: an unnecessary suite costs its
+  `estimatedMinutes`, a missing one ships a regression. So doubt WIDENS — to the whole layer the
+  changed repo touches, with the unmatched paths reported in `unmappedPaths`.
+- **The complete signal is primary, the precise-looking one is a bonus.** `resolveSuiteSource`
+  yields modules for 117 of 127 suites but **repos for only 44**, because `reposForModule` reports
+  router-matched names only — `vc-frontend` names 7 suites while 53 carry `layer: frontend`. So
+  selection is driven by the manifest's own `domain`/`tags` vocabulary (present on every suite) and
+  the repo index only ADDS; it can never filter out a vocabulary hit. Gating the fail-open fallback
+  on the repo index having contributed was a real bug, caught by its own test: one hit from an
+  index that covers a third of the corpus is not evidence the index is complete.
+- **No hand-written path map.** `client-app/shared/checkout/…` → `checkout` because some suite is
+  tagged `checkout`; a `.NET` path is split on dots, `-`, `_`, CamelCase and the structural
+  `Module`/`Service`/`Controller` suffix, then matched EXACTLY (a prefix match would let `cart`
+  capture `cartridge`). A transcribed table would fail silently on a renamed directory — the
+  `.claude/rules/test-data.md` §GOLDEN RULE case, with a narrower selection as the failure mode.
+- **The risk floor is never trimmed.** P0 plus `critical-ui-scope` survive any `--target`, and an
+  unreachable target reports the overrun honestly instead of dropping the P0 gate. Everything the
+  target does drop is printed as **coverage debt**, the opposite of the budget guard that truncates
+  silently and reports the remainder as `blocked`.
+
+**An unplaceable change is refused, not guessed.** `ci/lib/affected-suites.ts` `placeChange` maps
+`module <name>` and `diff [range]`; a PR reference, a changelog version and a ticket key return
+**null**, so the caller keeps its configured `SUITE_SELECTION`. Resolving a PR's file list needs a
+GitHub call this module deliberately does not make, and an unplaceable change is exactly when a
+wrong-but-plausible selection is least likely to be questioned.
+
+**Not the default for anything, deliberately.** Whether a scoped selection catches what `full`
+catches is a question about MISSED regressions, and answering it needs run history that does not
+exist yet (`history.json` is un-ignored per A4, but no run has written one — so the history rule is
+a documented no-op and the CLI says so). Run it in shadow beside a periodic `full` for several
+cycles and compare what it would have skipped. Making it the default now would trade a measured
+cost for an unmeasured risk.
 
 ## Post-Run Results Triage — `/qa-triage-results`
 

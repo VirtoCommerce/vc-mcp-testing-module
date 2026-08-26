@@ -56,6 +56,7 @@ import {
   blockerHistogram,
   classifySuiteCases,
   CLASSIFIER_VERSION,
+  type BlockerCode,
   type CaseLane,
   type ClassifiableRow,
 } from "../../scripts/lib/case-classifier.js";
@@ -247,7 +248,7 @@ function main(): void {
   if (lanes.blockers.length > 0) {
     console.log(`\nWhy the rest are not machine-executable (cases per code):`);
     const hist = blockerHistogram(
-      lanes.blockers.map((b) => ({ id: b.id, lane: "browser" as CaseLane, blockers: b.codes.map((code) => ({ code: code as never, detail: "" })) })),
+      lanes.blockers.map((b) => ({ blockers: b.codes.map((code) => ({ code: code as BlockerCode })) })),
     );
     for (const h of hist) console.log(`  ${h.code}  ${h.count}`);
   }

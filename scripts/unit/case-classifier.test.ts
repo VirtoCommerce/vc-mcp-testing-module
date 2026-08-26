@@ -9,15 +9,16 @@
 // Run: `npx tsx --test scripts/unit/case-classifier.test.ts` / `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import {
   blockerHistogram,
   classifyCase,
   classifySuiteCases,
   CLASSIFIER_VERSION,
+  isUiReady,
   type ClassifiableRow,
 } from "../lib/case-classifier.ts";
-import { parseSuite } from "../test-cases/append-test-cases-to-suite.ts";
+import { isCanonicalHeader, parseSuite } from "../test-cases/append-test-cases-to-suite.ts";
 import { loadManifest } from "../../ci/lib/suite-manifest.ts";
 import { classifyLane } from "../../ci/lib/lane-classifier.ts";
 
@@ -80,12 +81,28 @@ test("EX-002: an empty Steps cell is browser, never machine", () => {
   assert.equal(classifyCase(machineRow({ Steps: "" })).lane, "browser");
 });
 
-test("EX-011: browser prose with no runner op stays on the browser lane", () => {
+test("browser prose stays on the browser lane — whichever grammar judges it", () => {
+  // This input has [NAV]/[ACT] drivers, so since classifier 1.1.0 it is judged by the UI grammar
+  // and blocks on its prose operands (EX-010/EX-102) rather than on "no runner op" (EX-011).
+  // The lane is what this test is about; asserting the specific code here was asserting the
+  // mechanism, and the mechanism moved for a good reason.
   const v = classifyCase(
     machineRow({ Steps: "[NAV] {{FRONT_URL}}/cart\n[ACT] click 'Checkout'", Assertions: "[DOM] order confirmation visible" }),
   );
   assert.equal(v.lane, "browser");
-  assert.ok(v.blockers.some((b) => b.code === "EX-011"));
+  assert.equal(v.family, "ui");
+  assert.ok(v.blockers.length > 0);
+  assert.equal(isUiReady(v), false);
+});
+
+test("EX-011: a case with NO driver tag of either family is untyped prose", () => {
+  // The genuine EX-011 shape: nothing to execute in either grammar. This is the corpus's 84%.
+  const v = classifyCase(
+    machineRow({ Steps: "Open the cart page\nClick Checkout", Assertions: "order confirmation visible" }),
+  );
+  assert.equal(v.lane, "browser");
+  assert.equal(v.family, "gql", "no UI driver, so it falls through to the GraphQL grammar");
+  assert.ok(v.blockers.some((b) => b.code === "EX-011"), JSON.stringify(v.blockers));
 });
 
 test("EX-010: a step line the executor's parser cannot type blocks the case", () => {
@@ -230,4 +247,204 @@ test("087 has no browser cases at all — a whole suite can leave the browser po
   assert.equal(r.browser.length, 0, "087 gained a browser case — it can no longer skip the browser pool");
   assert.ok(r.machine.length >= 12);
   assert.ok(r.manual.length >= 1, "its Manual cases must still be reported, never silently dropped");
+});
+
+// =============================================================================================
+// The UI family (classifier 1.1.0)
+// =============================================================================================
+
+test("family: a case with a UI driver is judged against the UI grammar, not the GraphQL one", () => {
+  const v = classifyCase({
+    ID: "UI-001",
+    Steps: "[NAV] {{FRONT_URL}}/cart\n[ACT] click role=button name='Checkout'",
+    Assertions: "[DOM] css='.vc-checkout' visible",
+  });
+  assert.equal(v.family, "ui");
+});
+
+test("family: a GraphQL-only case is unaffected — no reclassification", () => {
+  const v = classifyCase(machineRow());
+  assert.equal(v.family, "gql");
+  assert.equal(v.lane, "machine", "and it still reaches the machine lane");
+});
+
+test("family: a UI driver WINS over GraphQL steps — that is the intended shape", () => {
+  // State setup through xAPI, verification through the DOM. A case doing both is a UI case.
+  const v = classifyCase({
+    ID: "UI-002",
+    Steps: [
+      "[GQL-OP seed]",
+      "  mutation { addItem { id } }",
+      "[GQL-EXEC seed]",
+      "[NAV] {{FRONT_URL}}/cart",
+      "[ACT] click role=button name='Checkout'",
+    ].join("\n"),
+    Assertions: "[DOM] css='.vc-checkout' visible",
+  });
+  assert.equal(v.family, "ui");
+  assert.equal(isUiReady(v), true, "the GraphQL half is delegated, not re-parsed, so it compiles");
+});
+
+test("GUARD: a compiling UI case is NEVER lane 'machine' while no ui-runner exists", () => {
+  // machine-lane.ts dispatches every lane==="machine" case to `graphql-runner --case`. Calling a
+  // UI case machine today would send it to a runner that cannot parse it — a BLOCKED that reads
+  // as a product failure. This is the single most important assertion in this block.
+  const v = classifyCase({
+    ID: "UI-003",
+    Steps: "[NAV] {{FRONT_URL}}/cart\n[ACT] click role=button name='Checkout'",
+    Assertions: "[DOM] css='.vc-checkout' visible",
+  });
+  assert.equal(v.lane, "browser");
+  assert.deepEqual(v.blockers.map((b) => b.code), ["EX-300"]);
+  assert.equal(isUiReady(v), true);
+});
+
+test("isUiReady is false for a UI case that does not compile", () => {
+  const v = classifyCase({
+    ID: "UI-004",
+    Steps: "[NAV] {{FRONT_URL}}/cart\n[WAIT] the cart drawer opens eventually",
+    Assertions: "[DOM] cart looks right",
+  });
+  assert.equal(v.family, "ui");
+  assert.equal(isUiReady(v), false);
+  assert.ok(v.blockers.length > 1, "several blockers, not the single EX-300");
+});
+
+test("isUiReady is false for a GraphQL case, however clean", () => {
+  const v = classifyCase(machineRow());
+  assert.equal(v.lane, "machine");
+  assert.equal(isUiReady(v), false);
+});
+
+test("UI: an untypeable step line blocks with EX-010 and its reason", () => {
+  const v = classifyCase({
+    ID: "UI-005",
+    Steps: "[NAV] {{FRONT_URL}}\n[ACT] click the hero banner primary CTA",
+    Assertions: "[DOM] css='.x' visible",
+  });
+  assert.ok(v.blockers.some((b) => b.code === "EX-010"), JSON.stringify(v.blockers));
+});
+
+test("UI: EVERY assertion must be scoreable, not one of them", () => {
+  // Same rule as the GraphQL branch and for the same reason: a runner whose verdict is
+  // "failed === 0 && results.length > 0" would PASS this on the strength of the first line.
+  const v = classifyCase({
+    ID: "UI-006",
+    Steps: "[NAV] {{FRONT_URL}}\n[ACT] click role=link name='Cart'",
+    Assertions: "[DOM] css='.a' visible\n[DOM] the totals look plausible",
+  });
+  assert.ok(v.blockers.some((b) => b.code === "EX-102"), JSON.stringify(v.blockers));
+  assert.equal(isUiReady(v), false);
+});
+
+test("UI: a [STATE] assertion is scored by the GraphQL scorer, not assumed", () => {
+  // Delegation is the point — this module must not grow a second predicate language, and it
+  // must not wave a [STATE] line through either.
+  const prose = classifyCase({
+    ID: "UI-007",
+    Steps: "[NAV] {{FRONT_URL}}\n[ACT] click role=link name='Cart'",
+    Assertions: "[STATE] the user seems to have a cart",
+  });
+  assert.ok(prose.blockers.some((b) => b.code === "EX-102"), JSON.stringify(prose.blockers));
+});
+
+test("UI: no assertions at all is EX-101, never a silent pass", () => {
+  const v = classifyCase({
+    ID: "UI-008",
+    Steps: "[NAV] {{FRONT_URL}}\n[ACT] click role=link name='Cart'",
+    Assertions: "",
+  });
+  assert.ok(v.blockers.some((b) => b.code === "EX-101"), JSON.stringify(v.blockers));
+});
+
+test("UI: a structural problem is EX-003 and is not double-counted with EX-010", () => {
+  // validateUiSteps repeats each UNKNOWN reason; the classifier must not report one bad line
+  // twice under two codes, or the histogram overstates the backlog.
+  const v = classifyCase({
+    ID: "UI-009",
+    Steps: "[NAV] {{FRONT_URL}}\n[ACT] click role=link name='Cart'\n[ACT] fill label='Email' = '{{reg_email}}'",
+    Assertions: "[DOM] css='.a' visible",
+  });
+  const ex003 = v.blockers.filter((b) => b.code === "EX-003");
+  const ex010 = v.blockers.filter((b) => b.code === "EX-010");
+  assert.equal(ex010.length, 0, "every line typed");
+  assert.equal(ex003.length, 1, JSON.stringify(v.blockers));
+  assert.match(ex003[0].detail, /\{\{reg_email\}\} is used but no \[SETUP\] declares it/);
+});
+
+test("Manual still wins over every grammar", () => {
+  const v = classifyCase({
+    ID: "UI-010",
+    Steps: "[NAV] {{FRONT_URL}}\n[ACT] click role=link name='Cart'",
+    Assertions: "[DOM] css='.a' visible",
+    Automation_Status: "Manual",
+  });
+  assert.equal(v.lane, "manual");
+  assert.equal(v.family, "none");
+  assert.deepEqual(v.blockers.map((b) => b.code), ["EX-200"]);
+});
+
+test("CORPUS: 768 cases are UI-family and ZERO compile — the authoring bottleneck, as a number", () => {
+  // This is the measurement that reorders stage C: a ui-runner built today would execute nothing.
+  // If `ready` ever becomes non-zero without a suite being re-authored, the grammar got too
+  // permissive; if `family` collapses, the family detection broke.
+  const files = manifest.suites.map((x) => x.file).filter((f) => existsSync(f));
+  if (files.length === 0) return;
+  let family = 0;
+  let ready = 0;
+  for (const file of files) {
+    const raw = readFileSync(file, "utf-8");
+    if (!isCanonicalHeader(raw)) continue;
+    for (const row of parseSuite(raw).rows) {
+      if (!row.ID) continue;
+      const v = classifyCase({
+        ID: row.ID,
+        Steps: row.Steps ?? "",
+        Assertions: row.Assertions ?? "",
+        Automation_Status: row.Automation_Status,
+      });
+      if (v.family !== "ui") continue;
+      family++;
+      if (isUiReady(v)) ready++;
+    }
+  }
+  assert.ok(family > 700, `expected >700 UI-family cases, got ${family}`);
+  assert.equal(ready, 0, "no suite is authored into the UI grammar yet");
+});
+
+test("family: a UI case written entirely in prose is still UI-family, not GraphQL", () => {
+  // Regression: family used to be decided from a SUCCESSFUL parse, so 042's SMK-013/014/015/034
+  // — checkout, payment x2 and GA4, the cases most in need of authoring — were filed under the
+  // GraphQL grammar and reported with its blocker codes. The tag decides the family.
+  const v = classifyCase({
+    ID: "SMK-013-like",
+    Steps: "[WAIT] cart page with payment section visible\n[ACT] complete the card form per SMK-014\n[ACT] click 'Place Order'",
+    Assertions: "[DOM] order confirmation visible",
+  });
+  assert.equal(v.family, "ui");
+  assert.equal(v.lane, "browser");
+  assert.ok(v.blockers.some((b) => b.code === "EX-010"), JSON.stringify(v.blockers));
+});
+
+test("CORPUS: no case that reaches the machine lane was reclassified into the UI family", () => {
+  // The guard on the guard. A GraphQL case carrying an [ACT] tag would now be judged by the UI
+  // grammar and could LOSE its machine status — a silent determinism regression the per-suite
+  // ratchet would only catch in aggregate.
+  const files = manifest.suites.map((x) => x.file).filter((f) => existsSync(f));
+  for (const file of files) {
+    const raw = readFileSync(file, "utf-8");
+    if (!isCanonicalHeader(raw)) continue;
+    for (const row of parseSuite(raw).rows) {
+      if (!row.ID) continue;
+      const v = classifyCase({
+        ID: row.ID,
+        Steps: row.Steps ?? "",
+        Assertions: row.Assertions ?? "",
+        Automation_Status: row.Automation_Status,
+      });
+      if (v.lane === "machine") {
+        assert.equal(v.family, "gql", `${row.ID} in ${file} reached the machine lane as family=${v.family}`);
+      }
+    }
+  }
 });
