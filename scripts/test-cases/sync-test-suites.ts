@@ -32,6 +32,7 @@ import { fileURLToPath } from "url";
 import { parse as parseCsv } from "csv-parse/sync";
 import { COLUMNS, extractExistingIds, headerFields, parseSuite } from "./append-test-cases-to-suite.js";
 import { AUTOMATION_STATUSES } from "./lint-test-cases.js";
+import { classifySuiteCases, type ClassifiableRow } from "../lib/case-classifier.js";
 
 const MANIFEST_PATH = join("config", "test-suites.json");
 const CHECK_MODE = process.argv.includes("--check");
@@ -65,6 +66,15 @@ interface Suite {
    * cannot run it. Reconciled from the CSV by `regenerate()` below.
    */
   clickDriven?: boolean;
+  /**
+   * DERIVED (never hand-authored): how this suite's cases split between the machine lane, a
+   * browser agent, and explicit Manual — per `scripts/lib/case-classifier.ts`. Reconciled from
+   * the CSV by `regenerate()` below, the same way `testCount` and `clickDriven` are, so the
+   * planner and the executability report read one recorded answer instead of re-classifying
+   * 127 CSVs. Present only when a suite has at least one machine case; a suite that is 100%
+   * browser carries nothing, for the same reason `clickDriven` is present only when true.
+   */
+  lanes?: { machine: number; browser: number; manual: number };
 }
 
 type WhereFilter = Partial<Pick<Suite, "domain" | "layer" | "concern" | "priority">> & {
@@ -536,6 +546,27 @@ const ACT_IS_HTTP_RE = /^\[ACT[\]:]?\s*(?:GET|POST|PUT|PATCH|DELETE|HEAD)\b|^\[A
 const ACT_IS_UI_RE =
   /^\[ACT[\]:]?[^\n]*\b(click|tap|fill|type|enter|select|choose|hover|check|uncheck|toggle|drag|drop|upload|press|scroll|open|expand|collapse|submit|add to cart|sign in|log in)\b/i;
 
+/**
+ * Per-suite lane split, delegated to the ONE classifier (`scripts/lib/case-classifier.ts`)
+ * that the machine lane itself uses. Returns null when the suite cannot be read or carries a
+ * legacy 11-column header — `parseSuite` maps positionally, so classifying such a file would
+ * route cases on the wrong columns, and a null keeps whatever the manifest already declares
+ * rather than zeroing a suite nobody can read.
+ */
+export function derivesLaneCounts(
+  file: string,
+): { machine: number; browser: number; manual: number } | null {
+  if (!existsSync(file)) return null;
+  const raw = readFileSync(file, "utf-8").replace(/^\uFEFF/, "");
+  if (headerFields(raw).join(",") !== COLUMNS.join(",")) return null;
+  try {
+    const r = classifySuiteCases(parseSuite(raw).rows as unknown as ClassifiableRow[]);
+    return { machine: r.machine.length, browser: r.browser.length, manual: r.manual.length };
+  } catch {
+    return null;
+  }
+}
+
 export function derivesClickDriven(file: string): boolean | null {
   if (!existsSync(file)) return null;
   let csv: string;
@@ -567,6 +598,7 @@ function regenerate(manifest: Manifest): { next: Manifest; drift: string[] } {
   // keep their declared value, so this guard never zeroes a suite it cannot read.
   const countDrift: string[] = [];
   const clickDrift: string[] = [];
+  const laneDrift: string[] = [];
   const reconciled = sortedSuites.map((s) => {
     let next = s;
 
@@ -591,6 +623,32 @@ function regenerate(manifest: Manifest): { next: Manifest; drift: string[] } {
       } else {
         const { clickDriven: _dropped, ...rest } = next;
         next = rest as Suite;
+      }
+    }
+
+    // Lane split, derived from the same classifier the runner lane uses. Recorded so
+    // `regression:plan` and `suites:executability` read one answer rather than each
+    // re-classifying the corpus — and so a DROP in machine cases is visible as manifest drift.
+    const lanes = derivesLaneCounts(s.file);
+    if (lanes !== null) {
+      const declared = next.lanes;
+      const same =
+        declared &&
+        declared.machine === lanes.machine &&
+        declared.browser === lanes.browser &&
+        declared.manual === lanes.manual;
+      if (lanes.machine === 0) {
+        if (declared) {
+          laneDrift.push(`${s.id}: lanes dropped (no machine cases)`);
+          const { lanes: _dropped, ...rest } = next;
+          next = rest as Suite;
+        }
+      } else if (!same) {
+        laneDrift.push(
+          `${s.id}: lanes ${declared ? `${declared.machine}/${declared.browser}/${declared.manual}` : "(none)"} ` +
+            `-> ${lanes.machine}/${lanes.browser}/${lanes.manual}`,
+        );
+        next = { ...next, lanes };
       }
     }
 
@@ -619,6 +677,13 @@ function regenerate(manifest: Manifest): { next: Manifest; drift: string[] } {
       countDrift.length <= 6
         ? countDrift.join(", ")
         : `${countDrift.length} suites with stale testCount (${countDrift.slice(0, 4).join(", ")}, …)`,
+    );
+  }
+  if (laneDrift.length > 0) {
+    drift.push(
+      laneDrift.length <= 6
+        ? laneDrift.join(", ")
+        : `${laneDrift.length} suites with stale lanes (${laneDrift.slice(0, 4).join(", ")}, …)`,
     );
   }
   if (clickDrift.length > 0) {

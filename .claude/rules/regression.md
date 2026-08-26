@@ -271,6 +271,64 @@ them, `050c`'s `ORD-GQL-TODO-001`, says so in its own steps: *"[MANUAL-BLOCKED] 
 graphql-runner"*, and today the runner runs it and reports `EMPTY` → exit 1 → a FAIL on a
 placeholder row.
 
+## Executability — what a runner can execute, and what would move it
+
+`npm run suites:executability` is the reporting half of `scripts/lib/case-classifier.ts`. It adds
+no judgement of its own and deliberately shares the classifier with the lane planner, because a
+report that disagreed with the routing would be worse than no report.
+
+| Command | Answers |
+|---|---|
+| `npm run suites:executability` | per-suite machine/browser/manual/**unroutable** + the `EX-*` histogram |
+| `… -- --suite <ID>` | per case, with the blocker codes and the offending token |
+| `… -- --burn-down` | the backlog, cheapest first |
+| `npm run suites:executability:check` | **ratchet: fails only when a suite LOSES machine cases** |
+
+**`--check` is not the question `suites:lint` asks.** That one asks *"is the manifest in sync?"* and
+fails on drift in either direction. This one asks *"did determinism regress?"* and fails **only on a
+drop**, so a change that makes cases unroutable cannot ride in behind a routine `suites:sync`.
+
+**It is deliberately NOT a gate on prose.** 84% of the corpus is prose by design — these are cases an
+LLM agent drives, and most should stay that way. A gate that failed on "not machine-executable"
+would be red forever, everyone would learn to pass `--warn-only`, and the signal would be dead.
+
+**Per-suite lane counts are recorded in the manifest** (`lanes: {machine, browser, manual}`,
+reconciled by `suites:sync` exactly like `testCount` and `clickDriven`, present only when a suite has
+at least one machine case). So the planner and the report read one recorded answer instead of each
+re-classifying 127 CSVs — and a drop shows up as manifest drift as well as a ratchet failure.
+
+**UNROUTABLE is its own count, never folded into `browser`.** The 11 surviving legacy 11-column
+suites (274 cases) are not "browser suites" — they are suites nothing can classify, because
+`parseSuite` maps positionally and on them the legacy `Steps` lands in `Test_Data`. Counting them as
+browser would hide 274 cases behind a number that reads like a deliberate choice.
+
+### The measured correction to the burn-down economics
+
+Determinism is **554 / 4,230 = 13.1%**. The backlog splits, against the grammar the GraphQL/REST
+runner actually parses:
+
+| cases | bucket |
+|---|---|
+| **2** | steps compile, assertions are prose |
+| **54** | assertions compile, steps need normalising |
+| **2,508** | prose on both sides — not a project; taken suite by suite in `/qa-review-tests` |
+| **838** | explicitly `Manual` — out of scope by intent |
+| **274** | UNROUTABLE — legacy header; a suite-level migration, and authoring |
+
+**Read the small number as a finding, not an under-count.** An earlier estimate put ~365 cases one
+assertion-rewrite away from determinism and ~739 one step-normalisation away. Those came from a proxy
+metric — *does the assertion CONTAIN a comparison operator* — and do not survive the executor's own
+parser: a storefront case asserting `[DOM] cart icon visible` can never be scoreable by a GraphQL
+predicate scorer, however well it is written. Worked examples of the real cheap tranche: `050a`'s
+`CAT-GQL-131`, whose assertion reads `data.products.sortings[0].name is non-null OR is null`
+(vacuously true), and `027b`'s `ORGROLE-001..003`, which carry a `[NAV]` step inside an otherwise
+GraphQL-shaped case.
+
+**So the next real gain is not an authoring push — it is a DOM predicate grammar (a `ui-runner`).**
+Rewriting assertions buys about **1 percentage point**; giving the browser lane a runner of its own
+is what addresses the other 2,508. That reorders the plan: the authoring burn-down is a tail task,
+not the next step.
+
 ## Post-Run Results Triage — `/qa-triage-results`
 
 A regression run tells you *which* tests failed; **`/qa-triage-results [RUN_ID|latest] [--fix] [--verify]`** works out *why* each one failed and what to do. **Owned by `qa-lead-orchestrator`** (orchestrate-only Triage Orchestrator — delegates classification to `regression-triage-agent`, live verification to `qa-frontend/backend-expert`, test fixes to `/qa-review-tests`, bug drafts to `/qa-bug`; never edits a CSV, files a ticket, or calls `/qa-fix`). It reads a completed run under `reports/regression/{RUN_ID}/`, and — cloning the `/qa-monitoring` skeleton (collect → dedup → triage → live-verify → report → STOP) — classifies every FAIL into **real product bug** vs a **test defect** (`TEST_STEPS_DEFECT` / `ASSERTION_DEFECT` / `TEST_DATA_DEFECT` / `STALE_TEST`) vs `FLAKY` / `ENV` / `KNOWN_ISSUE`.

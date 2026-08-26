@@ -653,7 +653,12 @@
       ],
       "envRiskGate": "staging",
       "customerApplicability": "reference",
-      "clickDriven": true
+      "clickDriven": true,
+      "lanes": {
+        "machine": 1,
+        "browser": 70,
+        "manual": 0
+      }
     },
     {
       "id": "027b",
@@ -682,7 +687,12 @@
       ],
       "envRiskGate": "staging",
       "customerApplicability": "reference",
-      "clickDriven": true
+      "clickDriven": true,
+      "lanes": {
+        "machine": 9,
+        "browser": 9,
+        "manual": 0
+      }
     },
     {
       "id": "028",
@@ -1279,7 +1289,12 @@
         "price-filter-bva",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 56,
+        "browser": 1,
+        "manual": 0
+      }
     },
     {
       "id": "050b1",
@@ -1299,7 +1314,12 @@
         "cart-quantity",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 19,
+        "browser": 1,
+        "manual": 0
+      }
     },
     {
       "id": "050b2",
@@ -1319,7 +1339,12 @@
         "coupons",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 14,
+        "browser": 2,
+        "manual": 0
+      }
     },
     {
       "id": "050b3",
@@ -1339,7 +1364,12 @@
         "checkout",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 22,
+        "browser": 1,
+        "manual": 0
+      }
     },
     {
       "id": "050b4",
@@ -1360,7 +1390,12 @@
         "schema-coverage",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 23,
+        "browser": 8,
+        "manual": 0
+      }
     },
     {
       "id": "050b5",
@@ -1381,7 +1416,12 @@
         "regression-guard",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 12,
+        "browser": 0,
+        "manual": 0
+      }
     },
     {
       "id": "050c",
@@ -1400,7 +1440,12 @@
         "xorder",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 7,
+        "browser": 1,
+        "manual": 0
+      }
     },
     {
       "id": "050d",
@@ -1420,7 +1465,12 @@
         "registration",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 46,
+        "browser": 3,
+        "manual": 0
+      }
     },
     {
       "id": "050e",
@@ -1440,7 +1490,12 @@
         "page-context",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 10,
+        "browser": 0,
+        "manual": 0
+      }
     },
     {
       "id": "050f",
@@ -1459,7 +1514,12 @@
         "xcms",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 19,
+        "browser": 0,
+        "manual": 0
+      }
     },
     {
       "id": "050g",
@@ -1478,7 +1538,12 @@
         "cross-cutting",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 4,
+        "browser": 0,
+        "manual": 0
+      }
     },
     {
       "id": "050h",
@@ -1498,7 +1563,12 @@
         "sprint"
       ],
       "customerApplicability": "universal",
-      "clickDriven": true
+      "clickDriven": true,
+      "lanes": {
+        "machine": 29,
+        "browser": 4,
+        "manual": 1
+      }
     },
     {
       "id": "050i",
@@ -1518,7 +1588,12 @@
         "configurations",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 60,
+        "browser": 0,
+        "manual": 0
+      }
     },
     {
       "id": "050j",
@@ -1539,7 +1614,12 @@
         "marketing",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 19,
+        "browser": 1,
+        "manual": 0
+      }
     },
     {
       "id": "050k",
@@ -1560,7 +1640,12 @@
         "bopis",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 11,
+        "browser": 0,
+        "manual": 0
+      }
     },
     {
       "id": "050l",
@@ -1582,7 +1667,12 @@
       "requiresModules": [
         "push-messages"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "lanes": {
+        "machine": 18,
+        "browser": 0,
+        "manual": 0
+      }
     },
     {
       "id": "050m",
@@ -1605,7 +1695,12 @@
       "requiresModules": [
         "sales-rep"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "lanes": {
+        "machine": 119,
+        "browser": 0,
+        "manual": 0
+      }
     },
     {
       "id": "050n",
@@ -1625,7 +1720,12 @@
         "asset-url",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 9,
+        "browser": 0,
+        "manual": 0
+      }
     },
     {
       "id": "051",
@@ -2305,7 +2405,12 @@
       ],
       "envRiskGate": "staging",
       "customerApplicability": "reference",
-      "clickDriven": true
+      "clickDriven": true,
+      "lanes": {
+        "machine": 9,
+        "browser": 4,
+        "manual": 0
+      }
     },
     {
       "id": "075c",
@@ -2329,7 +2434,12 @@
         "loyalty"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "lanes": {
+        "machine": 10,
+        "browser": 0,
+        "manual": 0
+      }
     },
     {
       "id": "076",
@@ -2666,7 +2776,12 @@
         "customer-reviews"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 16,
+        "browser": 0,
+        "manual": 0
+      }
     },
     {
       "id": "087",
@@ -2689,7 +2804,12 @@
       ],
       "envRiskGate": "staging",
       "customerApplicability": "universal",
-      "clickDriven": true
+      "clickDriven": true,
+      "lanes": {
+        "machine": 12,
+        "browser": 0,
+        "manual": 3
+      }
     },
     {
       "id": "088",
