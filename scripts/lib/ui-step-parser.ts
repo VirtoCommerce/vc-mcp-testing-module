@@ -209,6 +209,21 @@ export type UiStep =
   | { readonly tag: "PRE"; readonly primitive: string; readonly arg?: string; readonly raw: string }
   | { readonly tag: "NOTE"; readonly text: string; readonly raw: string }
   | { readonly tag: "ASSERT"; readonly assertion: UiAssertion; readonly raw: string }
+  /**
+   * A GraphQL/REST step inside a UI case, DELEGATED to `graphql-case-parser.ts` rather than
+   * re-implemented here.
+   *
+   * This is the load-bearing idea of the whole design, not a convenience: state setup and state
+   * verification go through xAPI, not through the DOM. "Product is in the cart", "the order
+   * exists", "the membership is there" are GraphQL queries the existing executor already runs,
+   * and `[GQL-CAPTURE]` feeds `{{VAR}}` into the DOM assertions that follow. That is what makes a
+   * UI case deterministic without inventing a DOM oracle for application state.
+   *
+   * The parser deliberately does NOT type the operand: a second implementation of the GraphQL
+   * grammar is exactly the divergence this module's header argues against. It records the line
+   * and the caller hands it to `parseSteps`/`validateStepBlocks`.
+   */
+  | { readonly tag: "GQL"; readonly raw: string }
   | { readonly tag: "UNKNOWN"; readonly raw: string; readonly reason: string };
 
 /** Keys Playwright accepts by name. Closed — a typo here is a step that silently does nothing. */
@@ -381,12 +396,66 @@ export function parseUiStepLine(line: string): UiStep {
   }
 }
 
+/**
+ * Start of a delegated GraphQL/REST block.
+ *
+ * Deliberately a SEPARATE pattern from `TAG_RE`, because the two grammars bracket differently:
+ * the UI grammar puts its operand after the bracket (`[NAV] /cart`) while the GraphQL grammar puts
+ * a label INSIDE it (`[GQL-OP cart]`). A single regex covering both would have to accept a space
+ * inside every tag, which would make `[ACT click]` look like a valid tag.
+ */
+const GQL_BLOCK_RE = /^\[((?:GQL|REST)[A-Z-]*)(?:\s+[^\]]*)?\]/;
+
+/** Does this line open some tagged construct — either grammar's? */
+function isTaggedLine(line: string): boolean {
+  return TAG_RE.test(line) || GQL_BLOCK_RE.test(line);
+}
+
+/**
+ * Parse a whole `Steps` cell.
+ *
+ * This is block-aware rather than purely line-by-line, for one reason: the GraphQL grammar is
+ * MULTI-LINE. `[GQL-OP cart]` is followed by the query body on continuation lines that carry no
+ * tag of their own, and a line-based pass reads each of those as untagged prose. So a GQL block
+ * absorbs the untagged lines that follow it, and the whole thing travels to the GraphQL parser as
+ * one delegated step. Getting this wrong is not cosmetic — it would reject exactly the shape the
+ * design depends on (state setup through xAPI, verification through the DOM).
+ */
 export function parseUiSteps(cell: string): UiStep[] {
-  return (cell ?? "")
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .map(parseUiStepLine);
+  const lines = (cell ?? "").split(/\r?\n/);
+  const steps: UiStep[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    if (!line) {
+      i++;
+      continue;
+    }
+    if (GQL_BLOCK_RE.test(line)) {
+      const block = [lines[i]];
+      i++;
+      while (i < lines.length && lines[i].trim() && !isTaggedLine(lines[i].trim())) {
+        block.push(lines[i]);
+        i++;
+      }
+      steps.push({ tag: "GQL", raw: block.join("\n") });
+      continue;
+    }
+    steps.push(parseUiStepLine(line));
+    i++;
+  }
+  return steps;
+}
+
+/**
+ * A step that drives the browser. This is what makes a case belong to the UI family, and it is
+ * exported so the classifier asks this module rather than keeping a second copy of the rule.
+ *
+ * A `[GQL]` step is deliberately NOT a driver: a case whose only actions are GraphQL belongs to
+ * the GraphQL family and its existing runner, not to a browser.
+ */
+export function isUiDriver(step: UiStep): boolean {
+  return step.tag === "ACT" || step.tag === "NAV" || step.tag === "KEY";
 }
 
 /**
@@ -397,7 +466,7 @@ export function validateUiSteps(steps: readonly UiStep[]): string[] {
   const errors: string[] = [];
   for (const s of steps) if (s.tag === "UNKNOWN") errors.push(s.reason);
 
-  const actionable = steps.filter((s) => s.tag === "ACT" || s.tag === "NAV" || s.tag === "KEY");
+  const actionable = steps.filter(isUiDriver);
   if (actionable.length === 0) {
     // A case whose steps only wait and assert never drives the app; whatever it observes is
     // whatever the previous case left behind. That is the hidden-coupling class, so it is an
@@ -405,7 +474,7 @@ export function validateUiSteps(steps: readonly UiStep[]): string[] {
     errors.push("no [NAV], [ACT] or [KEY] step — nothing drives the page");
   }
 
-  const first = steps.find((s) => s.tag !== "PRE" && s.tag !== "NOTE" && s.tag !== "SETUP");
+  const first = steps.find((s) => s.tag !== "PRE" && s.tag !== "NOTE" && s.tag !== "SETUP" && s.tag !== "GQL");
   if (first && first.tag !== "NAV") {
     errors.push(`first executable step is [${first.tag}], but a UI case must open a page with [NAV] first`);
   }

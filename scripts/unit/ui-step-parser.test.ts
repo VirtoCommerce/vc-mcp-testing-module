@@ -487,3 +487,53 @@ test("CORPUS: suite 042 does not compile TODAY — this is the authoring gap, st
   });
   assert.equal(compiling.length, 0, "042 is prose today; the generator is what changes this");
 });
+
+// ---------------------------------------------------------------------------------------------
+// Delegated GraphQL blocks inside a UI case
+// ---------------------------------------------------------------------------------------------
+
+test("delegated: a [GQL-OP <label>] block absorbs its untagged continuation lines", () => {
+  // The GraphQL grammar is MULTI-LINE and brackets its label INSIDE the tag. A purely line-based
+  // pass reads the query body as untagged prose and rejects exactly the shape the design depends
+  // on — state setup through xAPI, verification through the DOM. Found by a classifier test.
+  const steps = parseUiSteps([
+    "[GQL-OP seed]",
+    "  mutation { addItem { id } }",
+    "[GQL-EXEC seed]",
+    "[NAV] {{FRONT_URL}}/cart",
+    "[ACT] click role=button name='Checkout'",
+  ].join("\n"));
+  assert.deepEqual(steps.map((s) => s.tag), ["GQL", "GQL", "NAV", "ACT"]);
+  assert.match(steps[0].raw, /mutation \{ addItem/, "the body travels with its block");
+});
+
+test("delegated: a GQL block may precede the first [NAV] without tripping validation", () => {
+  const errors = validateUiSteps(parseUiSteps([
+    "[GQL-OP seed]",
+    "  mutation { addItem { id } }",
+    "[GQL-EXEC seed]",
+    "[NAV] {{FRONT_URL}}/cart",
+    "[ACT] click role=button name='Checkout'",
+  ].join("\n")));
+  assert.deepEqual(errors, []);
+});
+
+test("delegated: a GQL step is NOT a UI driver", () => {
+  // A case whose only actions are GraphQL belongs to the GraphQL family and its existing runner.
+  // If a GQL step counted as a driver, every runner-native case would be dragged into the UI
+  // family and lose the executor it already has.
+  const errors = validateUiSteps(parseUiSteps("[GQL-OP q]\n  query { cart { id } }\n[GQL-EXEC q]"));
+  assert.ok(errors.some((e) => /nothing drives the page/.test(e)), errors.join(" | "));
+});
+
+test("delegated: the block pattern does not turn a spaced UI tag into a valid tag", () => {
+  // GQL_BLOCK_RE accepts a space inside the bracket; TAG_RE must not. Otherwise `[ACT click]`
+  // would parse as a tag named "ACT click" and its operand would vanish.
+  const s = parseUiStepLine("[ACT click] role=button name='X'");
+  assert.equal(s.tag, "UNKNOWN");
+});
+
+test("delegated: REST blocks are delegated on the same rule as GQL", () => {
+  const steps = parseUiSteps("[REST-OP get]\n  GET /api/x\n[REST-EXEC get]\n[NAV] /cart\n[ACT] click role=link name='Cart'");
+  assert.deepEqual(steps.map((s) => s.tag), ["GQL", "GQL", "NAV", "ACT"]);
+});

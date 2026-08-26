@@ -31,12 +31,20 @@
  */
 import { parseSteps, validateStepBlocks, type StepBlock } from "./graphql-case-parser.js";
 import { classifyPredicateScoreability, parseAssertions } from "./graphql-assertions.js";
+import {
+  classifyUiScoreability,
+  isUiDriver,
+  parseUiAssertions,
+  parseUiSteps,
+  validateUiSteps,
+  type UiStep,
+} from "./ui-step-parser.js";
 
 /**
  * Bumped whenever a routing decision changes. Recorded in every lanes file so a stale
  * plan can be detected rather than silently followed.
  */
-export const CLASSIFIER_VERSION = "1.0.0";
+export const CLASSIFIER_VERSION = "1.1.0";
 
 export type CaseLane = "machine" | "browser" | "manual";
 
@@ -48,13 +56,41 @@ export type BlockerCode =
   | "EX-011" // no runner op at all — this is browser prose
   | "EX-101" // no scoreable assertion: the runner would have nothing to judge
   | "EX-102" // an assertion the runner cannot score
-  | "EX-200"; // explicitly Manual — a human decision, respected
+  | "EX-200" // explicitly Manual — a human decision, respected
+  | "EX-300"; // compiles under the UI grammar, but no executor is wired for that family yet
+
+/**
+ * Which executor family a case's steps belong to. Decided per case from the step tags, never
+ * from the suite: `042` is a UI suite whose cases are UI-family, `050i` is GraphQL-family, and a
+ * UI case may contain `[GQL-*]` setup steps without changing family (that is the design — state
+ * setup through xAPI, verification through the DOM).
+ *
+ * `"none"` means neither family's driver tags are present: browser prose, the corpus's 84%.
+ */
+export type ExecutorFamily = "gql" | "ui" | "none";
 
 export interface CaseVerdict {
   id: string;
   lane: CaseLane;
   /** Empty exactly when `lane === "machine"`. `code` + the offending token, never prose. */
   blockers: Array<{ code: BlockerCode; detail: string }>;
+  /** Which grammar the case was judged against. */
+  family: ExecutorFamily;
+}
+
+/**
+ * A UI-family case that compiles cleanly and would run deterministically the moment a
+ * `ui-runner` exists. Its lane is still `browser`, because there is no executor for it yet.
+ *
+ * This is deliberately a COUNT rather than a lane. `machine-lane.ts` dispatches every
+ * `lane === "machine"` case to `graphql-runner --case`, so calling a UI case machine today would
+ * send it to a runner that cannot parse it — a BLOCKED that reads as a product failure, the
+ * expensive direction of being wrong. Reporting it as `EX-300` instead keeps the operational
+ * behaviour identical while making the number visible: "how much would a ui-runner actually
+ * buy" becomes a measurement taken before the runner is built, rather than a projection.
+ */
+export function isUiReady(v: CaseVerdict): boolean {
+  return v.family === "ui" && v.blockers.length === 1 && v.blockers[0].code === "EX-300";
 }
 
 /** The columns the classifier reads. A subset of the enriched CSV, so tests need no fixture file. */
@@ -85,18 +121,89 @@ function isExplicitlyManual(row: ClassifiableRow): boolean {
   return (row.Automation_Status ?? "").trim().toLowerCase() === "manual";
 }
 
+/**
+ * Judge a UI-family case against the UI grammar.
+ *
+ * Same three rules as the GraphQL branch, for the same reasons: every step line must type
+ * (an untypeable line would be skipped at runtime, so the case would report a verdict on a
+ * subset of its own steps), the step list must be structurally runnable, and EVERY assertion
+ * must be scoreable rather than one of them.
+ *
+ * `[GQL]` steps inside a UI case are handed to the GraphQL parser — this module never has two
+ * implementations of one grammar.
+ */
+function classifyUiCase(id: string, row: ClassifiableRow, steps: readonly UiStep[]): CaseVerdict {
+  const blockers: CaseVerdict["blockers"] = [];
+
+  for (const s of steps) {
+    if (s.tag === "UNKNOWN") blockers.push({ code: "EX-010", detail: s.reason.slice(0, 80) });
+  }
+  for (const err of validateUiSteps(steps)) {
+    // validateUiSteps repeats each UNKNOWN reason; keep the structural findings only so one bad
+    // line is not counted twice.
+    if (!steps.some((s) => s.tag === "UNKNOWN" && s.reason.slice(0, 80) === err.slice(0, 80))) {
+      blockers.push({ code: "EX-003", detail: err });
+    }
+  }
+
+  // Delegated: the GraphQL half of a UI case is validated by the GraphQL parser.
+  const gqlLines = steps.filter((s) => s.tag === "GQL").map((s) => s.raw);
+  if (gqlLines.length > 0) {
+    for (const err of validateStepBlocks(parseSteps(gqlLines.join("\n")))) {
+      blockers.push({ code: "EX-003", detail: `[GQL] ${err}` });
+    }
+  }
+
+  const assertions = parseUiAssertions(row.Assertions ?? "");
+  if (assertions.length === 0) {
+    blockers.push({ code: "EX-101", detail: "no scoreable assertion" });
+  }
+  for (const a of assertions) {
+    const score = classifyUiScoreability(a);
+    if (score === "unparseable") {
+      blockers.push({ code: "EX-102", detail: a.tag === "UNKNOWN" ? a.reason.slice(0, 80) : a.raw.slice(0, 40) });
+    } else if (score === "delegated") {
+      // `[STATE]` is a GraphQL predicate. Ask the scorer that owns it; do not assume.
+      const { assertions: gqlAssertions } = parseAssertions(a.tag === "STATE" ? a.expr : "");
+      if (gqlAssertions.length === 0) {
+        blockers.push({ code: "EX-102", detail: `[STATE] ${a.raw.slice(0, 40)}` });
+      }
+      for (const ga of gqlAssertions) {
+        if (classifyPredicateScoreability(ga) !== "scoreable") {
+          blockers.push({ code: "EX-102", detail: `[STATE] ${ga.predicate.slice(0, 40)}` });
+        }
+      }
+    }
+  }
+
+  if (blockers.length > 0) return { id, lane: "browser", blockers, family: "ui" };
+
+  // It compiles — but there is no executor for it yet, so the lane does NOT change. See isUiReady.
+  return {
+    id,
+    lane: "browser",
+    blockers: [{ code: "EX-300", detail: "compiles under the UI grammar; ui-runner not implemented" }],
+    family: "ui",
+  };
+}
+
 export function classifyCase(row: ClassifiableRow): CaseVerdict {
   const id = (row.ID ?? "").trim();
   const blockers: CaseVerdict["blockers"] = [];
 
   if (isExplicitlyManual(row)) {
-    return { id, lane: "manual", blockers: [{ code: "EX-200", detail: "Automation_Status=Manual" }] };
+    return { id, lane: "manual", blockers: [{ code: "EX-200", detail: "Automation_Status=Manual" }], family: "none" };
   }
 
   const steps = (row.Steps ?? "").trim();
   if (!steps) {
-    return { id, lane: "browser", blockers: [{ code: "EX-002", detail: "empty Steps" }] };
+    return { id, lane: "browser", blockers: [{ code: "EX-002", detail: "empty Steps" }], family: "none" };
   }
+
+  // Family is decided by which driver tags are present, and a UI driver wins: a case that both
+  // clicks and queries is a UI case with GraphQL setup, which is the intended shape.
+  const uiSteps = parseUiSteps(row.Steps);
+  if (uiSteps.some(isUiDriver)) return classifyUiCase(id, row, uiSteps);
 
   const blocks = parseSteps(row.Steps);
 
@@ -130,7 +237,7 @@ export function classifyCase(row: ClassifiableRow): CaseVerdict {
     }
   }
 
-  return { id, lane: blockers.length === 0 ? "machine" : "browser", blockers };
+  return { id, lane: blockers.length === 0 ? "machine" : "browser", blockers, family: "gql" };
 }
 
 export interface SuiteLanes {
@@ -152,7 +259,14 @@ export function classifySuiteCases(rows: readonly ClassifiableRow[]): SuiteLanes
 }
 
 /** Blocker-code tally, cheapest-to-fix first — the burn-down view. */
-export function blockerHistogram(verdicts: readonly CaseVerdict[]): Array<{ code: BlockerCode; count: number }> {
+/**
+ * Cases per blocker code. Takes only the field it reads, so a caller counting codes it already
+ * has does not have to fabricate a whole verdict (id, lane and family it would have to invent)
+ * just to satisfy the signature — an invented field is a lie the typechecker would then bless.
+ */
+export function blockerHistogram(
+  verdicts: readonly { readonly blockers: readonly { readonly code: BlockerCode }[] }[],
+): Array<{ code: BlockerCode; count: number }> {
   const counts = new Map<BlockerCode, number>();
   for (const v of verdicts) {
     // Count a case once per distinct code, not once per occurrence.
