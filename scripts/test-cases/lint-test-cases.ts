@@ -321,8 +321,15 @@ function capturedVars(row: Row): Set<string> {
   return out;
 }
 
+// A row is "runner-native" (parsed by graphql-case-parser.ts, not the UI/Admin D-001
+// single-tag-per-line grammar) when it uses EITHER GQL-OP or REST-OP — a pure-REST
+// runner-native case (only [AUTH]/[REST-OP]/[REST-EXEC]/[REST-CAPTURE], no GraphQL at
+// all) is just as legitimate as a GQL one, and its multi-line REST-OP body (method+path,
+// headers, `Body: {...}` on their own lines — see graphql-test-cases-runner.md §3.7) is
+// NOT single-tag-per-line, so judging it against STEP_TAG_RE manufactured a false D-001
+// on every continuation line (found authoring VCST-5319 suite 075d, e.g. MSN-001/002/006).
 function isRunnerGraphql(row: Row): boolean {
-  return /\[GQL-OP\b/i.test(row.Steps);
+  return /\[GQL-OP\b|\[REST-OP\b/i.test(row.Steps);
 }
 
 export function lintRow(row: Row, idx: number, seenIds: Map<string, number>): Finding[] {
