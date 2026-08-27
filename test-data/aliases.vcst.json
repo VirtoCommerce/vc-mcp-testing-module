@@ -925,5 +925,70 @@
   "SR_ORDER_ACME_ELEC": {
     "id": "cc3ff3c8-8e02-4b4a-be63-ccb632537b68",
     "createdDate": "2026-08-26T15:56:48.9650491Z"
+  },
+  "MSN_ORDERVALUE": {
+    "id": "31f5119d-ea6a-4280-9c46-cf30ede3b32e",
+    "goal_currency": "USD",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-value.svg"
+  },
+  "MSN_ORDERVALUE_ALTCURRENCY": {
+    "id": "4cf51882-f710-49a6-9981-c402607a52e3",
+    "goal_currency": "AUD",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-value.svg"
+  },
+  "MSN_ORDERCOUNT": {
+    "id": "1e7be898-6e8b-40c6-80b6-e560821c8135",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
+  },
+  "MSN_PERSKU_ALL": {
+    "id": "557a3078-a2ce-40e3-b524-2122c3e392ef",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-per-sku.svg"
+  },
+  "MSN_PERSKU_ANY": {
+    "id": "90896258-011d-4b9a-90a9-f4ebb019490c",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-per-sku.svg"
+  },
+  "MSN_PUBLISHED_PRIVATE": {
+    "id": "854e2999-573a-4132-a4f3-b22aa59d6da3",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
+  },
+  "MSN_ZEROTARGET": {
+    "id": "75452f27-a074-4ed9-b2ea-1cc58d3c0a4f",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
+  },
+  "MSN_ZEROREWARD": {
+    "id": "d22fc50b-7b07-41db-b0aa-b818d57075da",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
+  },
+  "MSN_LOCALIZED": {
+    "id": "ea948e83-b09a-4939-9841-2f75489b7fb7",
+    "locale_default": "en-US",
+    "locale_alternate": "de-DE",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
+  },
+  "MSN_DRAFT": {
+    "id": "4591e786-853c-45a8-83bc-8e7c786df72b",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
+  },
+  "MSN_PERSKU_PRODUCT_A": {
+    "productId": "8d77666d-70d7-4b3c-a071-a2d0f376d63f",
+    "sku": "201482",
+    "name": "PEPSI COLA REGULAR CRATE 28X0.20L",
+    "catalogId": "6032bd3c-77dc-4035-a94f-6f60ee5abb4e"
+  },
+  "MSN_PERSKU_PRODUCT_B": {
+    "productId": "4b729fae613046448aaba7c265bb4f2d",
+    "sku": "55557702",
+    "name": "Xerox WorkCentre 3335DNI Mono Laser Multifunction Printer/Copier/Scanner/Fax Machine",
+    "catalogId": "5aa50aaea01544529a6b6d576a668439"
+  },
+  "MSN_STORE_SETTINGS": {
+    "missions_enabled": "true",
+    "base_loyalty_enabled": "true",
+    "store_id": "B2B-store"
+  },
+  "MSN_EXPIRED": {
+    "id": "a1cf3aaf-9149-447b-a0eb-c58bbafc3733",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
   }
 }

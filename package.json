@@ -193,7 +193,10 @@
     "seed:catalog-edge:teardown": "node scripts/seed-data/catalog/seed-catalog-edge-fixtures.mjs --teardown",
     "td:validate:catalog-edge": "node scripts/seed-data/catalog/validate-catalog-edge-data.mjs",
     "carts:check": "node scripts/seed-data/carts/check-competing-carts.mjs",
-    "carts:sweep": "node scripts/seed-data/carts/check-competing-carts.mjs --apply"
+    "carts:sweep": "node scripts/seed-data/carts/check-competing-carts.mjs --apply",
+    "seed:loyalty-missions": "node scripts/seed-data/loyalty/seed-loyalty-missions.mjs",
+    "seed:loyalty-missions:teardown": "node scripts/seed-data/loyalty/seed-loyalty-missions.mjs --teardown",
+    "td:validate:missions": "node scripts/seed-data/loyalty/validate-missions-data.mjs"
   },
   "repository": {
     "type": "git",

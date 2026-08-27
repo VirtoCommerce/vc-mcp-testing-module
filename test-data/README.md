@@ -110,6 +110,10 @@ test-data/
 │   ├── *.pdf, *.xlsx               # Document files
 │   ├── *.mp4                       # Video files
 │   └── *.svg, *.avif               # Other formats
+├── graphql/                         # Curated xAPI GraphQL fixture library — see graphql/README.md
+│   ├── index.json                  # Registry: path, category, role, requiredVars, gqlVars, usedBy
+│   ├── queries/                    # Schema-validated query bodies (copy into [GQL-OP] cells)
+│   └── mutations/                  # Schema-validated mutation bodies
 ├── cms/                             # CMS PageBuilder test data
 │   └── pagebuilder-pages.md        # 5 test pages with block structures, access matrices, scheduling
 └── white-labeling/                  # White labeling test data (VCST-4637)

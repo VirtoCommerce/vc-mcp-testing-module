@@ -1,6 +1,6 @@
 # GraphQL xAPI Schema Reference
 
-> **Source**: Live introspection of `{{BACK_URL}}/graphql` (2026-08-24)
+> **Source**: Live introspection of `{{BACK_URL}}/graphql` (2026-08-27)
 > **Purpose**: Agents MUST consult this file before writing or reviewing GraphQL queries/mutations.
 > **Refresh**: `npm run schema:refresh` — run when the schema may have changed.
 > **SCOPE — read this before concluding a field does not exist.** The query and mutation
@@ -62,6 +62,7 @@ productSuggestions(storeId: String!, query: String, size: Int)
 brands(after: String, first: Int, storeId: String!, userId: String, currencyCode: String, cultureName: String, sort: String, keyword: String)
 products(after: String, first: Int, storeId: String!, userId: String, currencyCode: String, cultureName: String, query: String, previousOutline: String, filter: String, preserveUserQuery: Boolean, facet: String, fuzzy: Boolean, fuzzyLevel: Int, sort: String, productIds: [String], selectedAddressId: String, selectedAddress: String, custom: String)
 productConfiguration(configurableProductId: String!, storeId: String!, userId: String, cultureName: String, currencyCode: String)
+salesRepDocumentCategories(keyword: String)
 ```
 
 ### CMS
@@ -74,6 +75,8 @@ page(storeId: String!, cultureName: String, id: String!)
 pages(after: String, first: Int, storeId: String!, keyword: String!, cultureName: String)
 pageDocument(id: String!)
 pageDocuments(after: String, first: Int, storeId: String!, keyword: String!, cultureName: String)
+salesRepDocument(id: String!)
+salesRepDocuments(after: String, first: Int, keyword: String, sort: String, category: String, pinned: Boolean)
 pageContext(domain: String, cultureName: String, permalink: String, organizationId: String, userId: String, storeId: String)
 ```
 
@@ -119,6 +122,7 @@ recommendations(storeId: String!, userId: String, cultureName: String, currencyC
 searchHistory(storeId: String!, maxCount: Int!)
 loyaltyPointsHistory(after: String, first: Int, keyword: String, sort: String, userId: String, operationType: String)
 loyaltyBalance(userId: String, orderId: String)
+loyaltyMissionProgress(after: String, first: Int, keyword: String, sort: String, storeId: String!, statuses: [String], completedStartDate: DateTime, completedEndDate: DateTime, cultureName: String, isStarted: Boolean, userId: String)
 customerSalesReps(after: String, first: Int, keyword: String, sort: String, storeId: String)
 salesRepCustomerFilterRules(storeId: String, cultureName: String)
 salesRepCustomer(organizationId: String!)

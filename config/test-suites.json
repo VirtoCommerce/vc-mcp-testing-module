@@ -4,7 +4,7 @@
     "version": "3.0",
     "description": "Regression test suite manifest for parallel orchestration with module-aligned directories under Frontend/Backend layers",
     "generated": "2026-08-27",
-    "totalSuites": 127,
+    "totalSuites": 129,
     "csvFormat": "Enriched Agent-Native CSV (ID, Title, Section, Priority, Business_Rule, Edge_Case_Refs, Preconditions, Test_Data, Steps, Assertions, Cross_Layer_Checks, Failure_Signals, Cleanup, References, Automation_Status)",
     "domains": [
       "purchase-flow",
@@ -2443,6 +2443,60 @@
         "browser": 0,
         "manual": 0
       }
+    },
+    {
+      "id": "075d",
+      "name": "Loyalty Missions",
+      "file": "regression/suites/Backend/loyalty/075d-loyalty-missions.csv",
+      "domain": "customer-b2b",
+      "layer": "backend",
+      "concern": "api",
+      "priority": "P1",
+      "testCount": 26,
+      "estimatedMinutes": 0,
+      "agent": "qa-backend-expert",
+      "tags": [
+        "loyalty",
+        "missions",
+        "graphql",
+        "api",
+        "sprint"
+      ],
+      "requiresModules": [
+        "loyalty"
+      ],
+      "envRiskGate": "staging",
+      "customerApplicability": "reference",
+      "lanes": {
+        "machine": 26,
+        "browser": 0,
+        "manual": 0
+      }
+    },
+    {
+      "id": "075e",
+      "name": "Loyalty Missions Admin",
+      "file": "regression/suites/Backend/loyalty/075e-loyalty-missions-admin.csv",
+      "domain": "customer-b2b",
+      "layer": "backend",
+      "concern": "admin",
+      "priority": "P1",
+      "testCount": 22,
+      "estimatedMinutes": 0,
+      "agent": "qa-backend-expert",
+      "tags": [
+        "loyalty",
+        "missions",
+        "admin",
+        "admin-spa",
+        "sprint"
+      ],
+      "requiresModules": [
+        "loyalty"
+      ],
+      "envRiskGate": "staging",
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "076",
