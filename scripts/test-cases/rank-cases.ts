@@ -3,12 +3,14 @@
  *
  * WHY THIS EXISTS
  * ---------------
- * The corpus grows every day and a full regression is ~14 h of wall clock, but
- * roughly half of it buys nothing: 1,909 of 3,969 cases (48% — 53% on Frontend)
- * carry no assertion that can fail on a wrong value, and 66% of Frontend cases
- * are >=6-step walkthroughs. That combination is the worst possible trade: the
- * maximum cost to run and near-zero probability of catching anything, because a
- * presence check only fails when an element is absent entirely.
+ * The corpus grows every day and a full regression runs for hours, but a large
+ * share of it buys nothing: many cases carry no assertion that can fail on a
+ * wrong value, and most Frontend cases are long walkthroughs. That combination
+ * is the worst possible trade — maximum cost to run, near-zero probability of
+ * catching anything, because a presence check only fails when an element is
+ * absent entirely. This script REPORTS the current numbers rather than quoting
+ * them: the first version transcribed a measurement that the next commit
+ * corrected, and it went stale in four places at once.
  *
  * This script makes that trade VISIBLE per case, with a reason for every verdict.
  * It deliberately prints reasons rather than a bare score: Google deployed a
@@ -42,7 +44,14 @@ import { readFileSync, readdirSync, statSync } from "fs";
 import { join, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { parseSuite, type Row } from "./append-test-cases-to-suite.js";
-import { classifyAssertionStrength, hasDiscriminatingAssertion } from "./lint-test-cases.js";
+import {
+  classifyAssertionStrength,
+  hasDiscriminatingAssertion,
+  isUnclassified,
+  STRENGTH_ORDER,
+} from "./lint-test-cases.js";
+import { collectAttributions, indexAttributions, loadKnownCaseIds } from "../lib/defect-attribution.js";
+import { isNonExecutingStatus } from "../lib/case-classifier.js";
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../..");
 const SUITES_ROOT = join(REPO_ROOT, "regression", "suites");
@@ -51,8 +60,17 @@ const SUITES_ROOT = join(REPO_ROOT, "regression", "suites");
 export const EXPENSIVE_STEPS = 6;
 /** Priorities that are never demoted regardless of assertion strength. */
 export const RISK_FLOOR = new Set(["Critical", "P0"]);
-/** Statuses whose cases actually consume regression time today. */
-const RUNNING_STATUSES = new Set(["Automated", "Draft", "Reviewed", "Semi-Automated", ""]);
+/**
+ * Does this case consume regression time today?
+ *
+ * DERIVED, not listed: `isNonExecutingStatus` owns EX-200/EX-201 and case-folds,
+ * which a local literal did not. A blank status runs (the runner does not skip
+ * it), so it counts as running here — and `demote-cases` must therefore be able
+ * to act on it, or the ranker advertises work its counterpart cannot do.
+ */
+function isRunningStatus(status: string): boolean {
+  return !isNonExecutingStatus(status);
+}
 
 export type Verdict = "KEEP" | "STRENGTHEN" | "DEMOTE";
 
@@ -72,23 +90,75 @@ export interface CaseRank {
   reasons: string[];
 }
 
+
+/** Shared CLI arg reading. Hand-rolled copies drifted: `--limit` was read as
+ *  `argv[0]` when the flag was absent, so `--unknown` became NaN and silently
+ *  emptied the report's main table. */
+function flagValue(argv: readonly string[], flag: string): string | undefined {
+  const i = argv.indexOf(flag);
+  return i >= 0 ? argv[i + 1] : undefined;
+}
+function intFlag(argv: readonly string[], flag: string, fallback: number): number {
+  const raw = flagValue(argv, flag);
+  if (raw === undefined) return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    console.error(`✗ ${flag} expects a non-negative number, got "${raw}"`);
+    process.exit(1);
+  }
+  return n;
+}
+
 function lines(cell: string): string[] {
   return (cell ?? "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 }
 
-/** Strongest class present, by the ladder's own order. */
+/**
+ * Strongest class present, by the ladder's own order.
+ *
+ * The order is imported, not re-declared. The first version kept a local copy
+ * and it silently lost `NEG` the moment that class was added: `indexOf` returned
+ * -1, the guard skipped it, and 49 cases reported `best: UNKNOWN` while being
+ * correctly judged discriminating — the explanation contradicting the verdict.
+ */
 export function bestStrength(assertionLines: readonly string[]): string {
-  const order = ["INV", "REL", "DER", "SHAPE", "PRES", "UNKNOWN"];
-  let bestIdx = order.length - 1;
+  let bestIdx = STRENGTH_ORDER.length - 1;
   for (const l of assertionLines) {
-    const idx = order.indexOf(classifyAssertionStrength(l));
+    const idx = STRENGTH_ORDER.indexOf(classifyAssertionStrength(l));
     if (idx >= 0 && idx < bestIdx) bestIdx = idx;
   }
-  return assertionLines.length ? order[bestIdx] : "NONE";
+  return assertionLines.length ? STRENGTH_ORDER[bestIdx] : "NONE";
 }
 
 /** Pure ranking of one row. Exported so the tests exercise it without file IO. */
-export function rankCase(row: Row, suite: string): CaseRank {
+/**
+ * Cases the repo can PROVE caught a bug. Lazily built once.
+ *
+ * This is the only ground truth available, and the first version of this ranker
+ * never consulted it — while its own header promised "every doubt resolves to
+ * KEEP". Measured on the corpus at the time: 10 of the 36 proven cases were
+ * marked DEMOTE, among them the tests that caught a nested-impersonation
+ * privilege escalation, a stored XSS, two open P0s and a cross-org role leak.
+ * A case that has caught a bug is not a candidate for anything but KEEP.
+ */
+let provenCatchers: Set<string> | null = null;
+export function provenBugCatchers(): Set<string> {
+  if (provenCatchers) return provenCatchers;
+  try {
+    const idx = indexAttributions(
+      collectAttributions(join(REPO_ROOT, "reports", "bugs"), loadKnownCaseIds(SUITES_ROOT)),
+    );
+    provenCatchers = new Set(idx.byCase.keys());
+  } catch {
+    // Fail CLOSED for demotion: with no evidence available we must not silently
+    // behave as though every case is unproven. An empty set plus the explicit
+    // flag below keeps the ranker honest about what it could not check.
+    provenCatchers = new Set();
+  }
+  return provenCatchers;
+}
+
+export function rankCase(row: Row, suite: string, proven: ReadonlySet<string> = provenBugCatchers()): CaseRank {
   const aLines = lines(row.Assertions);
   const sLines = lines(row.Steps);
   const discriminating = hasDiscriminatingAssertion(aLines);
@@ -99,42 +169,56 @@ export function rankCase(row: Row, suite: string): CaseRank {
   // (the /qa-test Step 1e contract). Deliberate design is evidence of intent, so
   // it blocks demotion even when the assertions are currently weak.
   const hasDesignStamp = /\bArchetype:\s*[A-Za-z]/.test(refs);
+  const id = row.ID ?? "<no id>";
+  const caughtABug = proven.has(id);
+  const unreadable = isUnclassified(aLines);
 
   const reasons: string[] = [];
   let verdict: Verdict = "KEEP";
 
+  // Every guard that can block demotion, evaluated once.
+  const blockers: string[] = [];
+  if (caughtABug) blockers.push("has caught a real bug (see tc:yield) — never demoted");
+  if (RISK_FLOOR.has(priority)) blockers.push(`${priority} — risk floor, never demoted; fix it instead`);
+  if (hasDesignStamp) blockers.push("carries a deliberate Archetype stamp — strengthen, do not retire");
+  if (sLines.length < EXPENSIVE_STEPS) blockers.push(`only ${sLines.length} steps — cheap to keep and fix`);
+
   if (!aLines.length) {
     reasons.push("no assertions at all — the case checks nothing");
-    verdict = RISK_FLOOR.has(priority) ? "STRENGTHEN" : "DEMOTE";
+    // The zero-assertion branch obeys the SAME contract as the weak branch: the
+    // documented rule is presence-only AND expensive AND not risk-floor AND not
+    // stamped. The first version checked only the risk floor here, so a 1-step
+    // deliberately-stamped case whose author had not yet filled Assertions was
+    // demoted.
+    verdict = blockers.length ? "STRENGTHEN" : "DEMOTE";
+    reasons.push(...blockers);
+  } else if (unreadable) {
+    // NOT presence-only: the classifier has no bucket for these forms. That is
+    // the classifier's gap, so it can never justify removing coverage.
+    reasons.push(
+      `assertion forms the strength classifier cannot read (${bestStrength(aLines)}) — a gap in the classifier, not evidence the case is weak`,
+    );
+    verdict = "STRENGTHEN";
   } else if (!discriminating) {
     reasons.push(
       `every assertion is presence-only (${bestStrength(aLines)}) — cannot fail on a wrong value`,
     );
     verdict = "STRENGTHEN";
-    if (
-      sLines.length >= EXPENSIVE_STEPS &&
-      !RISK_FLOOR.has(priority) &&
-      !hasDesignStamp
-    ) {
+    if (sLines.length >= EXPENSIVE_STEPS && !caughtABug && !RISK_FLOOR.has(priority) && !hasDesignStamp) {
       reasons.push(`${sLines.length} steps to run for a check that cannot discriminate`);
       verdict = "DEMOTE";
+    } else {
+      reasons.push(...blockers);
     }
   }
-
-  // Explain every block on demotion, so a KEEP/STRENGTHEN is attributable too.
-  if (!discriminating && verdict !== "DEMOTE") {
-    if (RISK_FLOOR.has(priority)) reasons.push(`${priority} — risk floor, never demoted; fix it instead`);
-    if (hasDesignStamp) reasons.push("carries a deliberate Archetype stamp — strengthen, do not retire");
-    if (sLines.length < EXPENSIVE_STEPS) reasons.push(`only ${sLines.length} steps — cheap to keep and fix`);
-  }
   if (discriminating) reasons.push(`strongest assertion class: ${bestStrength(aLines)}`);
-  if (!RUNNING_STATUSES.has(status)) {
+  if (!isRunningStatus(status)) {
     reasons.push(`Automation_Status "${status}" — already out of the regression lane`);
     verdict = "KEEP";
   }
 
   return {
-    id: row.ID ?? "<no id>",
+    id,
     suite,
     priority,
     status,
@@ -159,7 +243,12 @@ function collectSuites(layer?: string): string[] {
   };
   walk(SUITES_ROOT);
   if (!layer) return out.sort();
-  const want = layer.toLowerCase() === "frontend" ? "Frontend" : "Backend";
+  const l = layer.toLowerCase();
+  if (l !== "frontend" && l !== "backend") {
+    console.error(`✗ --layer expects "frontend" or "backend", got "${layer}"`);
+    process.exit(1);
+  }
+  const want = l === "frontend" ? "Frontend" : "Backend";
   return out.filter((f) => f.includes(`${sep}${want}${sep}`)).sort();
 }
 
@@ -186,23 +275,21 @@ export function rankSuiteFile(file: string): CaseRank[] {
 
 function main(): void {
   const argv = process.argv.slice(2);
-  const get = (flag: string): string | undefined => {
-    const i = argv.indexOf(flag);
-    return i >= 0 ? argv[i + 1] : undefined;
-  };
+  const get = (flag: string): string | undefined => flagValue(argv, flag);
   const asJson = argv.includes("--json");
   const suite = get("--suite");
   const layer = get("--layer");
   const wantVerdict = get("--verdict");
-  const limit = Number(get("--limit") ?? "40");
+  const limit = intFlag(argv, "--limit", 40);
 
   const files = suite ? [resolve(suite)] : collectSuites(layer);
-  let ranks = files.flatMap(rankSuiteFile);
-  const total = ranks.length;
-  if (wantVerdict) ranks = ranks.filter((r) => r.verdict === wantVerdict.toUpperCase());
-
+  // ONE walk: counts are corpus-wide, `ranks` is the filtered view of the same
+  // array. Two independent traversals that must agree is a smell, not a saving.
+  const all = files.flatMap((f) => rankSuiteFile(f));
+  const total = all.length;
   const counts = { KEEP: 0, STRENGTHEN: 0, DEMOTE: 0 } as Record<Verdict, number>;
-  for (const r of files.flatMap(rankSuiteFile)) counts[r.verdict]++;
+  for (const r of all) counts[r.verdict]++;
+  const ranks = wantVerdict ? all.filter((r) => r.verdict === wantVerdict.toUpperCase()) : all;
 
   if (asJson) {
     console.log(JSON.stringify({ total, counts, cases: ranks }, null, 2));

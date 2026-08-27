@@ -31,6 +31,15 @@ const VOCAB: DesignVocabulary = {
   techniques: new Set(["EP", "BVA", "DT"]),
 };
 
+/**
+ * A row that is valid in every respect EXCEPT what the test under it varies.
+ *
+ * `Assertions` carries a real discriminating line by default. The first version
+ * left it empty, which short-circuited the T-006 arm of `validateDesignStamps`
+ * — so all twelve stamp tests passed while never reaching it, and the gate went
+ * unasserted. A shared fixture has to pick a value, and picking one is what
+ * makes that kind of hole visible.
+ */
 function row(references: string, id = "CART-901"): Row {
   const r = {} as Row;
   for (const c of COLUMNS) r[c] = "";
@@ -40,6 +49,7 @@ function row(references: string, id = "CART-901"): Row {
   r.Priority = "High";
   r.Automation_Status = "Draft";
   r.References = references;
+  r.Assertions = "[REL] PDP price == listing price for the same SKU";
   return r;
 }
 
@@ -151,4 +161,50 @@ test("every catalog entry carries an in-vocabulary Archetype", () => {
   }
   const untagged = [...ids].filter((i) => !tagged.has(i));
   assert.deepEqual(untagged, [], `catalog entries with no Archetype: ${untagged.join(", ")}`);
+});
+
+// --- The T-006 arm. Every test above runs with `Assertions: ""`, which used to
+// --- short-circuit the whole check — so the block whose comment promises "a NEW
+// --- presence-only case simply never lands" was asserted by nobody, and an
+// --- empty-Assertions row sailed through the single door into the corpus.
+function withAsserts(a: string, id = "CART-901"): Row {
+  const r = row(OK, id);
+  r.Assertions = a;
+  return r;
+}
+
+test("a new presence-only row is refused at the door", () => {
+  const { errors } = validateDesignStamps(
+    [withAsserts("[DOM] price is visible\n[DOM] title is displayed")],
+    VOCAB,
+  );
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /presence-only/);
+});
+
+test("one discriminating line lets a new row through", () => {
+  const r = withAsserts("[DOM] price is visible\n[REL] PDP price == listing price for the same SKU");
+  assert.deepEqual(validateDesignStamps([r], VOCAB).errors, []);
+});
+
+test("a row asserting NOTHING is refused — worse than presence-only", () => {
+  const { errors } = validateDesignStamps([withAsserts("")], VOCAB);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /no assertions/);
+});
+
+// A gap in the classifier's vocabulary is the classifier's problem. Refusing the
+// row would punish the author for a shape we simply have not taught it, so this
+// warns and admits.
+test("an unreadable assertion form warns but is admitted", () => {
+  const r = withAsserts("[WIDGET] the frobnicator reconciles the ledger");
+  const res = validateDesignStamps([r], VOCAB);
+  assert.deepEqual(res.errors, []);
+  assert.equal(res.warnings.length, 1);
+  assert.match(res.warnings[0], /classifier recognises none/);
+});
+
+test("a backend status assertion is accepted — it is not presence", () => {
+  const r = withAsserts("[STATUS] GET for another user's member id returns 403 Forbidden — not 200");
+  assert.deepEqual(validateDesignStamps([r], VOCAB).errors, []);
 });

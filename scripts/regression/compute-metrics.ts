@@ -37,6 +37,7 @@
  */
 import { readFileSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
+import { resolve, join } from "path";
 import {
   collectAttributions,
   indexAttributions,
@@ -84,7 +85,10 @@ const round = (n: number, d = 2): number => {
  * supply it is not overridden.
  */
 export function bugsForEntry(e: RunEntry, join?: ReadonlyMap<string, number>): number {
-  if (Number.isFinite(e.bugs_found)) return Number(e.bugs_found);
+  // A row may carry the field as a string; the pre-existing `sum()` coerced, so
+  // `Number.isFinite(e.bugs_found)` alone would have silently dropped "3".
+  const own = e.bugs_found;
+  if (own !== undefined && own !== null && Number.isFinite(Number(own))) return Number(own);
   if (!join || !e.runId || !e.suiteId) return 0;
   return join.get(`${e.runId}::${e.suiteId}`) ?? 0;
 }
@@ -406,13 +410,22 @@ function main(): void {
   // Join the durable bug reports so defectDensity stops reading a flat 0.
   // Best-effort: a missing/unreadable reports/bugs tree degrades to the old
   // behaviour rather than failing the metrics run.
+  // Resolved from the module, not from cwd: bare relative paths made this
+  // silently report defectDensity 0 whenever the script ran from anywhere but
+  // the repo root — the exact "never pass on an unreachable source" failure
+  // .claude/rules/test-data.md §GOLDEN RULE step 4 warns about. The old `catch`
+  // was dead too: these functions return [] rather than throwing.
+  const repoRoot = resolve(fileURLToPath(import.meta.url), "../../..");
+  const bugsRoot = join(repoRoot, "reports", "bugs");
+  const suitesRoot = join(repoRoot, "regression", "suites");
   let bugJoin: ReadonlyMap<string, number> | undefined;
-  try {
-    bugJoin = indexAttributions(
-      collectAttributions("reports/bugs", loadKnownCaseIds("regression/suites")),
-    ).byRunSuite;
-  } catch {
-    bugJoin = undefined;
+  if (!existsSync(bugsRoot) || !existsSync(suitesRoot)) {
+    console.error(
+      `⚠ defect attribution unavailable (${bugsRoot} / ${suitesRoot} not found) — ` +
+        `bugsFound/defectDensity below are NOT measured, they are absent.`,
+    );
+  } else {
+    bugJoin = indexAttributions(collectAttributions(bugsRoot, loadKnownCaseIds(suitesRoot))).byRunSuite;
   }
 
   const agg = aggregate(entries, bugJoin);

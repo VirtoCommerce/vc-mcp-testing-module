@@ -6,9 +6,11 @@
  * `promote-cases.ts` is a one-way ratchet — its own header says it "never
  * demotes". The consequence is measurable: 3 cases out of 4,243 carry
  * `Deprecated`, and nothing else has ever left the lane. Meanwhile a full
- * regression is ~14 h of wall clock and ~48% of the corpus cannot fail on a
- * wrong value, so the suite spends roughly half its budget on checks that only
- * fail when an element is missing entirely.
+ * regression is many hours of wall clock and a large share of the corpus cannot
+ * fail on a wrong value, so much of that budget buys checks that only fail when
+ * an element is missing entirely. `npm run tc:rank` reports the current share;
+ * no figure is transcribed here, because the first version quoted one that the
+ * very next commit invalidated.
  *
  * This is the missing counterpart. It is deliberately the WEAKEST possible
  * intervention that still stops the bleeding.
@@ -52,10 +54,20 @@ import { fileURLToPath } from "url";
 import { parseSuite } from "./append-test-cases-to-suite.js";
 import { applyCellEdits, type CellEdit } from "./promote-cases.js";
 import { rankSuiteFile, type CaseRank } from "./rank-cases.js";
+import { isNonExecutingStatus } from "../lib/case-classifier.js";
 
 export const DEMOTION_TARGET = "Manual";
-/** Statuses this script is willing to move. Anything else is left alone. */
-export const DEMOTABLE_FROM = new Set(["Automated", "Draft", "Reviewed", "Semi-Automated"]);
+/**
+ * Can this status be moved out of the lane?
+ *
+ * Derived from the same owner `rank-cases` uses. The two previously kept
+ * separate literals and disagreed about a BLANK status: the ranker counted it as
+ * running and advertised it, this script refused it as DM-002, and 386 of 795
+ * advertised candidates (48%) were unactionable.
+ */
+export function isDemotable(status: string): boolean {
+  return !isNonExecutingStatus(status);
+}
 
 export const DEMOTE_REASONS = {
   NOT_A_CANDIDATE: "DM-001 rank verdict is not DEMOTE",
@@ -91,7 +103,7 @@ export function decideDemotion(r: CaseRank): DemotionDecision {
     return { ...base, demote: false, reason: DEMOTE_REASONS.ALREADY_TARGET };
   if (r.verdict !== "DEMOTE")
     return { ...base, demote: false, reason: `${DEMOTE_REASONS.NOT_A_CANDIDATE} (${r.verdict})` };
-  if (!DEMOTABLE_FROM.has(r.status))
+  if (!isDemotable(r.status))
     return { ...base, demote: false, reason: `${DEMOTE_REASONS.WRONG_STATUS} ("${r.status}")` };
   return { ...base, demote: true, reason: r.reasons.join("; ") };
 }
@@ -112,9 +124,10 @@ function main(): void {
   if (!suite) {
     console.error(
       "✗ --suite <csv> is required.\n" +
-        "  A corpus-wide bulk demotion is deliberately not offered: 872 cases across ~50 files in\n" +
-        "  one commit is unreviewable, and this write is the one that removes coverage. Run it per\n" +
-        "  suite, review the diff, move on. Use `rank-cases.ts --json` for the corpus-wide picture.",
+        "  A corpus-wide bulk demotion is deliberately not offered: hundreds of cases across dozens\n" +
+        "  of files in one commit is unreviewable, and this write is the one that removes coverage.\n" +
+        "  Run it per suite, review the diff, move on. `npm run tc:rank -- --verdict DEMOTE` gives\n" +
+        "  the current corpus-wide count — quoted nowhere, so it cannot go stale.",
     );
     process.exit(1);
   }
@@ -136,7 +149,7 @@ function main(): void {
   }
 
   if (!toDemote.length) {
-    console.log("\nNothing to demote.");
+    if (!asJson) console.log("\nNothing to demote.");
     return;
   }
 
@@ -173,9 +186,11 @@ function main(): void {
     process.exit(1);
   }
   writeFileSync(file, result.text, "utf-8");
-  console.log(`\n✓ Demoted ${result.applied.length} case(s) in ${file.split(sep).pop()}.`);
-  console.log(`  Reversible: set Automation_Status back, or \`git checkout -- ${suite}\`.`);
-  console.log(`  Next: run \`npm run suites:sync\` then \`npm run suites:lint\`.`);
+  // Human prose goes to stderr under --json so the document stays parseable.
+  const say = asJson ? console.error : console.log;
+  say(`\n✓ Demoted ${result.applied.length} case(s) in ${file.split(sep).pop()}.`);
+  say(`  Reversible: set Automation_Status back, or \`git checkout -- ${suite}\`.`);
+  say(`  Next: run \`npm run suites:sync\` then \`npm run suites:lint\`.`);
 }
 
 const isCli = !!process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];

@@ -179,9 +179,7 @@ const THROWAWAY_IDENTITY_RE = /(agent-test|TS_SUFFIX|\$\{?\w*SUFFIX)/i;
  * whether the check can fail on a WRONG VALUE. They are independent, and only
  * the second one decides whether a case can catch a bug.
  *
- * Measured on this corpus when the rule was written: 1,044 of 1,961 Frontend
- * cases (53%) carried nothing but presence assertions, and the presence-to-value
- * verb ratio was 5:1. A presence check fails only when the element is absent
+ * A presence check fails only when the element is absent
  * entirely — the rarest failure mode. Real bugs render SOMETHING: the open bug
  * `non-usd-price-zero-display` renders a literal `£0.00`, so "price is visible"
  * passes; `cart-configurable-line-summary-shows-wrong-option-label` renders a
@@ -206,9 +204,33 @@ const REL_PHRASE_RE = /\b(same as|identical to|matches the .* (shown|rendered|re
 /** Compared against an independently derived value (@td / {{VAR}} / another surface's captured value). */
 const DER_RE = /@td\(|\{\{[A-Z0-9_]+\}\}|\[GQL-CAPTURE\]|captured (value|id)\b/i;
 /** Numeric / identity comparison of any kind. */
-const NUMERIC_CMP_RE = /(==|!=|>=|<=|(?<![a-z])=(?!=)|\b(equals?|differs? by|increments? by|decrements? by|exactly)\b)/i;
+/**
+ * A value comparison of any kind.
+ *
+ * The bare-`=` arm excludes only the OTHER comparison operators (`==`, `!=`,
+ * `>=`, `<=`), which the alternation already handles. It must NOT exclude a
+ * preceding letter: the first version wrote `(?<![a-z])` under the `/i` flag,
+ * which made the lookbehind case-insensitive too and therefore rejected `=`
+ * after any letter at all. `qty = 2` passed and `quantity=2` did not — the
+ * difference was a space. That silently classified 3,397 corpus assertion lines
+ * as UNKNOWN and made the appender hard-reject 209 cases that carried exact
+ * expected values, with a message claiming they were "presence-only".
+ */
+const NUMERIC_CMP_RE = /(==|!=|>=|<=|(?<![=!<>])=(?!=)|\b(equals?|differs? by|increments? by|decrements? by|exactly)\b)/i;
 /** Form / order / count — falsifiable with no literal. */
-const SHAPE_RE = /\bmatches\s*\/|\bregex\b|\bsorted\b|\bascending\b|\bdescending\b|\bformat\b|\bdecimal places\b|\bcount\b|\bexactly \d+\b|\bnon-empty\b|\bunique\b/i;
+/**
+ * Form, order or count — falsifiable with no literal.
+ *
+ * `count` and `format` need a COMPARISON CONTEXT, not a bare noun. As plain
+ * words they laundered pure presence checks into the strong class — measured:
+ * 52 cases became "discriminating" solely because a `visible` assertion happened
+ * to contain the word, and `[FORM] dates displayed in correct format` was
+ * blessed here while VAGUE_RE condemned the same line for "correct".
+ * `\bexactly \d+\b` is deliberately absent: NUMERIC_CMP_RE owns `exactly` and is
+ * tested first, so this arm could never fire.
+ */
+const SHAPE_RE =
+  /\bmatches\s*\/|\bregex\b|\bsorted\b|\bascending\b|\bdescending\b|\bdecimal places\b|\bnon-empty\b|\bunique\b|\b(count|length|size)\s*(is|of|:)?\s*(=|==|>=|<=|\d)|\bin (the )?(correct|expected) order\b|\bformat\s*(is|matches|:)/i;
 /**
  * NEGATIVE assertions — "this specific thing did NOT happen / is NOT there".
  *
@@ -224,7 +246,7 @@ const SHAPE_RE = /\bmatches\s*\/|\bregex\b|\bsorted\b|\bascending\b|\bdescending
  * non-discriminating, which is backwards and would have flagged a correct case.
  */
 const NEG_RE =
-  /\b(not|never|no longer|without|prevents?|rejects?|blocks?|refuses?)\s+(\w+\s+){0,3}(created|added|deleted|removed|saved|persisted|applied|charged|submitted|visible|shown|displayed|present|listed|returned|reachable|accessible|enabled|allowed|placed|sent|granted|deletion|intact)\b/i;
+  /\b(not|never|no longer|without|prevents?|rejects?|blocks?|refuses?)\s+(\w+\s+){0,3}(created|added|deleted|removed|saved|persisted|applied|charged|submitted|visible|shown|displayed|present|listed|returned|reachable|accessible|enabled|disabled|allowed|placed|sent|granted|deletion|intact|include[sd]?|contain(s|ed)?|expose[sd]?|leak(s|ed)?)\b|\bno\s+(\w+\s+){0,2}(error|warning|results?|items?|rows?|entries|changes?|effect)\b/i;
 /**
  * A quoted literal is the most precise expected value the format has — T-001
  * strips quotes for the same reason. `Error message shown: 'exact string'` is a
@@ -239,6 +261,19 @@ const NEG_RE =
  */
 const QUOTED_VALUE_RE =
   /\b(reads?|contains?|equals?|matches|says?|message|text|value|label|title|error)\b[^'"]{0,20}['"][^'"]{4,}['"]|:\s*['"][^'"]{4,}['"]/i;
+/**
+ * Backend / HTTP shapes. The first version of this classifier was written and
+ * tested entirely on Storefront assertion forms, so 1,651 corpus assertion lines
+ * carrying `[BODY]` (339), `[GRID]` (246), `[STATUS]` (188), `[FORM]` (179),
+ * `[BLADE]` (151), `[DATA]` (86) and `[TOAST]` (82) fell through to UNKNOWN —
+ * and UNKNOWN was then treated as presence-only. That put real cross-org
+ * authorization tests on the demotion list: `[STATUS] GET for another user's
+ * member id returns 403 Forbidden — not 200` is the `SCOPE` archetype, the one
+ * this whole change argues is the most valuable and least covered.
+ */
+const HTTP_STATUS_RE = /\b(returns?|responds? with|status(?: code)?(?: is)?)\s*(HTTP\s*)?[1-5]\d\d\b|\b[1-5]\d\d\s+(OK|Created|No Content|Bad Request|Unauthorized|Forbidden|Not Found|Conflict|Unprocessable|Internal Server Error)\b/i;
+/** A concrete path or URL is an expected value, not a presence check. */
+const PATH_RE = /\b(URL|path|route|redirects? to|navigates? to)\b[^\n]{0,40}\s\/[a-z0-9\-_/{}:.]+/i;
 /** Presence / visibility / existence only. */
 const PRES_RE = /\b(visible|displayed|shown|shows?|present|appears?|renders?|exists?|enabled|disabled|hidden|absent|checked)\b/i;
 
@@ -254,11 +289,13 @@ export function classifyAssertionStrength(line: string): AssertionStrength {
   if (REL_TAG_RE.test(l) || REL_PHRASE_RE.test(l)) return "REL";
   // [MATH] with a formula is an identity, i.e. an invariant.
   if (/^\[MATH\]/i.test(l) && l.includes("=")) return "INV";
-  if (DER_RE.test(l) && NUMERIC_CMP_RE.test(l)) return "DER";
   if (DER_RE.test(l)) return "DER";
   if (NUMERIC_CMP_RE.test(l)) return "INV";
   // Before PRES: a negation is the opposite of a presence check, not a weak one.
   if (NEG_RE.test(l)) return "NEG";
+  // Before PRES: an HTTP status or a concrete path IS the expected value.
+  if (HTTP_STATUS_RE.test(l)) return "INV";
+  if (PATH_RE.test(l)) return "SHAPE";
   // Before PRES: a quoted expected value is a comparison, whatever verb carries it.
   if (QUOTED_VALUE_RE.test(l)) return "DER";
   if (SHAPE_RE.test(l)) return "SHAPE";
@@ -266,12 +303,33 @@ export function classifyAssertionStrength(line: string): AssertionStrength {
   return "UNKNOWN";
 }
 
+/** The ladder, strongest first. Single source of truth for rank ordering. */
+export const STRENGTH_ORDER: readonly AssertionStrength[] = [
+  "INV", "REL", "DER", "NEG", "SHAPE", "PRES", "UNKNOWN",
+];
+
+/** Classes that can fail on a wrong value. */
+const DISCRIMINATING = new Set<AssertionStrength>(["INV", "REL", "DER", "NEG", "SHAPE"]);
+
 /** True when at least one line can fail on a wrong value. */
 export function hasDiscriminatingAssertion(lines: readonly string[]): boolean {
-  return lines.some((l) => {
-    const c = classifyAssertionStrength(l);
-    return c === "INV" || c === "REL" || c === "DER" || c === "NEG" || c === "SHAPE";
-  });
+  return lines.some((l) => DISCRIMINATING.has(classifyAssertionStrength(l)));
+}
+
+/**
+ * True when NO line could even be classified — the classifier has no bucket for
+ * this case's assertion forms.
+ *
+ * This is deliberately NOT the same question as `!hasDiscriminatingAssertion`.
+ * Conflating them is a real defect this rule shipped with: `UNKNOWN` was folded
+ * into "presence-only", so a case the classifier simply could not READ was
+ * reported as one that checks nothing — 158 demotion candidates, 117 of them
+ * Backend, including live cross-org authorization tests. A gap in the classifier
+ * is the classifier's problem, never the case's: an unreadable case is sent to
+ * STRENGTHEN with an honest reason, and is never demotable.
+ */
+export function isUnclassified(lines: readonly string[]): boolean {
+  return lines.length > 0 && lines.every((l) => classifyAssertionStrength(l) === "UNKNOWN");
 }
 
 const VAGUE_RE = /\b(correctly|properly|as expected|looks good|works fine|works as|displays? properly|successfully)\b/i;
@@ -722,12 +780,17 @@ function lintCrossRow(rows: Row[], now = new Date(), staleDays = DEFAULT_STALE_D
   // so a per-case High would turn every suite red on day one and push everyone to
   // --warn-only, which kills the signal permanently. The HARD gate for this rule
   // lives in append-test-cases-to-suite.ts, where it sees only NEW rows.
-  const presenceOnly = rows.filter(
-    (r) => r.Assertions.trim() && !hasDiscriminatingAssertion(lines(r.Assertions)),
-  );
+  const weak = rows.filter((r) => r.Assertions.trim() && !hasDiscriminatingAssertion(lines(r.Assertions)));
+  const presenceOnly = weak.filter((r) => !isUnclassified(lines(r.Assertions)));
+  const unclassified = weak.filter((r) => isUnclassified(lines(r.Assertions)));
   if (presenceOnly.length)
     f.push(find("T-006", "Informational", presenceOnly[0].ID || "<file>",
-      `${presenceOnly.length} case(s) assert only presence/visibility (no INV/REL/DER/SHAPE) — cannot fail on a wrong value; strengthen on next touch`));
+      `${presenceOnly.length} case(s) assert only presence/visibility (no INV/REL/DER/NEG/SHAPE) — cannot fail on a wrong value; strengthen on next touch`));
+  // Reported separately and never as "presence-only": this is a gap in the
+  // classifier's vocabulary, not evidence about the case.
+  if (unclassified.length)
+    f.push(find("T-006", "Informational", unclassified[0].ID || "<file>",
+      `${unclassified.length} case(s) use assertion forms the strength classifier cannot read — not evidence they are weak; extend the classifier or rephrase`));
 
   // Dim 11 (TRI-000) staleness tally — one file-level signal, same shape as the
   // GRD-001 tally above and for the same reason: a per-case finding would emit

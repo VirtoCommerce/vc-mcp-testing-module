@@ -116,3 +116,71 @@ test("the demotion target is Manual and never Deprecated", () => {
   assert.equal(DEMOTION_TARGET, "Manual");
   assert.notEqual(DEMOTION_TARGET as string, "Deprecated");
 });
+
+// --- Regression guards for the code-review findings.
+
+// The one piece of GROUND TRUTH in the repo was never consulted. Measured at the
+// time: 10 of the 36 cases proven to have caught a bug were marked DEMOTE —
+// among them the tests that caught a nested-impersonation privilege escalation,
+// a stored XSS, two open P0s and a cross-org role leak. A case that has caught a
+// bug is not a candidate for anything but KEEP, whatever its assertions look like.
+test("GUARD: a case that has caught a real bug is never demoted", () => {
+  const proven = new Set(["CART-901"]);
+  const r = rankCase(row(), "s.csv", proven);
+  assert.notEqual(r.verdict, "DEMOTE");
+  assert.match(r.reasons.join(" "), /has caught a real bug/);
+});
+
+test("the same case with no proof is demotable — the guard is what changes it", () => {
+  assert.equal(rankCase(row(), "s.csv", new Set()).verdict, "DEMOTE");
+});
+
+// UNKNOWN is a gap in the classifier, not evidence about the case. Folding it
+// into "presence-only" put 158 candidates (117 Backend) on the demotion list and
+// printed a reason that was factually false.
+test("GUARD: a case the classifier cannot read is never demoted", () => {
+  const r = rankCase(row({ Assertions: "[WIDGET] the frobnicator reconciles the ledger" }), "s.csv", new Set());
+  assert.equal(r.verdict, "STRENGTHEN");
+  assert.match(r.reasons.join(" "), /cannot read/);
+  assert.doesNotMatch(r.reasons.join(" "), /presence-only/, "must not claim it is presence-only");
+});
+
+// The zero-assertion branch checked only the risk floor, ignoring step count and
+// the design stamp — so a 1-step, deliberately-stamped case whose author had not
+// yet filled Assertions was demoted, against the documented contract.
+test("GUARD: the zero-assertion branch obeys the same blockers as the weak branch", () => {
+  const cheap = rankCase(row({ Assertions: "", Steps: steps(1) }), "s.csv", new Set());
+  assert.equal(cheap.verdict, "STRENGTHEN", "1 step is cheap to fix");
+  const stamped = rankCase(
+    row({ Assertions: "", References: "VCST-1 · Archetype:SCOPE · Technique:EP" }),
+    "s.csv", new Set());
+  assert.equal(stamped.verdict, "STRENGTHEN", "a deliberate stamp blocks demotion");
+  // ...and with no blocker at all it is still DEMOTE.
+  assert.equal(rankCase(row({ Assertions: "" }), "s.csv", new Set()).verdict, "DEMOTE");
+});
+
+// bestStrength kept a private copy of the ladder and silently lost NEG when that
+// class was added: 49 cases reported best:UNKNOWN while being judged
+// discriminating — the explanation contradicting the verdict.
+test("bestStrength ranks NEG, the class the ladder was extended with", () => {
+  assert.equal(bestStrength(["[STATE] order NOT created — cart still intact"]), "NEG");
+  assert.equal(bestStrength(["[DOM] price is visible", "[STATE] order NOT created"]), "NEG");
+});
+
+// rank advertised candidates demote structurally could not act on: 386 of 795
+// (48%) differed only by a BLANK status being in one literal and not the other.
+test("what rank calls DEMOTE, demote can act on — one source of truth for status", () => {
+  for (const st of ["", "Automated", "Draft", "Reviewed", "Semi-Automated"]) {
+    const r = rankCase(row({ Automation_Status: st }), "s.csv", new Set());
+    assert.equal(r.verdict, "DEMOTE", `status "${st}" should rank DEMOTE`);
+    assert.equal(decideDemotion(r).demote, true, `status "${st}" should be actionable`);
+  }
+});
+
+test("a non-executing status is KEEP on both sides, case-insensitively", () => {
+  for (const st of ["Manual", "manual", "Deprecated", "DEPRECATED"]) {
+    const r = rankCase(row({ Automation_Status: st }), "s.csv", new Set());
+    assert.equal(r.verdict, "KEEP", st);
+    assert.equal(decideDemotion(r).demote, false, st);
+  }
+});

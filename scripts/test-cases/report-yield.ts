@@ -34,6 +34,25 @@ const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../..");
 const BUGS_ROOT = join(REPO_ROOT, "reports", "bugs");
 const SUITES_ROOT = join(REPO_ROOT, "regression", "suites");
 
+
+/** Shared CLI arg reading. Hand-rolled copies drifted: `--limit` was read as
+ *  `argv[0]` when the flag was absent, so `--unknown` became NaN and silently
+ *  emptied the report's main table. */
+function flagValue(argv: readonly string[], flag: string): string | undefined {
+  const i = argv.indexOf(flag);
+  return i >= 0 ? argv[i + 1] : undefined;
+}
+function intFlag(argv: readonly string[], flag: string, fallback: number): number {
+  const raw = flagValue(argv, flag);
+  if (raw === undefined) return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    console.error(`✗ ${flag} expects a non-negative number, got "${raw}"`);
+    process.exit(1);
+  }
+  return n;
+}
+
 function pct(n: number, d: number): string {
   return d ? `${Math.round((n / d) * 100)}%` : "n/a";
 }
@@ -42,7 +61,7 @@ function main(): void {
   const argv = process.argv.slice(2);
   const asJson = argv.includes("--json");
   const showUnknown = argv.includes("--unknown");
-  const limit = Number(argv[argv.indexOf("--limit") + 1] || "20");
+  const limit = intFlag(argv, "--limit", 20);
 
   const known = loadKnownCaseIds(SUITES_ROOT);
   const rows: Attribution[] = collectAttributions(BUGS_ROOT, known);
@@ -85,7 +104,8 @@ function main(): void {
 
   const suites = [...idx.bySuite.entries()].sort((a, b) => b[1].length - a[1].length);
   console.log(`\n  Suites credited: ${suites.length}`);
-  for (const [id, bugs] of suites.slice(0, 8)) console.log(`    suite ${id.padEnd(6)} ${bugs.length}`);
+  for (const [id, bugs] of suites.slice(0, limit)) console.log(`    suite ${id.padEnd(6)} ${bugs.length}`);
+  if (suites.length > limit) console.log(`    ... ${suites.length - limit} more`);
 
   const unknown = rows.flatMap((r) => r.unknownCaseIds);
   if (unknown.length) {

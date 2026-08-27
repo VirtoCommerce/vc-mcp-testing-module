@@ -43,7 +43,7 @@ import { join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { parse as parseCsv } from "csv-parse/sync";
 import { stringify as stringifyCsv } from "csv-stringify/sync";
-import { hasDiscriminatingAssertion } from "./lint-test-cases.js";
+import { hasDiscriminatingAssertion, isUnclassified } from "./lint-test-cases.js";
 
 export const COLUMNS = [
   "ID",
@@ -407,12 +407,30 @@ export function validateDesignStamps(
       .split(/\r?\n/)
       .map((l) => l.trim())
       .filter(Boolean);
-    if (assertionLines.length && !hasDiscriminatingAssertion(assertionLines)) {
+    // Zero assertions is strictly worse than presence-only, and the `&&` guard
+    // used to let it straight through: `validateRows` never requires Assertions
+    // either, so the single door into regression/suites/ admitted a case that
+    // checks nothing at all.
+    if (!assertionLines.length) {
+      errors.push(
+        `${where}: no assertions — the case checks nothing. Every case needs at least one ` +
+          `INV/REL/DER/NEG/SHAPE assertion. See test-case-template.md §Assertion STRENGTH`,
+      );
+    } else if (isUnclassified(assertionLines)) {
+      // The classifier could not read ANY line. That is a gap in its vocabulary,
+      // not proof the case is weak — so it is a warning, never a rejection.
+      warnings.push(
+        `${where}: the strength classifier recognises none of these assertion forms — the row is ` +
+          `allowed through, but check it carries a real expected value, and consider extending ` +
+          `classifyAssertionStrength() in lint-test-cases.ts`,
+      );
+    } else if (!hasDiscriminatingAssertion(assertionLines)) {
       errors.push(
         `${where}: every assertion is presence-only (visible/shown/present) — the case cannot fail ` +
-          `on a wrong value. Add at least one INV/REL/DER/SHAPE assertion (a measured invariant, a ` +
-          `relation between two observations, a comparison against an @td()-derived value, or a ` +
-          `format/order/count check). See test-case-template.md §Assertion STRENGTH`,
+          `on a wrong value. Add at least one INV/REL/DER/NEG/SHAPE assertion (a measured invariant, a ` +
+          `relation between two observations, a comparison against an @td()-derived value, an ` +
+          `assertion that something specific did NOT happen, or a format/order/count check). ` +
+          `See test-case-template.md §Assertion STRENGTH`,
       );
     }
 

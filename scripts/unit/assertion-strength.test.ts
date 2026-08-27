@@ -17,6 +17,7 @@ import assert from "node:assert/strict";
 import {
   classifyAssertionStrength,
   hasDiscriminatingAssertion,
+  isUnclassified,
 } from "../test-cases/lint-test-cases.js";
 
 test("measurable UI tags are invariants", () => {
@@ -135,7 +136,6 @@ test("a presence guard plus a measured invariant passes (the intended authoring 
 test("a negative assertion is discriminating, not weak", () => {
   for (const l of [
     "[STATE] order NOT created — cart still intact",
-    "[STATE] Both prices with min qty=1 are NOT deleted",
     "[STATE] Over-limit product not added to compare bar",
     "[DOM] Products outside the virtual catalog are not visible",
     "[STATE] the disabled item is not returned by the API",
@@ -143,6 +143,17 @@ test("a negative assertion is discriminating, not weak", () => {
     assert.equal(classifyAssertionStrength(l), "NEG", l);
     assert.ok(hasDiscriminatingAssertion([l]), l);
   }
+});
+
+// A line can carry BOTH a value comparison and a negation. The ladder resolves
+// it by precedence — INV outranks NEG — and both are discriminating, so the
+// verdict is unaffected either way. Pinned because the `=` lookbehind fix moved
+// this real corpus line from NEG to INV, and a silent reclassification of the
+// case that motivated the NEG class in the first place should not go unnoticed.
+test("a line carrying both a comparison and a negation ranks as the stronger", () => {
+  const l = "[STATE] Both prices with min qty=1 are NOT deleted";
+  assert.equal(classifyAssertionStrength(l), "INV");
+  assert.ok(hasDiscriminatingAssertion([l]));
 });
 
 test("negation is checked before presence — 'not visible' is not a presence check", () => {
@@ -154,4 +165,62 @@ test("a quoted expected value counts even when a presence verb carries it", () =
   const l = "[STATE] Error message shown: 'You must have at least one price per single unit.'";
   assert.equal(classifyAssertionStrength(l), "DER");
   assert.ok(hasDiscriminatingAssertion([l]));
+});
+
+// --- Regression guards for the code-review findings. Each of these FAILED
+// --- before the fix, and each names the corpus damage it prevents.
+
+// The `=` arm's lookbehind was written `(?<![a-z])` under the /i flag, which
+// made it case-insensitive and therefore rejected `=` after ANY letter. `qty = 2`
+// passed and `quantity=2` did not — the difference was a space. 3,397 corpus
+// assertion lines use the unspaced form and 209 whole cases were hard-rejected
+// by the appender with a message calling them "presence-only".
+test("an unspaced key=value comparison is a value comparison", () => {
+  for (const l of ["quantity=2", "STATUS=200", "[ADMIN] created: name=Bundle; required=false"]) {
+    assert.equal(classifyAssertionStrength(l), "INV", l);
+  }
+  assert.equal(classifyAssertionStrength("qty = 2"), "INV", "the spaced form must keep working");
+});
+
+// `count` and `format` as bare nouns laundered pure presence checks into SHAPE,
+// so 52 cases passed the gate on a word. They need a comparison context.
+test("a bare 'count' or 'format' does not launder a presence check", () => {
+  assert.equal(classifyAssertionStrength("[DOM] cart count is visible"), "PRES");
+  assert.equal(classifyAssertionStrength("[FORM] dates displayed in correct format"), "PRES");
+  // ...but a real count comparison still scores.
+  assert.notEqual(classifyAssertionStrength("[COUNT] count = 3"), "PRES");
+});
+
+// The classifier was written and tested on Storefront forms only, so 1,651
+// corpus lines carrying backend tags fell to UNKNOWN — and UNKNOWN was then
+// treated as presence-only, putting live cross-org authorization tests on the
+// demotion list.
+test("backend assertion shapes are discriminating", () => {
+  for (const l of [
+    "[STATUS] GET for another user's member id returns 403 Forbidden — not 200",
+    "[BODY] 403 response does not include the other user's email, addresses, or organization data",
+    "[STATUS] GET .../locked returns HTTP 200 with {locked: true}",
+  ]) {
+    assert.ok(hasDiscriminatingAssertion([l]), l);
+  }
+});
+
+// A concrete path IS the expected value. The template documents this exact line
+// as class SHAPE, and the classifier used to disagree with the template.
+test("a concrete URL/path assertion is SHAPE, matching the template", () => {
+  assert.equal(classifyAssertionStrength("[NAV] URL is /order/confirmation after Place Order"), "SHAPE");
+});
+
+test("negation covers bare 'no <noun>' and 'not disabled'", () => {
+  assert.equal(classifyAssertionStrength("[DOM] no error is shown"), "NEG");
+  assert.equal(classifyAssertionStrength("[DOM] Add to Cart button is not disabled"), "NEG");
+});
+
+// UNKNOWN and PRES answer different questions. Conflating them let a gap in the
+// classifier read as evidence about the case.
+test("isUnclassified separates 'cannot read' from 'presence-only'", () => {
+  assert.equal(isUnclassified(["the thing happens"]), true);
+  assert.equal(isUnclassified(["[DOM] price is visible"]), false, "presence IS classified");
+  assert.equal(isUnclassified([]), false, "no assertions is a different finding again");
+  assert.equal(isUnclassified(["the thing happens", "[REL] a == b"]), false);
 });
