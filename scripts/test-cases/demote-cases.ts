@@ -1,0 +1,182 @@
+/**
+ * Demote presence-only, expensive cases OUT of the regression lane.
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * `promote-cases.ts` is a one-way ratchet — its own header says it "never
+ * demotes". The consequence is measurable: 3 cases out of 4,243 carry
+ * `Deprecated`, and nothing else has ever left the lane. Meanwhile a full
+ * regression is ~14 h of wall clock and ~48% of the corpus cannot fail on a
+ * wrong value, so the suite spends roughly half its budget on checks that only
+ * fail when an element is missing entirely.
+ *
+ * This is the missing counterpart. It is deliberately the WEAKEST possible
+ * intervention that still stops the bleeding.
+ *
+ * WHAT IT DOES AND DOES NOT DO
+ * ----------------------------
+ *   - Writes `Automation_Status` -> `Manual` ONLY. A demoted case stays in the
+ *     file, keeps its ID, keeps its history, and a human can put it straight
+ *     back. `Manual` is already an EX-200 opt-out in `case-classifier.ts`, so it
+ *     immediately stops consuming regression time with no runner change.
+ *   - NEVER writes `Deprecated`. That is the repo's own rule (TRI-006:
+ *     "Deprecation is destructive … so it is ALWAYS human") and this script has
+ *     no business overriding it — `Deprecated` means "nobody runs this ever",
+ *     which is a claim about the product, not about the assertion text.
+ *   - NEVER deletes a row, and never touches Steps or Assertions. Strengthening
+ *     an assertion needs to know the correct value; that is authoring work for
+ *     `/qa-test-cases-generator`, not a bulk edit.
+ *   - Requires `--confirm` to write. Default is a dry run.
+ *
+ * FAIL-CLOSED, in the expensive direction
+ * ---------------------------------------
+ * A wrong demotion silently removes coverage; a wrong keep costs minutes. So the
+ * bar is `rank-cases.ts`'s DEMOTE verdict, which already requires ALL of:
+ * presence-only assertions, >= 6 steps, not on the risk floor (Critical/P0), and
+ * no deliberate `Archetype:` stamp. Anything cheap, critical or deliberately
+ * designed comes back STRENGTHEN and is never touched here.
+ *
+ * The write itself reuses `promote-cases.ts` `applyCellEdits`, which edits only
+ * the bytes of the changed cells and then re-parses and compares every field —
+ * so a re-serialisation cannot silently renormalise the quoting of untouched
+ * rows. Measured on promote: 39 edits produced exactly 39 insertions and 39
+ * deletions.
+ *
+ * Usage:
+ *   npx tsx scripts/test-cases/demote-cases.ts [--suite <csv>] [--layer frontend] [--limit N]
+ *   npx tsx scripts/test-cases/demote-cases.ts --suite <csv> --confirm
+ */
+import { readFileSync, writeFileSync } from "fs";
+import { resolve, sep } from "path";
+import { fileURLToPath } from "url";
+import { parseSuite } from "./append-test-cases-to-suite.js";
+import { applyCellEdits, type CellEdit } from "./promote-cases.js";
+import { rankSuiteFile, type CaseRank } from "./rank-cases.js";
+
+export const DEMOTION_TARGET = "Manual";
+/** Statuses this script is willing to move. Anything else is left alone. */
+export const DEMOTABLE_FROM = new Set(["Automated", "Draft", "Reviewed", "Semi-Automated"]);
+
+export const DEMOTE_REASONS = {
+  NOT_A_CANDIDATE: "DM-001 rank verdict is not DEMOTE",
+  WRONG_STATUS: "DM-002 Automation_Status is not one that runs in regression",
+  ALREADY_TARGET: "DM-003 already Manual",
+  NO_ID: "DM-004 row has no ID",
+} as const;
+
+/** Append a reversal-friendly stamp so the demotion is attributable and undoable. */
+export function stampDemotion(references: string, label: string, date: string): string {
+  const stamp = `Demoted: ${label} (${date}) presence-only`;
+  if (references.includes(stamp)) return references;
+  const trimmed = (references ?? "").trim();
+  return trimmed ? `${trimmed} | ${stamp}` : stamp;
+}
+
+export interface DemotionDecision {
+  id: string;
+  suite: string;
+  demote: boolean;
+  reason: string;
+  steps: number;
+  priority: string;
+  from: string;
+}
+
+/** Pure decision over an already-ranked case. */
+export function decideDemotion(r: CaseRank): DemotionDecision {
+  const base = { id: r.id, suite: r.suite, steps: r.steps, priority: r.priority, from: r.status };
+  if (!r.id || r.id === "<no id>" || r.id === "<unparsable>")
+    return { ...base, demote: false, reason: DEMOTE_REASONS.NO_ID };
+  if (r.status === DEMOTION_TARGET)
+    return { ...base, demote: false, reason: DEMOTE_REASONS.ALREADY_TARGET };
+  if (r.verdict !== "DEMOTE")
+    return { ...base, demote: false, reason: `${DEMOTE_REASONS.NOT_A_CANDIDATE} (${r.verdict})` };
+  if (!DEMOTABLE_FROM.has(r.status))
+    return { ...base, demote: false, reason: `${DEMOTE_REASONS.WRONG_STATUS} ("${r.status}")` };
+  return { ...base, demote: true, reason: r.reasons.join("; ") };
+}
+
+function main(): void {
+  const argv = process.argv.slice(2);
+  const get = (f: string): string | undefined => {
+    const i = argv.indexOf(f);
+    return i >= 0 ? argv[i + 1] : undefined;
+  };
+  const confirm = argv.includes("--confirm");
+  const asJson = argv.includes("--json");
+  const suite = get("--suite");
+  const label = get("--label") ?? "rank-cases";
+  const date = get("--date") ?? new Date().toISOString().slice(0, 10);
+  const limit = Number(get("--limit") ?? "50");
+
+  if (!suite) {
+    console.error(
+      "✗ --suite <csv> is required.\n" +
+        "  A corpus-wide bulk demotion is deliberately not offered: 872 cases across ~50 files in\n" +
+        "  one commit is unreviewable, and this write is the one that removes coverage. Run it per\n" +
+        "  suite, review the diff, move on. Use `rank-cases.ts --json` for the corpus-wide picture.",
+    );
+    process.exit(1);
+  }
+
+  const file = resolve(suite);
+  const decisions = rankSuiteFile(file).map(decideDemotion);
+  const toDemote = decisions.filter((d) => d.demote);
+
+  if (asJson) {
+    console.log(JSON.stringify({ suite: file, total: decisions.length, demoting: toDemote.length, decisions }, null, 2));
+    if (!confirm) return;
+  } else {
+    console.log(`\n${file.split(sep).pop()} — ${decisions.length} case(s), ${toDemote.length} to demote → ${DEMOTION_TARGET}\n`);
+    for (const d of toDemote.slice(0, limit)) {
+      console.log(`  ${d.id.padEnd(18)} ${d.priority.padEnd(9)} ${d.from.padEnd(10)} ${d.steps}st`);
+      console.log(`      ${d.reason}`);
+    }
+    if (toDemote.length > limit) console.log(`  … ${toDemote.length - limit} more`);
+  }
+
+  if (!toDemote.length) {
+    console.log("\nNothing to demote.");
+    return;
+  }
+
+  if (!confirm) {
+    console.log(
+      `\nDRY RUN — nothing written. Re-run with --confirm to apply.\n` +
+        `Demotion sets Automation_Status to "${DEMOTION_TARGET}" and appends a "Demoted:" stamp to\n` +
+        `References. The row, its ID and its steps are untouched, so this is reversible; it is NOT\n` +
+        `Deprecated (that stays human, per TRI-006) and nothing is deleted.`,
+    );
+    return;
+  }
+
+  const text = readFileSync(file, "utf-8");
+  // The References cell is read from the parsed row so the "Demoted:" stamp is
+  // APPENDED to whatever stamps are already there (Synced:/Audited:/Promoted:),
+  // never clobbering them.
+  const byId = new Map(parseSuite(text).rows.map((r) => [r.ID, r] as const));
+  const edits = new Map<string, CellEdit>();
+  const target = new Set(toDemote.map((d) => d.id));
+  for (const id of target) {
+    const row = byId.get(id);
+    if (!row) continue;
+    edits.set(id, {
+      Automation_Status: DEMOTION_TARGET,
+      References: stampDemotion(row.References ?? "", label, date),
+    });
+  }
+
+  const result = applyCellEdits(text, edits);
+  if (result.errors.length) {
+    console.error(`\n✗ Refusing to write — ${result.errors.length} verification error(s):`);
+    for (const e of result.errors.slice(0, 10)) console.error(`   ${e}`);
+    process.exit(1);
+  }
+  writeFileSync(file, result.text, "utf-8");
+  console.log(`\n✓ Demoted ${result.applied.length} case(s) in ${file.split(sep).pop()}.`);
+  console.log(`  Reversible: set Automation_Status back, or \`git checkout -- ${suite}\`.`);
+  console.log(`  Next: run \`npm run suites:sync\` then \`npm run suites:lint\`.`);
+}
+
+const isCli = !!process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+if (isCli) main();

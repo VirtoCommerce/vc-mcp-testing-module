@@ -203,7 +203,15 @@ Distill `1c` context + `1d` story analysis + `1a` scope/domains into one structu
 model** Step 3 authors cases from. It answers *"how can this feature be wrong, and what would catch each
 way?"*, not *"is every acceptance criterion represented?"* — coverage is necessary but it is not the goal,
 and a model that only traces ACs produces a suite that confirms the feature instead of attacking it. Keep
-it in working context (terminal-only, no file):
+**Write it to `reports/ba/test-models/<TICKET>-<date>.md`** — a durable artifact, not a terminal
+dump. Three reasons it has to be a file: a model nobody can re-open cannot be *argued with*, which
+is the whole point of having one; the parameter model for a surface (cart, checkout, org roles) does
+not change per ticket, so as a file it is **reused** and as terminal output it dies with the session;
+and a file can be linted (`npm run model:lint`), so the five parts and the resolved sweeps are
+checkable rather than asserted. It is `reports.md` **category 3** — the same durable BA test-design
+model the rules already provide for. Keep the *other* Step-1 artifacts terminal-only as before.
+
+Shape:
 ```
 TEST MODEL — <ticket-key>
 Ticket:      <ticket-key> | Type: Bug/Story/Task/Technical task/Sub-task/Epic | Status role: fix-ready/not-fixed/testable | Flow: feature-test | Priority: P0/P1/P2 | Path: FAST/FULL | Changed: Backend / Frontend / Both
@@ -222,6 +230,7 @@ Test scenarios (M rows — one per surviving cell)   ← authored from in Step 3
   | # | Cell (factor values) | Defect hypothesis — what breaks here, and why it plausibly would | Archetype | Technique | Oracle | P |
 Probes carried in: [vc-bug-catalog VC-*-NNN whose Detection probe hits this surface → scenario # | N/A + reason]   (filled in Step 2)
 Archetype sweep:  [archetypes in scope for these domains → covered by # | WAIVED + reason]                        (filled in Step 2)
+UIP sweep (UI only): [UIP-BACK/DEEP/REFRESH/TABS/EXPIRE/STORAGE/NET/INPUT/VIEW/DATA → covered by # | WAIVED + reason]  (filled in Step 2)
 User-flow diagram: [Mermaid flowchart of the primary + alternate user paths]         ← authored from in Step 3
 Business Rules: [BL-CART-001, BL-PAY-003, ...]   (filled in Step 2)
 Edge cases:  [ECL-* patterns]                    (filled in Step 2)
@@ -303,6 +312,16 @@ read it.)
   `CONVENTION` entries as scenario candidates: those are false-positive guards, and the right use is to
   *avoid filing* the behaviour they describe. Then fill `Archetype sweep`: for each archetype in scope for
   these domains, name the covering row or waive it with a reason.
+- **For a UI/storefront surface — the oracles that make a UI assertion strong** (previously unreachable
+  from authoring): `business-logic.md` **Domain 15 `BL-UI-*`** (measurable invariants + their `Verify`
+  recipes), `oracles/critical-ui-scope.md` (36 components × applicable invariants, with real
+  selectors), `skills/qa-design/SKILL.md` **§State-Stress Pass** (the seven states a surface must
+  survive), and `automation/storefront-selectors.md`. Assert these with the **measurable tags**
+  (`[SHIFT] [TOUCH] [SPACING] [ALIGN] [OVERFLOW] [CLS]`), never as prose inside `[DOM]`.
+- **`skills/qa-sbtm/modern-web-attack-surface.md` §The `UIP-*` sweep** — resolve all ten probes for a
+  UI flow: each covered by a scenario row or waived with a reason. These are the cases a real user
+  produces (Back, refresh, two tabs, expired session, deep link) and the corpus has almost none of
+  them: 8 · 5 · 11 · 5 · 5 out of 1 961 Frontend cases.
 
 **VirtoOZ docs query** (via `/vc-docs`) — **skip when `1c` delegated to `ba-system-analyzer`** (reuse its
 docs grounding; top up specific gaps only). Otherwise query the affected domain against the topic-scoped
@@ -325,7 +344,8 @@ both in parallel; UI/component → add `ui-ux-expert`; P0 or critical-revenue �
 
 **Gate (inline self-check):** every affected domain has its `BL-*`/`ECL-*`/`E2E-*`/`VC-*` loaded and an
 agent routed; **every in-domain defect-shaped `VC-*` entry is either a scenario row or an explicit N/A**;
-the `Archetype sweep` is resolved (covered or waived). (Verified as part of Step 3's gate on the full path
+the `Archetype sweep` is resolved (covered or waived); **for a UI surface the `UIP sweep` is resolved
+too**, and the UI oracles above are loaded. (Verified as part of Step 3's gate on the full path
 — no standalone verifier pass here.)
 
 ---

@@ -9,7 +9,10 @@
  *   Dim 1 Structure      S-001..S-007
  *   Dim 2 Determinism    D-001..D-006
  *   Dim 3 Completeness   C-001..C-008
- *   Dim 4 Testability    T-001..T-003 T-005   (T-004 needs tool-availability judgment — skipped)
+ *   Dim 4 Testability    T-001..T-003 T-005 T-006
+ *                        T-006 = assertion STRENGTH class (file-level tally here;
+ *                        the hard per-row gate is in the appender, new rows only)
+ *                        (T-004 needs tool-availability judgment — skipped)
  *                        T-005 = unscoreable prose in an EVALUATED assertion
  *                        (runner-native GraphQL cases only; grammar verdict
  *                        delegated to lib/graphql-assertions.ts)
@@ -168,6 +171,75 @@ const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i;
 // it fired on — and a rule that flags its own mandated convention trains people to
 // ignore the gate. A genuinely fixed address (e.g. a real user's email) still flags.
 const THROWAWAY_IDENTITY_RE = /(agent-test|TS_SUFFIX|\$\{?\w*SUFFIX)/i;
+/* ------------------------------------------------------------------ *
+ * Dim 4 / T-006 — assertion STRENGTH class
+ * ------------------------------------------------------------------ *
+ *
+ * The target tag ([DOM]/[STATE]/…) says WHERE to look. The strength class says
+ * whether the check can fail on a WRONG VALUE. They are independent, and only
+ * the second one decides whether a case can catch a bug.
+ *
+ * Measured on this corpus when the rule was written: 1,044 of 1,961 Frontend
+ * cases (53%) carried nothing but presence assertions, and the presence-to-value
+ * verb ratio was 5:1. A presence check fails only when the element is absent
+ * entirely — the rarest failure mode. Real bugs render SOMETHING: the open bug
+ * `non-usd-price-zero-display` renders a literal `£0.00`, so "price is visible"
+ * passes; `cart-configurable-line-summary-shows-wrong-option-label` renders a
+ * label, just the wrong one.
+ *
+ * Why the repo drifted here is worth recording, because it was not laziness: the
+ * Literal-text rule (GRD-002) forbids asserting an invented string and DV-016
+ * forbids asserting a literal value. Both are right. Together they leave PRES as
+ * the only remaining option UNLESS the author reaches for INV / REL / SHAPE,
+ * which are literal-free by construction. This classifier exists to make that
+ * third path the required one.
+ *
+ * Ranked strongest-first; the first match wins.
+ */
+export type AssertionStrength = "INV" | "REL" | "DER" | "SHAPE" | "PRES" | "UNKNOWN";
+
+/** Measurable UI + numeric-identity tags: the invariant is the whole assertion. */
+const INV_TAG_RE = /^\[(CLS|SHIFT|SPACING|ALIGN|OVERFLOW|TOUCH|IMGDIMS|PERF)\]/i;
+/** A relation between two observations of the system — no expected value needed. */
+const REL_TAG_RE = /^\[REL\]/i;
+const REL_PHRASE_RE = /\b(same as|identical to|matches the .* (shown|rendered|returned)|equals? the .* (shown|rendered|returned)|before (and|vs\.?) after|after .* == .* before|unchanged (from|vs)|consistent with the)\b/i;
+/** Compared against an independently derived value (@td / {{VAR}} / another surface's captured value). */
+const DER_RE = /@td\(|\{\{[A-Z0-9_]+\}\}|\[GQL-CAPTURE\]|captured (value|id)\b/i;
+/** Numeric / identity comparison of any kind. */
+const NUMERIC_CMP_RE = /(==|!=|>=|<=|(?<![a-z])=(?!=)|\b(equals?|differs? by|increments? by|decrements? by|exactly)\b)/i;
+/** Form / order / count — falsifiable with no literal. */
+const SHAPE_RE = /\bmatches\s*\/|\bregex\b|\bsorted\b|\bascending\b|\bdescending\b|\bformat\b|\bdecimal places\b|\bcount\b|\bexactly \d+\b|\bnon-empty\b|\bunique\b/i;
+/** Presence / visibility / existence only. */
+const PRES_RE = /\b(visible|displayed|shown|shows?|present|appears?|renders?|exists?|enabled|disabled|hidden|absent|checked)\b/i;
+
+/**
+ * Classify ONE assertion line. `stripQuoted` is applied by the caller for the
+ * same reason T-001 does it: a quoted literal is the most precise form we have
+ * and must not be mistaken for prose.
+ */
+export function classifyAssertionStrength(line: string): AssertionStrength {
+  const l = line.trim();
+  if (!l) return "UNKNOWN";
+  if (INV_TAG_RE.test(l)) return "INV";
+  if (REL_TAG_RE.test(l) || REL_PHRASE_RE.test(l)) return "REL";
+  // [MATH] with a formula is an identity, i.e. an invariant.
+  if (/^\[MATH\]/i.test(l) && l.includes("=")) return "INV";
+  if (DER_RE.test(l) && NUMERIC_CMP_RE.test(l)) return "DER";
+  if (DER_RE.test(l)) return "DER";
+  if (NUMERIC_CMP_RE.test(l)) return "INV";
+  if (SHAPE_RE.test(l)) return "SHAPE";
+  if (PRES_RE.test(l)) return "PRES";
+  return "UNKNOWN";
+}
+
+/** True when at least one line can fail on a wrong value. */
+export function hasDiscriminatingAssertion(lines: readonly string[]): boolean {
+  return lines.some((l) => {
+    const c = classifyAssertionStrength(l);
+    return c === "INV" || c === "REL" || c === "DER" || c === "SHAPE";
+  });
+}
+
 const VAGUE_RE = /\b(correctly|properly|as expected|looks good|works fine|works as|displays? properly|successfully)\b/i;
 // A QUOTED span is grounded evidence — a verbatim UI/i18n literal — not a vague predicate.
 // `[DOM] toast reads 'The user has been successfully blocked'` asserts an exact observed
@@ -610,6 +682,18 @@ function lintCrossRow(rows: Row[], now = new Date(), staleDays = DEFAULT_STALE_D
   if (legacyUngrounded.length)
     f.push(find("GRD-001", "Informational", legacyUngrounded[0].ID || "<file>",
       `${legacyUngrounded.length} case(s) have no assertion provenance tags (Dim 10) — grounded on next touch/regeneration`));
+
+  // Dim 4 (T-006) presence-only tally — file level, same shape and same reason as
+  // the GRD-001 tally above: ~1,900 cases corpus-wide carry only PRES assertions,
+  // so a per-case High would turn every suite red on day one and push everyone to
+  // --warn-only, which kills the signal permanently. The HARD gate for this rule
+  // lives in append-test-cases-to-suite.ts, where it sees only NEW rows.
+  const presenceOnly = rows.filter(
+    (r) => r.Assertions.trim() && !hasDiscriminatingAssertion(lines(r.Assertions)),
+  );
+  if (presenceOnly.length)
+    f.push(find("T-006", "Informational", presenceOnly[0].ID || "<file>",
+      `${presenceOnly.length} case(s) assert only presence/visibility (no INV/REL/DER/SHAPE) — cannot fail on a wrong value; strengthen on next touch`));
 
   // Dim 11 (TRI-000) staleness tally — one file-level signal, same shape as the
   // GRD-001 tally above and for the same reason: a per-case finding would emit

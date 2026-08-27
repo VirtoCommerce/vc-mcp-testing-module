@@ -43,6 +43,7 @@ import { join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { parse as parseCsv } from "csv-parse/sync";
 import { stringify as stringifyCsv } from "csv-stringify/sync";
+import { hasDiscriminatingAssertion } from "./lint-test-cases.js";
 
 export const COLUMNS = [
   "ID",
@@ -388,6 +389,30 @@ export function validateDesignStamps(
       errors.push(
         `${where}: Technique "${t[1]}" is not in the vocabulary ` +
           `(${[...vocab.techniques].sort().join(", ")})`,
+      );
+    }
+
+    // Assertion STRENGTH (T-006) — the hard gate, new rows only.
+    //
+    // Corpus-wide this is an Informational tally in lint-test-cases.ts, because
+    // ~1,900 existing cases would fail it and a red corpus gets routed around.
+    // Here it is an error: the appender is the single door into
+    // regression/suites/, so a NEW presence-only case simply never lands.
+    //
+    // A presence assertion cannot distinguish correct content from incorrect —
+    // it fails only when the element is absent, the rarest failure mode. The
+    // strong classes (INV/REL/DER/SHAPE) are all literal-free, so this does not
+    // conflict with GRD-002 / DV-016; it is the third path out of them.
+    const assertionLines = (row.Assertions ?? "")
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    if (assertionLines.length && !hasDiscriminatingAssertion(assertionLines)) {
+      errors.push(
+        `${where}: every assertion is presence-only (visible/shown/present) — the case cannot fail ` +
+          `on a wrong value. Add at least one INV/REL/DER/SHAPE assertion (a measured invariant, a ` +
+          `relation between two observations, a comparison against an @td()-derived value, or a ` +
+          `format/order/count check). See test-case-template.md §Assertion STRENGTH`,
       );
     }
 
