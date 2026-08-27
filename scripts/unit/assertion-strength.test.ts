@@ -125,3 +125,33 @@ test("a presence guard plus a measured invariant passes (the intended authoring 
     ]),
   );
 });
+
+// --- NEG and quoted literals: added after hand-checking PRICE-021/022/023
+// --- against the bug they cover. The first version of the classifier scored
+// --- "Both prices with min qty=1 are NOT deleted" as UNKNOWN, i.e. NOT
+// --- discriminating — exactly backwards, and it would have flagged a correct
+// --- case. A rule that hits correct cases gets switched off, so these are
+// --- regression guards, not nice-to-haves.
+test("a negative assertion is discriminating, not weak", () => {
+  for (const l of [
+    "[STATE] order NOT created — cart still intact",
+    "[STATE] Both prices with min qty=1 are NOT deleted",
+    "[STATE] Over-limit product not added to compare bar",
+    "[DOM] Products outside the virtual catalog are not visible",
+    "[STATE] the disabled item is not returned by the API",
+  ]) {
+    assert.equal(classifyAssertionStrength(l), "NEG", l);
+    assert.ok(hasDiscriminatingAssertion([l]), l);
+  }
+});
+
+test("negation is checked before presence — 'not visible' is not a presence check", () => {
+  assert.equal(classifyAssertionStrength("[DOM] the banner is visible"), "PRES");
+  assert.equal(classifyAssertionStrength("[DOM] the banner is not visible"), "NEG");
+});
+
+test("a quoted expected value counts even when a presence verb carries it", () => {
+  const l = "[STATE] Error message shown: 'You must have at least one price per single unit.'";
+  assert.equal(classifyAssertionStrength(l), "DER");
+  assert.ok(hasDiscriminatingAssertion([l]));
+});

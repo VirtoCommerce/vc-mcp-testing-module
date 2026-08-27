@@ -196,7 +196,7 @@ const THROWAWAY_IDENTITY_RE = /(agent-test|TS_SUFFIX|\$\{?\w*SUFFIX)/i;
  *
  * Ranked strongest-first; the first match wins.
  */
-export type AssertionStrength = "INV" | "REL" | "DER" | "SHAPE" | "PRES" | "UNKNOWN";
+export type AssertionStrength = "INV" | "REL" | "DER" | "NEG" | "SHAPE" | "PRES" | "UNKNOWN";
 
 /** Measurable UI + numeric-identity tags: the invariant is the whole assertion. */
 const INV_TAG_RE = /^\[(CLS|SHIFT|SPACING|ALIGN|OVERFLOW|TOUCH|IMGDIMS|PERF)\]/i;
@@ -209,6 +209,36 @@ const DER_RE = /@td\(|\{\{[A-Z0-9_]+\}\}|\[GQL-CAPTURE\]|captured (value|id)\b/i
 const NUMERIC_CMP_RE = /(==|!=|>=|<=|(?<![a-z])=(?!=)|\b(equals?|differs? by|increments? by|decrements? by|exactly)\b)/i;
 /** Form / order / count — falsifiable with no literal. */
 const SHAPE_RE = /\bmatches\s*\/|\bregex\b|\bsorted\b|\bascending\b|\bdescending\b|\bformat\b|\bdecimal places\b|\bcount\b|\bexactly \d+\b|\bnon-empty\b|\bunique\b/i;
+/**
+ * NEGATIVE assertions — "this specific thing did NOT happen / is NOT there".
+ *
+ * These are discriminating, and arguably the strongest UI/state shape there is:
+ * `[STATE] order NOT created — cart still intact` fails the moment a spurious
+ * order appears, which is exactly the defect it guards. They must be tested
+ * BEFORE PRES, because "not visible" contains "visible" and a naive presence
+ * match would score the negation as its own opposite.
+ *
+ * This was a real defect in the first version of this classifier, caught by
+ * hand-checking `PRICE-021/022/023` against the bug they cover: it scored
+ * `Both prices with min qty=1 are NOT deleted` as UNKNOWN and therefore
+ * non-discriminating, which is backwards and would have flagged a correct case.
+ */
+const NEG_RE =
+  /\b(not|never|no longer|without|prevents?|rejects?|blocks?|refuses?)\s+(\w+\s+){0,3}(created|added|deleted|removed|saved|persisted|applied|charged|submitted|visible|shown|displayed|present|listed|returned|reachable|accessible|enabled|allowed|placed|sent|granted|deletion|intact)\b/i;
+/**
+ * A quoted literal is the most precise expected value the format has — T-001
+ * strips quotes for the same reason. `Error message shown: 'exact string'` is a
+ * value comparison wearing a presence verb and must not fall through to PRES.
+ *
+ * But a bare quote is NOT enough, and getting this wrong in the permissive
+ * direction would gut the whole rule: D-002/T-002 *require* naming an element by
+ * its real UI label, so `[DOM] 'Add to Cart' button disabled` quotes a SUBJECT,
+ * not an expected value — and nearly every well-formed [DOM] assertion in the
+ * corpus carries such a label. The quote only counts when a comparison or
+ * content cue introduces it.
+ */
+const QUOTED_VALUE_RE =
+  /\b(reads?|contains?|equals?|matches|says?|message|text|value|label|title|error)\b[^'"]{0,20}['"][^'"]{4,}['"]|:\s*['"][^'"]{4,}['"]/i;
 /** Presence / visibility / existence only. */
 const PRES_RE = /\b(visible|displayed|shown|shows?|present|appears?|renders?|exists?|enabled|disabled|hidden|absent|checked)\b/i;
 
@@ -227,6 +257,10 @@ export function classifyAssertionStrength(line: string): AssertionStrength {
   if (DER_RE.test(l) && NUMERIC_CMP_RE.test(l)) return "DER";
   if (DER_RE.test(l)) return "DER";
   if (NUMERIC_CMP_RE.test(l)) return "INV";
+  // Before PRES: a negation is the opposite of a presence check, not a weak one.
+  if (NEG_RE.test(l)) return "NEG";
+  // Before PRES: a quoted expected value is a comparison, whatever verb carries it.
+  if (QUOTED_VALUE_RE.test(l)) return "DER";
   if (SHAPE_RE.test(l)) return "SHAPE";
   if (PRES_RE.test(l)) return "PRES";
   return "UNKNOWN";
@@ -236,7 +270,7 @@ export function classifyAssertionStrength(line: string): AssertionStrength {
 export function hasDiscriminatingAssertion(lines: readonly string[]): boolean {
   return lines.some((l) => {
     const c = classifyAssertionStrength(l);
-    return c === "INV" || c === "REL" || c === "DER" || c === "SHAPE";
+    return c === "INV" || c === "REL" || c === "DER" || c === "NEG" || c === "SHAPE";
   });
 }
 
