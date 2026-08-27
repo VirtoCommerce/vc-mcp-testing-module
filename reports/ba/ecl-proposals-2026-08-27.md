@@ -100,10 +100,25 @@ is display/clipboard fidelity, which remains falsifiable.
 
 ---
 
-## 6. Two tooling defects (`scripts/knowledge/oracle-significance.ts`)
+## 6. Two tooling defects — **BOTH FIXED 2026-08-27**
 
-1. **Business value unreachable for 45 of 54 sections.** `eclBusinessValue` reads only the `BL Invariant` column, which exists in chapter 14 alone; **Appendix D already declares a real invariant for 34 of the rest.** Demonstrated this run: correcting Appendix D's 15.1 row to `BL-A11Y-001/002/004` did not move its label. Fix: fall back to Appendix D for a 5-column chapter, or give the generic shape the column.
-2. **A fenced template row counts as real.** Appendix A's code-fenced placeholder is attributed to the preceding section — **13.3 scores 4 rows and 4/4 `[OBSERVED]` when it has 3**, the sole remaining `unresolved`. Fix: strip fenced blocks before row extraction.
+1. ~~**Business value unreachable for 45 of 54 sections.**~~ `eclBusinessValue` read only the `BL Invariant` column, which exists in chapter 14 alone, while **Appendix D already declared a real invariant for 34 of the rest**. Demonstrated by correcting Appendix D's 15.1 row to `BL-A11Y-001/002/004` and watching its label not move. **Fixed:** `parseLibrary` now returns `appendixBlRefs` and `eclBusinessValue` falls back to it when a section's own rows declare none. Two guards came with it — refs are read from the Appendix D row's **last cell only** (`ECL-14.9`'s BL cell also names `ECL-10.2`, which must not inherit `BL-LOY-008`), and an **em-dash cell declares nothing** even when its parenthetical names an invariant the section merely *overlaps*, because declining to declare is itself a claim.
+2. ~~**A fenced template row counts as real.**~~ Appendix A's code-fenced placeholder was attributed to the preceding section — 13.3 scored 4 rows and 4/4 `[OBSERVED]` for its 3. **Fixed:** `parseLibrary` tracks fences and skips their contents.
+
+**Measured effect:** `unresolved` 1 → **0**; §13.3 now reads 3/3 rows; §15.1 moved `undeclared` → `qualified` via `BL-A11Y-001 (P1-data) (via Appendix D)`. Distribution **7 high · 2 qualified · 45 undeclared → 23 high · 14 qualified · 5 low · 12 undeclared**, promotable **9 → 37**. The 12 that remain `undeclared` are exactly the 12 Appendix D rows whose BL cell opens with an em dash — genuine declaration gaps, and the right target for §4's `bl_proposals` work. 4 new unit tests; full suite 1938 pass.
+
+**Effect on the §2 held candidates — two are now value-cleared, and that changes the next run's scope:**
+
+| Candidate | Before | After the fix |
+|---|---|---|
+| reset-does-not-restore-default-controls (§3.2) | undeclared → HELD | **`qualified`** — business medium via `BL-SRCH-001` `[P1-data]` (Appendix D), product high (111 cases) |
+| external-IdP account collision (§4.3, endangers `BL-AUTH-002`) | undeclared → HELD | **`qualified`** — business medium via `BL-AUTH-002` `[P1-data]` (Appendix D), product high |
+| storefront per-module version-contract guard (§14.8) | undeclared → HELD | **still HELD** — 14.8's Appendix D row is `— (gap; VCST-5651)` |
+| analytics/dataLayer integrity (new §11.2) | undeclared → HELD | **still HELD** — a new section has no Appendix D row, and `BL-GA4-*` does not exist |
+| password-expiry-forces-reset (ch. 4) | undeclared → HELD | **depends on placement** — §4.2 declares `BL-AUTH-003`, §4.1 declares nothing; no invariant governs expiry itself |
+| order-editor-has-no-server-validation (§14.10) | `qualified`, held by the **truth** gate | unchanged — its live axis was absent, which value cannot fix |
+
+**Value-cleared is not write-cleared.** Both newly-qualified candidates still need their **MISSING verdict** to clear the three-axis bar in its own right, and each currently rests on a single batch's evidence (§3.2's docs axis was never established). They are now eligible to be written, not owed a write — re-triangulate before adding either.
 
 ---
 
