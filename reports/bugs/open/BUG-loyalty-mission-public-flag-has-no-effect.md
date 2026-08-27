@@ -15,6 +15,26 @@ undocumented.** If it is meant to gate customer visibility, this is a bug. If it
 hint with no eligibility meaning, the current behaviour is correct and the expectation in test `MSN-015`
 is what needs changing.
 
+## Decisive evidence — targeting held constant, `public` varied alone
+
+Queried `loyaltyMissionProgress` live (2026-08-27, post store-repair) as a **member** and a verified
+**non-member** of group `VIP`:
+
+| Mission | Condition | `public` | VIP member | Wholesaler (non-VIP) |
+|---|---|---|---|---|
+| `MSN_GROUP_VIP` | `UserGroupIsCondition[VIP]` | **true** | **VISIBLE** (Completed) | not visible |
+| `MSN_GROUP_VIP_PRIVATE` | `UserGroupIsCondition[VIP]` | **false** | **VISIBLE** (Completed) | not visible |
+| `MSN_PUBLISHED_PRIVATE` | `AnyUserGroupCondition` | false | VISIBLE (Completed) | **VISIBLE** (InProgress) |
+
+Totals: VIP member sees **15** missions, non-member sees **13** — a difference of exactly the two
+VIP-targeted rows.
+
+Two independent readings, same conclusion: **rows 1 vs 2** hold the audience identical and vary `public`
+alone — both are visible to the eligible user, so `public=false` does not hide a mission from someone in
+its audience; **row 3** shows that with a neutral condition it is visible to everyone, so the flag gates
+nothing on its own either. **Group targeting itself works in both directions**, which is what makes this a
+clean experiment rather than a broken-mission artifact.
+
 ## What this is NOT
 
 **Not an audience-control failure.** Mission targeting is done by the condition tree —
@@ -31,11 +51,12 @@ audience control. That was wrong and is retracted.
 
 Preconditions: `npm run seed:loyalty-missions`; `Loyalty.Missions.Enable = true`.
 
-1. As admin: `GET {{BACK_URL}}/api/loyalty-missions/@td(MSN_PUBLISHED_PRIVATE.id)`
-   → `"status": "Published"`, `"public": false`.
-2. As an ordinary authenticated storefront customer, POST `{{BACK_URL}}/graphql`:
-   `query { loyaltyMissionProgress(storeId: "{{STORE_ID}}" userId: "<me.id>" first: 50) { items { missionId name } } }`
-3. Observe the `public=false` mission present in `items[]`.
+1. As admin, confirm the record: `GET {{BACK_URL}}/api/loyalty-missions/@td(MSN_GROUP_VIP_PRIVATE.id)`
+   → `"status": "Published"`, `"public": false`, condition `UserGroupIsCondition[VIP]`.
+2. As `@td(LOYALTY_VIP_USER.email)` (a member of `VIP`), POST `{{BACK_URL}}/graphql`:
+   `query { loyaltyMissionProgress(storeId:"{{STORE_ID}}" userId:"<me.id>" cultureName:"en-US" first:100){ items { missionId name status } } }`
+3. The `public=false` mission is present in `items[]`. Repeat as `@td(LOYALTY_WHOLESALE_USER.email)`
+   (not in `VIP`) — it is correctly absent, proving the filter that *is* applied is the condition tree.
 
 Runner repro: `npx tsx scripts/graphql/graphql-runner.ts --case regression/suites/Backend/loyalty/075d-loyalty-missions.csv:MSN-015`
 
@@ -45,13 +66,10 @@ Runner repro: `npx tsx scripts/graphql/graphql-runner.ts --case regression/suite
 **Actual** — `public=false` has no observable effect: the mission is returned to customers, accrues
 progress, and pays its reward, identically to `public=true`.
 
-**The reward really is paid.** On the environment, `AGENT-TEST-MSN-PUBLISHED-PRIVATE` reached
-`status: Completed`, `percentage: 100`, with a `LoyaltyBalanceOperationLog` row
-(`operationType: Earned`, `sourceType: LoyaltyMission`) crediting the customer. This is stated because
-"a non-public mission is *listed*" and "a non-public mission *pays out points*" are very different asks of
-a reviewer. Under the advertising reading (below) the payout is correct and expected — the mission's own
-condition is `AnyUserGroupCondition`, so every customer is its intended audience. Under an eligibility
-reading it would be a points leak. **Which it is depends entirely on the open question.**
+**The reward really is paid** — `AGENT-TEST-MSN-PUBLISHED-PRIVATE` reached `Completed` / 100% with an
+`Earned` / `sourceType: LoyaltyMission` ledger row crediting the customer. Stated because "listed" and
+"pays out points" are very different asks of a reviewer. Under the advertising reading the payout is
+correct (that fixture's audience is everyone); under an eligibility reading it is a points leak.
 
 ## Three clean negatives — the flag has no consumer anywhere
 
@@ -79,14 +97,13 @@ What is `LoyaltyMission.Public` for? Three possibilities, each implying a differ
 There is no documentation for Missions anywhere (VirtoOZ has none; PR #14 adds 4 lines), so this cannot be
 resolved from product sources.
 
-**A working model exists, but it is ours, not the product's.** This QA repo's own
-`scripts/seed-data/loyalty/missions-specs.mjs` states the two-variable model in terms — *"the condition
-tree decides WHO a mission is FOR, and `public` decides whether it is advertised"* — and its header
-encodes the opposite expectation for the fixture, that *"a Published mission with `public=false` must not
-reach the customer-facing query"*. Both were written by our own test-data agent **today**, inferred from
-the field name and observed behaviour. That is a reasonable model and it is why LOW is the right grade,
-but it is **not a contract**: it cannot settle the question, and the two statements are only consistent if
-"advertised" means "appears in the customer-facing list" — which is precisely what is being asked.
+**A working model exists, but it is ours, not the product's.** This QA repo's
+`scripts/seed-data/loyalty/missions-specs.mjs` says *"the condition tree decides WHO a mission is FOR, and
+`public` decides whether it is advertised"*, while its header encodes the opposite expectation — that a
+`public=false` mission *"must not reach the customer-facing query"*. Both were written by our own agent
+today, inferred from the field name and observed behaviour. Reasonable, and why LOW is the right grade —
+but not a contract, and the two statements only agree if "advertised" means "appears in the list", which
+is the question itself.
 
 ## Root cause (if #1)
 
