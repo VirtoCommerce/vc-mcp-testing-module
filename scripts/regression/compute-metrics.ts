@@ -37,6 +37,11 @@
  */
 import { readFileSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
+import {
+  collectAttributions,
+  indexAttributions,
+  loadKnownCaseIds,
+} from "../lib/defect-attribution.js";
 
 interface RunEntry {
   runId: string;
@@ -62,7 +67,29 @@ const round = (n: number, d = 2): number => {
 };
 
 /** Aggregate execution + defect metrics over a set of run entries. */
-export function aggregate(entries: RunEntry[]) {
+/**
+ * Bugs attributed to a (runId, suiteId), DERIVED from `reports/bugs/**` at read
+ * time rather than read off the history row.
+ *
+ * `bugs_found` has been an optional field on `RunEntry` since this script was
+ * written and is populated in 0 of 109 rows, so `defectDensity` has computed a
+ * flat 0 for the entire corpus. The fix is not to start writing the field: the
+ * bug report is the source of truth for "a defect exists", it is durable while
+ * history.json prunes at 90 days, and a stored count goes stale the moment a bug
+ * moves open/ -> fixed/ -> closed/. So it is joined, not stored — the same
+ * derive-at-decision-time rule as `oracle-significance.ts`
+ * (`.claude/rules/test-data.md` §GOLDEN RULE).
+ *
+ * The row's own `bugs_found` still wins when present, so a CI writer that does
+ * supply it is not overridden.
+ */
+export function bugsForEntry(e: RunEntry, join?: ReadonlyMap<string, number>): number {
+  if (Number.isFinite(e.bugs_found)) return Number(e.bugs_found);
+  if (!join || !e.runId || !e.suiteId) return 0;
+  return join.get(`${e.runId}::${e.suiteId}`) ?? 0;
+}
+
+export function aggregate(entries: RunEntry[], bugJoin?: ReadonlyMap<string, number>) {
   const sum = (k: keyof RunEntry) => entries.reduce((a, e) => a + (Number(e[k]) || 0), 0);
   const passed = sum("passed");
   const failed = sum("failed");
@@ -71,7 +98,7 @@ export function aggregate(entries: RunEntry[]) {
   const planned = sum("total");
   const executed = passed + failed; // executed excludes blocked/skipped (catalog rule)
   const minutes = sum("duration_minutes");
-  const bugs = sum("bugs_found");
+  const bugs = entries.reduce((a, e) => a + bugsForEntry(e, bugJoin), 0);
 
   return {
     runs: entries.length,
@@ -376,7 +403,19 @@ function main(): void {
     process.exit(2);
   }
 
-  const agg = aggregate(entries);
+  // Join the durable bug reports so defectDensity stops reading a flat 0.
+  // Best-effort: a missing/unreadable reports/bugs tree degrades to the old
+  // behaviour rather than failing the metrics run.
+  let bugJoin: ReadonlyMap<string, number> | undefined;
+  try {
+    bugJoin = indexAttributions(
+      collectAttributions("reports/bugs", loadKnownCaseIds("regression/suites")),
+    ).byRunSuite;
+  } catch {
+    bugJoin = undefined;
+  }
+
+  const agg = aggregate(entries, bugJoin);
   const trend = trends(entries);
   const gate = gateType ? evaluateGate(gateType, agg, args.p0Bugs, args.p1Bugs) : null;
 
