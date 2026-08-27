@@ -39,6 +39,25 @@
  *   node scripts/seed-data/loyalty/seed-loyalty-missions.mjs --missions on
  *   node scripts/seed-data/loyalty/seed-loyalty-missions.mjs --reupload-banners  # artwork edited
  *
+ * PROGRESS (VCST-5346). Mission DEFINITIONS alone render a page of identical 0% / warning /
+ * not-completed cards, because the storefront draws every visual state from `loyaltyMissionProgress`.
+ * Progress has no write API on this build — `/api/loyalty-mission-progress` is search+get, and the one
+ * writer is `LoyaltyMissionHandler : IEventHandler<OrderChangedEvent>` filtered to `EntryState.Added`.
+ * There is no order-STATUS gate, so this seeder provisions the states with ONE Swagger-shaped order
+ * (`POST /api/order/customerOrders`, status New) for the `USER` role's SECURITY-ACCOUNT id, and then
+ * asserts the result twice: through the admin progress search, and through `loyaltyMissionProgress`
+ * itself — the only surface that reports `daysRemaining`, which is computed per request and never
+ * stored. A re-provision recreates the WHOLE mission set (a progress row cannot be reset, and one
+ * order contributes to one mission once); it only happens when the live state does not already match.
+ *
+ * GROUP TARGETING. Two fixtures (MSN_GROUP_VIP / MSN_GROUP_VIP_PRIVATE) carry a real
+ * `UserGroupIsCondition`, and the seeder resolves BOTH audience accounts live before writing anything:
+ * the member must be in the target group and the non-member must NOT be, compared the way the server
+ * compares (whole-string, OrdinalIgnoreCase). Either check failing ABORTS the seed — a targeted fixture
+ * whose audience nobody belongs to seeds cleanly and can only ever report an absence that reads as a
+ * product defect. The OBSERVED group lists go to the overlay as MSN_GROUP_AUDIENCE; the accounts
+ * themselves belong to the loyalty user seeder and are never created or deleted here.
+ *
  * BANNERS. Each mission carries the artwork for its GOAL TYPE (money / repeat orders / featured SKUs),
  * uploaded from `test-data/uploads/msn-banner-*.svg` under a FIXED file name so the asset URL is stable
  * across runs — it is part of `missionSignature`, and a churning URL would recreate every mission on
@@ -48,17 +67,21 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  STORE_ID, DRY_RUN, TEARDOWN, ONLY, ROOT,
-  log, verbose, assertSafeTarget, auth, api,
+  STORE_ID, DRY_RUN, TEARDOWN, ONLY, ROOT, BACK_URL, ADMIN, ADMIN_PASSWORD,
+  log, verbose, assertSafeTarget, auth, api, idsParam,
   uploadAsset, assetUrlOk,
   writeEnvAliasOverride, verifyRemoved, discoverCatalogProducts,
 } from '../../lib/seed-common.mjs';
+import { roleByKey, resolveRole } from '../../lib/user-roles.mjs';
 import {
   MISSIONS, MISSION_BY_ALIAS, STORE_SETTING, PERSKU_PRODUCTS, TARGETING,
   BANNERS, BANNER_FOLDER, BANNER_CONTENT_TYPE, bannerSourceRel, bannerAssetRel, bannerKeyFor,
   missionName, isSeededMissionName, needsGoalItems, resolveCurrencies, resolveLocales,
   buildMissionBody, buildGoalItems, reconcileGoalItems, localizedValues,
   missionSignature, signaturesMatch, windowIsOpen, windowExpectsOpen, validateSpecShape,
+  PROGRESS_ORDER, PROGRESS_ORDER_ALIAS, PROGRESS_USER_ROLE, progressOrderNumber,
+  predictProgress, percentagesMatch, progressFixtures, DANGER_THRESHOLD_DAYS, WINDOWS,
+  TARGET_GROUP, GROUP_AUDIENCE, isGroupTargeted, groupsInclude,
 } from './missions-specs.mjs';
 
 const argv = process.argv.slice(2);
@@ -67,6 +90,24 @@ const missionsFlagIdx = argv.indexOf('--missions');
 const MISSIONS_TOGGLE = missionsFlagIdx >= 0 ? String(argv[missionsFlagIdx + 1] || '').toLowerCase() : null;
 /** Push the banner BYTES back up even though the URL already serves — for when the artwork changed. */
 const REUPLOAD_BANNERS = argv.includes('--reupload-banners');
+
+/**
+ * ADDITIVE MODE: create what is missing, NEVER delete-and-recreate what is already there.
+ *
+ * The seeder's repair strategy is delete-and-recreate, because a Published mission is immutable. That
+ * is correct in isolation and DESTRUCTIVE when someone else's work is sitting on top of these
+ * fixtures: `LoyaltyMissionProgress` rows have no delete API on this build, so recreating a mission
+ * mints a fresh GUID and ORPHANS every progress row against a dead mission id — and the only way back
+ * is to place another order, which cannot be undone either. A parallel VCST-5346 session hit exactly
+ * that risk on 2026-08-27 while holding live progress on MSN_ENDING_SOON / MSN_PROGRESS_PARTIAL /
+ * MSN_PROGRESS_COMPLETED.
+ *
+ * So `--no-recreate` turns every recreate decision into a SKIP + a report. It deliberately does not
+ * silence the drift — the run still says which fixture is wrong and why, it just refuses to be the
+ * one that destroys the shared state. Use it whenever another session may be mid-run against the env;
+ * combine with `--only <ALIAS>` to add a single new fixture and touch nothing else.
+ */
+const NO_RECREATE = argv.includes('--no-recreate');
 
 /* ── Store settings ─────────────────────────────────────────────────────────── */
 
@@ -159,6 +200,13 @@ async function syncGoalItems(spec, missionId, products) {
     const qs = remove.map((r) => `ids=${encodeURIComponent(r.id)}`).join('&');
     await api('DELETE', `/api/loyalty-mission-goal-items?${qs}`, null, { expectStatus: [200, 204] });
   }
+  // A repaired QUANTITY is reported at normal verbosity, not just under --verbose. MSN_PERSKU_ANY was
+  // found live on 2026-08-27 carrying slot B at 2 against a spec of 1 — targetValue 4 instead of 3 —
+  // and the reconcile would have fixed it on the next run without anyone learning that it had ever
+  // been wrong. A silent repair of a discriminating value is indistinguishable from no drift at all.
+  if (update.length) {
+    log(`  ⚠ ${missionName(spec)}: repaired ${update.length} drifted goal-item quantity/-ies → ${update.map((u) => `${u.productId}=${u.quantity}`).join(', ')}`);
+  }
   verbose(`goal items for ${missionName(spec)}: +${create.length} ~${update.length} -${remove.length}`);
 
   if (DRY_RUN) return desired.length;
@@ -167,6 +215,16 @@ async function syncGoalItems(spec, missionId, products) {
   const after = await goalItemsFor(missionId);
   if (after.length !== desired.length) {
     throw new Error(`${missionName(spec)}: expected ${desired.length} goal items, found ${after.length}`);
+  }
+  // COUNT was asserted; QUANTITY was not — and quantity is what decides currentValue/targetValue and
+  // therefore every percentage derived from this mission. A row count that matches while a quantity
+  // does not is precisely how MSN_PERSKU_ANY sat at targetValue 4 while looking correctly seeded.
+  const wantByProduct = new Map(desired.map((d) => [d.productId, Number(d.quantity)]));
+  const wrong = after
+    .filter((r) => Number(r.quantity) !== wantByProduct.get(r.productId))
+    .map((r) => `${r.productId}: ${r.quantity} (want ${wantByProduct.get(r.productId)})`);
+  if (wrong.length) {
+    throw new Error(`${missionName(spec)}: goal-item quantities did not land — ${wrong.join('; ')}`);
   }
   return after.length;
 }
@@ -254,6 +312,268 @@ async function deleteBanners() {
   return removed;
 }
 
+/* ── Progress provisioning (VCST-5346) ──────────────────────────────────────
+ *
+ * The storefront's mission card renders PROGRESS, and progress has no write API on this build: the
+ * only writer is `LoyaltyMissionHandler : IEventHandler<OrderChangedEvent>` filtered to
+ * `EntryState.Added`, which enqueues `ProcessOrderAsync` on Hangfire. There is no order-STATUS gate,
+ * so a plain `POST /api/order/customerOrders` provisions it — no cart, no checkout, no payment, no
+ * browser. Everything here exists to make that one order produce a deterministic set of states.
+ *
+ * WHY A RE-PROVISION DELETES AND RECREATES *EVERY* MISSION, not just the ones whose state is wrong.
+ * A given order contributes to a given mission exactly once (`TransactionExistsAsync(missionId,
+ * orderId, userId)` plus a unique index), and a progress row cannot be deleted, edited or reset
+ * through any API. So the only way back to a known progress state is a mission with a NEW id — at
+ * which point a fresh order must be placed for it. But that fresh order also lands on every OTHER
+ * mission that still carries progress from the previous order, adding a second contribution and
+ * silently pushing e.g. MSN_ORDERCOUNT from 1/2 to 2/2. Recreating the whole set makes the resulting
+ * progress a pure function of (the spec set) x (one order) instead of of the run history. It is a big
+ * hammer, so it only swings when the live state does NOT already match: on an unchanged env the
+ * seeder reuses everything and touches nothing.
+ */
+
+/** The account whose progress this is — resolved through the role registry, never as a literal. */
+async function resolveProgressOwner() {
+  const role = resolveRole(roleByKey(PROGRESS_USER_ROLE));
+  if (!role.email) {
+    throw new Error(
+      `cannot resolve the ${PROGRESS_USER_ROLE} role's email (looked for ${roleByKey(PROGRESS_USER_ROLE).emailVars.join('|')} in .env.${process.env.TEST_ENV || 'vcst'}). `
+      + 'The progress fixtures need a real storefront account; an order with no customer writes progress nobody can query.',
+    );
+  }
+  const u = await api('GET', `/api/platform/security/users/${encodeURIComponent(role.email)}`, null, { expectStatus: [200, 404] });
+  // MUST be the SECURITY-ACCOUNT id, not the contact/member id. The write side stores
+  // `order.CustomerId` verbatim (`context.UserId = order.CustomerId`, no lookup) while the read side
+  // keys on `GetCurrentUserId()` = the `sub` claim = AspNetUsers.Id. Using `memberId` writes a row the
+  // storefront can never see, and it fails SILENTLY — the page just shows nothing started.
+  if (!u?.id) {
+    throw new Error(`security account for ${role.email} not found — cannot place the progress order (seed the user first: npm run seed:users)`);
+  }
+  return { email: role.email, userId: u.id, userName: u.userName || role.email, memberId: u.memberId || '' };
+}
+
+/** Live progress rows for our fixtures, keyed by missionId. */
+async function liveProgressByMission(missionIds, userId) {
+  if (!missionIds.length) return new Map();
+  const r = await api('POST', '/api/loyalty-mission-progress/search', { missionIds, userId, take: 200 }, { expectStatus: [200, 201] });
+  return new Map((r?.results || []).map((p) => [p.missionId, p]));
+}
+
+/** Does a live progress row match what the spec declares? A missing row never matches. */
+function progressMatches(spec, row) {
+  if (!row) return false;
+  const want = predictProgress(spec);
+  if (!want) return false;
+  return row.status === want.status
+    && percentagesMatch(Number(row.percentage), want.percentage)
+    && Number(row.currentValue) === want.currentValue
+    && Number(row.targetValue) === want.targetValue;
+}
+
+async function findProgressOrder() {
+  const number = progressOrderNumber();
+  const r = await api('POST', '/api/order/customerOrders/search', { keyword: number, take: 5 }, { expectStatus: [200, 201] });
+  return (r?.results || []).find((o) => o.number === number) || null;
+}
+
+async function deleteProgressOrder() {
+  const found = await findProgressOrder();
+  if (!found) return false;
+  await api('DELETE', `/api/order/customerOrders?${idsParam([found.id])}`, null, { expectStatus: [200, 204] });
+  verbose(`deleted provisioning order ${found.number}`);
+  return true;
+}
+
+/**
+ * Create the provisioning order if it is not already there. Deliberately NOT a rebuild-on-drift: a
+ * second order would add a SECOND contribution to every mission it matches, so an order that exists is
+ * always reused. The caller deletes it first when a genuine re-provision is needed.
+ *
+ * `catalogId` is mandatory on a line item — omitting it fails as a raw SQL NOT NULL violation
+ * (HTTP 500, verified live), not as a readable validation error.
+ */
+async function ensureProgressOrder(owner, products, currency) {
+  const number = progressOrderNumber();
+  const existing = await findProgressOrder();
+  if (existing) {
+    if (existing.customerId !== owner.userId) {
+      throw new Error(
+        `${number} exists but is owned by ${existing.customerId}, not ${owner.email} (${owner.userId}). `
+        + 'Its progress landed under the wrong account and the storefront cannot see it. Re-run after `--teardown`.',
+      );
+    }
+    verbose(`provisioning order ${number} exists → ${existing.id}`);
+    return { id: existing.id, created: false };
+  }
+  const body = {
+    number,
+    storeId: STORE_ID,
+    currency,
+    status: PROGRESS_ORDER.status,
+    customerId: owner.userId,
+    customerName: `AGENT-TEST Missions (${owner.email})`,
+    items: PROGRESS_ORDER.lines.map((l) => {
+      const p = products?.[l.slot];
+      if (!p?.id) throw new Error(`progress order line ${l.slot} has no resolved product`);
+      return {
+        sku: p.sku, productId: p.id, catalogId: p.catalogId, name: p.name,
+        quantity: l.quantity, price: PROGRESS_ORDER.unitPrice, productType: 'Physical', currency,
+      };
+    }),
+  };
+  const created = await api('POST', '/api/order/customerOrders', body, { expectStatus: [200, 201] });
+  log(`  ✓ provisioning order ${number} → ${created?.id} (${owner.email}, ${PROGRESS_ORDER.lines.map((l) => `${l.slot}x${l.quantity}`).join(' + ')})`);
+  return { id: created?.id, created: true };
+}
+
+/**
+ * Wait for Hangfire to write the progress the order implies, then assert it. Polling rather than a
+ * fixed sleep because the write is asynchronous: asserting immediately reads an empty table and
+ * reports a provisioning failure that is really a race.
+ */
+async function awaitProgress(specs, userId, missionIdByAlias, { attempts = 20, intervalMs = 3000 } = {}) {
+  const ids = specs.map((s) => missionIdByAlias[s.aliasName]).filter(Boolean);
+  let live = new Map();
+  for (let i = 0; i < attempts; i++) {
+    live = await liveProgressByMission(ids, userId);
+    if (specs.every((s) => progressMatches(s, live.get(missionIdByAlias[s.aliasName])))) return live;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  const detail = specs.map((s) => {
+    const row = live.get(missionIdByAlias[s.aliasName]);
+    const want = predictProgress(s);
+    return `${s.aliasName}: want ${want.status} ${want.percentage}% (${want.currentValue}/${want.targetValue}), got ${row ? `${row.status} ${row.percentage}% (${row.currentValue}/${row.targetValue})` : 'NO PROGRESS ROW'}`;
+  }).join('\n    ');
+  throw new Error(`progress did not reach the declared state within ${(attempts * intervalMs) / 1000}s:\n    ${detail}`);
+}
+
+/** A token for the customer-facing GraphQL. `/graphql` needs its own bearer; seed-common keeps its private. */
+async function graphqlToken() {
+  const res = await fetch(`${BACK_URL}/connect/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'password', username: ADMIN, password: ADMIN_PASSWORD, scope: 'offline_access' }),
+  });
+  if (!res.ok) throw new Error(`graphql token failed: ${res.status}`);
+  return (await res.json()).access_token;
+}
+
+/**
+ * Assert the states through the query the FRONTEND actually reads.
+ *
+ * The admin REST search above proves the rows exist; it cannot prove the storefront sees them, and it
+ * cannot see `daysRemaining` at all — that field is computed per request in the xAPI resolver and is
+ * never persisted, so the danger-badge fixture is unverifiable anywhere else. Run as admin with an
+ * explicit `userId` (the authorization handler allows admin-or-self), which keeps the seeder from
+ * needing the customer's password.
+ */
+async function verifyViaCustomerQuery(userId) {
+  const token = await graphqlToken();
+  const query = `query($s:String!,$u:String){ loyaltyMissionProgress(storeId:$s userId:$u first:100){ totalCount items {
+    missionId name status percentage currentValue targetValue daysRemaining isStarted missionType
+    items { productId currentQuantity targetQuantity } } } }`;
+  const res = await fetch(`${BACK_URL}/graphql`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ query, variables: { s: STORE_ID, u: userId } }),
+  });
+  const json = await res.json();
+  if (json.errors) throw new Error(`loyaltyMissionProgress failed: ${JSON.stringify(json.errors).slice(0, 300)}`);
+  const byName = new Map((json.data?.loyaltyMissionProgress?.items || []).map((i) => [i.name, i]));
+
+  const problems = [];
+  for (const spec of progressFixtures()) {
+    const card = byName.get(missionName(spec));
+    const want = predictProgress(spec);
+    if (!card) { problems.push(`${spec.aliasName}: absent from the customer-facing query entirely`); continue; }
+    if (card.status !== want.status) problems.push(`${spec.aliasName}: status ${card.status}, expected ${want.status}`);
+    if (!percentagesMatch(Number(card.percentage), want.percentage)) problems.push(`${spec.aliasName}: percentage ${card.percentage}, expected ${want.percentage}`);
+    if (card.isStarted !== true) problems.push(`${spec.aliasName}: isStarted=false — the card renders a transient 0% placeholder, not a real progress row`);
+    // The danger badge is a pure function of daysRemaining, and this is the ONLY surface that reports it.
+    if (WINDOWS[spec.window]?.endOffsetDays < DANGER_THRESHOLD_DAYS) {
+      if (!(card.daysRemaining < DANGER_THRESHOLD_DAYS)) {
+        problems.push(`${spec.aliasName}: daysRemaining=${card.daysRemaining}, not below the ${DANGER_THRESHOLD_DAYS}-day danger threshold — the badge renders warning`);
+      }
+    }
+    const rows = card.items || [];
+    if (want.rows.length && rows.length !== want.rows.length) problems.push(`${spec.aliasName}: ${rows.length} SKU row(s), expected ${want.rows.length}`);
+    if (want.rows.length) {
+      const met = rows.filter((r) => r.currentQuantity >= r.targetQuantity).length;
+      if (met !== want.rowsMet) problems.push(`${spec.aliasName}: ${met} target-met SKU row(s), expected ${want.rowsMet}`);
+    }
+    log(`  ✓ ${spec.aliasName.padEnd(24)} ${String(card.status).padEnd(11)} ${String(card.percentage).padEnd(5)}% ${card.currentValue}/${card.targetValue} daysRemaining=${card.daysRemaining} rows=${rows.map((r) => `${r.currentQuantity}/${r.targetQuantity}`).join(',') || '—'}`);
+  }
+  if (problems.length) throw new Error(`the customer-facing query does not show the declared states:\n    ${problems.join('\n    ')}`);
+}
+
+/* ── Group-targeting audience ───────────────────────────────────────────────
+ *
+ * A group-targeted fixture is worth nothing without two accounts that are provably on OPPOSITE sides
+ * of the group, and "provably" has to mean OBSERVED, not declared: the committed registry records who
+ * we intend the audience to be, and this is the step that checks the env agrees. Both directions are
+ * asserted because each fails silently on its own —
+ *   - the member drifting OUT of the group makes MSN_GROUP_VIP invisible to everyone, which reads as a
+ *     targeting bug rather than as a fixture problem;
+ *   - the non-member drifting IN makes "a non-member does not see it" unfalsifiable, and the case
+ *     passes forever. That one is not hypothetical: LOYALTY_NOBAL_USER already carries groups
+ *     ["VIP"] despite its name suggesting an unrelated purpose, so the wrong pick was one line away.
+ *
+ * Verified in source: the groups come from the CONTACT's `Groups` collection via
+ * `IMemberResolver.ResolveMemberByIdAsync(securityUserId)`, and the comparison is whole-string
+ * OrdinalIgnoreCase. `groupsInclude` mirrors that, so this agrees with the predicate that will really
+ * decide visibility rather than with a stricter one of our own.
+ */
+async function resolveAudienceAccount(roleKey) {
+  const decl = roleByKey(roleKey);
+  const role = resolveRole(decl);
+  if (!role.email) {
+    throw new Error(
+      `cannot resolve the ${roleKey} role's email (looked for ${decl.emailVars.join('|')} in .env.${process.env.TEST_ENV || 'vcst'}). `
+      + 'The group-targeted fixtures need both audience accounts; without one, targeting cannot be observed in either direction.',
+    );
+  }
+  const acct = await api('GET', `/api/platform/security/users/${encodeURIComponent(role.email)}`, null, { expectStatus: [200, 404] });
+  if (!acct?.id) {
+    throw new Error(`security account for ${roleKey} (${role.email}) not found — seed the loyalty users first (npm run seed:loyalty-users)`);
+  }
+  // The group lives on the MEMBER, not the account: GetUserGroups resolves securityUserId -> memberId
+  // -> member.Groups. An account with no member record yields a NULL UserGroups server-side, at which
+  // point every UserGroupIsCondition returns false and the mission vanishes with no error.
+  if (!acct.memberId) {
+    throw new Error(
+      `${roleKey} (${role.email}) has a security account but no memberId. The server reads groups off the `
+      + 'CONTACT, so this account can never satisfy a UserGroupIsCondition — every targeted mission would '
+      + 'silently disappear for it, and the absence would read as a product bug.',
+    );
+  }
+  const member = await api('GET', `/api/members/${encodeURIComponent(acct.memberId)}`, null, { expectStatus: [200, 404] });
+  const groups = Array.isArray(member?.groups) ? member.groups.map(String) : [];
+  return { role: roleKey, email: role.email, userId: acct.id, memberId: acct.memberId, groups };
+}
+
+async function resolveGroupAudience() {
+  const member = await resolveAudienceAccount(GROUP_AUDIENCE.memberRole);
+  const nonMember = await resolveAudienceAccount(GROUP_AUDIENCE.nonMemberRole);
+
+  if (!groupsInclude(member.groups, TARGET_GROUP)) {
+    throw new Error(
+      `${member.role} (${member.email}) carries groups ${JSON.stringify(member.groups)}, which do not include `
+      + `"${TARGET_GROUP}". The group-targeted fixtures would have NO audience at all, so "a targeted mission `
+      + 'reaches its group" could never be observed — and the resulting absence would read as a targeting defect.',
+    );
+  }
+  if (groupsInclude(nonMember.groups, TARGET_GROUP)) {
+    throw new Error(
+      `${nonMember.role} (${nonMember.email}) is ALSO in "${TARGET_GROUP}" (groups ${JSON.stringify(nonMember.groups)}). `
+      + 'With both control accounts inside the audience, "a non-member does NOT see it" cannot fail, and the '
+      + 'positive control proves nothing — a mission with no targeting at all would pass identically.',
+    );
+  }
+  log(`  audience: ${member.role} ${member.email} groups=${JSON.stringify(member.groups)} (in "${TARGET_GROUP}")`);
+  log(`            ${nonMember.role} ${nonMember.email} groups=${JSON.stringify(nonMember.groups)} (NOT in "${TARGET_GROUP}")`);
+  return { member, nonMember };
+}
+
 /* ── Product resolution ─────────────────────────────────────────────────────── */
 
 /**
@@ -279,6 +599,8 @@ async function resolveTargetProducts() {
 /* ── Main ───────────────────────────────────────────────────────────────────── */
 
 async function seed() {
+  /** Fixtures `--no-recreate` refused to rebuild. Reported at the end so the drift is never silent. */
+  const kept = [];
   const problems = validateSpecShape();
   if (problems.length) {
     console.error('ABORT: the committed mission spec set is not coherent:');
@@ -318,13 +640,69 @@ async function seed() {
     log(`  banner ${key.padEnd(12)} ${r.status} ${r.contentType || ''} ${url}`);
   }
 
-  const wantsProducts = specs.some(needsGoalItems);
+  // The progress order's line items point at the SAME discovered products the PerSku goals target, so
+  // a run that provisions progress needs them even if no selected spec has SKU targets of its own.
+  const wantsProducts = specs.some(needsGoalItems) || (!ONLY && progressFixtures().length > 0);
   const products = wantsProducts && !DRY_RUN ? await resolveTargetProducts() : {};
   if (wantsProducts && !DRY_RUN) {
     for (const p of PERSKU_PRODUCTS) log(`  PerSku target ${p.slot}: ${products[p.slot].sku} — ${products[p.slot].name} (qty ${p.quantity})`);
   }
 
-  const existing = DRY_RUN ? new Map() : await ourMissionsByName();
+  // The audience is checked BEFORE any mission is written, and it ABORTS rather than warns. A
+  // group-targeted mission seeded against an audience nobody is in is the vacuous-fixture failure this
+  // whole module is written against — it seeds cleanly, resolves through @td(), and can only ever
+  // report an absence that reads as a product defect.
+  const wantsAudience = !DRY_RUN && specs.some(isGroupTargeted);
+  const audience = wantsAudience ? await resolveGroupAudience() : null;
+
+  // --- VCST-5346: decide whether the progress states need re-provisioning, BEFORE any mission is
+  // written. A reset deletes the whole set (see the block comment above `resolveProgressOwner`), so
+  // the decision has to precede the reuse loop rather than interrupt it.
+  const wantsProgress = !ONLY && !DRY_RUN && progressFixtures().length > 0;
+  let owner = null;
+  let progressReset = false;
+  /** True when --no-recreate declined a reset, so the progress assertions below cannot hold. */
+  let progressRefused = false;
+  if (wantsProgress) {
+    owner = await resolveProgressOwner();
+    log(`  progress owner: ${owner.email} → security account ${owner.userId} (role ${PROGRESS_USER_ROLE})`);
+    const live = await ourMissionsByName();
+    const rows = await liveProgressByMission(
+      progressFixtures().map((s) => live.get(missionName(s))?.id).filter(Boolean),
+      owner.userId,
+    );
+    const stale = progressFixtures().filter((s) => {
+      const m = live.get(missionName(s));
+      return !m || !progressMatches(s, rows.get(m.id));
+    });
+    progressReset = stale.length > 0;
+    if (progressReset && NO_RECREATE) {
+      // The whole-set reset is the single most destructive thing this seeder can do — it deletes every
+      // mission so ONE order can redetermine the set. Under --no-recreate it is refused outright: the
+      // progress rows it would orphan cannot be deleted, and the states it would rebuild may be the
+      // very ones another session is asserting against right now.
+      progressReset = false;
+      progressRefused = true;
+      for (const s of stale) kept.push({ alias: s.aliasName, id: live.get(missionName(s))?.id || '(absent)', reason: 'progress state does not match the spec' });
+      log(`  ⚠ --no-recreate: NOT re-provisioning progress (${stale.map((s) => s.aliasName).join(', ')}). The whole-set reset would orphan undeletable LoyaltyMissionProgress rows.`);
+    } else if (progressReset) {
+      log(`  progress re-provision needed (${stale.map((s) => s.aliasName).join(', ')}) — recreating every mission so one order fully determines the set`);
+      const all = [...live.values()];
+      for (const m of all) {
+        const items = await goalItemsFor(m.id);
+        if (items.length) await api('DELETE', `/api/loyalty-mission-goal-items?${idsParam(items.map((i) => i.id))}`, null, { expectStatus: [200, 204] });
+      }
+      if (all.length) await deleteMissions(all.map((m) => m.id));
+      await deleteProgressOrder();
+      log(`  cleared ${all.length} mission(s) + the provisioning order`);
+    } else {
+      log('  progress states already match the spec — reusing them (no order placed)');
+    }
+  } else if (!DRY_RUN && ONLY) {
+    log('  ℹ --only run: progress provisioning skipped (a re-provision is a whole-set operation, see resolveProgressOwner)');
+  }
+
+  const existing = DRY_RUN || progressReset ? new Map() : await ourMissionsByName();
   const now = new Date();
   const writeback = {};
 
@@ -337,7 +715,10 @@ async function seed() {
     let mission = have;
     let action = 'reused';
 
-    if (have && spec.recreateAlways) {
+    if (have && spec.recreateAlways && NO_RECREATE) {
+      kept.push({ alias: spec.aliasName, id: have.id, reason: 'recreateAlways' });
+      action = 'KEPT (--no-recreate; NOT reset to Draft)';
+    } else if (have && spec.recreateAlways) {
       await deleteMissions([have.id]);
       mission = null; action = 'recreated (recreateAlways)';
     } else if (have) {
@@ -349,12 +730,21 @@ async function seed() {
       // every run — churning the GUID that `@td(MSN_EXPIRED.id)` resolves to. What is drift for one
       // intent is the fixture working for the other.
       const windowWrong = windowIsOpen(full || have, now) !== windowExpectsOpen(spec.window);
-      if (drifted || windowWrong) {
+      const reason = drifted
+        ? 'signature drift'
+        : (windowWrong ? `window ${windowExpectsOpen(spec.window) ? 'expired' : 'reopened'}` : null);
+      if (reason && NO_RECREATE) {
+        // Reported, never silenced: the fixture IS wrong and the run says so — it simply refuses to be
+        // the process that orphans someone else's undeletable progress rows to fix it.
+        const detail = drifted
+          ? `live ${JSON.stringify(missionSignature(full || have))} vs spec ${JSON.stringify(want)}`
+          : reason;
+        kept.push({ alias: spec.aliasName, id: have.id, reason, detail });
+        action = `KEPT (--no-recreate; ${reason} NOT repaired)`;
+      } else if (reason) {
         await deleteMissions([have.id]);
         mission = null;
-        action = drifted
-          ? 'recreated (signature drift)'
-          : `recreated (window ${windowExpectsOpen(spec.window) ? 'expired' : 'reopened'})`;
+        action = `recreated (${reason})`;
       }
     }
 
@@ -416,7 +806,42 @@ async function seed() {
       writeback[spec.aliasName].locale_default = locales['store-default'];
       writeback[spec.aliasName].locale_alternate = locales['store-alternate'];
     }
-    log(`✓ ${spec.aliasName.padEnd(26)} ${name.padEnd(34)} ${spec.status}/${spec.public ? 'public' : 'private'} banner=${bannerKeyFor(spec)} ${action}${items ? ` (+${items} SKU targets)` : ''}`);
+    const audienceLabel = isGroupTargeted(spec) ? `groups=[${spec.condition.groups.join(',')}]` : 'any-group';
+    log(`✓ ${spec.aliasName.padEnd(26)} ${name.padEnd(34)} ${spec.status}/${spec.public ? 'public' : 'private'} ${audienceLabel.padEnd(13)} banner=${bannerKeyFor(spec)} ${action}${items ? ` (+${items} SKU targets)` : ''}`);
+  }
+
+  // --- VCST-5346: place the provisioning order, then prove the states landed. Skipped entirely when
+  // --no-recreate declined the reset: the assertions below would fail on a state we deliberately chose
+  // not to rebuild, turning a considered refusal into a run that reads as broken.
+  if (wantsProgress && progressRefused) {
+    log('  ⚠ progress verification skipped — --no-recreate left the live states as they were (see the KEPT report below).');
+  } else if (wantsProgress) {
+    const missionIdByAlias = Object.fromEntries(Object.entries(writeback).map(([k, v]) => [k, v.id]));
+    const order = await ensureProgressOrder(owner, products, currencies['store-default']);
+    // The write is asynchronous (Hangfire), so this polls rather than asserting straight away.
+    await awaitProgress(progressFixtures(), owner.userId, missionIdByAlias);
+    // …and then re-asks the question through the query the storefront itself reads. The REST search
+    // proves rows exist; only this proves the customer can see them, and only this reports
+    // daysRemaining, which is computed per request and never stored.
+    await verifyViaCustomerQuery(owner.userId);
+    writeback[PROGRESS_ORDER_ALIAS] = {
+      id: order.id || '', user_id: owner.userId, user_email: owner.email, store_id: STORE_ID,
+    };
+  }
+
+  // The audience fixture records what was OBSERVED, never what was assumed: the two emails are per-env
+  // identity from .env.<env>, the security-account ids are runtime, and the group lists are live state
+  // read off this env's contacts. A case resolves the pair from here instead of naming an account, and
+  // `*_groups` is the evidence that the assertion it is about to make can actually fail.
+  if (audience) {
+    writeback[GROUP_AUDIENCE.aliasName] = {
+      member_email: audience.member.email,
+      member_user_id: audience.member.userId,
+      member_groups: audience.member.groups.join('|'),
+      nonmember_email: audience.nonMember.email,
+      nonmember_user_id: audience.nonMember.userId,
+      nonmember_groups: audience.nonMember.groups.join('|'),
+    };
   }
 
   // The two discovered products get their own aliases so a case can name the SKU it must buy.
@@ -434,10 +859,51 @@ async function seed() {
   };
 
   writeEnvAliasOverride(writeback);
-  log(DRY_RUN ? 'DRY RUN complete (no writes).' : `Seed complete — ${specs.length} mission(s).`);
+
+  // A refusal that nobody reads is the same as a silent repair. Everything --no-recreate declined is
+  // listed here, with the id, so the fixture can be fixed deliberately (and by whoever owns the state
+  // sitting on top of it) rather than incidentally by the next full seed.
+  if (kept.length) {
+    log(`⚠ --no-recreate kept ${kept.length} pre-existing fixture(s) that the spec says are WRONG:`);
+    for (const k of kept) log(`    ${k.alias} (${k.id}) — ${k.reason}${k.detail && k.detail !== k.reason ? `\n      ${k.detail}` : ''}`);
+    log('    Nothing was deleted. Re-run WITHOUT --no-recreate, once no other session depends on these ids, to repair them.');
+  }
+  log(DRY_RUN ? 'DRY RUN complete (no writes).' : `Seed complete — ${specs.length} mission(s)${kept.length ? `, ${kept.length} kept unrepaired` : ''}.`);
 }
 
 async function teardown() {
+  // Bottom-up in the entity graph: the provisioning ORDER is what created every progress row, so it
+  // goes before the missions it fed. A scoped (--only) teardown leaves it — the fixtures it did not
+  // touch still depend on it, and re-creating it later would double-count on all of them.
+  //
+  // KNOWN, UNAVOIDABLE RESIDUE: LoyaltyMissionProgress rows cannot be deleted. `/api/loyalty-mission-
+  // progress` is search+get only and nothing else in the module removes them, so the rows this order
+  // produced outlive it. They are harmless — GetUserMissionsAsync iterates MISSIONS, so a row whose
+  // mission is gone is unreachable from every API and every storefront surface — but they do
+  // accumulate, like the loyalty operation-log rows in seed-loyalty-ephemeral-user.mjs. This is
+  // reported rather than silently swallowed so a zero-residue claim is not made where none is possible.
+  if (!ONLY) {
+    const removed = await deleteProgressOrder();
+    log(removed
+      ? `✓ deleted the provisioning order ${progressOrderNumber()}`
+      : `ℹ no provisioning order ${progressOrderNumber()} to delete`);
+    log('ℹ LoyaltyMissionProgress rows are NOT deletable (search+get API only) — the rows this order produced remain, orphaned and unreachable once their mission is gone.');
+    if (!DRY_RUN) writeEnvAliasOverride({ [PROGRESS_ORDER_ALIAS]: { id: '', user_id: '', user_email: '', store_id: '' } });
+    // The audience ACCOUNTS are not ours to delete — they belong to the loyalty user seeder and other
+    // suites sign in as them. What this seeder owns is the OBSERVATION, and a stale one is worse than
+    // none: it would let a case claim a membership nobody re-checked. So the overlay entry is blanked
+    // and the accounts are left alone.
+    if (!DRY_RUN) {
+      writeEnvAliasOverride({
+        [GROUP_AUDIENCE.aliasName]: {
+          member_email: '', member_user_id: '', member_groups: '',
+          nonmember_email: '', nonmember_user_id: '', nonmember_groups: '',
+        },
+      });
+    }
+    log(`ℹ ${GROUP_AUDIENCE.memberRole} / ${GROUP_AUDIENCE.nonMemberRole} accounts left in place — they belong to the loyalty user seeder; only the observed-membership overlay was cleared.`);
+  }
+
   const ours = await ourMissionsByName();
   const targets = ONLY
     ? [...ours.values()].filter((m) => m.name === missionName(MISSION_BY_ALIAS[ONLY] || { key: ONLY }))

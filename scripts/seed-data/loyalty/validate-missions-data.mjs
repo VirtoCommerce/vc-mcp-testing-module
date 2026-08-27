@@ -21,6 +21,11 @@
  *   [6] the gate alias names the real setting + records the base switch it must NOT touch
  *   [7] no committed file anywhere carries a seeded mission GUID
  *   [8] (informational) which envs' overlays currently carry ids
+ *   [9] the VCST-5346 progress axis: the provisioning order's registry entry matches the order the
+ *       seeder places, the account it is placed for is a declared user-roles.mjs role, and all THREE
+ *       storefront states (danger badge / partial / completed-PerSku) are still reachable
+ *  [10] the targeting axis, across registries: the group the fixtures target is the group the intended
+ *       member account really carries, and the negative control is declared OUTSIDE it
  */
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -29,7 +34,13 @@ import {
   MISSIONS, PERSKU_PRODUCTS, STORE_SETTING, RUNTIME_FIELDS_BY_KIND, NAME_PREFIX,
   BANNERS, bannerKeyFor, bannerSourceRel,
   missionName, validateSpecShape,
+  PROGRESS_ORDER, PROGRESS_ORDER_ALIAS, PROGRESS_USER_ROLE, progressOrderNumber,
+  goalItemQuantities, needsGoalItems, predictProgress, percentagesMatch, progressFixtures,
+  WINDOWS, DANGER_THRESHOLD_DAYS,
+  TARGETING, TARGET_GROUP, GROUP_AUDIENCE, MISSION_BY_ALIAS,
+  targetedGroups, isGroupTargeted, groupMatches,
 } from './missions-specs.mjs';
+import { USER_ROLES } from '../../lib/user-roles.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const GUID_RE = /\b[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}\b/i;
@@ -52,6 +63,8 @@ const aliases = JSON.parse(readFileSync(aliasPath, 'utf8'));
  */
 const RUNTIME_BY_ALIAS = {
   [STORE_SETTING.aliasName]: RUNTIME_FIELDS_BY_KIND.storeSetting,
+  [PROGRESS_ORDER_ALIAS]: RUNTIME_FIELDS_BY_KIND.progressOrder,
+  [GROUP_AUDIENCE.aliasName]: RUNTIME_FIELDS_BY_KIND.groupAudience,
   ...Object.fromEntries(PERSKU_PRODUCTS.map((p) => [p.aliasName, RUNTIME_FIELDS_BY_KIND.perSkuProduct])),
   // A currency-carrying mission has one MORE runtime field: the resolved code. The INTENT is authored
   // and committed; the code it resolves to is per-env store config.
@@ -74,6 +87,8 @@ for (const p of validateSpecShape()) fail(`[1] ${p}`);
 /* [2] ─────────────────────────────────────────────────────────────────────── */
 const owned = [
   STORE_SETTING.aliasName,
+  PROGRESS_ORDER_ALIAS,
+  GROUP_AUDIENCE.aliasName,
   ...PERSKU_PRODUCTS.map((p) => p.aliasName),
   ...MISSIONS.map((m) => m.aliasName),
 ];
@@ -115,6 +130,22 @@ for (const m of MISSIONS) {
     fail(`[3] ${m.aliasName} carries window_intent but sits on the default "${DEFAULT_WINDOW}" window — a dead field reads as coverage that does not exist`);
   }
 
+  // A group condition is the whole point of the fixture that carries it, so the registry must NAME the
+  // audience — same treatment, and same reason, as `window_intent`. Without the mirror, a targeted
+  // fixture quietly re-authored onto the neutral condition reads as identical to every other mission
+  // and the case asserting that a non-member cannot see it starts passing for no reason at all.
+  const groups = targetedGroups(m);
+  if (groups) {
+    if (a.condition_type !== TARGETING.groupCondition.id) {
+      fail(`[3] ${m.aliasName}.condition_type is ${JSON.stringify(a.condition_type)} in aliases.json but the spec declares a ${TARGETING.groupCondition.id} — the registry no longer names the property this fixture exists for`);
+    }
+    if (a.condition_groups !== groups.join('|')) {
+      fail(`[3] ${m.aliasName}.condition_groups is ${JSON.stringify(a.condition_groups)} in aliases.json but the spec targets ${JSON.stringify(groups.join('|'))} — a case would sign in as one audience while the seeder targets another`);
+    }
+  } else if (['condition_type', 'condition_groups'].some((k) => k in a)) {
+    fail(`[3] ${m.aliasName} carries condition fields but its spec is on the neutral ${TARGETING.neutralCondition.id} — the fixture READS as audience-targeted while behaving as untargeted, which is exactly the misreading that cost a retracted P1 on 2026-08-27`);
+  }
+
   if (g.currency) {
     if (a.goal_currency_intent !== g.currency) {
       fail(`[3] ${m.aliasName}.goal_currency_intent is ${JSON.stringify(a.goal_currency_intent)} but the spec declares ${JSON.stringify(g.currency)}`);
@@ -151,6 +182,53 @@ for (const m of MISSIONS) {
   }
   if (!('banner_url' in a)) {
     fail(`[3] ${m.aliasName} has no banner_url field for the resolved asset URL — the seeder writes it and @td(${m.aliasName}.banner_url) would never see it`);
+  }
+
+  // A progress fixture's DECLARED state must be mirrored into the registry — a case asserts the
+  // storefront card against @td(...progress_status/percentage), so a registry that drifts from the
+  // spec makes the case assert a state the seeder never provisions. The value mirrored is the one
+  // predictProgress() RE-DERIVES from the seed order, not the hand-written declaration, so a stale
+  // number cannot survive in two places at once.
+  if (m.progress) {
+    const predicted = predictProgress(m);
+    if (!predicted) {
+      fail(`[3] ${m.aliasName} declares a progress expectation that predictProgress() cannot derive — validateSpecShape explains why; the registry cannot mirror what nothing can compute`);
+    } else {
+      if (a.progress_status !== predicted.status) {
+        fail(`[3] ${m.aliasName}.progress_status is ${JSON.stringify(a.progress_status)} in aliases.json but the seed order yields ${JSON.stringify(predicted.status)} — a case would assert a storefront state the seed never produces`);
+      }
+      if (!percentagesMatch(Number(a.progress_percentage), predicted.percentage)) {
+        fail(`[3] ${m.aliasName}.progress_percentage is ${JSON.stringify(a.progress_percentage)} in aliases.json but the seed order yields ${predicted.percentage}`);
+      }
+    }
+  } else if (['progress_status', 'progress_percentage'].some((k) => k in a)) {
+    fail(`[3] ${m.aliasName} carries progress fields but its spec declares no \`progress\` — nothing provisions or guards that state, so the field reads as coverage that does not exist`);
+  }
+
+  // GOAL-ITEM QUANTITIES — mirrored for EVERY PerSku mission, not only the ones that override them.
+  //
+  // The quantity is what decides `targetValue`, and therefore every percentage, every "{current} of
+  // {target}" label and every per-row "target met" mark derived from the mission. It was previously
+  // mirrored only when a spec OVERRODE the shared pair, which left MSN_PERSKU_ALL / MSN_PERSKU_ANY
+  // with their effective targets recorded nowhere a case could resolve or a guard could compare — and
+  // on 2026-08-27 MSN_PERSKU_ANY was found live with slot B at 2 against a spec of 1 (targetValue 4
+  // instead of 3), a drift that no static check could see and that the next re-seed would have
+  // repaired silently. `goalItemQuantities(m)` already resolves overrides on top of the shared
+  // defaults, so this mirrors the EFFECTIVE target — the number a case must actually buy.
+  const effectiveTargets = needsGoalItems(m) ? goalItemQuantities(m) : null;
+  if (effectiveTargets) {
+    for (const [slot, qty] of Object.entries(effectiveTargets)) {
+      const key = `target_qty_${slot.toLowerCase()}`;
+      if (!(key in a)) {
+        fail(`[3] ${m.aliasName} has no ${key} — its effective SKU target (${qty}) is recorded nowhere, so @td(${m.aliasName}.${key}) resolves to nothing and no guard can tell a drifted goal item from a correct one`);
+      } else if (a[key] !== qty) {
+        fail(`[3] ${m.aliasName}.${key} is ${JSON.stringify(a[key])} in aliases.json but its effective target is ${qty}${m.goalItemQuantities ? ' (spec override)' : ' (inherited from PERSKU_PRODUCTS)'} — the SKU modal row would be asserted against the wrong target`);
+      }
+    }
+  } else {
+    for (const k of Object.keys(a)) {
+      if (/^target_qty_/.test(k)) fail(`[3] ${m.aliasName} carries ${k} but its ${g.type} has no SKU targets — a dead override reads as coverage that does not exist`);
+    }
   }
 }
 
@@ -248,8 +326,121 @@ for (const f of readdirSync(join(ROOT, 'test-data'))) {
   else if (env !== 'localhost') warn(`no mission ids in aliases.${env}.json — @td(MSN_*.id) resolves to "" there until \`TEST_ENV=${env} npm run seed:loyalty-missions\` runs`);
 }
 
+/* [9] ─────────────────────────────────────────────────────────────────────── */
+// The VCST-5346 progress axis. [1] already enforces the fixture-level rules through
+// validateSpecShape; this block covers what the SPEC module cannot see — the registry entry for the
+// provisioning order, and the cross-registry fact that the account it is placed for is a real
+// declared test-user role rather than a name someone typed.
+const ordAlias = aliases[PROGRESS_ORDER_ALIAS];
+if (ordAlias) {
+  const expectOrder = {
+    number: progressOrderNumber(),
+    order_status: PROGRESS_ORDER.status,
+    user_role: PROGRESS_USER_ROLE,
+    line_a_quantity: PROGRESS_ORDER.lines.find((l) => l.slot === 'A')?.quantity,
+    line_b_quantity: PROGRESS_ORDER.lines.find((l) => l.slot === 'B')?.quantity,
+  };
+  for (const [k, v] of Object.entries(expectOrder)) {
+    if (ordAlias[k] !== v) fail(`[9] ${PROGRESS_ORDER_ALIAS}.${k} is ${JSON.stringify(ordAlias[k])} in aliases.json but ${JSON.stringify(v)} in missions-specs.mjs — the registry has drifted from the order the seeder actually places, so every derived progress state is asserted against the wrong purchase`);
+  }
+}
+const role = USER_ROLES.find((r) => r.key === PROGRESS_USER_ROLE);
+if (!role) {
+  fail(`[9] PROGRESS_USER_ROLE "${PROGRESS_USER_ROLE}" is not declared in scripts/lib/user-roles.mjs — the seeder would resolve no email and place the order under a null customer, which writes progress nobody can query`);
+} else if (!role.emailVars?.length) {
+  fail(`[9] user role ${PROGRESS_USER_ROLE} declares no emailVars — its identity cannot be resolved from .env.<ENV>`);
+}
+
+// Each of the three storefront states must still be COVERED by some fixture. Losing one is not a
+// spec-shape error (every surviving fixture is individually valid), so validateSpecShape cannot see
+// it — but a set that covers two states out of three passes every other check in this file.
+const derived = progressFixtures().map((m) => ({ m, p: predictProgress(m) }));
+const covers = {
+  'danger date badge': derived.some(({ m, p }) => {
+    const w = WINDOWS[m.window];
+    return w?.expectOpen === true && w.endOffsetDays < DANGER_THRESHOLD_DAYS && p?.status !== 'Completed';
+  }),
+  'partial progress (0 < percentage < 100)': derived.some(({ p }) => p && p.percentage > 0 && p.percentage < 100),
+  'completed (chip + success bar + read-only SKU modal)': derived.some(({ m, p }) => p?.status === 'Completed' && m.goal?.type === 'PerSkuGoal'),
+};
+for (const [state, ok] of Object.entries(covers)) {
+  if (!ok) fail(`[9] no fixture can produce the "${state}" storefront state any more — the acceptance criterion it backs becomes unjudgeable, and every remaining fixture still looks correctly seeded`);
+}
+
+const soonWindow = WINDOWS.endingSoon;
+if (soonWindow) {
+  notes.push(`danger badge: endingSoon ends in ${soonWindow.endOffsetDays}d, so daysRemaining ranges [0, ${soonWindow.endOffsetDays}] — always < the ${DANGER_THRESHOLD_DAYS}d threshold`);
+}
+for (const { m, p } of derived) {
+  notes.push(`${m.aliasName}: ${p ? `${p.status} ${p.percentage}% (${p.currentValue}/${p.targetValue}${p.rows.length ? `, ${p.rowsMet} row(s) met / ${p.rowsUnmet} unmet` : ''})` : 'UNPREDICTABLE'} from ${progressOrderNumber()}`);
+}
+
+/* [10] ────────────────────────────────────────────────────────────────────────
+ * The group-targeting axis, across registries. [1] already enforces everything the SPEC module can see
+ * — the three matrix cells, the VIP pair differing only on `public`, MSN_PUBLISHED_PRIVATE staying on
+ * the neutral condition. This block covers what the spec module deliberately cannot: whether the group
+ * it targets is the group the intended audience REALLY carries, and whether the control account is
+ * genuinely outside it. Both are cross-registry facts (aliases.json + user-roles.mjs), and both fail
+ * silently — a fixture targeting a group nobody is in is invisible to everyone and reads as a
+ * targeting defect, while a "non-member" who is actually a member makes the negative half unfalsifiable.
+ */
+const audience = aliases[GROUP_AUDIENCE.aliasName];
+if (audience) {
+  const expectAudience = {
+    group: GROUP_AUDIENCE.group,
+    member_role: GROUP_AUDIENCE.memberRole,
+    nonmember_role: GROUP_AUDIENCE.nonMemberRole,
+  };
+  for (const [k, v] of Object.entries(expectAudience)) {
+    if (audience[k] !== v) fail(`[10] ${GROUP_AUDIENCE.aliasName}.${k} is ${JSON.stringify(audience[k])} in aliases.json but ${JSON.stringify(v)} in missions-specs.mjs — a case would resolve one audience while the seeder verifies another`);
+  }
+}
+
+// The target group must be the one the MEMBER account really carries. The committed
+// LOYALTY_VIP_USER.group is the static half of that claim; the seeder re-reads the live contact and
+// aborts on disagreement, so the two together mean a group rename cannot pass unnoticed in either place.
+const memberAlias = aliases[GROUP_AUDIENCE.memberRole];
+if (!memberAlias) {
+  fail(`[10] alias ${GROUP_AUDIENCE.memberRole} is absent from aliases.json — the group-targeted fixtures name it as their audience and a case has nothing to resolve`);
+} else if (!groupMatches(memberAlias.group, TARGET_GROUP)) {
+  fail(`[10] ${GROUP_AUDIENCE.memberRole}.group is ${JSON.stringify(memberAlias.group)} but the fixtures target ${JSON.stringify(TARGET_GROUP)} — MSN_GROUP_VIP would be aimed at an audience its own intended member is not in, so it would be invisible to EVERYONE and the absence would read as a targeting defect`);
+}
+
+for (const [slot, key, mustBeMember] of [
+  ['member', GROUP_AUDIENCE.memberRole, true],
+  ['non-member', GROUP_AUDIENCE.nonMemberRole, false],
+]) {
+  const r = USER_ROLES.find((x) => x.key === key);
+  if (!r) {
+    fail(`[10] GROUP_AUDIENCE.${slot === 'member' ? 'memberRole' : 'nonMemberRole'} "${key}" is not declared in scripts/lib/user-roles.mjs — the seeder would resolve no email and could not check the audience at all`);
+    continue;
+  }
+  if (!r.emailVars?.length) fail(`[10] user role ${key} declares no emailVars — its identity cannot be resolved from .env.<ENV>`);
+  const declared = r.group ?? null;
+  if (mustBeMember && !groupMatches(declared, TARGET_GROUP)) {
+    fail(`[10] user role ${key} declares group ${JSON.stringify(declared)}, not ${JSON.stringify(TARGET_GROUP)} — the account nominated as the audience is not declared to be in it`);
+  }
+  if (!mustBeMember) {
+    // A role with NO declared group is not statically provable to be outside the audience, and
+    // "probably not VIP" is exactly the assumption that makes a negative control worthless.
+    if (declared == null) {
+      fail(`[10] user role ${key} declares no group at all, so nothing static can show it is OUTSIDE ${JSON.stringify(TARGET_GROUP)} — a negative control has to be verifiably a non-member, not merely un-annotated`);
+    } else if (groupMatches(declared, TARGET_GROUP)) {
+      fail(`[10] user role ${key} is declared in ${JSON.stringify(TARGET_GROUP)} — it is the NEGATIVE control, so with it inside the audience "a non-member does not see it" can never fail (LOYALTY_NOBAL_USER is the live example: despite its name it carries groups ["VIP"])`);
+    }
+  }
+}
+
+const targetedFixtures = MISSIONS.filter(isGroupTargeted);
+notes.push(
+  `targeting x public: ${targetedFixtures.length} fixture(s) target [${TARGET_GROUP}] `
+  + `(${targetedFixtures.map((m) => `${m.aliasName}/${m.public ? 'public' : 'private'}`).join(', ')}), `
+  + `and ${MISSION_BY_ALIAS.MSN_PUBLISHED_PRIVATE ? 'MSN_PUBLISHED_PRIVATE holds the neutral+private cell' : 'the neutral+private cell is EMPTY'}`,
+);
+notes.push(`audience: ${GROUP_AUDIENCE.memberRole} (in "${TARGET_GROUP}") vs ${GROUP_AUDIENCE.nonMemberRole} (not) — membership is re-read live and asserted in BOTH directions at seed time`);
+
 /* ── Report ─────────────────────────────────────────────────────────────────── */
-console.log(`td:validate:missions — ${MISSIONS.length} missions, ${PERSKU_PRODUCTS.length} PerSku targets, 1 store-settings fixture`);
+console.log(`td:validate:missions — ${MISSIONS.length} missions (${progressFixtures().length} with a declared progress state), ${PERSKU_PRODUCTS.length} PerSku targets, 1 provisioning order, 1 store-settings fixture`);
 for (const n of notes) console.log(`  · ${n}`);
 for (const w of warnings) console.log(`  ⚠ ${w}`);
 if (problems.length) {

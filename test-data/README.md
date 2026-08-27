@@ -252,14 +252,25 @@ A master product plus a genuine **variation** child (`mainProductId`), with **di
 ### 15. Loyalty missions (no CSV — `scripts/seed-data/loyalty/missions-specs.mjs`)
 The VCST-5319 mission fixtures have **no committed data file**: the side-effect-free spec module IS the
 source of truth, and everything runtime (mission GUIDs, the resolved currency/locale codes, the banner
-asset URLs) lives in `aliases.<env>.json`. Eleven `MSN_*` aliases plus `MSN_STORE_SETTINGS` (the
-`Loyalty.Missions.Enable` gate) and the two live-discovered `MSN_PERSKU_PRODUCT_*` targets. Two things
+asset URLs) lives in `aliases.<env>.json`. Fourteen `MSN_*` mission aliases plus `MSN_STORE_SETTINGS`
+(the `Loyalty.Missions.Enable` gate), the two live-discovered `MSN_PERSKU_PRODUCT_*` targets and
+`MSN_PROGRESS_ORDER`. Three things
 worth knowing before editing them: **`MSN_EXPIRED` is the one fixture deliberately OUTSIDE its date
 window** (window intent `expired`, offsets `-365`/`-30`) — it is the only fixture that can show
 `OnlyActive` is never applied, so the seeder reuses a closed window instead of treating it as drift;
 and **every mission carries a banner**, chosen by goal type from `test-data/uploads/msn-banner-*.svg`
 and uploaded to platform asset storage under a FIXED file name (the URL is part of the drift signature,
-so a churning one would recreate every mission on every seed). Seed:
+so a churning one would recreate every mission on every seed); and **three fixtures declare a
+storefront PROGRESS state** (VCST-5346) — `MSN_ENDING_SOON` (danger date badge, window intent
+`endingSoon`), `MSN_PROGRESS_PARTIAL` (75%, one SKU row met and one not) and `MSN_PROGRESS_COMPLETED`
+(100% PerSku, which is what makes the read-only SKU modal reachable). Progress has **no write API** on
+this build, so the seeder provisions all three with ONE order (`MSN_PROGRESS_ORDER`, `AGENT-TEST-MSN-ORDER`)
+placed for the `USER` role's **security-account** id — not its contact id, which would write a row the
+storefront can never see, silently. A progress row cannot be reset or deleted, and one order contributes
+to one mission exactly once, so when the live state does not match the declaration the seeder recreates
+the WHOLE mission set and places a fresh order; when it does match it changes nothing. Teardown removes
+the order but **cannot remove the progress rows it produced** (search+get API only) — they are left
+orphaned and unreachable, which is reported rather than swallowed. Seed:
 `npm run seed:loyalty-missions`; guard: `npm run td:validate:missions`; artwork edited →
 `npm run seed:loyalty-missions -- --reupload-banners`.
 ---

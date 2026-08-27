@@ -82,6 +82,18 @@ export const RUNTIME_FIELDS_BY_KIND = {
   mission: ['id', 'banner_url'],
   perSkuProduct: ['productId', 'sku', 'name', 'catalogId'],
   storeSetting: ['store_id', 'missions_enabled', 'base_loyalty_enabled'],
+  // The VCST-5346 provisioning order. Its GUID is server-assigned; `user_id` is the target account's
+  // per-env SECURITY-ACCOUNT id and `user_email`/`store_id` are per-env identity — all runtime.
+  progressOrder: ['id', 'user_id', 'user_email', 'store_id'],
+  // The group-targeting control pair. The GROUP NAME is authored and env-invariant (same treatment as
+  // USER_GROUP_VIP.name), and so are the two role KEYS — but the accounts those roles resolve to are
+  // per-env identity, and their observed group membership is live state read off the target env. The
+  // groups are runtime SPECIFICALLY so nothing can commit a claim about who is in the audience: that
+  // claim is what the seeder verifies, and a committed one would assert itself.
+  groupAudience: [
+    'member_email', 'member_user_id', 'member_groups',
+    'nonmember_email', 'nonmember_user_id', 'nonmember_groups',
+  ],
 };
 
 /** The store-settings fixture. The seeder flips ONLY `missionsSetting`; `baseSetting` is read and reported. */
@@ -130,6 +142,138 @@ export const TARGETING = {
   customerIdCondition: null,
 };
 
+/**
+ * TARGETING AND `public` ARE TWO INDEPENDENT VARIABLES, AND CONFLATING THEM COST A RETRACTED BUG.
+ *
+ * `MSN_PUBLISHED_PRIVATE` is Published with `public=false` and — deliberately — the NEUTRAL
+ * `AnyUserGroupCondition`. Its name says "private"; its condition says "every customer is the intended
+ * audience". Both are true at once, because the two properties are orthogonal: the condition tree
+ * decides WHO a mission is FOR, and `public` decides whether it is advertised. With that one fixture as
+ * the only non-public mission in the set, and `TARGETING.groupCondition` declared but used by NO spec,
+ * the set could not tell the two apart — so an arbitrary customer earning it read as an audience leak
+ * and was drafted as a P1 privacy/revenue defect on 2026-08-27, then retracted once the condition was
+ * read. The fixture was not wrong; the SET was under-designed.
+ *
+ * The two fixtures below close it, giving a 2x2 with one cell deliberately empty:
+ *
+ *   fixture                  condition   public   isolates
+ *   MSN_GROUP_VIP            VIP          true    TARGETING (the positive control)
+ *   MSN_GROUP_VIP_PRIVATE    VIP          false   `public` ON TOP OF targeting
+ *   MSN_PUBLISHED_PRIVATE    Any          false   `public` ON ITS OWN
+ *   (Any + public=true)      Any          true    the ordinary case — ten fixtures already are it
+ *
+ * `validateSpecShape` defends each cell, because every one of them can be destroyed by an edit that
+ * still seeds cleanly: give MSN_PUBLISHED_PRIVATE a group and it merges into the second row; let the
+ * VIP pair drift on a second field and neither row attributes anything.
+ */
+export const TARGET_GROUP = 'VIP';
+
+/**
+ * HOW THE SERVER REALLY EVALUATES A GROUP — verified in source 2026-08-27 (vc-module-loyalty PR #14 @
+ * 1be73b4, plus vc-module-core and vc-platform at their dev heads). Recorded because every one of these
+ * facts changes what a fixture is allowed to claim, and three of them are not guessable from the API.
+ *
+ * 1. `UserGroupIsCondition` is NOT a loyalty type — it lives in vc-module-core
+ *    (`Conditions/UserGroupIsCondition.cs`) and loyalty only lists it as an available child. It reads
+ *    `EvaluationContextBase.UserGroups`, and it is FAIL-CLOSED twice over: an empty/null `Groups[]`
+ *    returns false, and a null `UserGroups` returns false. That is why an empty `groups[]` is a guarded
+ *    problem below rather than a harmless default — it targets NOBODY, not everybody.
+ * 2. `UserGroups` comes from the CONTACT/MEMBER entity's `Groups` collection, nowhere else:
+ *    `LoyaltyLogicService.GetUserGroups(userId)` -> `IMemberResolver.ResolveMemberByIdAsync(userId)`
+ *    (security-user id -> `user.MemberId` -> member) -> `member.Groups.ToArray()`. Not a security-account
+ *    claim, not the order, not a store setting. If the resolver returns null the context's `UserGroups`
+ *    stays null and EVERY group-targeted mission silently vanishes — a fixture whose audience account has
+ *    no member record fails as an absence, which reads as a product bug.
+ * 3. The match is `UserGroups.Any(x => Groups.Any(x.EqualsIgnoreCase))` — whole-string, ORDINAL
+ *    CASE-INSENSITIVE, and NOT trimmed. So "vip" matches "VIP", "VIP Gold" does not, and a stray space
+ *    on either side breaks it with no error. The seeder therefore compares case-insensitively (mirroring
+ *    the server) but REFUSES a padded group string, because that one the server would silently drop.
+ * 4. `AnyUserGroupCondition.IsSatisfiedBy` is `context is LoyaltyProgramEvaluationContext` — a CONSTANT
+ *    TRUE. It is genuinely "no audience restriction", which is what makes MSN_PUBLISHED_PRIVATE the
+ *    neutral cell rather than a weakly-targeted one.
+ * 5. THE READ PATH APPLIES THE CONDITION, so a non-member does not merely fail to accrue — the mission
+ *    is FILTERED OUT of the storefront list entirely (`GetQualifyingMissionsAsync` ->
+ *    `Where(x => x.DynamicExpression?.IsSatisfiedBy(context) ?? false)`, and accrual uses the identical
+ *    predicate). MSN_GROUP_VIP is therefore observable as presence/absence on `loyaltyMissionProgress`,
+ *    not only as a payout difference.
+ * 6. `public` IS READ BY NOTHING ON EITHER PATH. `LoyaltyMissionSearchCriteria.Public` exists and
+ *    `LoyaltyMissionSearchService` will filter on it — but NO caller in the module ever sets it: the
+ *    storefront read sets `StoreIds`/`Status`/`Take`, accrual sets `StoreIds`/`OnlyActive`/`Take`, and
+ *    the xAPI project contains zero occurrences of the field. So on this build a Published, in-store,
+ *    condition-satisfying mission reaches the storefront REGARDLESS of `public`.
+ *    THIS IS A FINDING THE FIXTURES EXIST TO MAKE JUDGEABLE, NOT AN ASSERTION THEY MAY BAKE IN. The
+ *    predicted outcome — MSN_GROUP_VIP and MSN_GROUP_VIP_PRIVATE behaving IDENTICALLY, and
+ *    MSN_PUBLISHED_PRIVATE visible to everyone — is exactly what the triple is for, and a fixture that
+ *    encoded the expectation would prove it by construction. Nothing here declares an expected
+ *    visibility; the cells declare only the INPUTS.
+ *
+ * ONE MORE TRAP, GUARDED BY CONSTRUCTION. `BlockLoyaltyMissionCondition` is persisted with its own
+ * `all` flag (JSON round-trip; the stored value wins over the ctor). This build's template ships
+ * `all: false` = OR. With ONE condition child that is immaterial, and `buildMissionBody` emits exactly
+ * one — but a mission carrying BOTH `UserGroupIsCondition` and `AnyUserGroupCondition` would OR a real
+ * predicate with a constant true, and the targeting would be a silent no-op. That is the likeliest
+ * explanation for any "targeted mission shown to everyone" report, so the set must never author it.
+ */
+
+/**
+ * The two accounts that make group targeting FALSIFIABLE, named by user-roles.mjs key rather than by
+ * email — an email is per-env identity (`.env.<env>`), so a literal here is the same class of mistake
+ * as a literal GUID.
+ *
+ * WHY A NON-MEMBER IS MANDATORY AND NOT A NICETY. "The VIP user sees the VIP mission" is true of a
+ * mission with no targeting at all — it is exactly the observation that made the retracted bug look
+ * real. The claim only becomes falsifiable next to an account that is verifiably OUTSIDE the group and
+ * does NOT see it. So the seeder resolves both accounts live, asserts the membership in each direction,
+ * and records the OBSERVED groups in the overlay; a run whose control account has quietly joined the
+ * audience aborts instead of seeding a pair that can only ever agree.
+ *
+ * `nonMemberRole` is LOYALTY_WHOLESALE_USER because it is the only declared loyalty customer that is
+ * not in VIP: LOYALTY_NOBAL_USER is ALSO `groups:["VIP"]` (verified live on vcst-qa 2026-08-27), so
+ * picking it would have made the negative control a second positive one.
+ */
+export const GROUP_AUDIENCE = {
+  aliasName: 'MSN_GROUP_AUDIENCE',
+  group: TARGET_GROUP,
+  memberRole: 'LOYALTY_VIP_USER',
+  nonMemberRole: 'LOYALTY_WHOLESALE_USER',
+};
+
+/**
+ * Fields a controlled PAIR is allowed to differ on. Everything else must be identical, and the check is
+ * written as "compare every key EXCEPT these" rather than "compare this list" on purpose: a field added
+ * to the spec shape later is then compared automatically instead of silently escaping the control.
+ */
+export const GROUP_PAIR_EXEMPT_FIELDS = ['aliasName', 'key', 'public', 'purpose'];
+
+/**
+ * Which fields two specs differ on, exempt fields removed. `[]` means the pair is a clean controlled
+ * comparison. Pure — exported so the guard and the unit tests share one definition of "differ".
+ */
+export function specDifferences(a, b, exempt = GROUP_PAIR_EXEMPT_FIELDS) {
+  if (!a || !b) return null;
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)].filter((k) => !exempt.includes(k)));
+  return [...keys].filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k])).sort();
+}
+
+/** The groups a spec targets, sorted; `null` for a spec that carries no group condition. Pure. */
+export function targetedGroups(spec) {
+  if (spec?.condition?.type !== TARGETING.groupCondition.id) return null;
+  return [...(spec.condition.groups || [])].sort();
+}
+
+/** True when the spec aims at a specific audience rather than at everyone. Pure. */
+export const isGroupTargeted = (spec) => targetedGroups(spec) != null;
+
+/**
+ * A MIRROR of the server's own comparison — `string.Equals(a, b, OrdinalIgnoreCase)` — so the seeder's
+ * live membership assertion agrees with the predicate that will actually decide visibility. Whole
+ * string, never a substring: "VIP Gold" is not "VIP". Pure.
+ */
+export const groupMatches = (a, b) => String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase();
+
+/** Would the server consider an observed group list a member of `target`? Pure. */
+export const groupsInclude = (groups, target) => (groups || []).some((g) => groupMatches(g, target));
+
 /** The only periodicity the module actually processes; anything else is untested product surface. */
 export const PROCESSED_PERIODICITY = 'None';
 
@@ -175,7 +319,58 @@ export const WINDOWS = {
    * window look open and turn the case into a flake that reads as a product bug.
    */
   expired: { startOffsetDays: -365, endOffsetDays: -30, expectOpen: false },
+  /**
+   * A window that is OPEN but CLOSES SOON, so the storefront's date badge takes its DANGER branch
+   * (VCST-5346). This is the ONLY window intent that exists to make a COLOUR reachable rather than a
+   * filter, and it is the cheapest of the three progress-era fixtures because it needs no order at all.
+   *
+   * WHY A NEW INTENT AT ALL. `daysRemaining` is not stored anywhere — it is computed in the xAPI
+   * resolver, per request, off the MISSION's end date (LoyaltyUserMissionType; verified in source and
+   * live on vcst-qa):
+   *     days = ceil((mission.EndDate - DateTime.UtcNow).TotalDays), then clamped to >= 0
+   * The seeder writes `endDate = seedClock + endOffsetDays`, so the value STARTS at `endOffsetDays`
+   * and only ever decreases: its reachable range is exactly [0, endOffsetDays]. `WINDOWS.active` sets
+   * 180, so every fixture on it reports `daysRemaining: 180` (observed) and the danger branch — which
+   * needs `< DANGER_THRESHOLD_DAYS` — was unreachable BY CONSTRUCTION, not by accident of data.
+   *
+   * WHY 5, AND WHY THE NUMBER IS ARGUED IN BOTH DIRECTIONS. `WINDOWS.expired` argues its 30-day gap
+   * one way (far enough below "now" that a clock reading cannot make it look open). This fixture has
+   * a boundary on EACH side and can be destroyed by either:
+   *   - too close to DANGER_THRESHOLD_DAYS: a clock/timezone reading pushes `daysRemaining` to 10 and
+   *     the badge silently renders the WARNING colour — the fixture then asserts the default state;
+   *   - too close to 0: the window closes between one seed and the next, and once it does,
+   *     `GetUserMissionsAsync` drops the mission entirely (out of window + no progress row), so the
+   *     case asserts a badge colour on a card that is not on the page.
+   * The worst clock error this has to survive is ~26 h (a 14 h timezone offset plus a DST shift,
+   * rounded up) — see WINDOW_CLOCK_SLACK_DAYS. 5 is the midpoint of [0, DANGER_THRESHOLD_DAYS]: it
+   * buys 5 days of margin below the boundary AND 5 days of fixture life, each ~4.6x the worst error.
+   * Nothing between 2 and 8 is wrong; the midpoint is chosen because there is no reason to favour one
+   * failure mode over the other, and `validateSpecShape` enforces only the slack-derived range so the
+   * value can be moved without re-deriving the argument.
+   *
+   * THE SHORT LIFE IS AFFORDABLE BECAUSE THE SEEDER SELF-HEALS. For an `expectOpen: true` intent a
+   * closed window is DRIFT, so `windowIsOpen(...) !== windowExpectsOpen(...)` deletes and recreates
+   * the fixture with a fresh 5-day window on the next seed. That is the same mechanism that stops
+   * `expired` from churning, read in the other direction.
+   */
+  endingSoon: { startOffsetDays: -7, endOffsetDays: 5, expectOpen: true },
 };
+
+/**
+ * The storefront's own boundary: a mission whose `daysRemaining` is BELOW this renders its date badge
+ * in the danger colour; at or above it, the warning colour (VCST-5346, vc-frontend PR #2396). Declared
+ * here because `WINDOWS.endingSoon` is meaningless without the number it is chosen relative to — and
+ * because if the frontend ever moves the threshold, this is the one place the fixture follows it.
+ */
+export const DANGER_THRESHOLD_DAYS = 10;
+
+/**
+ * How much room a date-window fixture must keep between itself and any boundary it is judged against.
+ * The worst clock disagreement between the seeder and the resolver is a timezone offset (<= 14 h) plus
+ * a DST shift (1 h) — call it 26 h — so 2 days is ~2x the worst case. Used to bound `endingSoon` from
+ * BOTH sides; it is a minimum, not the chosen value.
+ */
+export const WINDOW_CLOCK_SLACK_DAYS = 2;
 
 /**
  * Does this window intent mean the fixture should currently be inside its window? Pure. Callers must
@@ -186,6 +381,172 @@ export function windowExpectsOpen(window) {
   if (!w) throw new Error(`unknown window intent: ${window}`);
   return w.expectOpen === true;
 }
+
+/* ── Progress: the VCST-5346 storefront states ───────────────────────────────
+ *
+ * WHAT THE STOREFRONT ACTUALLY RENDERS, AND WHY THE MISSION DEFINITIONS ABOVE CANNOT DRIVE IT.
+ * `/account/missions` (vc-frontend PR #2396) draws each card from `loyaltyMissionProgress`, and every
+ * visual state on it is a function of PROGRESS, not of the mission: the bar width and `percentage`,
+ * the "{current} of {target}" label, the green "Completed" chip + success bar, the date badge colour,
+ * and — in the SKU modal — the per-row "target met" styling plus the whole modal going READ-ONLY when
+ * the backend status is `Completed`. Every fixture above is a DEFINITION. Definitions alone yield a
+ * page of identical 0% / warning / not-completed cards, so three acceptance criteria could not be
+ * judged at all.
+ *
+ * HOW PROGRESS IS PROVISIONED — the answer is "an order", and it is the only answer.
+ * Verified from source (vc-module-loyalty PR #14, head 1be73b4) and confirmed live on vcst-qa:
+ *   - `/api/loyalty-mission-progress` exposes `POST /search` and `GET /{id}` and NOTHING else. There
+ *     is no create/update/delete, no recalculate, no reprocess, no enrol, no seed-progress endpoint,
+ *     and nothing anywhere in the module publishes the event that would drive one.
+ *   - The single writer is `LoyaltyMissionLogicService.ProcessOrderAsync`, reached only from
+ *     `LoyaltyMissionHandler : IEventHandler<OrderChangedEvent>` filtered to `EntryState.Added` — i.e.
+ *     the INSERT of a CustomerOrder row, dispatched to Hangfire.
+ *   - There is NO order-status gate: the mission advances on the insert whatever status the order
+ *     carries, so `POST /api/order/customerOrders` provisions progress with no cart, no checkout, no
+ *     payment and no browser. (Observed: progress appeared within 5 s of the POST.)
+ * So the cheapest honest path is ONE Swagger-shaped order, and everything below exists to make that
+ * one order produce three DIFFERENT, deterministic, re-derivable states.
+ *
+ * WHY THE GOALS ARE COUNTS AND SKUs AND NEVER MONEY. An `OrderValueGoal` contributes `order.Total`,
+ * and the platform RECOMPUTES that from line items, tax and shipping — a fixture authored with
+ * `total: 249.98` was stored as `251.99` (observed on vcst-qa). A percentage derived from an authored
+ * total would therefore be a guess that no static check could catch. Order COUNT and PerSku LINE
+ * QUANTITIES are carried through verbatim, so the outcome of the seed order is predictable in closed
+ * form — which is what `predictProgress` below computes and `validateSpecShape` enforces.
+ */
+
+/**
+ * WHOSE progress. Resolved through `scripts/lib/user-roles.mjs` at seed time, never as a literal:
+ * `USER` is the repo's canonical "primary storefront shopper" role, so this fixture set follows
+ * whatever account the storefront suites actually sign in as on the target env.
+ */
+export const PROGRESS_USER_ROLE = 'USER';
+
+/**
+ * The ONE order that provisions every progress state. Business keys only — no ids, no totals.
+ *
+ * `slot` refers to `PERSKU_PRODUCTS`, so the line items point at the same two live-discovered products
+ * the PerSku goals target; their real ids are resolved at seed time. `unitPrice` exists only because
+ * an order line needs one — nothing asserts against it, and nothing may, per the total-recompute note
+ * above.
+ *
+ * THE LINE QUANTITIES ARE THE DESIGN. A×2 + B×1 is the smallest single order that simultaneously
+ * OVER-satisfies one slot, EXACTLY satisfies another, and leaves a third target UNDER-satisfied
+ * depending on the goal's own quantities — which is what lets one order drive a partial fixture and a
+ * completed fixture at once instead of needing two orders (and a second order cannot be had cheaply:
+ * `TransactionExistsAsync(missionId, orderId, userId)` plus a unique index mean one order contributes
+ * to a given mission exactly once).
+ */
+export const PROGRESS_ORDER = {
+  key: 'ORDER',
+  status: 'New',
+  unitPrice: 10,
+  lines: [
+    { slot: 'A', quantity: 2 },
+    { slot: 'B', quantity: 1 },
+  ],
+};
+
+/** The provisioning order's business key — deterministic, so the seeder finds and reuses it. Pure. */
+export const progressOrderNumber = () => `${NAME_PREFIX}-${PROGRESS_ORDER.key}`;
+
+/** Alias that carries the provisioning order's runtime ids. */
+export const PROGRESS_ORDER_ALIAS = 'MSN_PROGRESS_ORDER';
+
+/** How many orders the seed places. `OrderCountGoal` contributions are exactly this. Pure. */
+export const PROGRESS_ORDER_COUNT = 1;
+
+/**
+ * The per-slot target quantities a PerSku mission's goal items carry. Defaults to `PERSKU_PRODUCTS`
+ * (the shared ALL/ANY pair) and lets a spec override per slot. Pure.
+ *
+ * The override exists because the progress fixtures need targets the seed order lands ABOVE for one
+ * and BELOW for another over the SAME two products — that is the only way to get a card showing one
+ * "target met" row next to one that is not. A second pair of discovered products would not do it: the
+ * distinction being tested is per-row, within one mission.
+ */
+export function goalItemQuantities(spec) {
+  const base = Object.fromEntries(PERSKU_PRODUCTS.map((p) => [p.slot, p.quantity]));
+  return { ...base, ...(spec?.goalItemQuantities || {}) };
+}
+
+/** What the seed order buys, per slot. Pure. */
+export const progressOrderQuantities = () => Object.fromEntries(
+  PROGRESS_ORDER.lines.map((l) => [l.slot, l.quantity]),
+);
+
+/**
+ * Predict, in closed form, what the single seed order does to a fixture's progress.
+ *
+ * This is a deliberate MIRROR of `LoyaltyMissionLogicService.UpdateMissionProgressMetrics` +
+ * `IsCompleted`, and mirroring server logic is normally exactly what `.claude/rules/test-data.md`
+ * §GOLDEN RULE forbids. It is justified here, narrowly, because it is not used as an ORACLE: nothing
+ * asserts the product against it. It is used to prove that a COMMITTED FIXTURE SET can still produce
+ * the three distinct states it claims to — statically, before anyone spends a seed run finding out
+ * that an edited quantity turned the partial fixture into a completed one. The live values remain the
+ * only proof that the data landed, and the seeder asserts those separately against the real query.
+ * If the module's arithmetic changes, this drifts and the SEEDER fails loudly on the live comparison
+ * — which is the failure mode we want, rather than a fixture that silently stops discriminating.
+ *
+ * Returns `null` for a goal whose outcome is NOT predictable (see the money note above). Pure.
+ */
+export function predictProgress(spec) {
+  const goal = spec?.goal;
+  if (!goal) return null;
+
+  if (goal.type === 'PerSkuGoal') {
+    const targets = goalItemQuantities(spec);
+    const bought = progressOrderQuantities();
+    const rows = PERSKU_PRODUCTS.map((p) => ({
+      slot: p.slot,
+      target: targets[p.slot],
+      current: bought[p.slot] || 0,
+    }));
+    const targetValue = rows.reduce((s, r) => s + r.target, 0);
+    // The module clamps EACH row before summing (`Sum(Math.Min(current, target))`), so buying ten of
+    // one SKU cannot compensate for buying none of another.
+    const currentValue = rows.reduce((s, r) => s + Math.min(r.current, r.target), 0);
+    const met = rows.filter((r) => r.current >= r.target);
+    const completed = goal.all
+      ? rows.length > 0 && met.length === rows.length
+      : met.length > 0;
+    // PerSkuAny's percentage is BINARY server-side (0 or 100) — it has no partial state at all, which
+    // is why the partial fixture must be a PerSkuAll.
+    const percentage = goal.all
+      ? (targetValue > 0 ? Math.min(100, (currentValue / targetValue) * 100) : 0)
+      : (completed ? 100 : 0);
+    return {
+      currentValue, targetValue, percentage,
+      status: completed ? 'Completed' : 'InProgress',
+      rows, rowsMet: met.length, rowsUnmet: rows.length - met.length,
+    };
+  }
+
+  if (goal.type === 'OrderCountGoal') {
+    const targetValue = goal.count;
+    const currentValue = PROGRESS_ORDER_COUNT;
+    // The `targetValue > 0` guard is the module's own, and it is why a zero-target mission reports 0%
+    // rather than dividing by zero or auto-completing (MSN_ZEROTARGET's whole point).
+    const percentage = targetValue > 0 ? Math.min(100, (currentValue / targetValue) * 100) : 0;
+    const completed = targetValue > 0 && currentValue >= targetValue;
+    return {
+      currentValue, targetValue, percentage,
+      status: completed ? 'Completed' : 'InProgress',
+      rows: [], rowsMet: 0, rowsUnmet: 0,
+    };
+  }
+
+  // OrderValueGoal: the contribution is the SERVER-RECOMPUTED order.Total. Not predictable.
+  return null;
+}
+
+/** Percentages are decimals off the wire; compare with a tolerance rather than by identity. Pure. */
+export const percentagesMatch = (a, b, tolerance = 0.01) => (
+  typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) <= tolerance
+);
+
+/** Every fixture that declares an expected progress state. Pure. */
+export const progressFixtures = () => MISSIONS.filter((m) => m.progress);
 
 /**
  * BANNER ARTWORK — one image per GOAL TYPE, shared by every mission of that type.
@@ -435,9 +796,54 @@ export const MISSIONS = [
     goal: { type: 'OrderCountGoal', count: 1 },
     reward: 100,
     purpose:
-      'C17, the ticket\'s highest-priority condition: Published but public=false must NOT leak into the '
-      + 'customer-facing query while REMAINING visible to the admin search. Both halves matter — a '
-      + 'mission that is merely absent everywhere would pass the leak check for the wrong reason.',
+      'C17 — the `public` FLAG IN ISOLATION, under a deliberately NEUTRAL condition. Read the name as '
+      + '"not advertised", NEVER as "audience-restricted": its AnyUserGroupCondition means every '
+      + 'customer IS its intended audience, so an arbitrary shopper (or an anonymous checkout) earning '
+      + 'it is CORRECT BEHAVIOUR and not a leak. Getting that backwards cost a retracted P1 on '
+      + '2026-08-27. This is the third cell of the targeting x public matrix — it answers "does `public` '
+      + 'do anything ON ITS OWN?" and nothing else; audience targeting is MSN_GROUP_VIP / '
+      + 'MSN_GROUP_VIP_PRIVATE. Both halves of C17 still matter — Published + public=false must stay out '
+      + 'of the customer-facing query while REMAINING visible to the admin search, because a mission '
+      + 'that is merely absent everywhere would pass the leak check for the wrong reason.',
+  },
+  {
+    aliasName: 'MSN_GROUP_VIP',
+    key: 'GROUP-VIP',
+    status: 'Published',
+    public: true,
+    window: 'active',
+    condition: { type: 'UserGroupIsCondition', groups: [TARGET_GROUP] },
+    goal: { type: 'OrderCountGoal', count: 1 },
+    reward: 275,
+    purpose:
+      'The POSITIVE CONTROL for group targeting, and the first fixture in the set to use '
+      + 'TARGETING.groupCondition at all (it was declared and used by nothing, so MSN-011 had to build a '
+      + 'group-scoped mission inline inside the case). Targeted at @td(MSN_GROUP_AUDIENCE.group) with '
+      + '`public` held at its PERMISSIVE value, so targeting is the only variable: '
+      + '@td(MSN_GROUP_AUDIENCE.member_email) must see and earn it, '
+      + '@td(MSN_GROUP_AUDIENCE.nonmember_email) must not. Both halves are required — "the VIP user sees '
+      + 'the VIP mission" is equally true of a mission with NO targeting, which is precisely the '
+      + 'observation that made the retracted bug look real. public=true is load-bearing: flip it and '
+      + 'this stops being the targeting cell and duplicates MSN_GROUP_VIP_PRIVATE.',
+  },
+  {
+    aliasName: 'MSN_GROUP_VIP_PRIVATE',
+    key: 'GROUP-VIP-PRIVATE',
+    status: 'Published',
+    public: false,
+    window: 'active',
+    condition: { type: 'UserGroupIsCondition', groups: [TARGET_GROUP] },
+    goal: { type: 'OrderCountGoal', count: 1 },
+    reward: 275,
+    purpose:
+      'The cell that isolates the FLAG with TARGETING HELD CONSTANT: identical to MSN_GROUP_VIP in every '
+      + 'respect except public=false. It answers the one question neither of the other two cells can — '
+      + 'does `public` add ANYTHING on top of an audience condition that already restricts the mission? '
+      + 'Run as a triple: if the member sees MSN_GROUP_VIP but not this, `public` is a second, '
+      + 'independent gate; if the member sees both, `public` is inert once a condition is present; if '
+      + 'the member sees neither, the two gates are redundant. The guard asserts the pair differs on '
+      + 'NOTHING but `public`, because a second variable makes every one of those three readings '
+      + 'unattributable — the exact failure that produced the retracted bug.',
   },
   {
     aliasName: 'MSN_ZEROTARGET',
@@ -536,6 +942,83 @@ export const MISSIONS = [
     purpose:
       'The mutation scratch fixture: edit-while-Draft, Draft->Published, delete-while-Draft. Kept apart '
       + 'from the read fixtures above so a mutation case can never strand one of them mid-transition.',
+  },
+
+  /* ── VCST-5346 storefront progress states ─────────────────────────────────
+   * The three fixtures below are the PROGRESS axis. Everything above them varies the mission
+   * DEFINITION and is judged by the admin API; these vary what the customer's card LOOKS LIKE and are
+   * judged by `loyaltyMissionProgress`. They overlap the definitions above by design — the same
+   * single order also moves MSN_ORDERCOUNT to 50% and completes MSN_PERSKU_ALL — but those fixtures
+   * declare nothing about progress and no guard defends their percentages, so an edit to
+   * MSN_ORDERCOUNT's count would silently take the storefront's only partial state with it. These
+   * three declare the state, and `validateSpecShape` re-derives it from the seed order.
+   */
+  {
+    aliasName: 'MSN_ENDING_SOON',
+    key: 'ENDING-SOON',
+    status: 'Published',
+    public: true,
+    window: 'endingSoon',
+    condition: { type: 'AnyUserGroupCondition' },
+    // count=4 against a ONE-order seed: comfortably un-completable, and 25% exactly (no repeating
+    // decimal to compare against). See the purpose note for why un-completable is load-bearing.
+    goal: { type: 'OrderCountGoal', count: 4 },
+    reward: 350,
+    progress: { status: 'InProgress', percentage: 25 },
+    purpose:
+      'The DANGER date badge (VCST-5346). The storefront colours the badge success when the mission is '
+      + 'completed, DANGER when daysRemaining < DANGER_THRESHOLD_DAYS, and warning otherwise — and '
+      + 'daysRemaining maxes out at the window intent\'s endOffsetDays, which is 180 for every other '
+      + 'fixture, so the danger branch was unreachable BY CONSTRUCTION rather than for want of data. '
+      + 'It is the only fixture on the endingSoon window. Two properties keep it honest and both are '
+      + 'guarded: the window must stay inside (0, DANGER_THRESHOLD_DAYS) with clock slack on BOTH '
+      + 'sides, and the mission must NOT be completable by the seed order — a completed mission takes '
+      + 'the success branch, which overrides danger entirely, so a fixture that quietly became '
+      + 'completable would render the one colour it exists to exclude while still looking seeded.',
+  },
+  {
+    aliasName: 'MSN_PROGRESS_PARTIAL',
+    key: 'PROGRESS-PARTIAL',
+    status: 'Published',
+    public: true,
+    window: 'active',
+    condition: { type: 'AnyUserGroupCondition' },
+    goal: { type: 'PerSkuGoal', all: true },
+    // Against the seed order (A x2, B x1): A is exactly met (2/2), B is left short (1/2).
+    // currentValue = min(2,2) + min(1,2) = 3 of 4 => 75%, InProgress.
+    goalItemQuantities: { A: 2, B: 2 },
+    reward: 450,
+    progress: { status: 'InProgress', percentage: 75, rowsMet: 1, rowsUnmet: 1 },
+    purpose:
+      'PARTIAL progress — a bar strictly between empty and full, a non-trivial "{current} of {target} '
+      + 'SKUs" label, and the only fixture in the set where the SKU modal shows a target-MET row next '
+      + 'to a target-UNMET one, so the per-row styling has both of its states on screen at once. '
+      + 'PerSkuALL is mandatory here and not a preference: the module computes PerSkuAny\'s percentage '
+      + 'as a BINARY 0-or-100, so an Any goal has no partial state to render at all. The two target '
+      + 'quantities must also DIVERGE relative to the seed order (one at or below what it buys, one '
+      + 'above) — equalise them and the fixture snaps to 0% or 100% and stops being partial while '
+      + 'still seeding cleanly.',
+  },
+  {
+    aliasName: 'MSN_PROGRESS_COMPLETED',
+    key: 'PROGRESS-COMPLETED',
+    status: 'Published',
+    public: true,
+    window: 'active',
+    condition: { type: 'AnyUserGroupCondition' },
+    goal: { type: 'PerSkuGoal', all: true },
+    // Against the seed order (A x2, B x1): both targets met.
+    // currentValue = min(2,1) + min(1,1) = 2 of 2 => 100%, Completed.
+    goalItemQuantities: { A: 1, B: 1 },
+    reward: 550,
+    progress: { status: 'Completed', percentage: 100, rowsMet: 2, rowsUnmet: 0 },
+    purpose:
+      'COMPLETED progress — the green chip, the success-coloured bar, the "Mission completed" label, '
+      + 'the success date badge, and the READ-ONLY SKU modal (steppers and Add-to-cart hidden once the '
+      + 'backend status is Completed). It is a PerSku mission on purpose: the read-only branch exists '
+      + 'ONLY on the SKU modal, so an OrderCount mission at 100% reaches four of those five surfaces '
+      + 'and silently leaves the fifth untested. Its targets sit at or below what the seed order buys '
+      + 'so completion is a closed-form consequence of the fixture rather than of order history.',
   },
 ];
 
@@ -762,10 +1245,13 @@ export function windowIsOpen(mission, now = new Date()) {
 /** The goal-item rows a PerSku mission needs, given the resolved products. Pure. */
 export function buildGoalItems(spec, missionId, products) {
   if (!needsGoalItems(spec)) return [];
+  // Per-spec quantities, defaulting to the shared PERSKU_PRODUCTS pair. A progress fixture overrides
+  // them so one order can land above one target and below another — see `goalItemQuantities`.
+  const quantities = goalItemQuantities(spec);
   return PERSKU_PRODUCTS.map((p) => {
     const resolved = products?.[p.slot];
     if (!resolved?.id) throw new Error(`PerSku slot ${p.slot} has no resolved product`);
-    return { missionId, productId: resolved.id, quantity: p.quantity };
+    return { missionId, productId: resolved.id, quantity: quantities[p.slot] };
   });
 }
 
@@ -843,6 +1329,100 @@ export function validateSpecShape() {
   const priv = MISSION_BY_ALIAS.MSN_PUBLISHED_PRIVATE;
   if (priv && (priv.public !== false || priv.status !== 'Published')) {
     problems.push('MSN_PUBLISHED_PRIVATE must stay Published + public=false — it is the ONLY fixture that can catch a private mission leaking to the customer-facing query (C17)');
+  }
+
+  /* ── Targeting x public: the three declared cells ──────────────────────────
+   * Targeting (the condition tree) and `public` (the advertise flag) are INDEPENDENT variables, and a
+   * set that varies both at once cannot attribute a behaviour to either. Every rule below names a way
+   * one of the three cells collapses into another while every fixture still seeds and still resolves.
+   */
+
+  if (!String(TARGET_GROUP || '').trim()) {
+    problems.push('TARGET_GROUP is empty — a UserGroupIsCondition with no group targets nobody, and the whole targeting axis becomes unobservable');
+  }
+  if (GROUP_AUDIENCE.group !== TARGET_GROUP) {
+    problems.push(`GROUP_AUDIENCE.group (${JSON.stringify(GROUP_AUDIENCE.group)}) disagrees with TARGET_GROUP (${JSON.stringify(TARGET_GROUP)}) — the fixtures would target one group while the audience assertions name another`);
+  }
+  if (GROUP_AUDIENCE.memberRole === GROUP_AUDIENCE.nonMemberRole) {
+    problems.push('GROUP_AUDIENCE names the SAME role as member and non-member — "in the group" and "not in the group" would be asserted against one account, so neither can fail');
+  }
+
+  // Condition shapes. An empty `groups[]` is the silent one: the API stores it, the mission seeds, and
+  // it aims at an audience nobody chose. A `groups` field on the NEUTRAL condition is the mirror image
+  // — `buildConditionNode` copies it onto a node the module never reads, so the spec READS as targeted
+  // while behaving as untargeted, which is the shape of the misreading this whole block exists for.
+  for (const m of MISSIONS) {
+    const c = m.condition || {};
+    if (c.type === TARGETING.groupCondition.id) {
+      const groups = c.groups;
+      if (!Array.isArray(groups) || !groups.length || groups.some((g) => !String(g || '').trim())) {
+        problems.push(`${m.aliasName}: ${TARGETING.groupCondition.id} with ${JSON.stringify(groups)} for ${TARGETING.groupCondition.field} — a missing or blank group still seeds and still resolves, and targets nothing anyone chose (the server's own check is fail-closed: an empty Groups[] returns false)`);
+      }
+      // The server compares with EqualsIgnoreCase and does NOT trim, so a padded group never matches
+      // anything and never errors — the mission simply disappears for every customer.
+      for (const g of Array.isArray(groups) ? groups : []) {
+        if (typeof g === 'string' && g !== g.trim()) {
+          problems.push(`${m.aliasName} targets ${JSON.stringify(g)}, which has leading/trailing whitespace — the server matches whole strings with EqualsIgnoreCase and never trims, so this silently matches nobody`);
+        }
+      }
+    } else if (c.type === TARGETING.neutralCondition.id) {
+      if ('groups' in c) {
+        problems.push(`${m.aliasName}: ${TARGETING.neutralCondition.id} carries a groups field — buildConditionNode copies it onto a node the module never reads, so the fixture reads as audience-targeted while behaving as untargeted`);
+      }
+    } else if (c.type) {
+      problems.push(`${m.aliasName}: condition type "${c.type}" is neither ${TARGETING.groupCondition.id} nor ${TARGETING.neutralCondition.id} — this build's template offers nothing else, so the create would be rejected`);
+    }
+  }
+
+  // MSN_PUBLISHED_PRIVATE is the `public`-alone cell, and it is that ONLY while its condition stays
+  // neutral. Give it a group and it becomes a second MSN_GROUP_VIP_PRIVATE: two fixtures varying both
+  // variables together, and nothing left that can separate them. That conflation is exactly what made
+  // the original set read as a privacy defect — "private" was in the name only.
+  if (priv && priv.condition?.type !== TARGETING.neutralCondition.id) {
+    problems.push(`MSN_PUBLISHED_PRIVATE must stay on the NEUTRAL ${TARGETING.neutralCondition.id} — it is the cell that isolates the \`public\` flag with targeting held constant, and a group on it merges it into the MSN_GROUP_VIP_PRIVATE cell`);
+  }
+
+  const vipPub = MISSION_BY_ALIAS.MSN_GROUP_VIP;
+  const vipPriv = MISSION_BY_ALIAS.MSN_GROUP_VIP_PRIVATE;
+  for (const [alias, m, wantPublic, why] of [
+    ['MSN_GROUP_VIP', vipPub, true, 'it is the cell that isolates TARGETING, so the flag has to be held at its permissive value; flipped, it duplicates MSN_GROUP_VIP_PRIVATE and the targeting control disappears'],
+    ['MSN_GROUP_VIP_PRIVATE', vipPriv, false, 'it is the cell that isolates the flag with targeting held constant; flipped, it duplicates MSN_GROUP_VIP'],
+  ]) {
+    if (!m) continue;
+    if (m.public !== wantPublic) problems.push(`${alias} must be public=${wantPublic} — ${why}`);
+    if (m.status !== 'Published') problems.push(`${alias} must stay Published — a Draft mission is filtered out for a second reason, so neither the targeting nor the flag explains its absence`);
+    const groups = targetedGroups(m);
+    if (!groups) {
+      problems.push(`${alias} no longer carries a ${TARGETING.groupCondition.id} — on the neutral condition it is just another ordinary mission, and the targeting axis loses the cell it exists to fill`);
+    } else if (groups.length !== 1 || groups[0] !== TARGET_GROUP) {
+      problems.push(`${alias} targets ${JSON.stringify(groups)} but TARGET_GROUP is ${JSON.stringify(TARGET_GROUP)} — it must be the group the member account really carries, or "the member sees it" is asserted against an audience nobody is in`);
+    }
+  }
+  if (vipPub && vipPriv) {
+    if (vipPub.public === vipPriv.public) {
+      problems.push('MSN_GROUP_VIP and MSN_GROUP_VIP_PRIVATE no longer differ on `public` — the pair collapses into one duplicated fixture and the flag stops being isolated at all');
+    }
+    const diff = specDifferences(vipPub, vipPriv);
+    if (diff.length) {
+      problems.push(`MSN_GROUP_VIP and MSN_GROUP_VIP_PRIVATE differ on ${diff.join(', ')} as well as \`public\` — with a second variable in play, a difference in behaviour can no longer be attributed to the flag, which is the whole reason the pair exists`);
+    }
+  }
+
+  // Losing a cell is not a per-fixture error — every survivor is individually valid — so it has to be
+  // asked of the SET. A set missing a cell still seeds, still resolves, and quietly answers two of the
+  // three questions.
+  const publishedCell = (targeted, isPublic) => MISSIONS.filter(
+    (m) => m.status === 'Published' && isGroupTargeted(m) === targeted && m.public === isPublic,
+  );
+  const MATRIX = [
+    ['targeted + public', true, true, 'does group targeting filter at all? (the positive control)'],
+    ['targeted + private', true, false, 'does `public` add anything ON TOP of targeting?'],
+    ['neutral + private', false, false, 'does `public` do anything ON ITS OWN?'],
+  ];
+  for (const [cell, targeted, isPublic, question] of MATRIX) {
+    if (!publishedCell(targeted, isPublic).length) {
+      problems.push(`the targeting x public matrix has no Published fixture in the "${cell}" cell — "${question}" becomes unanswerable, and every remaining fixture still looks correctly seeded`);
+    }
   }
 
   const all = MISSION_BY_ALIAS.MSN_PERSKU_ALL;
@@ -1010,6 +1590,149 @@ export function validateSpecShape() {
   }
   if (PERSKU_PRODUCTS.some((p) => !(p.quantity > 0))) {
     problems.push('every PERSKU_PRODUCTS slot needs a positive quantity');
+  }
+
+  /* ── VCST-5346 progress fixtures ───────────────────────────────────────────
+   * Each rule below names a way a progress fixture keeps seeding, keeps resolving through @td(), and
+   * stops rendering the state it was built for. The percentages are re-DERIVED from the seed order
+   * rather than trusted, so an edited goal quantity cannot leave a stale declaration behind.
+   */
+
+  // The seed order is what every prediction is relative to; a malformed one invalidates all three.
+  const orderSlots = PROGRESS_ORDER.lines.map((l) => l.slot);
+  if (new Set(orderSlots).size !== orderSlots.length) {
+    problems.push('PROGRESS_ORDER repeats a slot — two lines on one product would double its quantity in a way no fixture accounts for');
+  }
+  for (const l of PROGRESS_ORDER.lines) {
+    if (!PERSKU_PRODUCTS.some((p) => p.slot === l.slot)) problems.push(`PROGRESS_ORDER line references slot "${l.slot}", which PERSKU_PRODUCTS does not declare — the seeder has no product to resolve it to`);
+    if (!(l.quantity > 0)) problems.push(`PROGRESS_ORDER line ${l.slot} needs a positive quantity`);
+  }
+  if (PROGRESS_ORDER_COUNT !== 1) {
+    problems.push('PROGRESS_ORDER_COUNT is not 1, but the seeder places exactly one order — every OrderCount prediction would be wrong by construction');
+  }
+  if (!isSeededMissionName(progressOrderNumber())) {
+    problems.push(`the provisioning order is named "${progressOrderNumber()}", which lacks the ${NAME_PREFIX}- prefix — teardown sweeps by that prefix and would leave it behind`);
+  }
+
+  const withProgress = progressFixtures();
+  if (!withProgress.length) {
+    problems.push('no fixture declares a `progress` expectation — the storefront card renders from loyaltyMissionProgress, so with none the whole VCST-5346 state axis is untestable');
+  }
+  for (const m of withProgress) {
+    if (m.status !== 'Published' || m.public !== true) {
+      problems.push(`${m.aliasName} declares a progress expectation but is not Published + public — the customer-facing query would never return it, so the state could not be observed at all`);
+    }
+    if (WINDOWS[m.window]?.expectOpen !== true) {
+      problems.push(`${m.aliasName} declares a progress expectation on a CLOSED window — ProcessOrderAsync filters on OnlyActive, so the seed order would never contribute to it`);
+    }
+    const predicted = predictProgress(m);
+    if (!predicted) {
+      problems.push(
+        `${m.aliasName} declares a progress expectation but its ${m.goal?.type} is not predictable from the seed order. `
+        + 'An OrderValueGoal contributes order.Total, which the platform RECOMPUTES from line items, tax and shipping '
+        + '(an authored 249.98 came back as 251.99 on vcst-qa), so any percentage declared here would be a guess no static check could catch.',
+      );
+      continue;
+    }
+    if (predicted.status !== m.progress.status) {
+      problems.push(`${m.aliasName} declares status ${JSON.stringify(m.progress.status)} but the seed order yields ${JSON.stringify(predicted.status)} — the declaration and the fixture disagree, so one of them is testing something nobody chose`);
+    }
+    if (!percentagesMatch(predicted.percentage, m.progress.percentage)) {
+      problems.push(`${m.aliasName} declares percentage ${m.progress.percentage} but the seed order yields ${predicted.percentage} — re-derive it or fix the goal quantities`);
+    }
+    for (const k of ['rowsMet', 'rowsUnmet']) {
+      if (m.progress[k] != null && m.progress[k] !== predicted[k]) {
+        problems.push(`${m.aliasName} declares ${k}=${m.progress[k]} but the seed order yields ${predicted[k]} — the per-row "target met" styling would be asserted against the wrong row count`);
+      }
+    }
+  }
+
+  const soon = MISSION_BY_ALIAS.MSN_ENDING_SOON;
+  if (soon) {
+    const w = WINDOWS[soon.window];
+    if (!w) {
+      problems.push(`MSN_ENDING_SOON declares unknown window intent "${soon.window}"`);
+    } else {
+      // daysRemaining = ceil(endDate - now) clamped at 0, and endDate = seedClock + endOffsetDays, so
+      // the value never exceeds endOffsetDays and never goes below 0. Both bounds have to hold with
+      // clock slack, or the fixture renders warning (too high) or vanishes from the page (too low).
+      if (!(w.endOffsetDays < DANGER_THRESHOLD_DAYS)) {
+        problems.push(`MSN_ENDING_SOON's window ends in ${w.endOffsetDays} days, so daysRemaining starts at ${w.endOffsetDays} — the storefront's danger branch needs < ${DANGER_THRESHOLD_DAYS} and the badge would render WARNING, the default state the fixture exists to escape`);
+      }
+      if (w.endOffsetDays > DANGER_THRESHOLD_DAYS - WINDOW_CLOCK_SLACK_DAYS) {
+        problems.push(`MSN_ENDING_SOON's window ends in ${w.endOffsetDays} days, within ${WINDOW_CLOCK_SLACK_DAYS} of the ${DANGER_THRESHOLD_DAYS}-day boundary — a timezone or DST reading could push daysRemaining over it and flip the badge to warning intermittently, which reads as a product bug`);
+      }
+      if (w.endOffsetDays < WINDOW_CLOCK_SLACK_DAYS) {
+        problems.push(`MSN_ENDING_SOON's window ends in ${w.endOffsetDays} days, leaving less than ${WINDOW_CLOCK_SLACK_DAYS} days of life — once it closes GetUserMissionsAsync drops the mission entirely and the case asserts a badge colour on a card that is not on the page`);
+      }
+      if (w.expectOpen !== true) {
+        problems.push('MSN_ENDING_SOON must sit on an OPEN window (expectOpen=true) — an expired mission has no badge to colour');
+      }
+    }
+    if (MISSIONS.filter((m) => m.window === 'endingSoon').length !== 1) {
+      problems.push('more than one fixture sits on the endingSoon window — the danger-badge assertions can no longer name a single unambiguous subject');
+    }
+    if (predictProgress(soon)?.status === 'Completed') {
+      problems.push('MSN_ENDING_SOON is COMPLETED by the seed order — the storefront colours a completed mission SUCCESS, which overrides the danger branch, so the fixture would render exactly the state it exists to exclude while still looking correctly seeded');
+    }
+    if (!(soon.goal?.count > PROGRESS_ORDER_COUNT)) {
+      problems.push(`MSN_ENDING_SOON's target (${soon.goal?.count}) is not above the ${PROGRESS_ORDER_COUNT} order the seed places — it would complete, and a completed mission takes the success branch instead of the danger one`);
+    }
+  } else if (MISSIONS.some((m) => m.window === 'endingSoon')) {
+    problems.push('a fixture sits on the endingSoon window but MSN_ENDING_SOON is gone — the danger-badge fixture is the declared one');
+  }
+
+  const partial = MISSION_BY_ALIAS.MSN_PROGRESS_PARTIAL;
+  if (partial) {
+    const p = predictProgress(partial);
+    if (partial.goal?.type !== 'PerSkuGoal' || partial.goal?.all !== true) {
+      problems.push('MSN_PROGRESS_PARTIAL must be a PerSkuGoal with all=true — the module computes PerSkuAny\'s percentage as a BINARY 0 or 100, so an Any goal has no partial state, and an OrderValue goal\'s percentage is not statically derivable');
+    }
+    if (!p || !(p.percentage > 0 && p.percentage < 100)) {
+      problems.push(`MSN_PROGRESS_PARTIAL yields percentage ${p ? p.percentage : 'nothing'} — a partial fixture must be STRICTLY between 0 and 100 or the progress bar shows an end state and the "{current} of {target}" label is trivial`);
+    }
+    if (p?.status === 'Completed') {
+      problems.push('MSN_PROGRESS_PARTIAL is completed by the seed order — it would render the Completed chip and the success bar, i.e. the other fixture\'s state');
+    }
+    if (!p || !(p.rowsMet >= 1 && p.rowsUnmet >= 1)) {
+      problems.push('MSN_PROGRESS_PARTIAL no longer has one target-MET row and one target-UNMET row — the per-row "target met" styling then only ever shows one of its two states, and the modal cannot distinguish styling that works from styling that is never applied');
+    }
+  }
+
+  const done = MISSION_BY_ALIAS.MSN_PROGRESS_COMPLETED;
+  if (done) {
+    const p = predictProgress(done);
+    if (done.goal?.type !== 'PerSkuGoal') {
+      problems.push('MSN_PROGRESS_COMPLETED must be a PerSku mission — the READ-ONLY modal branch (steppers and Add-to-cart hidden at Completed) exists only on the SKU modal, so a completed OrderCount mission leaves it untested');
+    }
+    if (!p || p.status !== 'Completed') {
+      problems.push('MSN_PROGRESS_COMPLETED is NOT completed by the seed order — the Completed chip, the success bar and the read-only modal are all unreachable, and the case would assert them against an in-progress card');
+    }
+    if (!p || !percentagesMatch(p.percentage, 100)) {
+      problems.push(`MSN_PROGRESS_COMPLETED yields percentage ${p ? p.percentage : 'nothing'} rather than 100 — a "completed" card with a part-filled bar is a contradiction the fixture must not manufacture`);
+    }
+    if (p && p.rowsUnmet !== 0) {
+      problems.push(`MSN_PROGRESS_COMPLETED leaves ${p.rowsUnmet} SKU row(s) below target — every row must be met, or the modal shows unmet rows on a completed mission`);
+    }
+  }
+
+  // The three states must be DISTINCT. Collapse two of them and the set still seeds, still resolves,
+  // and quietly covers two states instead of three.
+  const states = withProgress.map((m) => `${m.progress.status}:${m.progress.percentage}`);
+  if (new Set(states).size !== states.length) {
+    problems.push(`two progress fixtures declare the SAME state (${states.join(', ')}) — one of them is redundant and the state it was meant to cover is now uncovered`);
+  }
+
+  // A per-slot override that names a slot nobody declares is silently ignored by buildGoalItems.
+  for (const m of MISSIONS) {
+    if (!m.goalItemQuantities) continue;
+    if (!needsGoalItems(m)) {
+      problems.push(`${m.aliasName} declares goalItemQuantities but its ${m.goal?.type} has no SKU targets — a dead override reads as coverage that does not exist`);
+    }
+    for (const [slot, qty] of Object.entries(m.goalItemQuantities)) {
+      if (!PERSKU_PRODUCTS.some((p) => p.slot === slot)) problems.push(`${m.aliasName}.goalItemQuantities names slot "${slot}", which PERSKU_PRODUCTS does not declare — buildGoalItems ignores it silently`);
+      if (!(qty > 0)) problems.push(`${m.aliasName}.goalItemQuantities.${slot} must be positive — the module treats 0 >= 0 as satisfied WITHOUT the SKU being bought, so a zero target completes the mission on any order at all`);
+    }
   }
 
   return problems;

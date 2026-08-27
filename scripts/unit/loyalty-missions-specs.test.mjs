@@ -20,6 +20,10 @@ import {
   BANNERS, BANNER_FOLDER, bannerKeyFor, bannerSourceRel, bannerAssetRel, resolveBannerUrl,
   resolveLocales, localizedString, localizedValues, buildLocalizedFields, LOCALE_INTENTS, MIN_LOCALES,
   buildGoalItems, reconcileGoalItems, validateSpecShape,
+  PROGRESS_ORDER, PROGRESS_ORDER_COUNT, progressOrderNumber, predictProgress, progressFixtures,
+  goalItemQuantities, DANGER_THRESHOLD_DAYS, WINDOW_CLOCK_SLACK_DAYS,
+  TARGET_GROUP, GROUP_AUDIENCE, GROUP_PAIR_EXEMPT_FIELDS,
+  specDifferences, targetedGroups, isGroupTargeted, groupMatches, groupsInclude,
 } from '../seed-data/loyalty/missions-specs.mjs';
 
 /* ── A faithful stand-in for GET /api/loyalty-missions/new ───────────────────
@@ -870,4 +874,172 @@ test('MSN_LOCALIZED is the only fixture carrying translations — but NOT the on
   // Exclusivity used to cover the banner too. It must not any more: every mission carries one, so the
   // C11 banner assertion is "MSN_LOCALIZED's banner serves like everyone else's", not "only it has one".
   for (const m of MISSIONS) assert.ok(bannerKeyFor(m), `${m.aliasName} has no banner`);
+});
+
+/* ── VCST-5346 storefront progress states ────────────────────────────────────
+ * The three fixtures below exist to make a COLOUR, a PARTIAL BAR and a COMPLETED CHIP reachable. Each
+ * of them dies quietly: a target nudged by one turns the partial fixture into a completed one, an
+ * `endOffsetDays` nudged upward turns the danger badge into the default warning, and in both cases the
+ * seed still succeeds and every "does the fixture exist?" check still passes. So these tests perturb
+ * the numbers and assert `validateSpecShape` NOTICES — the same discipline as the block above.
+ */
+
+test('predictProgress mirrors the module arithmetic the fixtures are designed against', () => {
+  // PerSkuAll clamps EACH row before summing, so over-buying one SKU cannot cover another.
+  const partial = predictProgress(spec('MSN_PROGRESS_PARTIAL'));
+  assert.deepEqual(
+    { current: partial.currentValue, target: partial.targetValue, pct: partial.percentage, status: partial.status },
+    { current: 3, target: 4, pct: 75, status: 'InProgress' },
+    'A x2 against target 2 plus B x1 against target 2 is min(2,2)+min(1,2)=3 of 4',
+  );
+  assert.equal(partial.rowsMet, 1);
+  assert.equal(partial.rowsUnmet, 1);
+
+  const done = predictProgress(spec('MSN_PROGRESS_COMPLETED'));
+  assert.deepEqual(
+    { current: done.currentValue, target: done.targetValue, pct: done.percentage, status: done.status },
+    { current: 2, target: 2, pct: 100, status: 'Completed' },
+    'over-buying is clamped: min(2,1)+min(1,1)=2 of 2, not 3 of 2',
+  );
+
+  // OrderCount contributes exactly one per order, and the module guards the division.
+  assert.equal(predictProgress(spec('MSN_ENDING_SOON')).percentage, 25);
+  assert.equal(predictProgress(spec('MSN_ZEROTARGET')).percentage, 0, 'a zero target must not divide by zero or read as complete');
+  assert.equal(predictProgress(spec('MSN_ZEROTARGET')).status, 'InProgress');
+
+  // An OrderValueGoal's contribution is the SERVER-RECOMPUTED order total, so it is not predictable —
+  // and saying so is the point: a fixture may not declare a percentage nothing can derive.
+  assert.equal(predictProgress(spec('MSN_ORDERVALUE')), null);
+});
+
+test('PerSkuAny has no partial state at all, which is why the partial fixture must be PerSkuAll', () => {
+  const p = predictProgress(spec('MSN_PERSKU_ANY'));
+  assert.ok(p.percentage === 0 || p.percentage === 100, `PerSkuAny percentage is binary, got ${p.percentage}`);
+});
+
+test('the three progress fixtures cover three DISTINCT storefront states', () => {
+  const states = progressFixtures().map((m) => `${m.progress.status}:${m.progress.percentage}`);
+  assert.equal(new Set(states).size, states.length, 'a collapsed pair silently drops a state from coverage');
+  assert.ok(progressFixtures().some((m) => predictProgress(m).status === 'Completed' && m.goal.type === 'PerSkuGoal'),
+    'the read-only-modal branch only exists on the SKU modal, so the completed fixture must be PerSku');
+});
+
+test('a declared progress state that the seed order does not produce is caught', () => {
+  const m = spec('MSN_PROGRESS_PARTIAL');
+  const orig = { progress: m.progress, goalItemQuantities: m.goalItemQuantities };
+  const perturb = (patch) => {
+    Object.assign(m, patch);
+    const p = validateSpecShape();
+    Object.assign(m, orig);
+    return p;
+  };
+
+  // The declaration drifting from the fixture — the failure the re-derivation exists to make impossible.
+  assert.ok(perturb({ progress: { ...orig.progress, percentage: 50 } })
+    .some((p) => /declares percentage 50 but the seed order yields 75/.test(p)));
+  assert.ok(perturb({ progress: { ...orig.progress, status: 'Completed' } })
+    .some((p) => /declares status "Completed" but the seed order yields "InProgress"/.test(p)));
+
+  // Equalising the two targets at or below what the order buys makes the "partial" fixture complete.
+  assert.ok(perturb({ goalItemQuantities: { A: 1, B: 1 } })
+    .some((p) => /MSN_PROGRESS_PARTIAL is completed by the seed order/.test(p)));
+  // …and pushing both above it makes every row unmet, so the per-row styling has one state again.
+  assert.ok(perturb({ goalItemQuantities: { A: 9, B: 9 } })
+    .some((p) => /one target-MET row and one target-UNMET row/.test(p)));
+
+  // A zero target is satisfied by 0 >= 0 WITHOUT the SKU being bought — the mirror image of
+  // MSN_ZEROTARGET's guarded division, and it silently completes the mission on any order at all.
+  assert.ok(perturb({ goalItemQuantities: { A: 0, B: 2 } }).some((p) => /must be positive/.test(p)));
+
+  assert.deepEqual(validateSpecShape(), [], 'and the committed spec set is clean');
+});
+
+test('the completed fixture cannot quietly stop being completed, or stop being PerSku', () => {
+  const m = spec('MSN_PROGRESS_COMPLETED');
+  const orig = { progress: m.progress, goalItemQuantities: m.goalItemQuantities, goal: m.goal };
+  const perturb = (patch) => {
+    Object.assign(m, patch);
+    const p = validateSpecShape();
+    Object.assign(m, orig);
+    return p;
+  };
+  assert.ok(perturb({ goalItemQuantities: { A: 1, B: 5 }, progress: { status: 'InProgress', percentage: 50, rowsMet: 1, rowsUnmet: 1 } })
+    .some((p) => /MSN_PROGRESS_COMPLETED is NOT completed by the seed order/.test(p)));
+  assert.ok(perturb({ goal: { type: 'OrderCountGoal', count: 1 }, goalItemQuantities: undefined, progress: { status: 'Completed', percentage: 100 } })
+    .some((p) => /must be a PerSku mission/.test(p)));
+  assert.deepEqual(validateSpecShape(), []);
+});
+
+test('the danger window is bounded on BOTH sides, and the bound is derived, not asserted by eye', () => {
+  const w = WINDOWS.endingSoon;
+  // daysRemaining = ceil(endDate - now) clamped at 0, and endDate = seedClock + endOffsetDays, so the
+  // reachable range is exactly [0, endOffsetDays]. The upper end is what the danger branch is judged on.
+  assert.ok(w.endOffsetDays < DANGER_THRESHOLD_DAYS, 'the badge would render warning at its widest');
+  assert.ok(w.endOffsetDays <= DANGER_THRESHOLD_DAYS - WINDOW_CLOCK_SLACK_DAYS, 'no clock slack below the boundary');
+  assert.ok(w.endOffsetDays >= WINDOW_CLOCK_SLACK_DAYS, 'the window would lapse before the next seed');
+  assert.equal(w.expectOpen, true);
+
+  const orig = { ...w };
+  const perturb = (patch) => {
+    Object.assign(WINDOWS.endingSoon, patch);
+    const p = validateSpecShape();
+    Object.assign(WINDOWS.endingSoon, orig);
+    return p;
+  };
+  assert.ok(perturb({ endOffsetDays: 180 }).some((p) => /danger branch needs < 10/.test(p)),
+    'the shared active window is exactly what made the danger branch unreachable');
+  assert.ok(perturb({ endOffsetDays: 9 }).some((p) => /within 2 of the 10-day boundary/.test(p)),
+    'one day of margin is inside a timezone reading');
+  assert.ok(perturb({ endOffsetDays: 1 }).some((p) => /less than 2 days of life/.test(p)),
+    'a window that lapses drops the card off the page entirely');
+  assert.deepEqual(validateSpecShape(), []);
+});
+
+test('a completable danger fixture is rejected — success overrides the danger badge', () => {
+  const m = spec('MSN_ENDING_SOON');
+  const orig = { goal: m.goal, progress: m.progress };
+  Object.assign(m, { goal: { type: 'OrderCountGoal', count: 1 }, progress: { status: 'Completed', percentage: 100 } });
+  const p = validateSpecShape();
+  Object.assign(m, orig);
+  assert.ok(p.some((x) => /is COMPLETED by the seed order/.test(x)));
+  assert.ok(p.some((x) => /is not above the 1 order the seed places/.test(x)));
+  assert.deepEqual(validateSpecShape(), []);
+});
+
+test('the provisioning order is the only lever, so its shape is guarded too', () => {
+  assert.equal(progressOrderNumber(), `${NAME_PREFIX}-ORDER`, 'teardown sweeps by the NAME_PREFIX');
+  assert.ok(isSeededMissionName(progressOrderNumber()));
+  assert.equal(PROGRESS_ORDER_COUNT, 1);
+  // Every line must name a declared slot, or buildGoalItems and the order body disagree about products.
+  for (const l of PROGRESS_ORDER.lines) {
+    assert.ok(PERSKU_PRODUCTS.some((p) => p.slot === l.slot), `line ${l.slot} has no product slot`);
+  }
+  const orig = PROGRESS_ORDER.lines.slice();
+  PROGRESS_ORDER.lines.splice(0, PROGRESS_ORDER.lines.length, { slot: 'A', quantity: 2 }, { slot: 'A', quantity: 1 });
+  const dup = validateSpecShape();
+  PROGRESS_ORDER.lines.splice(0, PROGRESS_ORDER.lines.length, ...orig);
+  assert.ok(dup.some((p) => /repeats a slot/.test(p)));
+  assert.deepEqual(validateSpecShape(), []);
+});
+
+test('goalItemQuantities overrides only the slots it names, and buildGoalItems follows', () => {
+  assert.deepEqual(goalItemQuantities(spec('MSN_PERSKU_ALL')), { A: 2, B: 1 }, 'no override -> the shared pair');
+  assert.deepEqual(goalItemQuantities(spec('MSN_PROGRESS_PARTIAL')), { A: 2, B: 2 });
+  const products = { A: { id: 'prod-a' }, B: { id: 'prod-b' } };
+  assert.deepEqual(
+    buildGoalItems(spec('MSN_PROGRESS_COMPLETED'), 'mission-1', products),
+    [{ missionId: 'mission-1', productId: 'prod-a', quantity: 1 }, { missionId: 'mission-1', productId: 'prod-b', quantity: 1 }],
+    'the override must reach the goal-item rows, or the mission targets the shared quantities and the state changes',
+  );
+});
+
+test('the endingSoon window resolves to real dates that are open and close inside the threshold', () => {
+  const now = new Date('2026-08-27T12:00:00Z');
+  const { startDate, endDate } = windowDates('endingSoon', now);
+  assert.ok(Date.parse(startDate) < now.getTime(), 'already started');
+  assert.ok(Date.parse(endDate) > now.getTime(), 'not yet closed');
+  assert.ok(windowIsOpen({ startDate, endDate }, now));
+  assert.equal(windowExpectsOpen('endingSoon'), true);
+  const days = Math.ceil((Date.parse(endDate) - now.getTime()) / 86400000);
+  assert.ok(days > 0 && days < DANGER_THRESHOLD_DAYS, `daysRemaining would be ${days}`);
 });

@@ -4750,6 +4750,8 @@
     "goal_target": "PerSkuAll",
     "reward": 750,
     "id": "",
+    "target_qty_a": 2,
+    "target_qty_b": 1,
     "fields": {
       "name": "name",
       "status": "status",
@@ -4760,9 +4762,11 @@
       "goal_type": "goal_type",
       "goal_target": "goal_target",
       "reward": "reward",
-      "id": "id"
+      "id": "id",
+      "target_qty_a": "target_qty_a",
+      "target_qty_b": "target_qty_b"
     },
-    "_notes": "VCST-5319 Loyalty Mission fixture. PerSku with all=true → surfaces as PerSkuAll: EVERY target SKU must be bought at its quantity. Paired with MSN_PERSKU_ANY over the SAME two targets, so the only variable is the flag. Business key is the NAME (AGENT-TEST-MSN-PERSKU-ALL) — the seeder looks it up by name; the runtime GUID is per-env and lives ONLY in aliases.<env>.json (@td(MSN_PERSKU_ALL.id) resolves to '' on an unseeded env — a clear miss). PUBLISHED = IMMUTABLE: EnsureMutableAsync rejects every edit except the single transition Published -> Archived (and everything on an Archived one), and the refusal comes back as HTTP 500, not 4xx — so a case must never try to edit this in place. DELETE is allowed at every status, which is how the seeder repairs drift. Seeded by `npm run seed:loyalty-missions`; drift-guarded by `npm run td:validate:missions`. BANNER: `banner_key` is the authored artwork this mission carries — derived from its goal type (order-value / order-count / per-sku), so the three mission types read as visually distinct on the VCST-5346 storefront card. `banner_url` is the address THIS env's platform asset store handed back for that file and lives ONLY in aliases.<env>.json — it is absolute and host-bearing, so a committed one would point every other env at this deployment's blob storage. The seeder uploads the SVG under a FIXED file name (so the URL is stable and the mission is not recreated on every seed), sets bannerUrl at CREATE time (a Published mission is immutable and cannot gain one afterwards), and asserts the URL serves 2xx + image/*."
+    "_notes": "VCST-5319 Loyalty Mission fixture. PerSku with all=true → surfaces as PerSkuAll: EVERY target SKU must be bought at its quantity. Paired with MSN_PERSKU_ANY over the SAME two targets, so the only variable is the flag. Business key is the NAME (AGENT-TEST-MSN-PERSKU-ALL) — the seeder looks it up by name; the runtime GUID is per-env and lives ONLY in aliases.<env>.json (@td(MSN_PERSKU_ALL.id) resolves to '' on an unseeded env — a clear miss). PUBLISHED = IMMUTABLE: EnsureMutableAsync rejects every edit except the single transition Published -> Archived (and everything on an Archived one), and the refusal comes back as HTTP 500, not 4xx — so a case must never try to edit this in place. DELETE is allowed at every status, which is how the seeder repairs drift. Seeded by `npm run seed:loyalty-missions`; drift-guarded by `npm run td:validate:missions`. BANNER: `banner_key` is the authored artwork this mission carries — derived from its goal type (order-value / order-count / per-sku), so the three mission types read as visually distinct on the VCST-5346 storefront card. `banner_url` is the address THIS env's platform asset store handed back for that file and lives ONLY in aliases.<env>.json — it is absolute and host-bearing, so a committed one would point every other env at this deployment's blob storage. The seeder uploads the SVG under a FIXED file name (so the URL is stable and the mission is not recreated on every seed), sets bannerUrl at CREATE time (a Published mission is immutable and cannot gain one afterwards), and asserts the URL serves 2xx + image/*. TARGET QUANTITIES: target_qty_a/target_qty_b are THIS mission's own LoyaltyMissionGoalItem quantities over @td(MSN_PERSKU_PRODUCT_A)/@td(MSN_PERSKU_PRODUCT_B) — it declares no override, so they are INHERITED from the shared PERSKU_PRODUCTS pair. They are mirrored here anyway, on every PerSku mission, because the quantity is what decides targetValue and therefore every percentage derived from the mission: on 2026-08-27 MSN_PERSKU_ANY was found live with slot B at 2 against a spec of 1 (targetValue 4 instead of 3), and with the effective target recorded nowhere no static guard could see it and the next re-seed would have repaired it silently. `npm run td:validate:missions` now requires this mirror on every PerSku mission and compares it against missions-specs.goalItemQuantities()."
   },
   "MSN_PERSKU_ANY": {
     "_inline": true,
@@ -4776,6 +4780,8 @@
     "goal_target": "PerSkuAny",
     "reward": 400,
     "id": "",
+    "target_qty_a": 2,
+    "target_qty_b": 1,
     "fields": {
       "name": "name",
       "status": "status",
@@ -4786,9 +4792,11 @@
       "goal_type": "goal_type",
       "goal_target": "goal_target",
       "reward": "reward",
-      "id": "id"
+      "id": "id",
+      "target_qty_a": "target_qty_a",
+      "target_qty_b": "target_qty_b"
     },
-    "_notes": "VCST-5319 Loyalty Mission fixture. PerSku with all=false → surfaces as PerSkuAny: ONE target SKU at quantity suffices. The discriminating half of the ALL/ANY pair. Business key is the NAME (AGENT-TEST-MSN-PERSKU-ANY) — the seeder looks it up by name; the runtime GUID is per-env and lives ONLY in aliases.<env>.json (@td(MSN_PERSKU_ANY.id) resolves to '' on an unseeded env — a clear miss). PUBLISHED = IMMUTABLE: EnsureMutableAsync rejects every edit except the single transition Published -> Archived (and everything on an Archived one), and the refusal comes back as HTTP 500, not 4xx — so a case must never try to edit this in place. DELETE is allowed at every status, which is how the seeder repairs drift. Seeded by `npm run seed:loyalty-missions`; drift-guarded by `npm run td:validate:missions`. BANNER: `banner_key` is the authored artwork this mission carries — derived from its goal type (order-value / order-count / per-sku), so the three mission types read as visually distinct on the VCST-5346 storefront card. `banner_url` is the address THIS env's platform asset store handed back for that file and lives ONLY in aliases.<env>.json — it is absolute and host-bearing, so a committed one would point every other env at this deployment's blob storage. The seeder uploads the SVG under a FIXED file name (so the URL is stable and the mission is not recreated on every seed), sets bannerUrl at CREATE time (a Published mission is immutable and cannot gain one afterwards), and asserts the URL serves 2xx + image/*."
+    "_notes": "VCST-5319 Loyalty Mission fixture. PerSku with all=false → surfaces as PerSkuAny: ONE target SKU at quantity suffices. The discriminating half of the ALL/ANY pair. Business key is the NAME (AGENT-TEST-MSN-PERSKU-ANY) — the seeder looks it up by name; the runtime GUID is per-env and lives ONLY in aliases.<env>.json (@td(MSN_PERSKU_ANY.id) resolves to '' on an unseeded env — a clear miss). PUBLISHED = IMMUTABLE: EnsureMutableAsync rejects every edit except the single transition Published -> Archived (and everything on an Archived one), and the refusal comes back as HTTP 500, not 4xx — so a case must never try to edit this in place. DELETE is allowed at every status, which is how the seeder repairs drift. Seeded by `npm run seed:loyalty-missions`; drift-guarded by `npm run td:validate:missions`. BANNER: `banner_key` is the authored artwork this mission carries — derived from its goal type (order-value / order-count / per-sku), so the three mission types read as visually distinct on the VCST-5346 storefront card. `banner_url` is the address THIS env's platform asset store handed back for that file and lives ONLY in aliases.<env>.json — it is absolute and host-bearing, so a committed one would point every other env at this deployment's blob storage. The seeder uploads the SVG under a FIXED file name (so the URL is stable and the mission is not recreated on every seed), sets bannerUrl at CREATE time (a Published mission is immutable and cannot gain one afterwards), and asserts the URL serves 2xx + image/*. TARGET QUANTITIES: target_qty_a/target_qty_b are THIS mission's own LoyaltyMissionGoalItem quantities over @td(MSN_PERSKU_PRODUCT_A)/@td(MSN_PERSKU_PRODUCT_B) — it declares no override, so they are INHERITED from the shared PERSKU_PRODUCTS pair. They are mirrored here anyway, on every PerSku mission, because the quantity is what decides targetValue and therefore every percentage derived from the mission: on 2026-08-27 MSN_PERSKU_ANY was found live with slot B at 2 against a spec of 1 (targetValue 4 instead of 3), and with the effective target recorded nowhere no static guard could see it and the next re-seed would have repaired it silently. `npm run td:validate:missions` now requires this mirror on every PerSku mission and compares it against missions-specs.goalItemQuantities()."
   },
   "MSN_PUBLISHED_PRIVATE": {
     "_inline": true,
@@ -4814,7 +4822,67 @@
       "reward": "reward",
       "id": "id"
     },
-    "_notes": "VCST-5319 Loyalty Mission fixture. C17, the ticket's highest-priority condition: Published but public=false must NOT leak into the customer-facing query while REMAINING visible to the admin search. Both halves matter — a mission that is merely absent everywhere would pass the leak check for the wrong reason. Business key is the NAME (AGENT-TEST-MSN-PUBLISHED-PRIVATE) — the seeder looks it up by name; the runtime GUID is per-env and lives ONLY in aliases.<env>.json (@td(MSN_PUBLISHED_PRIVATE.id) resolves to '' on an unseeded env — a clear miss). PUBLISHED = IMMUTABLE: EnsureMutableAsync rejects every edit except the single transition Published -> Archived (and everything on an Archived one), and the refusal comes back as HTTP 500, not 4xx — so a case must never try to edit this in place. DELETE is allowed at every status, which is how the seeder repairs drift. Seeded by `npm run seed:loyalty-missions`; drift-guarded by `npm run td:validate:missions`. BANNER: `banner_key` is the authored artwork this mission carries — derived from its goal type (order-value / order-count / per-sku), so the three mission types read as visually distinct on the VCST-5346 storefront card. `banner_url` is the address THIS env's platform asset store handed back for that file and lives ONLY in aliases.<env>.json — it is absolute and host-bearing, so a committed one would point every other env at this deployment's blob storage. The seeder uploads the SVG under a FIXED file name (so the URL is stable and the mission is not recreated on every seed), sets bannerUrl at CREATE time (a Published mission is immutable and cannot gain one afterwards), and asserts the URL serves 2xx + image/*."
+    "_notes": "VCST-5319 Loyalty Mission fixture — C17, the `public` FLAG IN ISOLATION under a deliberately NEUTRAL condition. READ THE NAME AS \"NOT ADVERTISED\", NEVER AS \"AUDIENCE-RESTRICTED\". Its condition is AnyUserGroupCondition, whose IsSatisfiedBy is a constant true, so EVERY customer is its intended audience: an arbitrary shopper — or an anonymous checkout — earning it is CORRECT BEHAVIOUR and is NOT a leak. Getting that backwards cost a retracted P1 privacy/revenue bug on 2026-08-27, drafted because this was the only non-public fixture in the set and TARGETING.groupCondition was declared but used by no spec, so nothing could tell \"not advertised\" from \"restricted to an audience\". This is the third cell of the targeting x public matrix and answers ONE question — does `public` do anything ON ITS OWN? Audience targeting is MSN_GROUP_VIP (targeted + public) and MSN_GROUP_VIP_PRIVATE (targeted + private); `td:validate:missions` asserts this fixture stays on the neutral condition, because a group on it merges it into the MSN_GROUP_VIP_PRIVATE cell and leaves nothing that can separate the two variables. Both halves of C17 still matter: Published + public=false must stay out of the customer-facing query while REMAINING visible to the admin search, since a mission that is merely absent everywhere would pass the leak check for the wrong reason. SEPARATELY VERIFIED, AND THE REASON THIS PAIR EXISTS: `public` is read by NOTHING on either path on this build. LoyaltyMissionSearchCriteria.Public exists and LoyaltyMissionSearchService will filter on it, but no caller in the module ever sets it (the storefront read sets StoreIds/Status/Take, accrual sets StoreIds/OnlyActive/Take, and the xAPI project contains zero occurrences of the field). The fixtures deliberately declare only the INPUTS and no expected visibility — encoding the expectation would prove it by construction. Business key is the NAME — the seeder looks it up by name; the runtime GUID is per-env and lives ONLY in aliases.<env>.json (@td(MSN_PUBLISHED_PRIVATE.id) resolves to '' on an unseeded env — a clear miss). PUBLISHED = IMMUTABLE: EnsureMutableAsync rejects every edit except the single transition Published -> Archived, so a case must never try to edit this in place; DELETE is allowed at every status, which is how the seeder repairs drift. Seeded by `npm run seed:loyalty-missions`; drift-guarded by `npm run td:validate:missions`. BANNER: `banner_key` is the authored artwork, derived from the goal type; `banner_url` is the absolute, host-bearing address THIS env's asset store handed back and lives ONLY in aliases.<env>.json."
+  },
+  "MSN_GROUP_VIP": {
+    "_inline": true,
+    "name": "AGENT-TEST-MSN-GROUP-VIP",
+    "status": "Published",
+    "public": "true",
+    "periodicity": "None",
+    "condition_type": "UserGroupIsCondition",
+    "condition_groups": "VIP",
+    "banner_key": "order-count",
+    "banner_url": "",
+    "goal_type": "OrderCountGoal",
+    "goal_target": "1",
+    "reward": 275,
+    "id": "",
+    "fields": {
+      "name": "name",
+      "status": "status",
+      "public": "public",
+      "periodicity": "periodicity",
+      "condition_type": "condition_type",
+      "condition_groups": "condition_groups",
+      "banner_key": "banner_key",
+      "banner_url": "banner_url",
+      "goal_type": "goal_type",
+      "goal_target": "goal_target",
+      "reward": "reward",
+      "id": "id"
+    },
+    "_notes": "VCST-5319 Loyalty Mission fixture — the POSITIVE CONTROL for group targeting. Targeted at @td(MSN_GROUP_AUDIENCE.group) with `public` held at its PERMISSIVE value (true), so TARGETING is the only variable: @td(MSN_GROUP_AUDIENCE.member_email) must see and earn it, @td(MSN_GROUP_AUDIENCE.nonmember_email) must not. Both halves are required — \"the VIP user sees the VIP mission\" is equally true of a mission with NO targeting, and that is exactly the observation that made a P1 privacy bug look real on 2026-08-27 before it was retracted. It is the first fixture in the set to use TARGETING.groupCondition at all: the shape was declared and used by nothing, so MSN-011 had to build a group-scoped mission inline inside the case. public=true is load-bearing — flip it and this stops being the targeting cell and duplicates MSN_GROUP_VIP_PRIVATE. Paired with MSN_GROUP_VIP_PRIVATE (same condition, public=false) and MSN_PUBLISHED_PRIVATE (neutral condition, public=false) to form the targeting x public matrix. HOW THE SERVER EVALUATES THIS (verified in source 2026-08-27 — vc-module-loyalty PR #14 @ 1be73b4 + vc-module-core dev): UserGroupIsCondition lives in vc-module-core and reads EvaluationContextBase.UserGroups, which LoyaltyLogicService.GetUserGroups fills from the CONTACT/MEMBER entity's `Groups` collection (securityUserId -> user.MemberId -> member.Groups) — not from a security-account claim, not from the order. The match is whole-string OrdinalIgnoreCase and is NOT trimmed, so 'vip' matches 'VIP' but 'VIP Gold' and ' VIP' do not. It is fail-closed twice: an empty Groups[] returns false, and a null UserGroups (no member record) returns false. The READ path applies the condition too (GetQualifyingMissionsAsync filters on DynamicExpression.IsSatisfiedBy), so a non-member does not merely fail to accrue — the mission is absent from loyaltyMissionProgress entirely. Business key is the NAME — the seeder looks it up by name; the runtime GUID is per-env and lives ONLY in aliases.<env>.json (@td(MSN_GROUP_VIP.id) resolves to '' on an unseeded env — a clear miss). PUBLISHED = IMMUTABLE: EnsureMutableAsync rejects every edit except the single transition Published -> Archived, so a case must never try to edit this in place; DELETE is allowed at every status, which is how the seeder repairs drift. Seeded by `npm run seed:loyalty-missions`; drift-guarded by `npm run td:validate:missions`. BANNER: `banner_key` is the authored artwork, derived from the goal type; `banner_url` is the absolute, host-bearing address THIS env's asset store handed back and lives ONLY in aliases.<env>.json."
+  },
+  "MSN_GROUP_VIP_PRIVATE": {
+    "_inline": true,
+    "name": "AGENT-TEST-MSN-GROUP-VIP-PRIVATE",
+    "status": "Published",
+    "public": "false",
+    "periodicity": "None",
+    "condition_type": "UserGroupIsCondition",
+    "condition_groups": "VIP",
+    "banner_key": "order-count",
+    "banner_url": "",
+    "goal_type": "OrderCountGoal",
+    "goal_target": "1",
+    "reward": 275,
+    "id": "",
+    "fields": {
+      "name": "name",
+      "status": "status",
+      "public": "public",
+      "periodicity": "periodicity",
+      "condition_type": "condition_type",
+      "condition_groups": "condition_groups",
+      "banner_key": "banner_key",
+      "banner_url": "banner_url",
+      "goal_type": "goal_type",
+      "goal_target": "goal_target",
+      "reward": "reward",
+      "id": "id"
+    },
+    "_notes": "VCST-5319 Loyalty Mission fixture — the cell that isolates the `public` FLAG with TARGETING HELD CONSTANT. Identical to MSN_GROUP_VIP in every respect except public=false, and `npm run td:validate:missions` asserts the pair differs on NOTHING else (every spec key is compared except aliasName/key/public/purpose, so a field added later is compared automatically). Run as a triple with MSN_GROUP_VIP: if the member sees MSN_GROUP_VIP but not this, `public` is a second independent gate; if the member sees both, `public` is inert once a condition is present; if the member sees neither, the two gates are redundant. A second variable in the pair makes all three readings unattributable — which is the failure that produced the retracted bug. SEPARATELY VERIFIED, AND THE REASON THIS PAIR EXISTS: `public` is read by NOTHING on either path on this build. LoyaltyMissionSearchCriteria.Public exists and LoyaltyMissionSearchService will filter on it, but no caller in the module ever sets it (the storefront read sets StoreIds/Status/Take, accrual sets StoreIds/OnlyActive/Take, and the xAPI project contains zero occurrences of the field). The fixtures deliberately declare only the INPUTS and no expected visibility — encoding the expectation would prove it by construction. HOW THE SERVER EVALUATES THIS (verified in source 2026-08-27 — vc-module-loyalty PR #14 @ 1be73b4 + vc-module-core dev): UserGroupIsCondition lives in vc-module-core and reads EvaluationContextBase.UserGroups, which LoyaltyLogicService.GetUserGroups fills from the CONTACT/MEMBER entity's `Groups` collection (securityUserId -> user.MemberId -> member.Groups) — not from a security-account claim, not from the order. The match is whole-string OrdinalIgnoreCase and is NOT trimmed, so 'vip' matches 'VIP' but 'VIP Gold' and ' VIP' do not. It is fail-closed twice: an empty Groups[] returns false, and a null UserGroups (no member record) returns false. The READ path applies the condition too (GetQualifyingMissionsAsync filters on DynamicExpression.IsSatisfiedBy), so a non-member does not merely fail to accrue — the mission is absent from loyaltyMissionProgress entirely. Business key is the NAME — the seeder looks it up by name; the runtime GUID is per-env and lives ONLY in aliases.<env>.json (@td(MSN_GROUP_VIP_PRIVATE.id) resolves to '' on an unseeded env — a clear miss). PUBLISHED = IMMUTABLE: EnsureMutableAsync rejects every edit except the single transition Published -> Archived, so a case must never try to edit this in place; DELETE is allowed at every status, which is how the seeder repairs drift. Seeded by `npm run seed:loyalty-missions`; drift-guarded by `npm run td:validate:missions`. BANNER: `banner_key` is the authored artwork, derived from the goal type; `banner_url` is the absolute, host-bearing address THIS env's asset store handed back and lives ONLY in aliases.<env>.json."
   },
   "MSN_ZEROTARGET": {
     "_inline": true,
@@ -4959,5 +5027,153 @@
       "id": "id"
     },
     "_notes": "VCST-5319 Loyalty Mission fixture. The mutation scratch fixture: edit-while-Draft, Draft->Published, delete-while-Draft. Kept apart from the read fixtures above so a mutation case can never strand one of them mid-transition. Business key is the NAME (AGENT-TEST-MSN-DRAFT) — the seeder looks it up by name; the runtime GUID is per-env and lives ONLY in aliases.<env>.json (@td(MSN_DRAFT.id) resolves to '' on an unseeded env — a clear miss). RECREATED ON EVERY SEED, deliberately: a mutation case publishes this mission and a Published mission can NEVER return to Draft, so reuse would hand the next run a Published fixture wearing a Draft alias. Its GUID therefore changes on each seed — never cache it across runs. Seeded by `npm run seed:loyalty-missions`; drift-guarded by `npm run td:validate:missions`. BANNER: `banner_key` is the authored artwork this mission carries — derived from its goal type (order-value / order-count / per-sku), so the three mission types read as visually distinct on the VCST-5346 storefront card. `banner_url` is the address THIS env's platform asset store handed back for that file and lives ONLY in aliases.<env>.json — it is absolute and host-bearing, so a committed one would point every other env at this deployment's blob storage. The seeder uploads the SVG under a FIXED file name (so the URL is stable and the mission is not recreated on every seed), sets bannerUrl at CREATE time (a Published mission is immutable and cannot gain one afterwards), and asserts the URL serves 2xx + image/*."
+  },
+  "MSN_ENDING_SOON": {
+    "_inline": true,
+    "name": "AGENT-TEST-MSN-ENDING-SOON",
+    "status": "Published",
+    "public": "true",
+    "periodicity": "None",
+    "banner_key": "order-count",
+    "banner_url": "",
+    "window_intent": "endingSoon",
+    "goal_type": "OrderCountGoal",
+    "goal_target": "4",
+    "reward": 350,
+    "progress_status": "InProgress",
+    "progress_percentage": 25,
+    "id": "",
+    "fields": {
+      "name": "name",
+      "status": "status",
+      "public": "public",
+      "periodicity": "periodicity",
+      "banner_key": "banner_key",
+      "banner_url": "banner_url",
+      "window_intent": "window_intent",
+      "goal_type": "goal_type",
+      "goal_target": "goal_target",
+      "reward": "reward",
+      "progress_status": "progress_status",
+      "progress_percentage": "progress_percentage",
+      "id": "id"
+    },
+    "_notes": "VCST-5346 DANGER date-badge fixture. The DANGER date badge (VCST-5346). The storefront colours the badge success when the mission is completed, DANGER when daysRemaining < DANGER_THRESHOLD_DAYS, and warning otherwise — and daysRemaining maxes out at the window intent's endOffsetDays, which is 180 for every other fixture, so the danger branch was unreachable BY CONSTRUCTION rather than for want of data. It is the only fixture on the endingSoon window. Two properties keep it honest and both are guarded: the window must stay inside (0, DANGER_THRESHOLD_DAYS) with clock slack on BOTH sides, and the mission must NOT be completable by the seed order — a completed mission takes the success branch, which overrides danger entirely, so a fixture that quietly became completable would render the one colour it exists to exclude while still looking seeded. daysRemaining is computed per request in the xAPI resolver as ceil(mission.EndDate - UtcNow) clamped at 0 — it is NEVER persisted — so it maxes out at the window intent's endOffsetDays (5 here, vs 180 on the shared 'active' window). window_intent 'endingSoon' is therefore the whole fixture: td:validate:missions holds it inside (2, 8) days so a timezone/DST reading can neither push daysRemaining over the 10-day danger boundary nor let the window lapse between seeds. Because the window is short by design, a re-seed self-heals it: for an expectOpen=true intent a closed window is drift, so the seeder deletes and recreates the fixture with a fresh window. Business key is the NAME — the seeder looks it up by name; the runtime GUID is per-env and lives ONLY in aliases.<env>.json (resolves to '' on an unseeded env — a clear miss). PUBLISHED = IMMUTABLE: EnsureMutableAsync rejects every edit except Published -> Archived, so a case must never try to edit this in place; DELETE is allowed at every status, which is how the seeder repairs drift. Seeded by `npm run seed:loyalty-missions`; drift-guarded by `npm run td:validate:missions`."
+  },
+  "MSN_PROGRESS_PARTIAL": {
+    "_inline": true,
+    "name": "AGENT-TEST-MSN-PROGRESS-PARTIAL",
+    "status": "Published",
+    "public": "true",
+    "periodicity": "None",
+    "banner_key": "per-sku",
+    "banner_url": "",
+    "goal_type": "PerSkuGoal",
+    "goal_target": "PerSkuAll",
+    "reward": 450,
+    "progress_status": "InProgress",
+    "progress_percentage": 75,
+    "target_qty_a": 2,
+    "target_qty_b": 2,
+    "id": "",
+    "fields": {
+      "name": "name",
+      "status": "status",
+      "public": "public",
+      "periodicity": "periodicity",
+      "banner_key": "banner_key",
+      "banner_url": "banner_url",
+      "goal_type": "goal_type",
+      "goal_target": "goal_target",
+      "reward": "reward",
+      "progress_status": "progress_status",
+      "progress_percentage": "progress_percentage",
+      "target_qty_a": "target_qty_a",
+      "target_qty_b": "target_qty_b",
+      "id": "id"
+    },
+    "_notes": "VCST-5346 PROGRESS fixture. The storefront card at /account/missions renders from loyaltyMissionProgress, so its visual state is a function of PROGRESS, not of the mission definition. Progress has NO write API (/api/loyalty-mission-progress is search+get only) and exactly one writer: LoyaltyMissionHandler on OrderChangedEvent/EntryState.Added -> ProcessOrderAsync, dispatched to Hangfire. There is no order-STATUS gate, so the seeder provisions this with ONE Swagger-shaped order (@td(MSN_PROGRESS_ORDER)) via POST /api/order/customerOrders — no cart, no checkout, no payment, no browser. `progress_status` / `progress_percentage` are the DECLARED expectation, re-derived in closed form from the seed order by missions-specs.predictProgress() and enforced by td:validate:missions; the seeder additionally asserts the LIVE values from the customer-facing query after seeding. One order contributes to a given mission exactly once (TransactionExistsAsync + a unique index on mission/order/user), so re-provisioning a DIFFERENT state means deleting and recreating the mission (fresh id => fresh progress), which is what the seeder does when the live state does not match. PARTIAL progress — a bar strictly between empty and full, a non-trivial \"{current} of {target} SKUs\" label, and the only fixture in the set where the SKU modal shows a target-MET row next to a target-UNMET one, so the per-row styling has both of its states on screen at once. PerSkuALL is mandatory here and not a preference: the module computes PerSkuAny's percentage as a BINARY 0-or-100, so an Any goal has no partial state to render at all. The two target quantities must also DIVERGE relative to the seed order (one at or below what it buys, one above) — equalise them and the fixture snaps to 0% or 100% and stops being partial while still seeding cleanly. TARGET QUANTITIES: target_qty_a/target_qty_b are THIS mission's own LoyaltyMissionGoalItem quantities over the SAME two live-discovered products as @td(MSN_PERSKU_PRODUCT_A)/@td(MSN_PERSKU_PRODUCT_B) — they override the shared pair's defaults, because the per-row \"target met\" distinction only exists WITHIN one mission. Business key is the NAME — the seeder looks it up by name; the runtime GUID is per-env and lives ONLY in aliases.<env>.json (resolves to '' on an unseeded env — a clear miss). PUBLISHED = IMMUTABLE: EnsureMutableAsync rejects every edit except Published -> Archived, so a case must never try to edit this in place; DELETE is allowed at every status, which is how the seeder repairs drift. Seeded by `npm run seed:loyalty-missions`; drift-guarded by `npm run td:validate:missions`."
+  },
+  "MSN_PROGRESS_COMPLETED": {
+    "_inline": true,
+    "name": "AGENT-TEST-MSN-PROGRESS-COMPLETED",
+    "status": "Published",
+    "public": "true",
+    "periodicity": "None",
+    "banner_key": "per-sku",
+    "banner_url": "",
+    "goal_type": "PerSkuGoal",
+    "goal_target": "PerSkuAll",
+    "reward": 550,
+    "progress_status": "Completed",
+    "progress_percentage": 100,
+    "target_qty_a": 1,
+    "target_qty_b": 1,
+    "id": "",
+    "fields": {
+      "name": "name",
+      "status": "status",
+      "public": "public",
+      "periodicity": "periodicity",
+      "banner_key": "banner_key",
+      "banner_url": "banner_url",
+      "goal_type": "goal_type",
+      "goal_target": "goal_target",
+      "reward": "reward",
+      "progress_status": "progress_status",
+      "progress_percentage": "progress_percentage",
+      "target_qty_a": "target_qty_a",
+      "target_qty_b": "target_qty_b",
+      "id": "id"
+    },
+    "_notes": "VCST-5346 PROGRESS fixture. The storefront card at /account/missions renders from loyaltyMissionProgress, so its visual state is a function of PROGRESS, not of the mission definition. Progress has NO write API (/api/loyalty-mission-progress is search+get only) and exactly one writer: LoyaltyMissionHandler on OrderChangedEvent/EntryState.Added -> ProcessOrderAsync, dispatched to Hangfire. There is no order-STATUS gate, so the seeder provisions this with ONE Swagger-shaped order (@td(MSN_PROGRESS_ORDER)) via POST /api/order/customerOrders — no cart, no checkout, no payment, no browser. `progress_status` / `progress_percentage` are the DECLARED expectation, re-derived in closed form from the seed order by missions-specs.predictProgress() and enforced by td:validate:missions; the seeder additionally asserts the LIVE values from the customer-facing query after seeding. One order contributes to a given mission exactly once (TransactionExistsAsync + a unique index on mission/order/user), so re-provisioning a DIFFERENT state means deleting and recreating the mission (fresh id => fresh progress), which is what the seeder does when the live state does not match. COMPLETED progress — the green chip, the success-coloured bar, the \"Mission completed\" label, the success date badge, and the READ-ONLY SKU modal (steppers and Add-to-cart hidden once the backend status is Completed). It is a PerSku mission on purpose: the read-only branch exists ONLY on the SKU modal, so an OrderCount mission at 100% reaches four of those five surfaces and silently leaves the fifth untested. Its targets sit at or below what the seed order buys so completion is a closed-form consequence of the fixture rather than of order history. TARGET QUANTITIES: target_qty_a/target_qty_b are THIS mission's own LoyaltyMissionGoalItem quantities over the SAME two live-discovered products as @td(MSN_PERSKU_PRODUCT_A)/@td(MSN_PERSKU_PRODUCT_B) — they override the shared pair's defaults, because the per-row \"target met\" distinction only exists WITHIN one mission. Business key is the NAME — the seeder looks it up by name; the runtime GUID is per-env and lives ONLY in aliases.<env>.json (resolves to '' on an unseeded env — a clear miss). PUBLISHED = IMMUTABLE: EnsureMutableAsync rejects every edit except Published -> Archived, so a case must never try to edit this in place; DELETE is allowed at every status, which is how the seeder repairs drift. Seeded by `npm run seed:loyalty-missions`; drift-guarded by `npm run td:validate:missions`."
+  },
+  "MSN_PROGRESS_ORDER": {
+    "_inline": true,
+    "number": "AGENT-TEST-MSN-ORDER",
+    "order_status": "New",
+    "line_a_quantity": 2,
+    "line_b_quantity": 1,
+    "user_role": "USER",
+    "store_id": "",
+    "user_id": "",
+    "user_email": "",
+    "id": "",
+    "fields": {
+      "number": "number",
+      "order_status": "order_status",
+      "line_a_quantity": "line_a_quantity",
+      "line_b_quantity": "line_b_quantity",
+      "user_role": "user_role",
+      "store_id": "store_id",
+      "user_id": "user_id",
+      "user_email": "user_email",
+      "id": "id"
+    },
+    "_notes": "VCST-5346 provisioning order — the ONLY way to give a customer loyalty-mission progress on this build. /api/loyalty-mission-progress exposes search+get and nothing else; the single writer is LoyaltyMissionHandler : IEventHandler<OrderChangedEvent> filtered to EntryState.Added, which enqueues LoyaltyMissionLogicService.ProcessOrderAsync on Hangfire. There is NO order-status gate, so a plain POST /api/order/customerOrders in status New provisions progress with no cart, checkout, payment or browser (observed live on vcst-qa: progress appeared within 5 s). `user_id` MUST be the SECURITY-ACCOUNT id (AspNetUsers.Id / GraphQL me{id}), NOT the contact/member id: the write side stores order.CustomerId verbatim (LoyaltyLogicService sets context.UserId = order.CustomerId with no lookup) while the read side keys on GetCurrentUserId() = the `sub` claim = the security-account id. Using the contact id writes a progress row the storefront can never see — and it fails SILENTLY, returning zero started missions. Identity comes from the `USER` role in scripts/lib/user-roles.mjs (.env.<ENV> USER_EMAIL), so this follows whatever account the storefront suites sign in as; user_id/user_email/store_id/id are all per-env and live only in aliases.<env>.json. Line quantities are the design, not filler: A x2 + B x1 is the smallest single order that over-satisfies one slot, exactly satisfies another and leaves a third target short, which is what lets ONE order drive both @td(MSN_PROGRESS_PARTIAL) and @td(MSN_PROGRESS_COMPLETED) — and a second order cannot be had cheaply, since TransactionExistsAsync(missionId, orderId, userId) plus a unique index mean one order contributes to a given mission exactly once. Created and torn down by `npm run seed:loyalty-missions`."
+  },
+  "MSN_GROUP_AUDIENCE": {
+    "_inline": true,
+    "group": "VIP",
+    "member_role": "LOYALTY_VIP_USER",
+    "nonmember_role": "LOYALTY_WHOLESALE_USER",
+    "member_email": "",
+    "member_user_id": "",
+    "member_groups": "",
+    "nonmember_email": "",
+    "nonmember_user_id": "",
+    "nonmember_groups": "",
+    "fields": {
+      "group": "group",
+      "member_role": "member_role",
+      "nonmember_role": "nonmember_role",
+      "member_email": "member_email",
+      "member_user_id": "member_user_id",
+      "member_groups": "member_groups",
+      "nonmember_email": "nonmember_email",
+      "nonmember_user_id": "nonmember_user_id",
+      "nonmember_groups": "nonmember_groups"
+    },
+    "_notes": "VCST-5319 — the AUDIENCE PAIR that makes group targeting falsifiable. `group` is the customer group MSN_GROUP_VIP / MSN_GROUP_VIP_PRIVATE target; `member_role` / `nonmember_role` are user-roles.mjs KEYS (never emails — an email is per-env identity, so a literal here is the same class of mistake as a literal GUID). EMPTY BY DESIGN: the two emails, the two SECURITY-ACCOUNT ids and the two OBSERVED group lists are all per-env and live only in aliases.<env>.json, so an unseeded env resolves them to '' — a clear miss. `member_groups` / `nonmember_groups` are '|'-joined lists of what the seeder actually READ off each contact, not a claim anyone authored: the seeder asserts the member IS in `group` and the non-member is NOT (whole-string OrdinalIgnoreCase, mirroring the server) and ABORTS the whole seed if either fails, because a targeted fixture whose audience nobody belongs to seeds cleanly, resolves through @td(), and can only ever report an absence that reads as a targeting defect. WHY LOYALTY_WHOLESALE_USER IS THE NON-MEMBER: it is the only declared loyalty customer verifiably outside VIP — LOYALTY_NOBAL_USER is ALSO groups:['VIP'] (verified live on vcst-qa 2026-08-27, contact 83bcb310-…), so picking it by name would have made the negative control a second positive one. NOTE the group-name drift it exposes: the committed LOYALTY_WHOLESALE_USER.group and USER_GROUP_WHOLESALE.name both say 'Wholesaler', while the live contact and scripts/lib/user-roles.mjs both say 'Wholesale' — irrelevant to this fixture (which only needs 'not VIP', and records what it observed rather than a committed literal) but relevant to suite 075c's LOY_PP_WHOLESALE gate, which matches whole-string OrdinalIgnoreCase and would therefore never fire for this user. The ACCOUNTS belong to the loyalty user seeder: this seeder never creates or deletes them, and its teardown clears only the observed-membership overlay — a stale observation is worse than none, because it would let a case claim a membership nobody re-checked. Seeded by `npm run seed:loyalty-missions`; drift-guarded by `npm run td:validate:missions`."
   }
 }

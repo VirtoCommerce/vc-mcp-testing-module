@@ -1610,5 +1610,36 @@
     "pass_rate": 100,
     "duration_minutes": 63,
     "mode": "interactive"
+  },
+  {
+    "runId": "REG-2026-08-27-1529",
+    "date": "2026-08-27",
+    "suiteId": "075d",
+    "suiteName": "Loyalty Missions",
+    "environment": "vcst",
+    "total": 26,
+    "passed": 11,
+    "failed": 15,
+    "blocked": 0,
+    "skipped": 0,
+    "pass_rate": 42.31,
+    "duration_minutes": 3.8,
+    "mode": "interactive"
+  },
+  {
+    "runId": "REG-2026-08-27-1529",
+    "date": "2026-08-27",
+    "suiteId": "075e",
+    "suiteName": "Loyalty Missions Admin",
+    "environment": "vcst",
+    "browser": "playwright-edge",
+    "total": 22,
+    "passed": 19,
+    "failed": 3,
+    "blocked": 0,
+    "skipped": 0,
+    "pass_rate": 86.36,
+    "duration_minutes": 27.71,
+    "mode": "interactive"
   }
 ]

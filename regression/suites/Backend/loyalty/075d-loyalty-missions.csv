@@ -22,24 +22,23 @@ GET {{BACK_URL}}/api/loyalty-missions/new
 [DATA label=get_template] body.dynamicExpression.children[?id=BlockLoyaltyMissionCondition].availableChildren[?id=UserGroupIsCondition] is non-null {DOC}
 [DATA label=get_template] body.dynamicExpression.children[?id=BlockLoyaltyMissionCondition].availableChildren[?id=AnyUserGroupCondition] is non-null {DOC}
 [DATA label=get_template] body.dynamicExpression.children[?id=BlockLoyaltyMissionCondition].availableChildren[?id=CustomerIsCondition] is null {DOC}",[ADMIN] MSNA-024 confirms the identical 2-option 'Shopper profile' palette live in the details blade's 'Add condition' menu,availableChildren.length != 2; a third condition type appears (targeting surface expanded),none,"VCST-5319; C6, C7",Draft
-MSN-003,Periodicity is never validated or branched on — a non-None value is silently accepted,GraphQL > Loyalty Missions > Periodicity > Validation,High,,,Runner-native REST. Creates a scratch Draft mission with Periodicity=Monthly (module only documents/processes None) then deletes it — DELETE is allowed at every status.,store_id={{STORE_ID}}; mission_name=AGENT-TEST-MSN-PERIODICITY-{{TIMESTAMP}},"[AUTH role=ADMIN_DEFAULT]
+MSN-003,Periodicity is never validated or branched on — a non-None value is silently accepted,GraphQL > Loyalty Missions > Periodicity > Validation,High,,,Runner-native REST. Creates a scratch Draft mission with Periodicity=Monthly (module only documents/processes None) then deletes it — DELETE is allowed at every status.,store_id={{STORE_ID}}; mission_name=AGENT-TEST-MSN-PERIODICITY,"[AUTH role=ADMIN_DEFAULT]
 [REST-OP create_mission]
 POST {{BACK_URL}}/api/loyalty-missions
 Content-Type: application/json
 Body: {""id"": null, ""name"": ""{{mission_name}}"", ""storeId"": ""{{STORE_ID}}"", ""status"": ""Draft"", ""public"": true, ""periodicity"": ""Monthly"", ""startDate"": ""2026-01-01T00:00:00Z"", ""endDate"": ""2027-01-01T00:00:00Z"", ""dynamicExpression"": {""id"": ""LoyaltyMissionConditionAndRewardTree"", ""children"": [{""id"": ""BlockLoyaltyMissionCondition"", ""children"": [{""id"": ""AnyUserGroupCondition""}]}, {""id"": ""BlockLoyaltyMissionGoals"", ""children"": [{""id"": ""OrderCountGoal"", ""count"": 3}]}, {""id"": ""BlockLoyaltyReward"", ""children"": [{""id"": ""FixedAmountReward"", ""amount"": 50}]}]}}
 [REST-EXEC create_mission]
-[REST-CAPTURE create_mission.body.id → SCRATCH_MISSION_ID]","[ERRORS label=create_mission] HTTP 200 {DOC}
-[DATA label=create_mission] body.id is non-empty GUID {DOC}
-[DATA label=create_mission] body.periodicity = Monthly {SPEC}","[EVIDENCE] Source (LoyaltyMissionLogicService.ResolvePeriod, per VCST-5319 triage) calls an unconditional period resolver and the create validator does not check Periodicity — so a non-None value persists but is PROCESSED IDENTICALLY to None. This case proves the persist/accept half; MSN-019 (toggle-off/accrual case) exercises processing on a None-periodicity fixture only, so a follow-up case comparing accrual behavior on THIS Monthly mission vs a None one is a coverage gap — see final report.",HTTP 400 'periodicity' validation error (would mean the defect is fixed); periodicity silently coerced to None on the response body,"[AUTH role=ADMIN_DEFAULT]
+[REST-CAPTURE create_mission.body.id → SCRATCH_MISSION_ID]","[ERRORS label=create_mission] HTTP 400 {SPEC}
+[DATA label=create_mission] body.0.errorMessage is non-null {SPEC}","[EVIDENCE] Source (LoyaltyMissionLogicService.ResolvePeriod, per VCST-5319 triage) calls an unconditional period resolver and the create validator does not check Periodicity — a non-None value is silently accepted and PROCESSED IDENTICALLY to None, never honoured. Since only None is documented/processed, the intended contract is rejection at creation; this case asserts that intent and is expected to FAIL until the module validates Periodicity. Live-verified 2026-08-27: actual response is HTTP 200, body.periodicity = 'Monthly' verbatim (stored, not coerced). A follow-up case comparing accrual behavior on a Monthly mission vs a None one (if creation is ever allowed) is a coverage gap — see final report.","HTTP 200 (a non-None periodicity accepted without rejection — the defect this case targets); body.id present (mission actually persisted, compounding the gap)","[AUTH role=ADMIN_DEFAULT]
 [REST DELETE {{BACK_URL}}/api/loyalty-missions?ids={{SCRATCH_MISSION_ID}}]","VCST-5319; C4, NEW-Periodicity",Draft
-MSN-004,OrderValueGoal currencyCode null is rejected — 'Currency code is required for the order value goal',GraphQL > Loyalty Missions > OrderValueGoal > Currency contract,High,PROPOSED-BL-LOY-016,,"Runner-native REST. currencyCode is nullable in the DTO/Swagger but rejected at save — this is the DOCUMENTED contract mismatch (missions-specs.mjs CURRENCY_INTENTS comment, verified live 2026-08-27).",store_id={{STORE_ID}}; mission_name=AGENT-TEST-MSN-NULLCUR-{{TIMESTAMP}},"[AUTH role=ADMIN_DEFAULT]
+MSN-004,OrderValueGoal currencyCode null is rejected — 'Currency code is required for the order value goal',GraphQL > Loyalty Missions > OrderValueGoal > Currency contract,High,PROPOSED-BL-LOY-016,,"Runner-native REST. currencyCode is nullable in the DTO/Swagger but rejected at save — this is the DOCUMENTED contract mismatch (missions-specs.mjs CURRENCY_INTENTS comment, verified live 2026-08-27).",store_id={{STORE_ID}}; mission_name=AGENT-TEST-MSN-NULLCUR,"[AUTH role=ADMIN_DEFAULT]
 [REST-OP create_null_currency]
 POST {{BACK_URL}}/api/loyalty-missions
 Content-Type: application/json
 Body: {""id"": null, ""name"": ""{{mission_name}}"", ""storeId"": ""{{STORE_ID}}"", ""status"": ""Draft"", ""public"": true, ""periodicity"": ""None"", ""startDate"": ""2026-01-01T00:00:00Z"", ""endDate"": ""2027-01-01T00:00:00Z"", ""dynamicExpression"": {""id"": ""LoyaltyMissionConditionAndRewardTree"", ""children"": [{""id"": ""BlockLoyaltyMissionCondition"", ""children"": [{""id"": ""AnyUserGroupCondition""}]}, {""id"": ""BlockLoyaltyMissionGoals"", ""children"": [{""id"": ""OrderValueGoal"", ""value"": 100, ""currencyCode"": null}]}, {""id"": ""BlockLoyaltyReward"", ""children"": [{""id"": ""FixedAmountReward"", ""amount"": 50}]}]}}
 [REST-EXEC create_null_currency]","[ERRORS label=create_null_currency] HTTP 400 {DOC}
-[DATA label=create_null_currency] body matches /[Cc]urrency code is required for the order value goal/ {DOC}",none,HTTP 200/201 (mission created despite null currency — contract regressed); a different error message (i18n/text changed),none — creation is expected to fail; nothing persisted,VCST-5319; C19,Draft
-MSN-005,OrderValueGoal currencyCode validation is asymmetric — an invalid or wrong-case code is accepted verbatim,GraphQL > Loyalty Missions > OrderValueGoal > Currency contract,High,PROPOSED-BL-LOY-016,,Runner-native REST. Presence of currencyCode is enforced (MSN-004); validity is not. Creates+deletes two scratch missions.,store_id={{STORE_ID}}; name_a=AGENT-TEST-MSN-BADCUR-{{TIMESTAMP}}; name_b=AGENT-TEST-MSN-LOWERCUR-{{TIMESTAMP}},"[AUTH role=ADMIN_DEFAULT]
+[DATA label=create_null_currency] body.0.errorMessage matches /[Cc]urrency code is required for the order value goal/ {DOC}",none,HTTP 200/201 (mission created despite null currency — contract regressed); a different error message (i18n/text changed),none — creation is expected to fail; nothing persisted,VCST-5319; C19,Draft
+MSN-005,OrderValueGoal currencyCode validation is asymmetric — an invalid or wrong-case code is accepted verbatim,GraphQL > Loyalty Missions > OrderValueGoal > Currency contract,High,PROPOSED-BL-LOY-016,,Runner-native REST. Presence of currencyCode is enforced (MSN-004); validity is not. Creates+deletes two scratch missions.,store_id={{STORE_ID}}; name_a=AGENT-TEST-MSN-BADCUR; name_b=AGENT-TEST-MSN-LOWERCUR,"[AUTH role=ADMIN_DEFAULT]
 [REST-OP create_bad_code]
 POST {{BACK_URL}}/api/loyalty-missions
 Content-Type: application/json
@@ -51,33 +50,34 @@ POST {{BACK_URL}}/api/loyalty-missions
 Content-Type: application/json
 Body: {""id"": null, ""name"": ""{{name_b}}"", ""storeId"": ""{{STORE_ID}}"", ""status"": ""Draft"", ""public"": true, ""periodicity"": ""None"", ""startDate"": ""2026-01-01T00:00:00Z"", ""endDate"": ""2027-01-01T00:00:00Z"", ""dynamicExpression"": {""id"": ""LoyaltyMissionConditionAndRewardTree"", ""children"": [{""id"": ""BlockLoyaltyMissionCondition"", ""children"": [{""id"": ""AnyUserGroupCondition""}]}, {""id"": ""BlockLoyaltyMissionGoals"", ""children"": [{""id"": ""OrderValueGoal"", ""value"": 100, ""currencyCode"": ""usd""}]}, {""id"": ""BlockLoyaltyReward"", ""children"": [{""id"": ""FixedAmountReward"", ""amount"": 50}]}]}}
 [REST-EXEC create_lower_code]
-[REST-CAPTURE create_lower_code.body.id → LOWER_CODE_ID]","[ERRORS label=create_bad_code] HTTP 200 {DOC}
-[DATA label=create_bad_code] body.dynamicExpression.children[?id=BlockLoyaltyMissionGoals].children.0.currencyCode = XYZ {DOC}
-[ERRORS label=create_lower_code] HTTP 200 {DOC}
-[DATA label=create_lower_code] body.dynamicExpression.children[?id=BlockLoyaltyMissionGoals].children.0.currencyCode = usd {DOC}","[EVIDENCE] Asymmetric validation confirmed: presence enforced (MSN-004, HTTP 400), validity not (this case, HTTP 200 for a non-ISO code and a lowercase code). A wrong-currency defect can only surface at accrual — see MSN-024 (C18).","HTTP 400 on either create (validation added — contract changed, update this case); currencyCode silently normalized to uppercase or rejected on read-back","[AUTH role=ADMIN_DEFAULT]
+[REST-CAPTURE create_lower_code.body.id → LOWER_CODE_ID]","[ERRORS label=create_bad_code] HTTP 400 {SPEC}
+[ERRORS label=create_lower_code] HTTP 400 {SPEC}","[EVIDENCE] Asymmetric validation confirmed: presence is enforced (MSN-004, HTTP 400) while validity is not (this case observed HTTP 200 for a non-ISO code AND for a lowercase code, both stored verbatim). Since the presence check already establishes currencyCode is a validated field, the intended contract is that an invalid/wrong-case value is ALSO rejected at creation — this case asserts that intent and is expected to FAIL until validity is enforced. A wrong-currency defect that instead reaches accrual unrejected can only surface later — see MSN-023 (C18).","HTTP 200 on either create (an invalid or wrong-case currency code accepted without rejection — the defect this case targets); currencyCode silently normalized to uppercase (would mask the case-sensitivity half of the defect even if a fix landed)","[AUTH role=ADMIN_DEFAULT]
 [REST DELETE {{BACK_URL}}/api/loyalty-missions?ids={{BAD_CODE_ID}},{{LOWER_CODE_ID}}]",VCST-5319; C19,Draft
 MSN-006,"Editing a Published mission is rejected with HTTP 500, never a 4xx",GraphQL > Loyalty Missions > Immutability > API,High,,,"Runner-native REST. @td(MSN_ORDERVALUE.id) is Published (immutable per EnsureMutableAsync — only Published->Archived is allowed). PUT is expected to fail; nothing is persisted regardless of outcome, so no cleanup mutates the fixture.",store_id={{STORE_ID}},"[AUTH role=ADMIN_DEFAULT]
+[REST-OP get_mission]
+GET {{BACK_URL}}/api/loyalty-missions/@td(MSN_ORDERVALUE.id)
+[REST-EXEC get_mission]
+[REST-CAPTURE get_mission.body. → MISSION_BODY]
 [REST-OP edit_published]
 PUT {{BACK_URL}}/api/loyalty-missions
 Content-Type: application/json
-Body: {""id"": ""@td(MSN_ORDERVALUE.id)"", ""name"": ""AGENT-TEST-MSN-ORDERVALUE-EDITED"", ""storeId"": ""{{STORE_ID}}"", ""status"": ""Published"", ""public"": true, ""periodicity"": ""None""}
+Body: {{MISSION_BODY}}
 [REST-EXEC edit_published]
 [REST-OP read_back]
 GET {{BACK_URL}}/api/loyalty-missions/@td(MSN_ORDERVALUE.id)
-[REST-EXEC read_back]","[ERRORS label=edit_published] HTTP 500 {DOC}
+[REST-EXEC read_back]","[ERRORS label=edit_published] HTTP 409 {SPEC}
 [ERRORS label=read_back] HTTP 200 {DOC}
-[DATA label=read_back] body.name = @td(MSN_ORDERVALUE.name) {DOC}",[ADMIN] MSNA-013 confirms the equivalent Admin-UI-level read-only guard and its exact banner text,"HTTP 4xx instead of 500 (error-shape contract changed — update this case, it is still a defect worth tracking as an API-quality finding); HTTP 200 (immutability broken — real regression); read_back.name changed (the edit silently applied)",none,VCST-5319; C20,Draft
-MSN-007,StartDate after EndDate is accepted silently — no validation at save,GraphQL > Loyalty Missions > Date window > Validation,Medium,,,Runner-native REST. Creates+deletes a scratch Draft mission whose StartDate is after its EndDate.,store_id={{STORE_ID}}; mission_name=AGENT-TEST-MSN-BADWINDOW-{{TIMESTAMP}},"[AUTH role=ADMIN_DEFAULT]
+[DATA label=read_back] body.name = @td(MSN_ORDERVALUE.name) {DOC}","[ADMIN] MSNA-013 confirms the equivalent Admin-UI-level read-only guard and its exact banner text. [EVIDENCE] Live-verified 2026-08-27: the ORIGINAL partial body (missing dynamicExpression) never reached the immutability guard at all — it returned HTTP 400 'Mission must have at least one condition/goal' from ordinary model validation, a false pass for the wrong reason. A full GET-merge-PUT (this fix) DOES reach the guard, which throws 'Mission '<id>' is Published and cannot be modified...' — but unwrapped as HTTP 500, not a 4xx. 409 Conflict is the intended REST contract for a state-conflict rejection; the runner's HTTP predicate only matches an exact 3-digit code (the documented 'HTTP 4xx' wildcard in the runner grammar is not actually implemented — verified against classifyErrorsPredicate), so 409 stands in for 'any proper 4xx' rather than a specific documented contract.","HTTP 500 (the immutability guard's exception is not mapped to a 4xx — the current, observed, defective contract); HTTP 200 (immutability broken entirely — a more severe regression); read_back.name changed (the edit silently applied)",none,VCST-5319; C20,Draft
+MSN-007,StartDate after EndDate is accepted silently — no validation at save,GraphQL > Loyalty Missions > Date window > Validation,Medium,,,Runner-native REST. Creates+deletes a scratch Draft mission whose StartDate is after its EndDate.,store_id={{STORE_ID}}; mission_name=AGENT-TEST-MSN-BADWINDOW,"[AUTH role=ADMIN_DEFAULT]
 [REST-OP create_bad_window]
 POST {{BACK_URL}}/api/loyalty-missions
 Content-Type: application/json
 Body: {""id"": null, ""name"": ""{{mission_name}}"", ""storeId"": ""{{STORE_ID}}"", ""status"": ""Draft"", ""public"": true, ""periodicity"": ""None"", ""startDate"": ""2027-01-01T00:00:00Z"", ""endDate"": ""2026-01-01T00:00:00Z"", ""dynamicExpression"": {""id"": ""LoyaltyMissionConditionAndRewardTree"", ""children"": [{""id"": ""BlockLoyaltyMissionCondition"", ""children"": [{""id"": ""AnyUserGroupCondition""}]}, {""id"": ""BlockLoyaltyMissionGoals"", ""children"": [{""id"": ""OrderCountGoal"", ""count"": 1}]}, {""id"": ""BlockLoyaltyReward"", ""children"": [{""id"": ""FixedAmountReward"", ""amount"": 10}]}]}}
 [REST-EXEC create_bad_window]
-[REST-CAPTURE create_bad_window.body.id → BADWINDOW_ID]","[ERRORS label=create_bad_window] HTTP 200 {DOC}
-[DATA label=create_bad_window] body.startDate = 2027-01-01T00:00:00Z {DOC}
-[DATA label=create_bad_window] body.endDate = 2026-01-01T00:00:00Z {DOC}","[EVIDENCE] Confirmed defect-shaped finding (missions-specs.mjs, verified live 2026-08-27): the module never rejects an inverted window. Downstream effect on GetUserMissionsAsync's isStarted/percentage computation is untested by this case — flag for exploratory follow-up.","HTTP 400 (validation added — contract changed, update this case)","[AUTH role=ADMIN_DEFAULT]
+[REST-CAPTURE create_bad_window.body.id → BADWINDOW_ID]","[ERRORS label=create_bad_window] HTTP 400 {SPEC}
+[DATA label=create_bad_window] body.0.errorMessage is non-null {SPEC}","[EVIDENCE] Confirmed defect-shaped finding (missions-specs.mjs, verified live 2026-08-27): the module never rejects an inverted window — StartDate after EndDate is accepted and persisted verbatim. The intended contract is rejection at creation; this case asserts that intent and is expected to FAIL until the window is validated. Downstream effect on GetUserMissionsAsync's isStarted/percentage computation for an already-inverted window is untested by this case — flag for exploratory follow-up.","HTTP 200 (an inverted date window accepted without rejection — the defect this case targets); body.id present (mission actually persisted, compounding the gap)","[AUTH role=ADMIN_DEFAULT]
 [REST DELETE {{BACK_URL}}/api/loyalty-missions?ids={{BADWINDOW_ID}}]",VCST-5319; C22,Draft
-MSN-008,OnlyActive is never applied — an expired mission still returns from loyaltyMissionProgress,GraphQL > Loyalty Missions > Window filter > OnlyActive,High,,,"MSN_EXPIRED is seeded (window intent 'expired': startOffsetDays -365, endOffsetDays -30) and Published/public with an ordinary OrderCountGoal(1), so only the closed window can explain its absence from the customer-facing query.",store_id={{STORE_ID}},"[AUTH role=ORG_USER]
+MSN-008,An expired mission with no prior user progress is excluded from loyaltyMissionProgress (window filter honoured),GraphQL > Loyalty Missions > Window filter > Expired exclusion,High,,,"MSN_EXPIRED is seeded (window intent 'expired': startOffsetDays -365, endOffsetDays -30) and Published/public with an ordinary OrderCountGoal(1), so only the closed window can explain its absence from the customer-facing query. Retitled from an 'OnlyActive is never applied' claim this case never actually tested — it never establishes a mission the user has already started, the precondition an OnlyActive-with-existing-progress defect would need; see Cross_Layer_Checks.",store_id={{STORE_ID}},"[AUTH role=ORG_USER]
 [GQL-OP setup_me]
   query { me { id } }
 [GQL-EXEC setup_me]
@@ -85,7 +85,7 @@ MSN-008,OnlyActive is never applied — an expired mission still returns from lo
 [GQL-OP progress]
   query { loyaltyMissionProgress(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" first: 50) { totalCount items { missionId name endDate status } } }
 [GQL-EXEC progress]","[ERRORS label=progress] errors[] empty {DOC}
-[DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_EXPIRED.id)] is null {SPEC}",none,@td(MSN_EXPIRED.id) resolves empty (fixture missing — re-run seed:loyalty-missions); expired mission still present in items[] (OnlyActive not applied — the defect under test),none,VCST-5319; NEW-OnlyActive,Draft
+[DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_EXPIRED.id)] is null {SPEC}","[EVIDENCE] Covers only the never-started case: an expired mission the user has no progress on is correctly excluded. Does NOT cover whether an already-started mission's progress stays visible after its window closes — that needs a distinct precondition (partial progress driven before the window closed) and is a coverage gap, not something this case's PASS speaks to.",@td(MSN_EXPIRED.id) resolves empty (fixture missing — re-run seed:loyalty-missions); expired mission present in items[] despite no prior progress (window filter not applied — the defect this case targets),none,VCST-5319; NEW-Expired-Exclusion,Draft
 MSN-009,loyaltyMissionProgress returns missions when Loyalty.Missions.Enable=true (baseline),GraphQL > Loyalty Missions > Toggle > Read,Critical,,ECL-13.3,@td(MSN_STORE_SETTINGS.setting_name)=true on @td(STORE_PRIMARY.id) (baseline env state — do not leave altered).,store_id={{STORE_ID}},"[AUTH role=ORG_USER]
 [GQL-OP setup_me]
   query { me { id } }
@@ -114,10 +114,12 @@ MSN-010,loyaltyMissionProgress returns empty when Loyalty.Missions.Enable=false,
 [REST-OP get_store]
 GET {{BACK_URL}}/api/stores/{{STORE_ID}}
 [REST-EXEC get_store]
+[REST-CAPTURE get_store.body.catalog → STORE_CATALOG]
+[REST-CAPTURE get_store.body.name → STORE_NAME]
 [REST-OP disable_missions]
 PUT {{BACK_URL}}/api/stores
 Content-Type: application/json
-Body: {""id"": ""{{STORE_ID}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": false}]}
+Body: {""id"": ""{{STORE_ID}}"", ""catalog"": ""{{STORE_CATALOG}}"", ""name"": ""{{STORE_NAME}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": false}]}
 [REST-EXEC disable_missions]
 [AUTH role=ORG_USER]
 [GQL-OP setup_me]
@@ -131,14 +133,14 @@ Body: {""id"": ""{{STORE_ID}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTI
 [REST-OP restore_missions]
 PUT {{BACK_URL}}/api/stores
 Content-Type: application/json
-Body: {""id"": ""{{STORE_ID}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": true}]}
-[REST-EXEC restore_missions]","[ERRORS label=disable_missions] HTTP 200 {DOC}
+Body: {""id"": ""{{STORE_ID}}"", ""catalog"": ""{{STORE_CATALOG}}"", ""name"": ""{{STORE_NAME}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": true}]}
+[REST-EXEC restore_missions]","[ERRORS label=disable_missions] HTTP 204 {OBSERVED}
 [ERRORS label=progress_off] errors[] empty {SPEC}
 [COUNT label=progress_off] data.loyaltyMissionProgress.totalCount = 0 {SPEC}
-[ERRORS label=restore_missions] HTTP 200 {DOC}",[ADMIN] MSNA-021 confirms the equivalent Admin toggle path (Stores > B2B-store > Settings > Loyalty > Missions),totalCount > 0 with the toggle OFF (read gate not independent/broken); restore_missions HTTP != 200 (state left OFF — would break every other suite reading this store),"[AUTH role=ADMIN_DEFAULT]
+[ERRORS label=restore_missions] HTTP 204 {OBSERVED}","[ADMIN] MSNA-021 confirms the equivalent Admin toggle path (Stores > B2B-store > Settings > Loyalty > Missions). [EVIDENCE] Live-verified 2026-08-27: PUT /api/stores with only {id, settings:[{name,value}]} 500s ('Cannot insert the value NULL into column Catalog/Name' — required non-null columns absent from the partial body); GET-merge-PUT with just {id, catalog, name} + a single-entry settings array returns 204 and preserves all 104 other settings untouched (the backend merges settings by name — a full settings array is not required, only the missing top-level columns were).",totalCount > 0 with the toggle OFF (read gate not independent/broken); restore_missions HTTP != 204 (state left OFF — would break every other suite reading this store),"[AUTH role=ADMIN_DEFAULT]
 [REST PUT {{BACK_URL}}/api/stores]
-{""id"": ""{{STORE_ID}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": true}]}",VCST-5319; C2,Draft
-MSN-011,Group-scoped mission is visible to a matching-group user and absent for a non-matching user,GraphQL > Loyalty Missions > Targeting > UserGroupIsCondition,High,,,"Creates a scratch Draft mission scoped to condition UserGroupIsCondition(groups=[VIP]) via REST, publishes it, reads it back via GraphQL as two different users, then archives it (Published->Archived is the only legal transition — DELETE also allowed at every status).",store_id={{STORE_ID}}; mission_name=AGENT-TEST-MSN-GROUPSCOPE-{{TIMESTAMP}},"[AUTH role=ADMIN_DEFAULT]
+{""id"": ""{{STORE_ID}}"", ""catalog"": ""{{STORE_CATALOG}}"", ""name"": ""{{STORE_NAME}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": true}]}",VCST-5319; C2,Draft
+MSN-011,Group-scoped mission is visible to a matching-group user and absent for a non-matching user,GraphQL > Loyalty Missions > Targeting > UserGroupIsCondition,High,,,"Creates a scratch Draft mission scoped to condition UserGroupIsCondition(groups=[VIP]) via REST, publishes it, reads it back via GraphQL as two different users, then archives it (Published->Archived is the only legal transition — DELETE also allowed at every status).",store_id={{STORE_ID}}; mission_name=AGENT-TEST-MSN-GROUPSCOPE,"[AUTH role=ADMIN_DEFAULT]
 [REST-OP create_scoped]
 POST {{BACK_URL}}/api/loyalty-missions
 Content-Type: application/json
@@ -178,7 +180,7 @@ MSN-012,Localized name/description resolve per requested culture; an unconfigure
   query { loyaltyMissionProgress(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cultureName: ""fr-FR"" first: 50) { items { missionId localizedName description } } }
 [GQL-EXEC progress_fr]","[ERRORS label=progress_default] errors[] empty {DOC}
 [DATA label=progress_default] data.loyaltyMissionProgress.items[?missionId=@td(MSN_LOCALIZED.id)].localizedName is non-null {SPEC}
-[DATA label=progress_default] data.loyaltyMissionProgress.items[?missionId=@td(MSN_LOCALIZED.id)].bannerUrl = @td(MSN_LOCALIZED.banner_url) {DOC}
+[DATA label=progress_default] data.loyaltyMissionProgress.items[?missionId=@td(MSN_LOCALIZED.id)].bannerUrl matches /msn-banner-order-count\.svg$/ {DOC}
 [ERRORS label=progress_fr] errors[] empty {DOC}
 [DATA label=progress_fr] data.loyaltyMissionProgress.items[?missionId=@td(MSN_LOCALIZED.id)].localizedName = @td(MSN_LOCALIZED.name) {DOC}","[EVIDENCE] The fixture also proves the LocalizedString wire-shape trap ({values:{locale:text}} vs a flat dict that silently discards translations) — that check happened at seed time (missions-specs.mjs), not here; this case only reads the already-verified round-trip.","progress_default.localizedName is empty/null (translation silently discarded, the LocalizedString-shape trap); progress_fr.localizedName is also null/empty (fallback broken, not just untranslated)",none,VCST-5319; C11,Draft
 MSN-013,"loyaltyMissionProgress exposes a status enum, not isActive/isCompleted booleans",GraphQL > Loyalty Missions > Schema shape > Status,Medium,,,Runner-native. Schema introspection (this session) confirms LoyaltyUserMission carries `status` (String) and `isStarted` (Boolean) but no `isCompleted`/`isActive` field.,store_id={{STORE_ID}},"[AUTH role=ORG_USER]
@@ -197,7 +199,7 @@ MSN-014,"PerSku mission progress exposes items[] as an array of per-target rows,
 [GQL-EXEC setup_me]
 [GQL-CAPTURE setup_me.data.me.id → USER_ID]
 [GQL-OP progress]
-  query { loyaltyMissionProgress(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" first: 50) { items { missionId items { productId currentQuantity targetQuantity product { id } } } } }
+  query { loyaltyMissionProgress(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" first: 50) { items { missionId items { productId currentQuantity targetQuantity } } } }
 [GQL-EXEC progress]","[ERRORS label=progress] errors[] empty {DOC}
 [COUNT label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_PERSKU_ALL.id)].items.length = 2 {DOC}
 [DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_PERSKU_ALL.id)].items[?productId=@td(MSN_PERSKU_PRODUCT_A.productId)].targetQuantity = @td(MSN_PERSKU_PRODUCT_A.quantity) {DOC}",none,"items.length = 0 or 1 (goal-item join broken — PerSkuGoal targets are a separate LoyaltyMissionGoalItem entity, not inline on the mission)",none,VCST-5319; C16,Draft
@@ -226,14 +228,14 @@ MSN-017,"Toggling Loyalty.Missions.Enable off mid-flight hides an in-progress mi
 [GQL-EXEC setup_me]
 [GQL-CAPTURE setup_me.data.me.id → USER_ID]
 [GQL-OP cleanup_pre]
-  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" }) { id } }
+  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC cleanup_pre]
 [GQL-OP find_partial]
   query { products(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" currencyCode: ""USD"" sort: ""price:desc"" first: 1 filter: ""category.subtree:@td(VIRTUAL_CATALOG_B2B.id)"") { items { id } } }
 [GQL-EXEC find_partial]
 [GQL-CAPTURE find_partial.data.products.items.0.id → FIND_PARTIAL_PRODUCT_ID]
 [GQL-OP add_partial]
-  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" productId: ""{{FIND_PARTIAL_PRODUCT_ID}}"" quantity: 1 }) { id } }
+  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" productId: ""{{FIND_PARTIAL_PRODUCT_ID}}"" quantity: 1 currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC add_partial]
 [GQL-OP get_cart_add_partial]
   query { cart(cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" currencyCode: ""USD"" cultureName: ""en-US"") { id total { amount } availableShippingMethods { code optionName price { amount } } } }
@@ -256,10 +258,15 @@ MSN-017,"Toggling Loyalty.Missions.Enable off mid-flight hides an in-progress mi
   query { loyaltyMissionProgress(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" first: 50) { items { missionId currentValue } } }
 [GQL-EXEC progress_before]
 [AUTH role=ADMIN_DEFAULT]
+[REST-OP get_store]
+GET {{BACK_URL}}/api/stores/{{STORE_ID}}
+[REST-EXEC get_store]
+[REST-CAPTURE get_store.body.catalog → STORE_CATALOG]
+[REST-CAPTURE get_store.body.name → STORE_NAME]
 [REST-OP disable_missions]
 PUT {{BACK_URL}}/api/stores
 Content-Type: application/json
-Body: {""id"": ""{{STORE_ID}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": false}]}
+Body: {""id"": ""{{STORE_ID}}"", ""catalog"": ""{{STORE_CATALOG}}"", ""name"": ""{{STORE_NAME}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": false}]}
 [REST-EXEC disable_missions]
 [AUTH role=LOYALTY_VIP_USER]
 [GQL-OP progress_off]
@@ -269,25 +276,32 @@ Body: {""id"": ""{{STORE_ID}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTI
 [REST-OP restore_missions]
 PUT {{BACK_URL}}/api/stores
 Content-Type: application/json
-Body: {""id"": ""{{STORE_ID}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": true}]}
+Body: {""id"": ""{{STORE_ID}}"", ""catalog"": ""{{STORE_CATALOG}}"", ""name"": ""{{STORE_NAME}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": true}]}
 [REST-EXEC restore_missions]
 [AUTH role=LOYALTY_VIP_USER]
 [GQL-OP progress_after]
   query { loyaltyMissionProgress(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" first: 50) { items { missionId currentValue } } }
 [GQL-EXEC progress_after]","[ERRORS label=place_add_partial] errors[] empty {DOC}
+[ERRORS label=disable_missions] HTTP 204 {OBSERVED}
 [ERRORS label=progress_before] errors[] empty {DOC}
 [DATA label=progress_before] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERCOUNT.id)].currentValue = 1 {SPEC}
 [ERRORS label=progress_off] errors[] empty {DOC}
 [DATA label=progress_off] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERCOUNT.id)] is null {SPEC}
+[ERRORS label=restore_missions] HTTP 204 {OBSERVED}
 [ERRORS label=progress_after] errors[] empty {DOC}
-[DATA label=progress_after] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERCOUNT.id)].currentValue = data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERCOUNT.id)].currentValue {SPEC}",none,progress_off still contains the mission (toggle does not gate the read path); progress_after's currentValue resets to 0 (progress lost rather than merely hidden — a more severe defect than the ticket condition describes),"[AUTH role=ADMIN_DEFAULT]
+[DATA label=progress_after] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERCOUNT.id)].currentValue = 1 {SPEC}",none,progress_off still contains the mission (toggle does not gate the read path); progress_after's currentValue is not 1 — either still hidden (0/null) or reset (progress lost rather than merely hidden — a more severe defect than the ticket condition describes),"[AUTH role=ADMIN_DEFAULT]
 [REST PUT {{BACK_URL}}/api/stores]
-{""id"": ""{{STORE_ID}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": true}]}",VCST-5319; C25,Draft
+{""id"": ""{{STORE_ID}}"", ""catalog"": ""{{STORE_CATALOG}}"", ""name"": ""{{STORE_NAME}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": true}]}",VCST-5319; C25,Draft
 MSN-018,Toggle OFF blocks accrual — a qualifying order placed while Loyalty.Missions.Enable=false never advances currentValue,GraphQL > Loyalty Missions > Toggle > Accrual,Critical,,"ECL-13.3, ECL-14.7","@td(MSN_ORDERCOUNT.id) target=2. Flips the toggle OFF, places ONE qualifying order, polls for settlement, then restores the toggle ON before asserting.",store_id={{STORE_ID}},"[AUTH role=ADMIN_DEFAULT]
+[REST-OP get_store]
+GET {{BACK_URL}}/api/stores/{{STORE_ID}}
+[REST-EXEC get_store]
+[REST-CAPTURE get_store.body.catalog → STORE_CATALOG]
+[REST-CAPTURE get_store.body.name → STORE_NAME]
 [REST-OP disable_missions]
 PUT {{BACK_URL}}/api/stores
 Content-Type: application/json
-Body: {""id"": ""{{STORE_ID}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": false}]}
+Body: {""id"": ""{{STORE_ID}}"", ""catalog"": ""{{STORE_CATALOG}}"", ""name"": ""{{STORE_NAME}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": false}]}
 [REST-EXEC disable_missions]
 [AUTH role=LOYALTY_VIP_USER]
 [GQL-OP setup_me]
@@ -295,14 +309,14 @@ Body: {""id"": ""{{STORE_ID}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTI
 [GQL-EXEC setup_me]
 [GQL-CAPTURE setup_me.data.me.id → USER_ID]
 [GQL-OP cleanup_pre]
-  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" }) { id } }
+  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC cleanup_pre]
 [GQL-OP find_toggleoff]
   query { products(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" currencyCode: ""USD"" sort: ""price:desc"" first: 1 filter: ""category.subtree:@td(VIRTUAL_CATALOG_B2B.id)"") { items { id } } }
 [GQL-EXEC find_toggleoff]
 [GQL-CAPTURE find_toggleoff.data.products.items.0.id → FIND_TOGGLEOFF_PRODUCT_ID]
 [GQL-OP add_toggleoff]
-  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" productId: ""{{FIND_TOGGLEOFF_PRODUCT_ID}}"" quantity: 1 }) { id } }
+  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" productId: ""{{FIND_TOGGLEOFF_PRODUCT_ID}}"" quantity: 1 currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC add_toggleoff]
 [GQL-OP get_cart_add_toggleoff]
   query { cart(cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" currencyCode: ""USD"" cultureName: ""en-US"") { id total { amount } availableShippingMethods { code optionName price { amount } } } }
@@ -325,26 +339,26 @@ Body: {""id"": ""{{STORE_ID}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTI
 [REST-OP restore_missions]
 PUT {{BACK_URL}}/api/stores
 Content-Type: application/json
-Body: {""id"": ""{{STORE_ID}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": true}]}
+Body: {""id"": ""{{STORE_ID}}"", ""catalog"": ""{{STORE_CATALOG}}"", ""name"": ""{{STORE_NAME}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": true}]}
 [REST-EXEC restore_missions]
 [AUTH role=LOYALTY_VIP_USER]
 [WAIT seconds=15]
 [GQL-OP progress]
   query { loyaltyMissionProgress(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" first: 50) { items { missionId currentValue } } }
-[GQL-EXEC progress]","[ERRORS label=disable_missions] HTTP 200 {DOC}
+[GQL-EXEC progress]","[ERRORS label=disable_missions] HTTP 204 {OBSERVED}
 [ERRORS label=place_add_toggleoff] errors[] empty {BL}
-[ERRORS label=restore_missions] HTTP 200 {DOC}
+[ERRORS label=restore_missions] HTTP 204 {OBSERVED}
 [ERRORS label=progress] errors[] empty {DOC}
 [DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERCOUNT.id)].currentValue = 0 {SPEC}","[API] the order itself is created successfully (toggle gates ONLY the mission accrual/read path, never checkout)","currentValue > 0 (the order placed while disabled was still counted — toggle gate broken on the accrual path); order creation itself fails (unrelated regression, not the toggle)","[AUTH role=ADMIN_DEFAULT]
 [REST PUT {{BACK_URL}}/api/stores]
-{""id"": ""{{STORE_ID}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": true}]}",VCST-5319; C1,Draft
+{""id"": ""{{STORE_ID}}"", ""catalog"": ""{{STORE_CATALOG}}"", ""name"": ""{{STORE_NAME}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": true}]}",VCST-5319; C1,Draft
 MSN-019,OrderCountGoal completion grants the configured reward and the balance-log entry is Mission-sourced,GraphQL > Loyalty Missions > Reward > Grant,Critical,BL-LOY-007,"ECL-13.3, ECL-14.7","@td(MSN_ORDERCOUNT.id) target=2, reward=300. Places TWO qualifying orders in this case (order count crosses the threshold on the second).",store_id={{STORE_ID}},"[AUTH role=LOYALTY_VIP_USER]
 [GQL-OP setup_me]
   query { me { id } }
 [GQL-EXEC setup_me]
 [GQL-CAPTURE setup_me.data.me.id → USER_ID]
 [GQL-OP cleanup_pre]
-  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" }) { id } }
+  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC cleanup_pre]
 [GQL-OP balance_before]
   query { loyaltyBalance(userId: ""{{USER_ID}}"") { currentBalance } }
@@ -355,7 +369,7 @@ MSN-019,OrderCountGoal completion grants the configured reward and the balance-l
 [GQL-EXEC find_order1]
 [GQL-CAPTURE find_order1.data.products.items.0.id → FIND_ORDER1_PRODUCT_ID]
 [GQL-OP add_order1]
-  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" productId: ""{{FIND_ORDER1_PRODUCT_ID}}"" quantity: 1 }) { id } }
+  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" productId: ""{{FIND_ORDER1_PRODUCT_ID}}"" quantity: 1 currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC add_order1]
 [GQL-OP get_cart_add_order1]
   query { cart(cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" currencyCode: ""USD"" cultureName: ""en-US"") { id total { amount } availableShippingMethods { code optionName price { amount } } } }
@@ -375,14 +389,14 @@ MSN-019,OrderCountGoal completion grants the configured reward and the balance-l
 [GQL-EXEC place_add_order1]
 [GQL-CAPTURE place_add_order1.data.createOrderFromCart.number → ORDER_NUMBER_ADD_ORDER1]
 [GQL-OP cleanup_between]
-  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" }) { id } }
+  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC cleanup_between]
 [GQL-OP find_order2]
   query { products(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" currencyCode: ""USD"" sort: ""price:desc"" first: 1 filter: ""category.subtree:@td(VIRTUAL_CATALOG_B2B.id)"") { items { id } } }
 [GQL-EXEC find_order2]
 [GQL-CAPTURE find_order2.data.products.items.0.id → FIND_ORDER2_PRODUCT_ID]
 [GQL-OP add_order2]
-  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" productId: ""{{FIND_ORDER2_PRODUCT_ID}}"" quantity: 1 }) { id } }
+  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" productId: ""{{FIND_ORDER2_PRODUCT_ID}}"" quantity: 1 currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC add_order2]
 [GQL-OP get_cart_add_order2]
   query { cart(cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" currencyCode: ""USD"" cultureName: ""en-US"") { id total { amount } availableShippingMethods { code optionName price { amount } } } }
@@ -401,6 +415,7 @@ MSN-019,OrderCountGoal completion grants the configured reward and the balance-l
   mutation { createOrderFromCart(command: { cartId: ""{{CART_ID_ADD_ORDER2}}"" }) { id number } }
 [GQL-EXEC place_add_order2]
 [GQL-CAPTURE place_add_order2.data.createOrderFromCart.number → ORDER_NUMBER_ADD_ORDER2]
+[GQL-CAPTURE place_add_order2.data.createOrderFromCart.id → ORDER_ID_ADD_ORDER2]
 [GQL-OP balance_after]
   query { loyaltyBalance(userId: ""{{USER_ID}}"") { currentBalance } }
 [GQL-EXEC balance_after]
@@ -412,26 +427,31 @@ MSN-019,OrderCountGoal completion grants the configured reward and the balance-l
 [ERRORS label=balance_after] errors[] empty {DOC}
 [DATA label=balance_after] data.loyaltyBalance.currentBalance = {{BAL_BEFORE}} + @td(MSN_ORDERCOUNT.reward) {SPEC}
 [ERRORS label=history] errors[] empty {DOC}
-[DATA label=history] data.loyaltyPointsHistory.items[?orderId={{ORDER_NUMBER_ADD_ORDER2}}].amount = @td(MSN_ORDERCOUNT.reward) {SPEC}
-[DATA label=history] data.loyaltyPointsHistory.items[?orderId={{ORDER_NUMBER_ADD_ORDER2}}].object.type is non-null {OBSERVED}",[API] object.type on the mission-sourced entry is expected to read distinctly from a base-loyalty (LoyaltyProgram) entry — see MSN-021 (C12) for the direct comparison,balance unchanged after order 2 (reward never granted); balance increases after order 1 already (threshold=2 not enforced); history has no orderId={{ORDER_NUMBER_ADD_ORDER2}} row,"none — order placement is a terminal state, not reversible via this suite","VCST-5319; C9, C12",Draft
+[DATA label=history] data.loyaltyPointsHistory.items.0.object.orderId = {{ORDER_ID_ADD_ORDER2}} {SPEC}
+[DATA label=history] data.loyaltyPointsHistory.items.0.amount = @td(MSN_ORDERCOUNT.reward) {SPEC}
+[DATA label=history] data.loyaltyPointsHistory.items.0.object.type is non-null {OBSERVED}","[API] object.type on the mission-sourced entry is expected to read distinctly from a base-loyalty (LoyaltyProgram) entry — see MSN-021 (C12) for the direct comparison. [EVIDENCE] orderId lives on LoyaltyOperationLogObject via the `object` field, not on LoyaltyOperationLog directly — this query already selects it correctly (`object { type orderId }`); the ORIGINAL assertions filtered `items[?orderId=...]` at the wrong (non-existent, top-level) path and could never match (getByPath filter keys are single-level, no dots — `object.orderId` is not expressible as a filter key either, verified against getByPath). Reworked to index item.0 — history is sorted createdDate:desc and this is the freshest event for this user immediately after order 2 settles. Also compares against createOrderFromCart.id (the order's GUID), not .number (its human-readable number) — object.orderId is the id, not the number.",balance unchanged after order 2 (reward never granted); balance increases after order 1 already (threshold=2 not enforced); items.0.object.orderId does not match order 2's id (a stale/unrelated entry sorted first OR the reward truly was not logged),"none — order placement is a terminal state, not reversible via this suite","VCST-5319; C9, C12",Draft
 MSN-020,A zero-reward mission completes but grants nothing and writes no points-history entry,GraphQL > Loyalty Missions > Reward > Zero,High,,,"@td(MSN_ZEROREWARD.id) target=1 order, reward=0. Places exactly one qualifying order.",store_id={{STORE_ID}},"[AUTH role=LOYALTY_VIP_USER]
 [GQL-OP setup_me]
   query { me { id } }
 [GQL-EXEC setup_me]
 [GQL-CAPTURE setup_me.data.me.id → USER_ID]
 [GQL-OP cleanup_pre]
-  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" }) { id } }
+  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC cleanup_pre]
 [GQL-OP balance_before]
   query { loyaltyBalance(userId: ""{{USER_ID}}"") { currentBalance } }
 [GQL-EXEC balance_before]
 [GQL-CAPTURE balance_before.data.loyaltyBalance.currentBalance → BAL_BEFORE]
+[GQL-OP history_before]
+  query { loyaltyPointsHistory(userId: ""{{USER_ID}}"" first: 500) { items { amount } } }
+[GQL-EXEC history_before]
+[GQL-CAPTURE history_before.data.loyaltyPointsHistory.items.length → HISTORY_COUNT_BEFORE]
 [GQL-OP find_zeroreward]
   query { products(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" currencyCode: ""USD"" sort: ""price:desc"" first: 1 filter: ""category.subtree:@td(VIRTUAL_CATALOG_B2B.id)"") { items { id } } }
 [GQL-EXEC find_zeroreward]
 [GQL-CAPTURE find_zeroreward.data.products.items.0.id → FIND_ZEROREWARD_PRODUCT_ID]
 [GQL-OP add_zeroreward]
-  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" productId: ""{{FIND_ZEROREWARD_PRODUCT_ID}}"" quantity: 1 }) { id } }
+  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" productId: ""{{FIND_ZEROREWARD_PRODUCT_ID}}"" quantity: 1 currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC add_zeroreward]
 [GQL-OP get_cart_add_zeroreward]
   query { cart(cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" currencyCode: ""USD"" cultureName: ""en-US"") { id total { amount } availableShippingMethods { code optionName price { amount } } } }
@@ -457,29 +477,33 @@ MSN-020,A zero-reward mission completes but grants nothing and writes no points-
 [GQL-OP balance_after]
   query { loyaltyBalance(userId: ""{{USER_ID}}"") { currentBalance } }
 [GQL-EXEC balance_after]
-[GQL-OP history]
-  query { loyaltyPointsHistory(userId: ""{{USER_ID}}"" first: 10 sort: ""createdDate:desc"") { items { orderId amount } } }
-[GQL-EXEC history]","[ERRORS label=place_add_zeroreward] errors[] empty {DOC}
+[GQL-OP history_after]
+  query { loyaltyPointsHistory(userId: ""{{USER_ID}}"" first: 500) { items { amount } } }
+[GQL-EXEC history_after]","[ERRORS label=place_add_zeroreward] errors[] empty {DOC}
 [ERRORS label=progress] errors[] empty {DOC}
 [DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ZEROREWARD.id)].status = Completed {SPEC}
 [ERRORS label=balance_after] errors[] empty {DOC}
 [DATA label=balance_after] data.loyaltyBalance.currentBalance = {{BAL_BEFORE}} {SPEC}
-[ERRORS label=history] errors[] empty {DOC}
-[DATA label=history] data.loyaltyPointsHistory.items[?orderId={{ORDER_NUMBER_ADD_ZEROREWARD}}] is null {SPEC}",none,"status never reaches Completed (goal itself broken, unrelated to reward=0); balance changes (zero reward still grants something); a history row exists for this order despite a zero amount (writes a no-op transaction)",none,VCST-5319; C10,Draft
+[ERRORS label=history_after] errors[] empty {DOC}
+[COUNT label=history_after] data.loyaltyPointsHistory.items.length = {{HISTORY_COUNT_BEFORE}} {SPEC}","[EVIDENCE] `orderId` is not a field on LoyaltyOperationLog (it lives on the nested `object` sub-type — see MSN-019/MSN-021), so the ORIGINAL `items[?orderId=...]` filter could never match anything and this case's PASS was vacuous regardless of the product. Reworked to a before/after total-count comparison (no per-order filtering needed): if the zero-reward completion genuinely writes no entry, the user's total history count is unchanged across the mutation. `first: 500` is used on both reads to keep the comparison meaningful even for a long-lived shared fixture user (LOYALTY_VIP_USER) whose history grows across other MSN- cases in this suite.","status never reaches Completed (goal itself broken, unrelated to reward=0); balance changes (zero reward still grants something); history_after.items.length > history_count_before (a new — likely zero-amount, no-op — history row was written for this order)",none,VCST-5319; C10,Draft
 MSN-021,Repeated points-history reads after settlement report the SAME entry — no duplicate on re-check (dedup),GraphQL > Loyalty Missions > Reward > Dedup,Critical,BL-LOY-007; PROPOSED-BL-LOY-017,ECL-14.7,"Self-contained — places exactly one qualifying order against @td(MSN_ORDERVALUE.id) (single-order completion, no multi-order setup needed) within this case, then reads the resulting Earned-mission log entry TWICE with a settle delay between reads.",store_id={{STORE_ID}},"[AUTH role=LOYALTY_VIP_USER]
 [GQL-OP setup_me]
   query { me { id } }
 [GQL-EXEC setup_me]
 [GQL-CAPTURE setup_me.data.me.id → USER_ID]
 [GQL-OP cleanup_pre]
-  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" }) { id } }
+  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC cleanup_pre]
+[GQL-OP history_before]
+  query { loyaltyPointsHistory(userId: ""{{USER_ID}}"" first: 500 operationType: ""Earned"") { items { amount } } }
+[GQL-EXEC history_before]
+[GQL-CAPTURE history_before.data.loyaltyPointsHistory.items.length → HISTORY_COUNT_BEFORE]
 [GQL-OP find_dedup]
   query { products(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" currencyCode: ""USD"" sort: ""price:desc"" first: 1 filter: ""category.subtree:@td(VIRTUAL_CATALOG_B2B.id)"") { items { id } } }
 [GQL-EXEC find_dedup]
 [GQL-CAPTURE find_dedup.data.products.items.0.id → FIND_DEDUP_PRODUCT_ID]
 [GQL-OP add_dedup]
-  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" productId: ""{{FIND_DEDUP_PRODUCT_ID}}"" quantity: 20 }) { id } }
+  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" productId: ""{{FIND_DEDUP_PRODUCT_ID}}"" quantity: 20 currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC add_dedup]
 [GQL-OP get_cart_add_dedup]
   query { cart(cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" currencyCode: ""USD"" cultureName: ""en-US"") { id total { amount } availableShippingMethods { code optionName price { amount } } } }
@@ -498,32 +522,33 @@ MSN-021,Repeated points-history reads after settlement report the SAME entry —
   mutation { createOrderFromCart(command: { cartId: ""{{CART_ID_ADD_DEDUP}}"" }) { id number } }
 [GQL-EXEC place_add_dedup]
 [GQL-CAPTURE place_add_dedup.data.createOrderFromCart.number → ORDER_NUMBER_ADD_DEDUP]
+[GQL-CAPTURE place_add_dedup.data.createOrderFromCart.id → ORDER_ID_ADD_DEDUP]
 [GQL-OP history_1]
-  query { loyaltyPointsHistory(userId: ""{{USER_ID}}"" first: 50 operationType: ""Earned"") { items { orderId amount } } }
+  query { loyaltyPointsHistory(userId: ""{{USER_ID}}"" first: 500 operationType: ""Earned"" sort: ""createdDate:desc"") { items { amount object { orderId } } } }
 [GQL-EXEC history_1]
-[WAIT until=history_1 timeout=30 interval=3] data.loyaltyPointsHistory.items[?orderId={{ORDER_NUMBER_ADD_DEDUP}}] is non-null
+[WAIT until=history_1 timeout=30 interval=3] data.loyaltyPointsHistory.items.0.object.orderId = {{ORDER_ID_ADD_DEDUP}}
 [WAIT seconds=15]
 [GQL-OP history_2]
-  query { loyaltyPointsHistory(userId: ""{{USER_ID}}"" first: 50 operationType: ""Earned"") { items { orderId amount } } }
+  query { loyaltyPointsHistory(userId: ""{{USER_ID}}"" first: 500 operationType: ""Earned"") { items { amount } } }
 [GQL-EXEC history_2]","[ERRORS label=place_add_dedup] errors[] empty {DOC}
 [ERRORS label=history_1] errors[] empty {DOC}
-[COUNT label=history_1] data.loyaltyPointsHistory.items[*?orderId={{ORDER_NUMBER_ADD_DEDUP}}].length = 1 {BL}
+[DATA label=history_1] data.loyaltyPointsHistory.items.length = {{HISTORY_COUNT_BEFORE}} + 1 {BL}
 [ERRORS label=history_2] errors[] empty {DOC}
-[COUNT label=history_2] data.loyaltyPointsHistory.items[*?orderId={{ORDER_NUMBER_ADD_DEDUP}}].length = 1 {BL}",none,"the count differs between history_1 and history_2 (a re-processing pass duplicated the entry — the exact BL-LOY-007 failure mode, applied to Missions)",none,"VCST-5319; C13, C23",Draft
+[DATA label=history_2] data.loyaltyPointsHistory.items.length = {{HISTORY_COUNT_BEFORE}} + 1 {BL}","[EVIDENCE] `orderId` is not a field on LoyaltyOperationLog (it lives on the nested `object` sub-type — see MSN-019/MSN-020); the ORIGINAL per-item `[?orderId=...]` filter (both in the WAIT predicate and the COUNT assertions) could never match, so the WAIT always ran its full 30s timeout and the COUNT assertions vacuously read 0=1 as a match only by accident of an unrecognized-predicate path never triggering. Reworked to: a before/after total-Earned-count comparison (dedup = the count settles at baseline+1 and STAYS at baseline+1 on the second read, never baseline+2) plus a WAIT keyed on items.0.object.orderId (sorted createdDate:desc, so the freshest entry) to detect settlement without a broken filter. `first: 500` keeps the comparison meaningful for the long-lived shared LOYALTY_VIP_USER fixture.",the count differs between history_1 and history_2 (a re-processing pass duplicated the entry — the exact BL-LOY-007 failure mode — applied to Missions); history_1 never reaches baseline+1 within the WAIT window (settlement broken or slower than 30s),none,"VCST-5319; C13, C23",Draft
 MSN-022,"Order value math caps mission percentage at exactly 100, even when the order exceeds the threshold",GraphQL > Loyalty Missions > Reward > Percentage cap,High,,,@td(MSN_ORDERVALUE.id) target=250. Places a single order well above the threshold (quantity inflated to make an overshoot likely).,store_id={{STORE_ID}},"[AUTH role=LOYALTY_VIP_USER]
 [GQL-OP setup_me]
   query { me { id } }
 [GQL-EXEC setup_me]
 [GQL-CAPTURE setup_me.data.me.id → USER_ID]
 [GQL-OP cleanup_pre]
-  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" }) { id } }
+  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC cleanup_pre]
 [GQL-OP find_overshoot]
   query { products(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" currencyCode: ""USD"" sort: ""price:desc"" first: 1 filter: ""category.subtree:@td(VIRTUAL_CATALOG_B2B.id)"") { items { id } } }
 [GQL-EXEC find_overshoot]
 [GQL-CAPTURE find_overshoot.data.products.items.0.id → FIND_OVERSHOOT_PRODUCT_ID]
 [GQL-OP add_overshoot]
-  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" productId: ""{{FIND_OVERSHOOT_PRODUCT_ID}}"" quantity: 20 }) { id } }
+  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" productId: ""{{FIND_OVERSHOOT_PRODUCT_ID}}"" quantity: 20 currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC add_overshoot]
 [GQL-OP get_cart_add_overshoot]
   query { cart(cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" currencyCode: ""USD"" cultureName: ""en-US"") { id total { amount } availableShippingMethods { code optionName price { amount } } } }
@@ -559,14 +584,14 @@ MSN-023,"Currency-mismatched order silently fails an OrderValueGoal in a differe
 [GQL-EXEC setup_me]
 [GQL-CAPTURE setup_me.data.me.id → USER_ID]
 [GQL-OP cleanup_pre]
-  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" }) { id } }
+  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC cleanup_pre]
 [GQL-OP find_curmismatch]
   query { products(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" currencyCode: ""USD"" sort: ""price:desc"" first: 1 filter: ""category.subtree:@td(VIRTUAL_CATALOG_B2B.id)"") { items { id } } }
 [GQL-EXEC find_curmismatch]
 [GQL-CAPTURE find_curmismatch.data.products.items.0.id → FIND_CURMISMATCH_PRODUCT_ID]
 [GQL-OP add_curmismatch]
-  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" productId: ""{{FIND_CURMISMATCH_PRODUCT_ID}}"" quantity: 20 }) { id } }
+  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" productId: ""{{FIND_CURMISMATCH_PRODUCT_ID}}"" quantity: 20 currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC add_curmismatch]
 [GQL-OP get_cart_add_curmismatch]
   query { cart(cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" currencyCode: ""USD"" cultureName: ""en-US"") { id total { amount } availableShippingMethods { code optionName price { amount } } } }
@@ -592,15 +617,15 @@ MSN-023,"Currency-mismatched order silently fails an OrderValueGoal in a differe
 [ERRORS label=progress] errors[] empty {DOC}
 [DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERVALUE.id)].status = Completed {SPEC}
 [DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERVALUE_ALTCURRENCY.id)].currentValue = 0 {SPEC}","[EVIDENCE] No error is expected on the ALTCURRENCY side — the ticket names this 'contributes nothing, silently', which this case asserts as currentValue staying at 0, not as an error/errors[] entry",ALTCURRENCY.currentValue > 0 (a default-currency order is being counted toward a different-currency goal — currency isolation broken); MSN_ORDERVALUE never completes (unrelated accrual regression),none,VCST-5319; C18,Draft
-MSN-024,A guest (unauthenticated) order that would otherwise satisfy an OrderValueGoal completes checkout without a loyalty-related error and attributes nothing,GraphQL > Loyalty Missions > Accrual > Guest checkout,Medium,,,"PUBLIC role — no [AUTH]. Places a guest order valued above @td(MSN_ORDERVALUE.reward)'s threshold. A guest has no persistent userId, so `loyaltyMissionProgress` cannot be queried for this shopper post-checkout — this case asserts the order itself succeeds cleanly (no loyalty-path exception), which is the observable half of C24 available at this layer.",store_id={{STORE_ID}}; guest_id=AGENT-TEST-guest-{{TIMESTAMP}},"[GQL-OP cleanup_pre]
-  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{guest_id}}"" cartName: ""default"" }) { id } }
+MSN-024,A guest (unauthenticated) order that would otherwise satisfy an OrderValueGoal completes checkout without a loyalty-related error and attributes nothing,GraphQL > Loyalty Missions > Accrual > Guest checkout,Medium,,,"PUBLIC role — no [AUTH]. Places a guest order valued above @td(MSN_ORDERVALUE.reward)'s threshold. A guest has no persistent userId, so `loyaltyMissionProgress` cannot be queried for this shopper post-checkout — this case asserts the order itself succeeds cleanly (no loyalty-path exception), which is the observable half of C24 available at this layer.",store_id={{STORE_ID}}; guest_id=AGENT-TEST-guest,"[GQL-OP cleanup_pre]
+  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{guest_id}}"" cartName: ""default"" currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC cleanup_pre]
 [GQL-OP find_guest]
   query { products(storeId: ""{{STORE_ID}}"" userId: ""{{guest_id}}"" currencyCode: ""USD"" sort: ""price:desc"" first: 1 filter: ""category.subtree:@td(VIRTUAL_CATALOG_B2B.id)"") { items { id } } }
 [GQL-EXEC find_guest]
 [GQL-CAPTURE find_guest.data.products.items.0.id → GUEST_PRODUCT_ID]
 [GQL-OP add_guest]
-  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{guest_id}}"" productId: ""{{GUEST_PRODUCT_ID}}"" quantity: 20 }) { id } }
+  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{guest_id}}"" productId: ""{{GUEST_PRODUCT_ID}}"" quantity: 20 currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC add_guest]
 [GQL-OP get_cart_guest]
   query { cart(cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{guest_id}}"" currencyCode: ""USD"" cultureName: ""en-US"") { id validationErrors { errorCode } availableShippingMethods { code optionName price { amount } } } }
@@ -620,8 +645,8 @@ MSN-024,A guest (unauthenticated) order that would otherwise satisfy an OrderVal
 [GQL-EXEC place_guest]","[ERRORS label=get_cart_guest] errors[] empty {DOC}
 [COUNT label=get_cart_guest] data.cart.validationErrors.length = 0 {SPEC}
 [ERRORS label=place_guest] errors[] empty {SPEC}
-[DATA label=place_guest] data.createOrderFromCart.number is non-null {SPEC}","[EVIDENCE] This case cannot directly assert 'attributes nothing' (no stable userId to re-query) — it is a coverage gap for a future admin-side check (search loyalty-points-history by orderId={{ORDER_NUMBER}} and assert zero rows), flagged in the final report","place_guest errors[] non-empty (guest checkout itself broken, unrelated to loyalty); a validation error mentioning loyalty/mission appears on the guest cart (the accrual path is throwing instead of gracefully skipping a userId-less order)",none,VCST-5319; C24,Draft
-MSN-025,"Multiple simultaneous group conditions combine as OR, per the Admin UI's own 'If any of the following criteria' label — verify at accrual",GraphQL > Loyalty Missions > Targeting > Condition composition,Medium,,,"The Admin details blade labels the condition block 'If any of the following criteria:' (confirmed live this session — MSNA-024), which is a UI-level OR hint; the RUNTIME composition when two UserGroupIsCondition entries are both present is not independently confirmed. Creates a scratch Published mission with TWO group conditions (VIP, Wholesaler-like) and drives a VIP-group order through it.",store_id={{STORE_ID}}; mission_name=AGENT-TEST-MSN-ORCOND-{{TIMESTAMP}},"[AUTH role=ADMIN_DEFAULT]
+[DATA label=place_guest] data.createOrderFromCart.number is non-null {SPEC}","[EVIDENCE] This case cannot directly assert 'attributes nothing' (no stable userId to re-query) — it is a coverage gap for a future admin-side check (search loyalty-points-history by orderId={{ORDER_NUMBER}} and assert zero rows), flagged in the final report. [EVIDENCE] guest_id is a DELIBERATELY fixed AGENT-TEST-guest identity, not per-run-unique: the runner has no built-in random/timestamp primitive available at Test_Data-parse time, and there is no write API to reset or delete an accumulated LoyaltyOperationLog / mission-progress row for a customer (confirmed — loyalty balance/history has no delete endpoint), so a per-run cleanup of prior progress is not implementable either. Today's assertions do not depend on this guest having zero prior progress (checkout-success only), so the fixed identity is safe now. If a future case adds an 'attributes nothing' check here, it must NOT reuse this fixed identity as-is.","place_guest errors[] non-empty (guest checkout itself broken, unrelated to loyalty); a validation error mentioning loyalty/mission appears on the guest cart (the accrual path is throwing instead of gracefully skipping a userId-less order)",none,VCST-5319; C24,Draft
+MSN-025,"Multiple simultaneous group conditions combine as OR, per the Admin UI's own 'If any of the following criteria' label — verify at accrual",GraphQL > Loyalty Missions > Targeting > Condition composition,Medium,,,"The Admin details blade labels the condition block 'If any of the following criteria:' (confirmed live this session — MSNA-024), which is a UI-level OR hint; the RUNTIME composition when two UserGroupIsCondition entries are both present is not independently confirmed. Creates a scratch Published mission with TWO group conditions (VIP, Wholesaler-like) and drives a VIP-group order through it.",store_id={{STORE_ID}}; mission_name=AGENT-TEST-MSN-ORCOND,"[AUTH role=ADMIN_DEFAULT]
 [REST-OP create_or_mission]
 POST {{BACK_URL}}/api/loyalty-missions
 Content-Type: application/json
@@ -634,14 +659,14 @@ Body: {""id"": null, ""name"": ""{{mission_name}}"", ""storeId"": ""{{STORE_ID}}
 [GQL-EXEC setup_me]
 [GQL-CAPTURE setup_me.data.me.id → USER_ID]
 [GQL-OP cleanup_pre]
-  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" }) { id } }
+  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC cleanup_pre]
 [GQL-OP find_orcond]
   query { products(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" currencyCode: ""USD"" sort: ""price:desc"" first: 1 filter: ""category.subtree:@td(VIRTUAL_CATALOG_B2B.id)"") { items { id } } }
 [GQL-EXEC find_orcond]
 [GQL-CAPTURE find_orcond.data.products.items.0.id → FIND_ORCOND_PRODUCT_ID]
 [GQL-OP add_orcond]
-  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" productId: ""{{FIND_ORCOND_PRODUCT_ID}}"" quantity: 1 }) { id } }
+  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" productId: ""{{FIND_ORCOND_PRODUCT_ID}}"" quantity: 1 currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC add_orcond]
 [GQL-OP get_cart_add_orcond]
   query { cart(cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" currencyCode: ""USD"" cultureName: ""en-US"") { id total { amount } availableShippingMethods { code optionName price { amount } } } }
@@ -674,10 +699,10 @@ MSN-026,PerSku ALL vs ANY diverge — buying only target A completes the ANY mis
 [GQL-EXEC setup_me]
 [GQL-CAPTURE setup_me.data.me.id → USER_ID]
 [GQL-OP cleanup_pre]
-  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" }) { id } }
+  mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC cleanup_pre]
 [GQL-OP add_target_a]
-  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" productId: ""@td(MSN_PERSKU_PRODUCT_A.productId)"" quantity: @td(MSN_PERSKU_PRODUCT_A.quantity) }) { id } }
+  mutation { addItem(command: { cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" productId: ""@td(MSN_PERSKU_PRODUCT_A.productId)"" quantity: @td(MSN_PERSKU_PRODUCT_A.quantity) currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC add_target_a]
 [GQL-OP get_cart_persku]
   query { cart(cartName: ""default"" storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" currencyCode: ""USD"" cultureName: ""en-US"") { id availableShippingMethods { code optionName price { amount } } } }
