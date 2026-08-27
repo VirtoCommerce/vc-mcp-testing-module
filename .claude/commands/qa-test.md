@@ -258,7 +258,7 @@ points alongside the `BL-*` rules.
 | Storefront UI, checkout, cart, search, mobile | `qa-frontend-expert` | `playwright-chrome` |
 | Admin SPA, APIs, modules, GraphQL, backend | `qa-backend-expert` | `playwright-edge` |
 | Storybook components, accessibility, design system | `ui-ux-expert` | Chrome DevTools MCP |
-| Cross-browser, Figma comparison, debugging | `qa-testing-expert` | `playwright-firefox` |
+| Cross-browser, Claude Design or Figma comparison, debugging | `qa-testing-expert` | `playwright-firefox` |
 
 **Minimum dispatch:** backend-only → `qa-backend-expert`; frontend-only → `qa-frontend-expert`; both →
 both in parallel; UI/component → add `ui-ux-expert`; P0 or critical-revenue → add `qa-testing-expert`.
@@ -282,16 +282,32 @@ of truth; neither command restates them. Read them; do not re-derive them here:*
 | Case authoring contract, 15-column schema, `Automation_Status` enum | `/qa-test-cases-generator` + `.claude/skills/qa-test-cases-generator/test-case-template.md` |
 | Review dimensions, check codes, severities, auto-fix matrix | `.claude/skills/qa-review-tests/SKILL.md` + `review-criteria.md` |
 | Behavior-rewrite evidence bar (docs + live + source) | `.claude/skills/qa-review-tests/triangulation-criteria.md` |
-| Test-data design + provisioning | `/qa-generate-data` → `/qa-seed-data` (`test-data-engineer`) |
+| Test-data design + provisioning (**Step 3a — orchestrator-dispatched, runs FIRST**) | `/qa-generate-data` → `/qa-seed-data` (`test-data-engineer`) |
 | Write-scope ceiling + revert-on-regression | `.claude/commands/qa-test-lifecycle.md` §Phase 4b |
 
-The specialist produces **three hand-off artifacts**, then reviews/auto-fixes them and provisions data:
+**Step 3a — Provision test data FIRST, dispatched by the ORCHESTRATOR (not by the specialist).** Cases are
+authored *against fixtures that already resolve*, never against imagined ones — so this runs **before**
+Artifact A, not after the review pass. **The orchestrator dispatches `test-data-engineer` directly**
+(`/qa-generate-data <feature>` → `/qa-seed-data <domain>`), because dispatching a peer agent is an
+orchestration act and `test-data-engineer` is the canonical fixture owner (`.claude/rules/agents.md`) —
+asking `test-management-specialist` to sub-delegate is both unreliable and wrong-shaped, and in practice
+produces fixtures written by the wrong agent and **never executed**. `test-data-engineer` owns the whole
+job end-to-end: design the combinations, author the specs/seeder/`@td()` aliases/drift-guard + its unit
+test, **and RUN the seed live** against the non-prod env, ending on a green `td:validate` (+ any
+`td:validate:<domain>` guard it added). Skip with a one-line note only when every planned case resolves
+against existing `@td()`/`{{VAR}}` data. A fixture that cannot be seeded is reported as such and its
+dependent cases are marked BLOCKED — never authored against data that does not exist. **Seeder files
+authored by any other agent are unvalidated drafts**: hand them to `test-data-engineer` to review and run,
+never treat them as done.
+
+The specialist then produces **three hand-off artifacts** and reviews/auto-fixes them:
 
 **Artifact A — Test cases (authored into the durable suites).** Derive cases from the Test Model's
 scenarios + user-flow diagram + `1d` AC conditions (story + gap-ACs) + `E2E-*` scenarios + `BL-*` / `ECL-*`
 + domain checklists.
 - **New feature / Story** → **author new** enriched-CSV cases.
 - **Bug fix / enhancement with existing coverage** → **map to existing** suite cases (start from the Step-2 `E2E-*` → suite mappings); author **only the gaps**.
+- **Split the targets by EXECUTION SURFACE before authoring a single row — name every target suite up front.** A feature that spans API/GraphQL *and* an Admin SPA blade *and* the storefront needs **one suite per surface**, because the surface decides the lane, the agent and the browser: API/GraphQL rows are machine-lane (`graphql-runner`), Admin-SPA and storefront rows are browser-lane and **cannot run on firefox** (`.claude/rules/agents.md` — `browser_click` fails on this Admin SPA). Follow the corpus convention for the admin-side twin: the storefront/API suite keeps the bare prefix and the admin suite takes an `A` suffix (`CAT-`/`CATA-`, `ORD-`/`ORDA-`, `SRCH-`/`SRCHA-`). Naming a single backend suite makes browser cases homeless, and the agent will then satisfy a UI condition through the API — which reads as coverage but tests a different surface. **Symptom to check for in the manifest after `suites:sync`: a change that touched a blade producing `lanes: {browser: 0}`.** If the Test Model's affected surface lists an Admin blade or a storefront view, a browser-lane suite is mandatory, and each blade/view is an explicit coverage target — not an incidental mention inside an API case.
 - **Append into the target `regression/suites/<layer>/<module>/*.csv` as `Automation_Status = Draft`**, using the deterministic appender (never a hand-rolled append):
   `npx tsx scripts/test-cases/append-test-cases-to-suite.ts <target-suite.csv> --rows <new-rows.csv> --check-global-ids --dry-run` (drop `--dry-run` on a clean pass). Existing-suite sync/review edits happen in place. `--check-global-ids` rejects an ID already used anywhere under `regression/suites/`.
 - **`Draft` is required, not a placeholder.** These cases are grounded and promotable only after Step 4 executes them live; 5g (last, non-blocking) does the `Draft → Automated` flip (a deliberate `{HYPOTHESIS}` — a genuinely unknown expected value phrased as a question — is legal **only** at `Draft`). The runner does not skip `Draft`, so Step 4's scoped regression *will* run them (that is the point).
@@ -319,14 +335,22 @@ ticket agent's prompt** (`feedback_long_runner_sessions_unreliable`).
 <csv> --fail-on=High` + `npm run td:validate`; an auto-fix introducing a new Blocker/Critical is reverted).
 A case that can't pass review is flagged, not shipped.
 
-**Provision test data (only if needed).** If cases assert against entities not covered by an existing
-`@td()` fixture, delegate to `test-data-engineer`: `/qa-generate-data <feature>` → `/qa-seed-data <domain>`,
-ending on a green `td:validate`. Reuse existing fixtures where they cover a case; skip with a one-line note
-when every case resolves against existing `@td()`/`{{VAR}}` data. Must complete before hand-off.
+**Test data — already done.** Provisioning is **Step 3a above**, run by the orchestrator *before* authoring.
+It is not repeated here and is not the specialist's to dispatch. If authoring surfaces a fixture need 3a
+missed, report it back to the orchestrator (which re-dispatches `test-data-engineer`) rather than authoring
+the seeder inline — that is how fixtures end up written by the wrong agent and never executed.
 
 **Gate (Artifacts reviewed + data seeded — hard STOP before Step 4):** new cases pass the
 `/qa-review-tests` dimensions (0 blocker / 0 critical); **every atomic condition + risk area maps to a case
-or checklist item**; required data seeded to a **green `td:validate`**.
+or checklist item**; required data seeded to a **green `td:validate`**; **every affected surface in the Test
+Model has a suite on the right lane** — when the Test Model names an Admin blade or a storefront view,
+verify with `npm run suites:executability -- --suite <id>` that a browser-lane suite exists and its browser
+count is non-zero; if every new suite is machine-lane, the surface was authored through the API instead of
+exercised, which is a REJECT. **Do not read this off `config/test-suites.json` `lanes`** — that block is
+recorded *only when a suite has at least one machine case* (`.claude/rules/regression.md` §Executability),
+so a correct pure-browser suite has **no `lanes` key at all** and a naive `lanes.browser === 0` test
+misfires on exactly the suite it is meant to bless. And **the fixtures were run, not merely written** — `test-data-engineer` reports an
+executed seed, not a seeder file on disk.
 - **FULL path — independent verification (1 round):** a fresh `qa-lead` verifier **re-runs `npm run
   suites:review`** on the touched suite and **re-runs `npm run td:validate`** (not the author's word), then
   re-reads the Test Model and confirms each atomic condition has a covering case. REJECT on any
