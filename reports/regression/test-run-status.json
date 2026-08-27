@@ -1,9 +1,9 @@
 {
   "runId": "REG-2026-08-27-1731",
-  "status": "in_progress",
+  "status": "completed",
   "selection": "083c",
   "startedAt": "2026-08-27T17:31:23.000Z",
-  "finishedAt": null,
+  "finishedAt": "2026-08-27T18:11:14.893Z",
   "environment": "vcst-qa",
   "deployState": {
     "platform": "3.1061.0",
@@ -17,12 +17,19 @@
       "id": "083c",
       "name": "Loyalty Missions Storefront",
       "file": "regression/suites/Frontend/loyalty/083c-loyalty-missions-storefront.csv",
-      "status": "running",
+      "status": "done",
       "browser": "playwright-chrome",
       "lane": 1,
       "totalCases": 68,
       "startedAt": "2026-08-27T17:32:25.643Z",
-      "finishedAt": null
+      "finishedAt": "2026-08-27T18:11:14.893Z",
+      "results": {
+        "pass": 38,
+        "fail": 14,
+        "blocked": 15,
+        "skipped": 1,
+        "total": 68
+      }
     }
   ]
 }
