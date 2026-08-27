@@ -85,7 +85,7 @@ MSN-008,OnlyActive is never applied — an expired mission still returns from lo
 [GQL-OP progress]
   query { loyaltyMissionProgress(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" first: 50) { totalCount items { missionId name endDate status } } }
 [GQL-EXEC progress]","[ERRORS label=progress] errors[] empty {DOC}
-[DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_EXPIRED.id)] is null {SPEC}",none,@td(MSN_EXPIRED.id) resolves empty (fixture missing — re-run seed:loyalty-missions); NEW-OnlyActive,Draft
+[DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_EXPIRED.id)] is null {SPEC}",none,@td(MSN_EXPIRED.id) resolves empty (fixture missing — re-run seed:loyalty-missions); expired mission still present in items[] (OnlyActive not applied — the defect under test),none,VCST-5319; NEW-OnlyActive,Draft
 MSN-009,loyaltyMissionProgress returns missions when Loyalty.Missions.Enable=true (baseline),GraphQL > Loyalty Missions > Toggle > Read,Critical,,ECL-13.3,@td(MSN_STORE_SETTINGS.setting_name)=true on @td(STORE_PRIMARY.id) (baseline env state — do not leave altered).,store_id={{STORE_ID}},"[AUTH role=ORG_USER]
 [GQL-OP setup_me]
   query { me { id } }
