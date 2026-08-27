@@ -77,7 +77,7 @@ Body: {""id"": null, ""name"": ""{{mission_name}}"", ""storeId"": ""{{STORE_ID}}
 [DATA label=create_bad_window] body.startDate = 2027-01-01T00:00:00Z {DOC}
 [DATA label=create_bad_window] body.endDate = 2026-01-01T00:00:00Z {DOC}","[EVIDENCE] Confirmed defect-shaped finding (missions-specs.mjs, verified live 2026-08-27): the module never rejects an inverted window. Downstream effect on GetUserMissionsAsync's isStarted/percentage computation is untested by this case — flag for exploratory follow-up.","HTTP 400 (validation added — contract changed, update this case)","[AUTH role=ADMIN_DEFAULT]
 [REST DELETE {{BACK_URL}}/api/loyalty-missions?ids={{BADWINDOW_ID}}]",VCST-5319; C22,Draft
-MSN-008,OnlyActive is never applied — an expired mission still returns from loyaltyMissionProgress,GraphQL > Loyalty Missions > Window filter > OnlyActive,High,,,"BLOCKED PENDING FIXTURE — no expired-window mission fixture exists. Every MSN_* mission uses window intent 'active' (startOffsetDays=-7, endOffsetDays=180 relative to seed time), so none has a past EndDate. Reported as a fixture gap in the VCST-5319 authoring report (proposed alias: MSN_EXPIRED, window intent 'expired' — startOffsetDays well in the past, endOffsetDays also in the past). Do not run before the fixture exists.",store_id={{STORE_ID}},"[AUTH role=ORG_USER]
+MSN-008,OnlyActive is never applied — an expired mission still returns from loyaltyMissionProgress,GraphQL > Loyalty Missions > Window filter > OnlyActive,High,,,"MSN_EXPIRED is seeded (window intent 'expired': startOffsetDays -365, endOffsetDays -30) and Published/public with an ordinary OrderCountGoal(1), so only the closed window can explain its absence from the customer-facing query.",store_id={{STORE_ID}},"[AUTH role=ORG_USER]
 [GQL-OP setup_me]
   query { me { id } }
 [GQL-EXEC setup_me]
@@ -85,7 +85,7 @@ MSN-008,OnlyActive is never applied — an expired mission still returns from lo
 [GQL-OP progress]
   query { loyaltyMissionProgress(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" first: 50) { totalCount items { missionId name endDate status } } }
 [GQL-EXEC progress]","[ERRORS label=progress] errors[] empty {DOC}
-[DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_EXPIRED.id)] is null {SPEC}",none,@td(MSN_EXPIRED.id) resolves empty (fixture not yet seeded — expected until the gap is closed); the case BLOCKS on an unresolved @td() reference rather than reporting FAIL,none,VCST-5319; NEW-OnlyActive,Draft
+[DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_EXPIRED.id)] is null {SPEC}",none,@td(MSN_EXPIRED.id) resolves empty (fixture missing — re-run seed:loyalty-missions); NEW-OnlyActive,Draft
 MSN-009,loyaltyMissionProgress returns missions when Loyalty.Missions.Enable=true (baseline),GraphQL > Loyalty Missions > Toggle > Read,Critical,,ECL-13.3,@td(MSN_STORE_SETTINGS.setting_name)=true on @td(STORE_PRIMARY.id) (baseline env state — do not leave altered).,store_id={{STORE_ID}},"[AUTH role=ORG_USER]
 [GQL-OP setup_me]
   query { me { id } }

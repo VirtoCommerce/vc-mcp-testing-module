@@ -248,6 +248,20 @@ Marketing promotions and coupon codes for VCST-4590 testing. Covers 4 reward typ
 
 ### 14. Variation stock (inventory/variation-stock.csv)
 A master product plus a genuine **variation** child (`mainProductId`), with **divergent** non-zero stock at the store's **main** fulfillment center (VCST-5546 / INV-047). Equal quantities would make "the variation row shows its own inventory, not the master's aggregate" unfalsifiable, so the guard requires them to differ. Seed: `npm run seed:variation-stock`; guard: `npm run td:validate:variation-stock`. Aliases: `INV_VARIATION_STOCKED`, `INV_VARIATION_MASTER`. This seeder also writes `FC_EAST`'s runtime GUID to the overlay — before it, `@td(FC_EAST.id)` resolved to the bare CSV business key `FFC-001`, which is not a platform id on any env.
+
+### 15. Loyalty missions (no CSV — `scripts/seed-data/loyalty/missions-specs.mjs`)
+The VCST-5319 mission fixtures have **no committed data file**: the side-effect-free spec module IS the
+source of truth, and everything runtime (mission GUIDs, the resolved currency/locale codes, the banner
+asset URLs) lives in `aliases.<env>.json`. Eleven `MSN_*` aliases plus `MSN_STORE_SETTINGS` (the
+`Loyalty.Missions.Enable` gate) and the two live-discovered `MSN_PERSKU_PRODUCT_*` targets. Two things
+worth knowing before editing them: **`MSN_EXPIRED` is the one fixture deliberately OUTSIDE its date
+window** (window intent `expired`, offsets `-365`/`-30`) — it is the only fixture that can show
+`OnlyActive` is never applied, so the seeder reuses a closed window instead of treating it as drift;
+and **every mission carries a banner**, chosen by goal type from `test-data/uploads/msn-banner-*.svg`
+and uploaded to platform asset storage under a FIXED file name (the URL is part of the drift signature,
+so a churning one would recreate every mission on every seed). Seed:
+`npm run seed:loyalty-missions`; guard: `npm run td:validate:missions`; artwork edited →
+`npm run seed:loyalty-missions -- --reupload-banners`.
 ---
 
 ## Usage Guidelines

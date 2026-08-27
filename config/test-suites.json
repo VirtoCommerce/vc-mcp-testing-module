@@ -2453,7 +2453,7 @@
       "concern": "api",
       "priority": "P1",
       "testCount": 26,
-      "estimatedMinutes": 0,
+      "estimatedMinutes": 12,
       "agent": "qa-backend-expert",
       "tags": [
         "loyalty",
@@ -2482,7 +2482,7 @@
       "concern": "admin",
       "priority": "P1",
       "testCount": 22,
-      "estimatedMinutes": 0,
+      "estimatedMinutes": 20,
       "agent": "qa-backend-expert",
       "tags": [
         "loyalty",
