@@ -327,7 +327,17 @@ export function loadDesignVocabulary(): DesignVocabulary {
 
   const archetypes = tableTokens(defectPart);
   const nonDefectArchetypes = tableTokens(nonDefectPart);
-  const techniques = tableTokens(readVocabFile(TECHNIQUES_MD));
+  // Section-scoped, like the archetypes above. Scanning the whole file made
+  // every table in it a candidate vocabulary source: harmless today (it yields
+  // exactly the seven §0 tokens) but any future table with a backticked
+  // ALL-CAPS first cell would silently widen what the gate accepts.
+  const techMd = readVocabFile(TECHNIQUES_MD);
+  const techStart = techMd.indexOf("## 0. Technique tokens");
+  if (techStart < 0)
+    fail(`${TECHNIQUES_MD} has no "## 0. Technique tokens" section — cannot validate Technique stamps.`);
+  const techRest = techMd.slice(techStart);
+  const techEnd = techRest.search(/\n## [^#]/);
+  const techniques = tableTokens(techEnd < 0 ? techRest : techRest.slice(0, techEnd));
 
   if (archetypes.size === 0)
     fail(`Parsed 0 defect archetypes from ${CATALOG_MD} — the table shape changed; fix the parser.`);
@@ -337,7 +347,7 @@ export function loadDesignVocabulary(): DesignVocabulary {
   return { archetypes, nonDefectArchetypes, techniques };
 }
 
-const ARCHETYPE_STAMP_RE = /\bArchetype:\s*([A-Za-z][A-Za-z0-9-]*)/;
+export const ARCHETYPE_STAMP_RE = /\bArchetype:\s*([A-Za-z][A-Za-z0-9-]*)/;
 const TECHNIQUE_STAMP_RE = /\bTechnique:\s*([A-Za-z][A-Za-z0-9-]*)/;
 const PROBE_STAMP_RE = /\bProbe:\s*(VC-[A-Z0-9]+-\d+)/g;
 

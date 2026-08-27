@@ -46,15 +46,16 @@
  *
  * Usage:
  *   npx tsx scripts/test-cases/demote-cases.ts [--suite <csv>] [--layer frontend] [--limit N]
- *   npx tsx scripts/test-cases/demote-cases.ts --suite <csv> --confirm
+ *   npx tsx scripts/test-cases/demote-cases.ts --suite <csv> --apply
  */
 import { readFileSync, writeFileSync } from "fs";
 import { resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { parseSuite } from "./append-test-cases-to-suite.js";
-import { applyCellEdits, type CellEdit } from "./promote-cases.js";
+import { appendStamp, applyCellEdits, type CellEdit } from "./promote-cases.js";
 import { rankSuiteFile, type CaseRank } from "./rank-cases.js";
 import { isNonExecutingStatus } from "../lib/case-classifier.js";
+import { flagValue, intFlag, rejectUnknownFlags } from "../lib/cli-args.js";
 
 export const DEMOTION_TARGET = "Manual";
 /**
@@ -76,12 +77,13 @@ export const DEMOTE_REASONS = {
   NO_ID: "DM-004 row has no ID",
 } as const;
 
-/** Append a reversal-friendly stamp so the demotion is attributable and undoable. */
+/**
+ * Append a reversal-friendly stamp so the demotion is attributable and undoable.
+ * Delegates to `promote-cases`' `appendStamp` — same idempotent-append rule,
+ * one implementation.
+ */
 export function stampDemotion(references: string, label: string, date: string): string {
-  const stamp = `Demoted: ${label} (${date}) presence-only`;
-  if (references.includes(stamp)) return references;
-  const trimmed = (references ?? "").trim();
-  return trimmed ? `${trimmed} | ${stamp}` : stamp;
+  return appendStamp(references, "Demoted", label, date, "presence-only");
 }
 
 export interface DemotionDecision {
@@ -110,16 +112,19 @@ export function decideDemotion(r: CaseRank): DemotionDecision {
 
 function main(): void {
   const argv = process.argv.slice(2);
-  const get = (f: string): string | undefined => {
-    const i = argv.indexOf(f);
-    return i >= 0 ? argv[i + 1] : undefined;
-  };
-  const confirm = argv.includes("--confirm");
+  rejectUnknownFlags(
+    argv,
+    ["--apply", "--json", "--suite", "--label", "--date", "--limit"],
+    ["--suite", "--label", "--date", "--limit"],
+  );
+  // `--apply` matches promote-cases, the incumbent counterpart. The first
+  // version used `--confirm` for identical semantics.
+  const confirm = argv.includes("--apply");
   const asJson = argv.includes("--json");
-  const suite = get("--suite");
-  const label = get("--label") ?? "rank-cases";
-  const date = get("--date") ?? new Date().toISOString().slice(0, 10);
-  const limit = Number(get("--limit") ?? "50");
+  const suite = flagValue(argv, "--suite");
+  const label = flagValue(argv, "--label") ?? "rank-cases";
+  const date = flagValue(argv, "--date") ?? new Date().toISOString().slice(0, 10);
+  const limit = intFlag(argv, "--limit", 50);
 
   if (!suite) {
     console.error(
@@ -155,7 +160,7 @@ function main(): void {
 
   if (!confirm) {
     console.log(
-      `\nDRY RUN — nothing written. Re-run with --confirm to apply.\n` +
+      `\nDRY RUN — nothing written. Re-run with --apply to write.\n` +
         `Demotion sets Automation_Status to "${DEMOTION_TARGET}" and appends a "Demoted:" stamp to\n` +
         `References. The row, its ID and its steps are untouched, so this is reversible; it is NOT\n` +
         `Deprecated (that stays human, per TRI-006) and nothing is deleted.`,

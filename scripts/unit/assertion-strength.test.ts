@@ -161,10 +161,20 @@ test("negation is checked before presence — 'not visible' is not a presence ch
   assert.equal(classifyAssertionStrength("[DOM] the banner is not visible"), "NEG");
 });
 
-test("a quoted expected value counts even when a presence verb carries it", () => {
+// A quoted literal discriminates, so it clears the gate — but it is NOT `DER`.
+// `DER` means "compared against an independently DERIVED value" (@td / {{VAR}} /
+// a captured value); a transcribed literal is the opposite of that, and DV-016
+// discourages it. Reporting it as the strongest class would have told the author
+// the exact thing the data-validity rules are trying to discourage.
+test("a quoted expected value counts, but is SHAPE rather than DER", () => {
   const l = "[STATE] Error message shown: 'You must have at least one price per single unit.'";
-  assert.equal(classifyAssertionStrength(l), "DER");
+  assert.equal(classifyAssertionStrength(l), "SHAPE");
   assert.ok(hasDiscriminatingAssertion([l]));
+  // ...while a genuinely derived comparison IS DER.
+  assert.equal(
+    classifyAssertionStrength("[DOM] img src host equals @td(STORE_ASSET_TEST_URL.host)"),
+    "DER",
+  );
 });
 
 // --- Regression guards for the code-review findings. Each of these FAILED

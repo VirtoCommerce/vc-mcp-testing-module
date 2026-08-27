@@ -40,10 +40,10 @@
  *   npx tsx scripts/test-cases/rank-cases.ts [--suite <csv>] [--layer frontend|backend]
  *                                            [--verdict DEMOTE|STRENGTHEN|KEEP] [--json] [--limit N]
  */
-import { readFileSync, readdirSync, statSync } from "fs";
+import { readFileSync } from "fs";
 import { join, resolve, sep } from "path";
 import { fileURLToPath } from "url";
-import { parseSuite, type Row } from "./append-test-cases-to-suite.js";
+import { ARCHETYPE_STAMP_RE, parseSuite, type Row } from "./append-test-cases-to-suite.js";
 import {
   classifyAssertionStrength,
   hasDiscriminatingAssertion,
@@ -52,6 +52,8 @@ import {
 } from "./lint-test-cases.js";
 import { collectAttributions, indexAttributions, loadKnownCaseIds } from "../lib/defect-attribution.js";
 import { isNonExecutingStatus } from "../lib/case-classifier.js";
+import { allSuiteCsvs } from "./sync-test-suites.js";
+import { enumFlag, flagValue, intFlag, rejectUnknownFlags } from "../lib/cli-args.js";
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../..");
 const SUITES_ROOT = join(REPO_ROOT, "regression", "suites");
@@ -88,25 +90,6 @@ export interface CaseRank {
   verdict: Verdict;
   /** Human-readable, one clause per contributing signal. */
   reasons: string[];
-}
-
-
-/** Shared CLI arg reading. Hand-rolled copies drifted: `--limit` was read as
- *  `argv[0]` when the flag was absent, so `--unknown` became NaN and silently
- *  emptied the report's main table. */
-function flagValue(argv: readonly string[], flag: string): string | undefined {
-  const i = argv.indexOf(flag);
-  return i >= 0 ? argv[i + 1] : undefined;
-}
-function intFlag(argv: readonly string[], flag: string, fallback: number): number {
-  const raw = flagValue(argv, flag);
-  if (raw === undefined) return fallback;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 0) {
-    console.error(`✗ ${flag} expects a non-negative number, got "${raw}"`);
-    process.exit(1);
-  }
-  return n;
 }
 
 function lines(cell: string): string[] {
@@ -168,7 +151,7 @@ export function rankCase(row: Row, suite: string, proven: ReadonlySet<string> = 
   // A stamp means a human/agent deliberately declared what defect this probes
   // (the /qa-test Step 1e contract). Deliberate design is evidence of intent, so
   // it blocks demotion even when the assertions are currently weak.
-  const hasDesignStamp = /\bArchetype:\s*[A-Za-z]/.test(refs);
+  const hasDesignStamp = ARCHETYPE_STAMP_RE.test(refs);
   const id = row.ID ?? "<no id>";
   const caughtABug = proven.has(id);
   const unreadable = isUnclassified(aLines);
@@ -232,24 +215,17 @@ export function rankCase(row: Row, suite: string, proven: ReadonlySet<string> = 
   };
 }
 
+/**
+ * Corpus walk, delegated. `allSuiteCsvs` already does this (with
+ * `withFileTypes`, avoiding a `statSync` per entry) and returns repo-relative
+ * forward-slash paths — which is also what `rankSuiteFile` used to recompute by
+ * hand. This was the sixth `.csv` walker in the repo; five was already too many.
+ */
 function collectSuites(layer?: string): string[] {
-  const out: string[] = [];
-  const walk = (dir: string): void => {
-    for (const e of readdirSync(dir)) {
-      const full = join(dir, e);
-      if (statSync(full).isDirectory()) walk(full);
-      else if (e.endsWith(".csv")) out.push(full);
-    }
-  };
-  walk(SUITES_ROOT);
-  if (!layer) return out.sort();
-  const l = layer.toLowerCase();
-  if (l !== "frontend" && l !== "backend") {
-    console.error(`✗ --layer expects "frontend" or "backend", got "${layer}"`);
-    process.exit(1);
-  }
-  const want = l === "frontend" ? "Frontend" : "Backend";
-  return out.filter((f) => f.includes(`${sep}${want}${sep}`)).sort();
+  const all = allSuiteCsvs(SUITES_ROOT);
+  if (!layer) return all;
+  const want = layer.toLowerCase() === "frontend" ? "Frontend" : "Backend";
+  return all.filter((f) => f.includes(`/${want}/`));
 }
 
 export function rankSuiteFile(file: string): CaseRank[] {
@@ -275,11 +251,15 @@ export function rankSuiteFile(file: string): CaseRank[] {
 
 function main(): void {
   const argv = process.argv.slice(2);
-  const get = (flag: string): string | undefined => flagValue(argv, flag);
+  rejectUnknownFlags(
+    argv,
+    ["--json", "--suite", "--layer", "--verdict", "--limit"],
+    ["--suite", "--layer", "--verdict", "--limit"],
+  );
   const asJson = argv.includes("--json");
-  const suite = get("--suite");
-  const layer = get("--layer");
-  const wantVerdict = get("--verdict");
+  const suite = flagValue(argv, "--suite");
+  const layer = enumFlag(argv, "--layer", ["frontend", "backend"] as const);
+  const wantVerdict = enumFlag(argv, "--verdict", ["KEEP", "STRENGTHEN", "DEMOTE"] as const);
   const limit = intFlag(argv, "--limit", 40);
 
   const files = suite ? [resolve(suite)] : collectSuites(layer);
@@ -289,7 +269,7 @@ function main(): void {
   const total = all.length;
   const counts = { KEEP: 0, STRENGTHEN: 0, DEMOTE: 0 } as Record<Verdict, number>;
   for (const r of all) counts[r.verdict]++;
-  const ranks = wantVerdict ? all.filter((r) => r.verdict === wantVerdict.toUpperCase()) : all;
+  const ranks = wantVerdict ? all.filter((r) => r.verdict === wantVerdict) : all;
 
   if (asJson) {
     console.log(JSON.stringify({ total, counts, cases: ranks }, null, 2));

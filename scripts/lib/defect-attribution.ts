@@ -72,15 +72,21 @@ const SOURCE_HINTS: ReadonlyArray<readonly [FoundSource, RegExp]> = [
 export function expandShorthand(group: string): string[] {
   const out: string[] = [];
   let prefix: string | null = null;
+  let width = 3;
   const tokens = group.split(/([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{2,4}[a-z]?)/);
   for (const t of tokens) {
     if (/^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{2,4}[a-z]?$/.test(t)) {
       out.push(t);
       prefix = t.replace(/-\d{2,4}[a-z]?$/, "");
+      width = (/-(\d{2,4})[a-z]?$/.exec(t)?.[1] ?? "").length || 3;
       continue;
     }
     if (!prefix) continue;
-    for (const m of t.matchAll(/(?:^|,)\s*(\d{2,4})(?=\s*(?:,|$))/g)) out.push(`${prefix}-${m[1]}`);
+    for (const m of t.matchAll(/(?:^|,)\s*(\d{1,4})(?=\s*(?:,|$))/g)) {
+      // Pad to the anchor id's width: `(PRF-GQL-066, 67)` means 067, and an
+      // unpadded `PRF-GQL-67` would land in unknownCaseIds as false noise.
+      out.push(`${prefix}-${m[1].padStart(width, "0")}`);
+    }
   }
   return out;
 }
@@ -141,13 +147,23 @@ export function parseFoundBy(
   };
 }
 
-function lifecycleOf(dir: string): Lifecycle {
-  const d = dir.toLowerCase();
-  if (d.endsWith("open")) return "open";
-  if (d.endsWith("fixed")) return "fixed";
-  if (d.endsWith("closed")) return "closed";
-  if (d.endsWith("rejected")) return "rejected";
-  return "unknown";
+/**
+ * Exact match on the directory NAME, not `endsWith` on the path.
+ *
+ * `endsWith` dropped and mis-labelled in both directions: `reports/bugs/reopened`
+ * ends in "ened", so it fell to `unknown` and every bug inside was skipped —
+ * directly contradicting this file's own "AN UNATTRIBUTED BUG IS RECORDED,
+ * NEVER DROPPED". And in the other direction `unfixed`/`not-fixed` would have
+ * read as `fixed`, `auto-closed` as `closed`, `reopen` as `open`.
+ */
+const LIFECYCLE_DIRS: ReadonlyMap<string, Lifecycle> = new Map([
+  ["open", "open"], ["fixed", "fixed"], ["closed", "closed"], ["rejected", "rejected"],
+]);
+/** Directories that legitimately hold no bug reports, so their absence is not a warning. */
+const NON_REPORT_DIRS = new Set(["screenshots", "attachments", "evidence", "assets"]);
+
+function lifecycleOf(dirName: string): Lifecycle {
+  return LIFECYCLE_DIRS.get(dirName.trim().toLowerCase()) ?? "unknown";
 }
 
 /** Every `PREFIX-NNN` id present in the suite corpus, for validation. */
@@ -179,8 +195,20 @@ export function collectAttributions(bugsRoot: string, knownCaseIds: ReadonlySet<
   for (const sub of readdirSync(bugsRoot)) {
     const dir = join(bugsRoot, sub);
     if (!statSync(dir).isDirectory()) continue;
-    const lifecycle = lifecycleOf(dir);
-    if (lifecycle === "unknown") continue; // screenshots/ etc.
+    const lifecycle = lifecycleOf(sub);
+    if (lifecycle === "unknown") {
+      // A directory we do not recognise may hold real reports. Say so rather
+      // than silently excluding it from the denominator.
+      if (!NON_REPORT_DIRS.has(sub.trim().toLowerCase())) {
+        const mdCount = readdirSync(dir).filter((f) => f.endsWith(".md")).length;
+        if (mdCount)
+          console.error(
+            `⚠ reports/bugs/${sub}/ holds ${mdCount} report(s) but is not a known lifecycle ` +
+              `directory (${[...LIFECYCLE_DIRS.keys()].join(", ")}) — they are NOT counted.`,
+          );
+      }
+      continue;
+    }
     for (const f of readdirSync(dir)) {
       if (!f.endsWith(".md")) continue;
       const full = join(dir, f);

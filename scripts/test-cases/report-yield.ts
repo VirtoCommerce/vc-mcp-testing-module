@@ -29,29 +29,11 @@ import {
   loadKnownCaseIds,
   type Attribution,
 } from "../lib/defect-attribution.js";
+import { intFlag, rejectUnknownFlags } from "../lib/cli-args.js";
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../..");
 const BUGS_ROOT = join(REPO_ROOT, "reports", "bugs");
 const SUITES_ROOT = join(REPO_ROOT, "regression", "suites");
-
-
-/** Shared CLI arg reading. Hand-rolled copies drifted: `--limit` was read as
- *  `argv[0]` when the flag was absent, so `--unknown` became NaN and silently
- *  emptied the report's main table. */
-function flagValue(argv: readonly string[], flag: string): string | undefined {
-  const i = argv.indexOf(flag);
-  return i >= 0 ? argv[i + 1] : undefined;
-}
-function intFlag(argv: readonly string[], flag: string, fallback: number): number {
-  const raw = flagValue(argv, flag);
-  if (raw === undefined) return fallback;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 0) {
-    console.error(`✗ ${flag} expects a non-negative number, got "${raw}"`);
-    process.exit(1);
-  }
-  return n;
-}
 
 function pct(n: number, d: number): string {
   return d ? `${Math.round((n / d) * 100)}%` : "n/a";
@@ -61,6 +43,7 @@ function main(): void {
   const argv = process.argv.slice(2);
   const asJson = argv.includes("--json");
   const showUnknown = argv.includes("--unknown");
+  rejectUnknownFlags(argv, ["--json", "--unknown", "--limit"], ["--limit"]);
   const limit = intFlag(argv, "--limit", 20);
 
   const known = loadKnownCaseIds(SUITES_ROOT);

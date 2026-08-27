@@ -296,8 +296,12 @@ export function classifyAssertionStrength(line: string): AssertionStrength {
   // Before PRES: an HTTP status or a concrete path IS the expected value.
   if (HTTP_STATUS_RE.test(l)) return "INV";
   if (PATH_RE.test(l)) return "SHAPE";
-  // Before PRES: a quoted expected value is a comparison, whatever verb carries it.
-  if (QUOTED_VALUE_RE.test(l)) return "DER";
+  // Before PRES: a quoted expected value is a comparison, whatever verb carries
+  // it. Classified SHAPE, not DER: DER means "compared against an independently
+  // DERIVED value" (@td/{{VAR}}/a captured value) — a transcribed literal is the
+  // opposite of that, and DV-016 discourages it. It still discriminates, so it
+  // clears the gate; it just must not be reported as the strongest class.
+  if (QUOTED_VALUE_RE.test(l)) return "SHAPE";
   if (SHAPE_RE.test(l)) return "SHAPE";
   if (PRES_RE.test(l)) return "PRES";
   return "UNKNOWN";
