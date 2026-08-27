@@ -1008,5 +1008,21 @@
     "user_id": "f194c370-b7b0-4b88-8fc5-edc9ca80ee1c",
     "user_email": "mutykovaelena@gmail.com",
     "store_id": "B2B-store"
+  },
+  "MSN_GROUP_VIP": {
+    "id": "70d4af6a-4b11-47c2-b51d-f5c15bffd357",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
+  },
+  "MSN_GROUP_AUDIENCE": {
+    "member_email": "AGENT-TEST-vip@test.virtocommerce.com",
+    "member_user_id": "95a30901-9b99-4269-a855-109607378479",
+    "member_groups": "VIP",
+    "nonmember_email": "AGENT-TEST-wholesale@test.virtocommerce.com",
+    "nonmember_user_id": "fa360b8f-aab2-43eb-828e-9edb9c451d15",
+    "nonmember_groups": "Wholesale"
+  },
+  "MSN_GROUP_VIP_PRIVATE": {
+    "id": "feca8948-62fb-4e04-a969-fa729ac7200d",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
   }
 }

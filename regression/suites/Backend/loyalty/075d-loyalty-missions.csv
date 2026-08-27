@@ -13,7 +13,7 @@ GET {{BACK_URL}}/api/loyalty-missions/@td(MSN_PERSKU_ALL.id)
 [ERRORS label=get_oc] HTTP 200 {DOC}
 [DATA label=get_oc] body.dynamicExpression.children[?id=BlockLoyaltyMissionGoals].children.0.id = OrderCountGoal {DOC}
 [ERRORS label=get_sku] HTTP 200 {DOC}
-[DATA label=get_sku] body.dynamicExpression.children[?id=BlockLoyaltyMissionGoals].children.0.id = PerSkuGoal {DOC}",[ADMIN] each mission's 'Mission goal' row in the details blade renders a goal-type-specific sentence (Reach order total of.../Reach.../Purchase...) — see MSNA-005..007,goal.id missing or identical across the three fixtures; HTTP 404 on a fixture id (unseeded env),none,VCST-5319; C3,Draft
+[DATA label=get_sku] body.dynamicExpression.children[?id=BlockLoyaltyMissionGoals].children.0.id = PerSkuGoal {DOC}",[ADMIN] each mission's 'Mission goal' row in the details blade renders a goal-type-specific sentence (Reach order total of.../Reach.../Purchase...) — see MSNA-005..007,goal.id missing or identical across the three fixtures; HTTP 404 on a fixture id (unseeded env),none,VCST-5319; C3 | Promoted: REG-2026-08-27-1846 (2026-08-27),Automated
 MSN-002,Mission condition palette offers group targeting only — no customer-ID condition exists,GraphQL > Loyalty Missions > Targeting > Template,Medium,,,Runner-native REST. GET /new returns the live BlockLoyaltyMissionCondition prototype for @td(STORE_PRIMARY.id).,store_id={{STORE_ID}},"[AUTH role=ADMIN_DEFAULT]
 [REST-OP get_template]
 GET {{BACK_URL}}/api/loyalty-missions/new
@@ -21,7 +21,7 @@ GET {{BACK_URL}}/api/loyalty-missions/new
 [COUNT label=get_template] body.dynamicExpression.children[?id=BlockLoyaltyMissionCondition].availableChildren.length = 2 {DOC}
 [DATA label=get_template] body.dynamicExpression.children[?id=BlockLoyaltyMissionCondition].availableChildren[?id=UserGroupIsCondition] is non-null {DOC}
 [DATA label=get_template] body.dynamicExpression.children[?id=BlockLoyaltyMissionCondition].availableChildren[?id=AnyUserGroupCondition] is non-null {DOC}
-[DATA label=get_template] body.dynamicExpression.children[?id=BlockLoyaltyMissionCondition].availableChildren[?id=CustomerIsCondition] is null {DOC}",[ADMIN] MSNA-024 confirms the identical 2-option 'Shopper profile' palette live in the details blade's 'Add condition' menu,availableChildren.length != 2; a third condition type appears (targeting surface expanded),none,"VCST-5319; C6, C7",Draft
+[DATA label=get_template] body.dynamicExpression.children[?id=BlockLoyaltyMissionCondition].availableChildren[?id=CustomerIsCondition] is null {DOC}",[ADMIN] MSNA-024 confirms the identical 2-option 'Shopper profile' palette live in the details blade's 'Add condition' menu,availableChildren.length != 2; a third condition type appears (targeting surface expanded),none,"VCST-5319; C6, C7 | Promoted: REG-2026-08-27-1846 (2026-08-27)",Automated
 MSN-003,Periodicity is never validated or branched on — a non-None value is silently accepted,GraphQL > Loyalty Missions > Periodicity > Validation,High,,,Runner-native REST. Creates a scratch Draft mission with Periodicity=Monthly (module only documents/processes None) then deletes it — DELETE is allowed at every status.,store_id={{STORE_ID}}; mission_name=AGENT-TEST-MSN-PERIODICITY,"[AUTH role=ADMIN_DEFAULT]
 [REST-OP create_mission]
 POST {{BACK_URL}}/api/loyalty-missions
@@ -37,7 +37,7 @@ POST {{BACK_URL}}/api/loyalty-missions
 Content-Type: application/json
 Body: {""id"": null, ""name"": ""{{mission_name}}"", ""storeId"": ""{{STORE_ID}}"", ""status"": ""Draft"", ""public"": true, ""periodicity"": ""None"", ""startDate"": ""2026-01-01T00:00:00Z"", ""endDate"": ""2027-01-01T00:00:00Z"", ""dynamicExpression"": {""id"": ""LoyaltyMissionConditionAndRewardTree"", ""children"": [{""id"": ""BlockLoyaltyMissionCondition"", ""children"": [{""id"": ""AnyUserGroupCondition""}]}, {""id"": ""BlockLoyaltyMissionGoals"", ""children"": [{""id"": ""OrderValueGoal"", ""value"": 100, ""currencyCode"": null}]}, {""id"": ""BlockLoyaltyReward"", ""children"": [{""id"": ""FixedAmountReward"", ""amount"": 50}]}]}}
 [REST-EXEC create_null_currency]","[ERRORS label=create_null_currency] HTTP 400 {DOC}
-[DATA label=create_null_currency] body.0.errorMessage matches /[Cc]urrency code is required for the order value goal/ {DOC}",none,HTTP 200/201 (mission created despite null currency — contract regressed); a different error message (i18n/text changed),none — creation is expected to fail; nothing persisted,VCST-5319; C19,Draft
+[DATA label=create_null_currency] body.0.errorMessage matches /[Cc]urrency code is required for the order value goal/ {DOC}",none,HTTP 200/201 (mission created despite null currency — contract regressed); a different error message (i18n/text changed),none — creation is expected to fail; nothing persisted,VCST-5319; C19 | Promoted: REG-2026-08-27-1846 (2026-08-27),Automated
 MSN-005,OrderValueGoal currencyCode validation is asymmetric — an invalid or wrong-case code is accepted verbatim,GraphQL > Loyalty Missions > OrderValueGoal > Currency contract,High,PROPOSED-BL-LOY-016,,Runner-native REST. Presence of currencyCode is enforced (MSN-004); validity is not. Creates+deletes two scratch missions.,store_id={{STORE_ID}}; name_a=AGENT-TEST-MSN-BADCUR; name_b=AGENT-TEST-MSN-LOWERCUR,"[AUTH role=ADMIN_DEFAULT]
 [REST-OP create_bad_code]
 POST {{BACK_URL}}/api/loyalty-missions
@@ -85,7 +85,7 @@ MSN-008,An expired mission with no prior user progress is excluded from loyaltyM
 [GQL-OP progress]
   query { loyaltyMissionProgress(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" first: 50) { totalCount items { missionId name endDate status } } }
 [GQL-EXEC progress]","[ERRORS label=progress] errors[] empty {DOC}
-[DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_EXPIRED.id)] is null {SPEC}","[EVIDENCE] Covers only the never-started case: an expired mission the user has no progress on is correctly excluded. Does NOT cover whether an already-started mission's progress stays visible after its window closes — that needs a distinct precondition (partial progress driven before the window closed) and is a coverage gap, not something this case's PASS speaks to.",@td(MSN_EXPIRED.id) resolves empty (fixture missing — re-run seed:loyalty-missions); expired mission present in items[] despite no prior progress (window filter not applied — the defect this case targets),none,VCST-5319; NEW-Expired-Exclusion,Draft
+[DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_EXPIRED.id)] is null {SPEC}","[EVIDENCE] Covers only the never-started case: an expired mission the user has no progress on is correctly excluded. Does NOT cover whether an already-started mission's progress stays visible after its window closes — that needs a distinct precondition (partial progress driven before the window closed) and is a coverage gap, not something this case's PASS speaks to.",@td(MSN_EXPIRED.id) resolves empty (fixture missing — re-run seed:loyalty-missions); expired mission present in items[] despite no prior progress (window filter not applied — the defect this case targets),none,VCST-5319; NEW-Expired-Exclusion | Promoted: REG-2026-08-27-1846 (2026-08-27),Automated
 MSN-009,loyaltyMissionProgress returns missions when Loyalty.Missions.Enable=true (baseline),GraphQL > Loyalty Missions > Toggle > Read,Critical,,ECL-13.3,@td(MSN_STORE_SETTINGS.setting_name)=true on @td(STORE_PRIMARY.id) (baseline env state — do not leave altered).,store_id={{STORE_ID}},"[AUTH role=ORG_USER]
 [GQL-OP setup_me]
   query { me { id } }
@@ -111,16 +111,7 @@ MSN-009,loyaltyMissionProgress returns missions when Loyalty.Missions.Enable=tru
 [DATA label=progress] data.loyaltyMissionProgress.items.0.missionId is non-empty GUID {OBSERVED}
 [DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERVALUE.id)] is non-null {SPEC}",[API] full LoyaltyUserMission field selection round-trips with no schema error (schema-coverage),errors[] non-empty; totalCount = 0 with toggle ON (accrual/read gate broken),none,VCST-5319; C2,Draft
 MSN-010,loyaltyMissionProgress returns empty when Loyalty.Missions.Enable=false,GraphQL > Loyalty Missions > Toggle > Read,Critical,,ECL-13.3,"Flips @td(MSN_STORE_SETTINGS.setting_name) OFF for the duration of this case only, then restores it — suites 075/075b/075c and every other MSN- case depend on it being ON.",store_id={{STORE_ID}},"[AUTH role=ADMIN_DEFAULT]
-[REST-OP get_store]
-GET {{BACK_URL}}/api/stores/{{STORE_ID}}
-[REST-EXEC get_store]
-[REST-CAPTURE get_store.body.catalog → STORE_CATALOG]
-[REST-CAPTURE get_store.body.name → STORE_NAME]
-[REST-OP disable_missions]
-PUT {{BACK_URL}}/api/stores
-Content-Type: application/json
-Body: {""id"": ""{{STORE_ID}}"", ""catalog"": ""{{STORE_CATALOG}}"", ""name"": ""{{STORE_NAME}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": false}]}
-[REST-EXEC disable_missions]
+[SETUP] Run: npm run store:set -- --name @td(MSN_STORE_SETTINGS.setting_name) --value false (full-body GET-merge-PUT via scripts/seed-data/store/set-store-setting.mjs — never hand-roll PUT /api/stores)
 [AUTH role=ORG_USER]
 [GQL-OP setup_me]
   query { me { id } }
@@ -130,16 +121,11 @@ Body: {""id"": ""{{STORE_ID}}"", ""catalog"": ""{{STORE_CATALOG}}"", ""name"": "
   query { loyaltyMissionProgress(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" first: 50) { totalCount items { missionId } } }
 [GQL-EXEC progress_off]
 [AUTH role=ADMIN_DEFAULT]
-[REST-OP restore_missions]
-PUT {{BACK_URL}}/api/stores
-Content-Type: application/json
-Body: {""id"": ""{{STORE_ID}}"", ""catalog"": ""{{STORE_CATALOG}}"", ""name"": ""{{STORE_NAME}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": true}]}
-[REST-EXEC restore_missions]","[ERRORS label=disable_missions] HTTP 204 {OBSERVED}
+[TEARDOWN] MANDATORY — Run: npm run store:set -- --name @td(MSN_STORE_SETTINGS.setting_name) --value true (run even if the progress_off assertion below fails; suites 075/075b/075c and every other MSN- case depend on this setting staying ON)","[STATE] store:set (disable) exits 0 and read-back confirms @td(MSN_STORE_SETTINGS.setting_name) = false on {{STORE_ID}} {OBSERVED}
 [ERRORS label=progress_off] errors[] empty {SPEC}
 [COUNT label=progress_off] data.loyaltyMissionProgress.totalCount = 0 {SPEC}
-[ERRORS label=restore_missions] HTTP 204 {OBSERVED}","[ADMIN] MSNA-021 confirms the equivalent Admin toggle path (Stores > B2B-store > Settings > Loyalty > Missions). [EVIDENCE] Live-verified 2026-08-27: PUT /api/stores with only {id, settings:[{name,value}]} 500s ('Cannot insert the value NULL into column Catalog/Name' — required non-null columns absent from the partial body); GET-merge-PUT with just {id, catalog, name} + a single-entry settings array returns 204 and preserves all 104 other settings untouched (the backend merges settings by name — a full settings array is not required, only the missing top-level columns were).",totalCount > 0 with the toggle OFF (read gate not independent/broken); restore_missions HTTP != 204 (state left OFF — would break every other suite reading this store),"[AUTH role=ADMIN_DEFAULT]
-[REST PUT {{BACK_URL}}/api/stores]
-{""id"": ""{{STORE_ID}}"", ""catalog"": ""{{STORE_CATALOG}}"", ""name"": ""{{STORE_NAME}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": true}]}",VCST-5319; C2,Draft
+[STATE] store:set (restore) exits 0 and read-back confirms @td(MSN_STORE_SETTINGS.setting_name) = true on {{STORE_ID}} {OBSERVED}","[ADMIN] MSNA-021 confirms the equivalent Admin toggle path (Stores > B2B-store > Settings > Loyalty > Missions). [EVIDENCE] Live-verified 2026-08-27: PUT /api/stores with only {id, settings:[{name,value}]} 500s ('Cannot insert the value NULL into column Catalog/Name' — required non-null columns absent from the partial body); GET-merge-PUT with just {id, catalog, name} + a single-entry settings array returns 204 and preserves all 104 other settings untouched (the backend merges settings by name — a full settings array is not required, only the missing top-level columns were). This same partial-body PUT, hand-rolled directly in the earlier version of this case, nulled defaultCurrency/defaultLanguage/url/secureUrl on the shared env twice on 2026-08-27 (the second took the storefront down) — the case now drives the toggle exclusively via npm run store:set (scripts/seed-data/store/set-store-setting.mjs), which performs the full-body merge and refuses any write that would blank a required default.",totalCount > 0 with the toggle OFF (read gate not independent/broken); store:set (restore) exits non-zero or read-back still shows false (state left OFF — would break every other suite reading this store),"[AUTH role=ADMIN_DEFAULT]
+[TEARDOWN] Run: npm run store:set -- --name @td(MSN_STORE_SETTINGS.setting_name) --value true (idempotent no-op if already true; safety-net cleanup in case the case aborted before its own mid-flow restore)",VCST-5319; C2,Manual
 MSN-011,Group-scoped mission is visible to a matching-group user and absent for a non-matching user,GraphQL > Loyalty Missions > Targeting > UserGroupIsCondition,High,,,"Creates a scratch Draft mission scoped to condition UserGroupIsCondition(groups=[VIP]) via REST, publishes it, reads it back via GraphQL as two different users, then archives it (Published->Archived is the only legal transition — DELETE also allowed at every status).",store_id={{STORE_ID}}; mission_name=AGENT-TEST-MSN-GROUPSCOPE,"[AUTH role=ADMIN_DEFAULT]
 [REST-OP create_scoped]
 POST {{BACK_URL}}/api/loyalty-missions
@@ -167,7 +153,7 @@ Body: {""id"": null, ""name"": ""{{mission_name}}"", ""storeId"": ""{{STORE_ID}}
 [DATA label=progress_vip] data.loyaltyMissionProgress.items[?missionId={{SCOPED_MISSION_ID}}] is non-null {SPEC}
 [ERRORS label=progress_org] errors[] empty {DOC}
 [DATA label=progress_org] data.loyaltyMissionProgress.items[?missionId={{SCOPED_MISSION_ID}}] is null {SPEC}",[ADMIN] MSNA-024 confirms the 'User group is ...' condition option is selectable live,progress_org also contains the scoped mission (group gate not enforced at read time); progress_vip does NOT contain it (group condition broken both ways),"[AUTH role=ADMIN_DEFAULT]
-[REST DELETE {{BACK_URL}}/api/loyalty-missions?ids={{SCOPED_MISSION_ID}}]",VCST-5319; C7,Draft
+[REST DELETE {{BACK_URL}}/api/loyalty-missions?ids={{SCOPED_MISSION_ID}}]",VCST-5319; C7 | Promoted: REG-2026-08-27-1846 (2026-08-27),Automated
 MSN-012,Localized name/description resolve per requested culture; an unconfigured culture falls back to the raw name,GraphQL > Loyalty Missions > Localization,Medium,,,"@td(MSN_LOCALIZED.id) carries store-default and store-alternate translations plus a bannerUrl (VCST-5319 fixture — the ONLY mission with l10n). A third, unconfigured culture (fr-FR) is expected to fall back to the raw ASCII name with a null description.",store_id={{STORE_ID}},"[AUTH role=ORG_USER]
 [GQL-OP setup_me]
   query { me { id } }
@@ -182,7 +168,7 @@ MSN-012,Localized name/description resolve per requested culture; an unconfigure
 [DATA label=progress_default] data.loyaltyMissionProgress.items[?missionId=@td(MSN_LOCALIZED.id)].localizedName is non-null {SPEC}
 [DATA label=progress_default] data.loyaltyMissionProgress.items[?missionId=@td(MSN_LOCALIZED.id)].bannerUrl matches /msn-banner-order-count\.svg$/ {DOC}
 [ERRORS label=progress_fr] errors[] empty {DOC}
-[DATA label=progress_fr] data.loyaltyMissionProgress.items[?missionId=@td(MSN_LOCALIZED.id)].localizedName = @td(MSN_LOCALIZED.name) {DOC}","[EVIDENCE] The fixture also proves the LocalizedString wire-shape trap ({values:{locale:text}} vs a flat dict that silently discards translations) — that check happened at seed time (missions-specs.mjs), not here; this case only reads the already-verified round-trip.","progress_default.localizedName is empty/null (translation silently discarded, the LocalizedString-shape trap); progress_fr.localizedName is also null/empty (fallback broken, not just untranslated)",none,VCST-5319; C11,Draft
+[DATA label=progress_fr] data.loyaltyMissionProgress.items[?missionId=@td(MSN_LOCALIZED.id)].localizedName = @td(MSN_LOCALIZED.name) {DOC}","[EVIDENCE] The fixture also proves the LocalizedString wire-shape trap ({values:{locale:text}} vs a flat dict that silently discards translations) — that check happened at seed time (missions-specs.mjs), not here; this case only reads the already-verified round-trip.","progress_default.localizedName is empty/null (translation silently discarded, the LocalizedString-shape trap); progress_fr.localizedName is also null/empty (fallback broken, not just untranslated)",none,VCST-5319; C11 | Promoted: REG-2026-08-27-1846 (2026-08-27),Automated
 MSN-013,"loyaltyMissionProgress exposes a status enum, not isActive/isCompleted booleans",GraphQL > Loyalty Missions > Schema shape > Status,Medium,,,Runner-native. Schema introspection (this session) confirms LoyaltyUserMission carries `status` (String) and `isStarted` (Boolean) but no `isCompleted`/`isActive` field.,store_id={{STORE_ID}},"[AUTH role=ORG_USER]
 [GQL-OP setup_me]
   query { me { id } }
@@ -192,7 +178,7 @@ MSN-013,"loyaltyMissionProgress exposes a status enum, not isActive/isCompleted 
   query { loyaltyMissionProgress(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" first: 50) { items { missionId status isStarted currentValue targetValue percentage } } }
 [GQL-EXEC progress]","[ERRORS label=progress] errors[] empty {DOC}
 [DATA label=progress] data.loyaltyMissionProgress.items.0.status is non-null {OBSERVED}
-[DATA label=progress] data.loyaltyMissionProgress.items.0.isStarted is non-null {OBSERVED}",none,"the runner rejects a probe of `isCompleted`/`isActive` at schema-validate time — DO NOT add those fields to this case, that is itself the proof the fields do not exist (DV-006)",none,VCST-5319; C15,Draft
+[DATA label=progress] data.loyaltyMissionProgress.items.0.isStarted is non-null {OBSERVED}",none,"the runner rejects a probe of `isCompleted`/`isActive` at schema-validate time — DO NOT add those fields to this case, that is itself the proof the fields do not exist (DV-006)",none,VCST-5319; C15 | Promoted: REG-2026-08-27-1846 (2026-08-27),Automated
 MSN-014,"PerSku mission progress exposes items[] as an array of per-target rows, not a scalar",GraphQL > Loyalty Missions > Schema shape > PerSku items,Medium,,,"@td(MSN_PERSKU_ALL.id) carries 2 LoyaltyMissionGoalItem targets (@td(MSN_PERSKU_PRODUCT_A.sku), @td(MSN_PERSKU_PRODUCT_B.sku)).",store_id={{STORE_ID}},"[AUTH role=ORG_USER]
 [GQL-OP setup_me]
   query { me { id } }
@@ -202,7 +188,7 @@ MSN-014,"PerSku mission progress exposes items[] as an array of per-target rows,
   query { loyaltyMissionProgress(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" first: 50) { items { missionId items { productId currentQuantity targetQuantity } } } }
 [GQL-EXEC progress]","[ERRORS label=progress] errors[] empty {DOC}
 [COUNT label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_PERSKU_ALL.id)].items.length = 2 {DOC}
-[DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_PERSKU_ALL.id)].items[?productId=@td(MSN_PERSKU_PRODUCT_A.productId)].targetQuantity = @td(MSN_PERSKU_PRODUCT_A.quantity) {DOC}",none,"items.length = 0 or 1 (goal-item join broken — PerSkuGoal targets are a separate LoyaltyMissionGoalItem entity, not inline on the mission)",none,VCST-5319; C16,Draft
+[DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_PERSKU_ALL.id)].items[?productId=@td(MSN_PERSKU_PRODUCT_A.productId)].targetQuantity = @td(MSN_PERSKU_PRODUCT_A.quantity) {DOC}",none,"items.length = 0 or 1 (goal-item join broken — PerSkuGoal targets are a separate LoyaltyMissionGoalItem entity, not inline on the mission)",none,VCST-5319; C16 | Promoted: REG-2026-08-27-1846 (2026-08-27),Automated
 MSN-015,CONFIRMED DEFECT — a Published mission with public=false leaks into the customer-facing progress query,GraphQL > Loyalty Missions > Privacy > public flag,Critical,PROPOSED-BL-LOY-015,ECL-13.3,"@td(MSN_PUBLISHED_PRIVATE.id) is Published, public=false (VCST-5319 highest-priority fixture, C17). Live behavior observed 2026-08-27: 9 of 10 missions return, INCLUDING this one — status filters correctly (MSN_DRAFT is excluded) but public does not. This case asserts the CORRECT behavior and is expected to FAIL until fixed.",store_id={{STORE_ID}},"[AUTH role=ORG_USER]
 [GQL-OP setup_me]
   query { me { id } }
@@ -221,7 +207,7 @@ MSN-016,A zero-target mission never auto-completes for a user with no order hist
   query { loyaltyMissionProgress(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" first: 50) { items { missionId status percentage isStarted completedDate } } }
 [GQL-EXEC progress]","[ERRORS label=progress] errors[] empty {DOC}
 [DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ZEROTARGET.id)].status is non-null {SPEC}
-[DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ZEROTARGET.id)].completedDate is null {SPEC}",none,completedDate is non-null for a user who never engaged this mission (zero target auto-completes on an empty history — the exact boundary the fixture exists for); percentage = 100 with currentValue = 0,none,VCST-5319; C21,Draft
+[DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ZEROTARGET.id)].completedDate is null {SPEC}",none,completedDate is non-null for a user who never engaged this mission (zero target auto-completes on an empty history — the exact boundary the fixture exists for); percentage = 100 with currentValue = 0,none,VCST-5319; C21 | Promoted: REG-2026-08-27-1846 (2026-08-27),Automated
 MSN-017,"Toggling Loyalty.Missions.Enable off mid-flight hides an in-progress mission summary, and restoring it un-hides the same progress",GraphQL > Loyalty Missions > Toggle > Mid-flight,High,,"ECL-13.3, ECL-14.7","@td(MSN_ORDERCOUNT.id) target=2 orders — this case places exactly ONE qualifying order first (self-contained partial-progress setup, independent of any other case) so currentValue=1, status != Completed, before flipping the toggle OFF then back ON.",store_id={{STORE_ID}},"[AUTH role=LOYALTY_VIP_USER]
 [GQL-OP setup_me]
   query { me { id } }
@@ -258,51 +244,28 @@ MSN-017,"Toggling Loyalty.Missions.Enable off mid-flight hides an in-progress mi
   query { loyaltyMissionProgress(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" first: 50) { items { missionId currentValue } } }
 [GQL-EXEC progress_before]
 [AUTH role=ADMIN_DEFAULT]
-[REST-OP get_store]
-GET {{BACK_URL}}/api/stores/{{STORE_ID}}
-[REST-EXEC get_store]
-[REST-CAPTURE get_store.body.catalog → STORE_CATALOG]
-[REST-CAPTURE get_store.body.name → STORE_NAME]
-[REST-OP disable_missions]
-PUT {{BACK_URL}}/api/stores
-Content-Type: application/json
-Body: {""id"": ""{{STORE_ID}}"", ""catalog"": ""{{STORE_CATALOG}}"", ""name"": ""{{STORE_NAME}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": false}]}
-[REST-EXEC disable_missions]
+[SETUP] Run: npm run store:set -- --name @td(MSN_STORE_SETTINGS.setting_name) --value false (full-body GET-merge-PUT via scripts/seed-data/store/set-store-setting.mjs — never hand-roll PUT /api/stores)
 [AUTH role=LOYALTY_VIP_USER]
 [GQL-OP progress_off]
   query { loyaltyMissionProgress(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" first: 50) { items { missionId currentValue } } }
 [GQL-EXEC progress_off]
 [AUTH role=ADMIN_DEFAULT]
-[REST-OP restore_missions]
-PUT {{BACK_URL}}/api/stores
-Content-Type: application/json
-Body: {""id"": ""{{STORE_ID}}"", ""catalog"": ""{{STORE_CATALOG}}"", ""name"": ""{{STORE_NAME}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": true}]}
-[REST-EXEC restore_missions]
+[TEARDOWN] MANDATORY — Run: npm run store:set -- --name @td(MSN_STORE_SETTINGS.setting_name) --value true (run even if the progress_off assertion above fails; suites 075/075b/075c and every other MSN- case depend on this setting staying ON)
 [AUTH role=LOYALTY_VIP_USER]
 [GQL-OP progress_after]
   query { loyaltyMissionProgress(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" first: 50) { items { missionId currentValue } } }
 [GQL-EXEC progress_after]","[ERRORS label=place_add_partial] errors[] empty {DOC}
-[ERRORS label=disable_missions] HTTP 204 {OBSERVED}
+[STATE] store:set (disable) exits 0 and read-back confirms @td(MSN_STORE_SETTINGS.setting_name) = false on {{STORE_ID}} {OBSERVED}
 [ERRORS label=progress_before] errors[] empty {DOC}
 [DATA label=progress_before] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERCOUNT.id)].currentValue = 1 {SPEC}
 [ERRORS label=progress_off] errors[] empty {DOC}
 [DATA label=progress_off] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERCOUNT.id)] is null {SPEC}
-[ERRORS label=restore_missions] HTTP 204 {OBSERVED}
+[STATE] store:set (restore) exits 0 and read-back confirms @td(MSN_STORE_SETTINGS.setting_name) = true on {{STORE_ID}} {OBSERVED}
 [ERRORS label=progress_after] errors[] empty {DOC}
-[DATA label=progress_after] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERCOUNT.id)].currentValue = 1 {SPEC}",none,progress_off still contains the mission (toggle does not gate the read path); progress_after's currentValue is not 1 — either still hidden (0/null) or reset (progress lost rather than merely hidden — a more severe defect than the ticket condition describes),"[AUTH role=ADMIN_DEFAULT]
-[REST PUT {{BACK_URL}}/api/stores]
-{""id"": ""{{STORE_ID}}"", ""catalog"": ""{{STORE_CATALOG}}"", ""name"": ""{{STORE_NAME}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": true}]}",VCST-5319; C25,Draft
+[DATA label=progress_after] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERCOUNT.id)].currentValue = 1 {SPEC}","[EVIDENCE] See MSN-010 Cross_Layer_Checks for the 2026-08-27 partial-PUT outage this case's toggle steps used to trigger — now driven via npm run store:set (scripts/seed-data/store/set-store-setting.mjs).",progress_off still contains the mission (toggle does not gate the read path); progress_after's currentValue is not 1 — either still hidden (0/null) or reset (progress lost rather than merely hidden — a more severe defect than the ticket condition describes),"[AUTH role=ADMIN_DEFAULT]
+[TEARDOWN] Run: npm run store:set -- --name @td(MSN_STORE_SETTINGS.setting_name) --value true (idempotent no-op if already true; safety-net cleanup in case the case aborted before its own mid-flow restore)",VCST-5319; C25,Manual
 MSN-018,Toggle OFF blocks accrual — a qualifying order placed while Loyalty.Missions.Enable=false never advances currentValue,GraphQL > Loyalty Missions > Toggle > Accrual,Critical,,"ECL-13.3, ECL-14.7","@td(MSN_ORDERCOUNT.id) target=2. Flips the toggle OFF, places ONE qualifying order, polls for settlement, then restores the toggle ON before asserting.",store_id={{STORE_ID}},"[AUTH role=ADMIN_DEFAULT]
-[REST-OP get_store]
-GET {{BACK_URL}}/api/stores/{{STORE_ID}}
-[REST-EXEC get_store]
-[REST-CAPTURE get_store.body.catalog → STORE_CATALOG]
-[REST-CAPTURE get_store.body.name → STORE_NAME]
-[REST-OP disable_missions]
-PUT {{BACK_URL}}/api/stores
-Content-Type: application/json
-Body: {""id"": ""{{STORE_ID}}"", ""catalog"": ""{{STORE_CATALOG}}"", ""name"": ""{{STORE_NAME}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": false}]}
-[REST-EXEC disable_missions]
+[SETUP] Run: npm run store:set -- --name @td(MSN_STORE_SETTINGS.setting_name) --value false (full-body GET-merge-PUT via scripts/seed-data/store/set-store-setting.mjs — never hand-roll PUT /api/stores)
 [AUTH role=LOYALTY_VIP_USER]
 [GQL-OP setup_me]
   query { me { id } }
@@ -336,22 +299,17 @@ Body: {""id"": ""{{STORE_ID}}"", ""catalog"": ""{{STORE_CATALOG}}"", ""name"": "
 [GQL-EXEC place_add_toggleoff]
 [GQL-CAPTURE place_add_toggleoff.data.createOrderFromCart.number → ORDER_NUMBER_ADD_TOGGLEOFF]
 [AUTH role=ADMIN_DEFAULT]
-[REST-OP restore_missions]
-PUT {{BACK_URL}}/api/stores
-Content-Type: application/json
-Body: {""id"": ""{{STORE_ID}}"", ""catalog"": ""{{STORE_CATALOG}}"", ""name"": ""{{STORE_NAME}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": true}]}
-[REST-EXEC restore_missions]
+[TEARDOWN] MANDATORY — Run: npm run store:set -- --name @td(MSN_STORE_SETTINGS.setting_name) --value true (run even before polling/asserting progress below; restores state regardless of order-settlement outcome)
 [AUTH role=LOYALTY_VIP_USER]
 [WAIT seconds=15]
 [GQL-OP progress]
   query { loyaltyMissionProgress(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" first: 50) { items { missionId currentValue } } }
-[GQL-EXEC progress]","[ERRORS label=disable_missions] HTTP 204 {OBSERVED}
+[GQL-EXEC progress]","[STATE] store:set (disable) exits 0 and read-back confirms @td(MSN_STORE_SETTINGS.setting_name) = false on {{STORE_ID}} {OBSERVED}
 [ERRORS label=place_add_toggleoff] errors[] empty {BL}
-[ERRORS label=restore_missions] HTTP 204 {OBSERVED}
+[STATE] store:set (restore) exits 0 and read-back confirms @td(MSN_STORE_SETTINGS.setting_name) = true on {{STORE_ID}} {OBSERVED}
 [ERRORS label=progress] errors[] empty {DOC}
-[DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERCOUNT.id)].currentValue = 0 {SPEC}","[API] the order itself is created successfully (toggle gates ONLY the mission accrual/read path, never checkout)","currentValue > 0 (the order placed while disabled was still counted — toggle gate broken on the accrual path); order creation itself fails (unrelated regression, not the toggle)","[AUTH role=ADMIN_DEFAULT]
-[REST PUT {{BACK_URL}}/api/stores]
-{""id"": ""{{STORE_ID}}"", ""catalog"": ""{{STORE_CATALOG}}"", ""name"": ""{{STORE_NAME}}"", ""settings"": [{""name"": ""@td(MSN_STORE_SETTINGS.setting_name)"", ""value"": true}]}",VCST-5319; C1,Draft
+[DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERCOUNT.id)].currentValue = 0 {SPEC}","[API] the order itself is created successfully (toggle gates ONLY the mission accrual/read path, never checkout). [EVIDENCE] See MSN-010 Cross_Layer_Checks for the 2026-08-27 partial-PUT outage this case's toggle steps used to trigger — now driven via npm run store:set (scripts/seed-data/store/set-store-setting.mjs).","currentValue > 0 (the order placed while disabled was still counted — toggle gate broken on the accrual path); order creation itself fails (unrelated regression, not the toggle)","[AUTH role=ADMIN_DEFAULT]
+[TEARDOWN] Run: npm run store:set -- --name @td(MSN_STORE_SETTINGS.setting_name) --value true (idempotent no-op if already true; safety-net cleanup in case the case aborted before its own mid-flow restore)",VCST-5319; C1,Manual
 MSN-019,OrderCountGoal completion grants the configured reward and the balance-log entry is Mission-sourced,GraphQL > Loyalty Missions > Reward > Grant,Critical,BL-LOY-007,"ECL-13.3, ECL-14.7","@td(MSN_ORDERCOUNT.id) target=2, reward=300. Places TWO qualifying orders in this case (order count crosses the threshold on the second).",store_id={{STORE_ID}},"[AUTH role=LOYALTY_VIP_USER]
 [GQL-OP setup_me]
   query { me { id } }
@@ -485,7 +443,7 @@ MSN-020,A zero-reward mission completes but grants nothing and writes no points-
 [ERRORS label=balance_after] errors[] empty {DOC}
 [DATA label=balance_after] data.loyaltyBalance.currentBalance = {{BAL_BEFORE}} {SPEC}
 [ERRORS label=history_after] errors[] empty {DOC}
-[COUNT label=history_after] data.loyaltyPointsHistory.items.length = {{HISTORY_COUNT_BEFORE}} {SPEC}","[EVIDENCE] `orderId` is not a field on LoyaltyOperationLog (it lives on the nested `object` sub-type — see MSN-019/MSN-021), so the ORIGINAL `items[?orderId=...]` filter could never match anything and this case's PASS was vacuous regardless of the product. Reworked to a before/after total-count comparison (no per-order filtering needed): if the zero-reward completion genuinely writes no entry, the user's total history count is unchanged across the mutation. `first: 500` is used on both reads to keep the comparison meaningful even for a long-lived shared fixture user (LOYALTY_VIP_USER) whose history grows across other MSN- cases in this suite.","status never reaches Completed (goal itself broken, unrelated to reward=0); balance changes (zero reward still grants something); history_after.items.length > history_count_before (a new — likely zero-amount, no-op — history row was written for this order)",none,VCST-5319; C10,Draft
+[COUNT label=history_after] data.loyaltyPointsHistory.items.length = {{HISTORY_COUNT_BEFORE}} {SPEC}","[EVIDENCE] `orderId` is not a field on LoyaltyOperationLog (it lives on the nested `object` sub-type — see MSN-019/MSN-021), so the ORIGINAL `items[?orderId=...]` filter could never match anything and this case's PASS was vacuous regardless of the product. Reworked to a before/after total-count comparison (no per-order filtering needed): if the zero-reward completion genuinely writes no entry, the user's total history count is unchanged across the mutation. `first: 500` is used on both reads to keep the comparison meaningful even for a long-lived shared fixture user (LOYALTY_VIP_USER) whose history grows across other MSN- cases in this suite.","status never reaches Completed (goal itself broken, unrelated to reward=0); balance changes (zero reward still grants something); history_after.items.length > history_count_before (a new — likely zero-amount, no-op — history row was written for this order)",none,VCST-5319; C10 | Promoted: REG-2026-08-27-1846 (2026-08-27),Automated
 MSN-021,Repeated points-history reads after settlement report the SAME entry — no duplicate on re-check (dedup),GraphQL > Loyalty Missions > Reward > Dedup,Critical,BL-LOY-007; PROPOSED-BL-LOY-017,ECL-14.7,"Self-contained — places exactly one qualifying order against @td(MSN_ORDERVALUE.id) (single-order completion, no multi-order setup needed) within this case, then reads the resulting Earned-mission log entry TWICE with a settle delay between reads.",store_id={{STORE_ID}},"[AUTH role=LOYALTY_VIP_USER]
 [GQL-OP setup_me]
   query { me { id } }
@@ -534,7 +492,7 @@ MSN-021,Repeated points-history reads after settlement report the SAME entry —
 [ERRORS label=history_1] errors[] empty {DOC}
 [DATA label=history_1] data.loyaltyPointsHistory.items.length = {{HISTORY_COUNT_BEFORE}} + 1 {BL}
 [ERRORS label=history_2] errors[] empty {DOC}
-[DATA label=history_2] data.loyaltyPointsHistory.items.length = {{HISTORY_COUNT_BEFORE}} + 1 {BL}","[EVIDENCE] `orderId` is not a field on LoyaltyOperationLog (it lives on the nested `object` sub-type — see MSN-019/MSN-020); the ORIGINAL per-item `[?orderId=...]` filter (both in the WAIT predicate and the COUNT assertions) could never match, so the WAIT always ran its full 30s timeout and the COUNT assertions vacuously read 0=1 as a match only by accident of an unrecognized-predicate path never triggering. Reworked to: a before/after total-Earned-count comparison (dedup = the count settles at baseline+1 and STAYS at baseline+1 on the second read, never baseline+2) plus a WAIT keyed on items.0.object.orderId (sorted createdDate:desc, so the freshest entry) to detect settlement without a broken filter. `first: 500` keeps the comparison meaningful for the long-lived shared LOYALTY_VIP_USER fixture.",the count differs between history_1 and history_2 (a re-processing pass duplicated the entry — the exact BL-LOY-007 failure mode — applied to Missions); history_1 never reaches baseline+1 within the WAIT window (settlement broken or slower than 30s),none,"VCST-5319; C13, C23",Draft
+[DATA label=history_2] data.loyaltyPointsHistory.items.length = {{HISTORY_COUNT_BEFORE}} + 1 {BL}","[EVIDENCE] `orderId` is not a field on LoyaltyOperationLog (it lives on the nested `object` sub-type — see MSN-019/MSN-020); the ORIGINAL per-item `[?orderId=...]` filter (both in the WAIT predicate and the COUNT assertions) could never match, so the WAIT always ran its full 30s timeout and the COUNT assertions vacuously read 0=1 as a match only by accident of an unrecognized-predicate path never triggering. Reworked to: a before/after total-Earned-count comparison (dedup = the count settles at baseline+1 and STAYS at baseline+1 on the second read, never baseline+2) plus a WAIT keyed on items.0.object.orderId (sorted createdDate:desc, so the freshest entry) to detect settlement without a broken filter. `first: 500` keeps the comparison meaningful for the long-lived shared LOYALTY_VIP_USER fixture.",the count differs between history_1 and history_2 (a re-processing pass duplicated the entry — the exact BL-LOY-007 failure mode — applied to Missions); history_1 never reaches baseline+1 within the WAIT window (settlement broken or slower than 30s),none,"VCST-5319; C13, C23 | Promoted: REG-2026-08-27-1846 (2026-08-27)",Automated
 MSN-022,"Order value math caps mission percentage at exactly 100, even when the order exceeds the threshold",GraphQL > Loyalty Missions > Reward > Percentage cap,High,,,@td(MSN_ORDERVALUE.id) target=250. Places a single order well above the threshold (quantity inflated to make an overshoot likely).,store_id={{STORE_ID}},"[AUTH role=LOYALTY_VIP_USER]
 [GQL-OP setup_me]
   query { me { id } }
@@ -577,7 +535,7 @@ MSN-022,"Order value math caps mission percentage at exactly 100, even when the 
 [ERRORS label=order_check] errors[] empty {DOC}
 [DATA label=order_check] data.order.total.amount >= 250 {SPEC}
 [ERRORS label=progress] errors[] empty {DOC}
-[DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERVALUE.id)].percentage = 100 {SPEC}",none,"order_check.total.amount < 250 (the overshoot quantity did not clear the threshold on this catalog — pick a different product/quantity, this is a test-data issue not a product defect); percentage > 100 (cap missing — real defect)",none,VCST-5319; C14,Draft
+[DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERVALUE.id)].percentage = 100 {SPEC}",none,"order_check.total.amount < 250 (the overshoot quantity did not clear the threshold on this catalog — pick a different product/quantity, this is a test-data issue not a product defect); percentage > 100 (cap missing — real defect)",none,VCST-5319; C14 | Promoted: REG-2026-08-27-1846 (2026-08-27),Automated
 MSN-023,"Currency-mismatched order silently fails an OrderValueGoal in a different currency, while the matching-currency goal is satisfied",GraphQL > Loyalty Missions > OrderValueGoal > Currency accrual,Critical,PROPOSED-BL-LOY-016,ECL-14.4,@td(MSN_ORDERVALUE.id) and @td(MSN_ORDERVALUE_ALTCURRENCY.id) are IDENTICAL except currency (store-default vs store-alternate) — the controlled experiment the fixture pair exists for. Places one order in the store's default currency.,store_id={{STORE_ID}},"[AUTH role=LOYALTY_VIP_USER]
 [GQL-OP setup_me]
   query { me { id } }
@@ -616,7 +574,7 @@ MSN-023,"Currency-mismatched order silently fails an OrderValueGoal in a differe
 [WAIT until=progress timeout=30 interval=3] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERVALUE.id)].status = Completed","[ERRORS label=place_add_curmismatch] errors[] empty {DOC}
 [ERRORS label=progress] errors[] empty {DOC}
 [DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERVALUE.id)].status = Completed {SPEC}
-[DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERVALUE_ALTCURRENCY.id)].currentValue = 0 {SPEC}","[EVIDENCE] No error is expected on the ALTCURRENCY side — the ticket names this 'contributes nothing, silently', which this case asserts as currentValue staying at 0, not as an error/errors[] entry",ALTCURRENCY.currentValue > 0 (a default-currency order is being counted toward a different-currency goal — currency isolation broken); MSN_ORDERVALUE never completes (unrelated accrual regression),none,VCST-5319; C18,Draft
+[DATA label=progress] data.loyaltyMissionProgress.items[?missionId=@td(MSN_ORDERVALUE_ALTCURRENCY.id)].currentValue = 0 {SPEC}","[EVIDENCE] No error is expected on the ALTCURRENCY side — the ticket names this 'contributes nothing, silently', which this case asserts as currentValue staying at 0, not as an error/errors[] entry",ALTCURRENCY.currentValue > 0 (a default-currency order is being counted toward a different-currency goal — currency isolation broken); MSN_ORDERVALUE never completes (unrelated accrual regression),none,VCST-5319; C18 | Promoted: REG-2026-08-27-1846 (2026-08-27),Automated
 MSN-024,A guest (unauthenticated) order that would otherwise satisfy an OrderValueGoal completes checkout without a loyalty-related error and attributes nothing,GraphQL > Loyalty Missions > Accrual > Guest checkout,Medium,,,"PUBLIC role — no [AUTH]. Places a guest order valued above @td(MSN_ORDERVALUE.reward)'s threshold. A guest has no persistent userId, so `loyaltyMissionProgress` cannot be queried for this shopper post-checkout — this case asserts the order itself succeeds cleanly (no loyalty-path exception), which is the observable half of C24 available at this layer.",store_id={{STORE_ID}}; guest_id=AGENT-TEST-guest,"[GQL-OP cleanup_pre]
   mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{guest_id}}"" cartName: ""default"" currencyCode: ""USD"" cultureName: ""en-US"" }) { id } }
 [GQL-EXEC cleanup_pre]
@@ -645,7 +603,7 @@ MSN-024,A guest (unauthenticated) order that would otherwise satisfy an OrderVal
 [GQL-EXEC place_guest]","[ERRORS label=get_cart_guest] errors[] empty {DOC}
 [COUNT label=get_cart_guest] data.cart.validationErrors.length = 0 {SPEC}
 [ERRORS label=place_guest] errors[] empty {SPEC}
-[DATA label=place_guest] data.createOrderFromCart.number is non-null {SPEC}","[EVIDENCE] This case cannot directly assert 'attributes nothing' (no stable userId to re-query) — it is a coverage gap for a future admin-side check (search loyalty-points-history by orderId={{ORDER_NUMBER}} and assert zero rows), flagged in the final report. [EVIDENCE] guest_id is a DELIBERATELY fixed AGENT-TEST-guest identity, not per-run-unique: the runner has no built-in random/timestamp primitive available at Test_Data-parse time, and there is no write API to reset or delete an accumulated LoyaltyOperationLog / mission-progress row for a customer (confirmed — loyalty balance/history has no delete endpoint), so a per-run cleanup of prior progress is not implementable either. Today's assertions do not depend on this guest having zero prior progress (checkout-success only), so the fixed identity is safe now. If a future case adds an 'attributes nothing' check here, it must NOT reuse this fixed identity as-is.","place_guest errors[] non-empty (guest checkout itself broken, unrelated to loyalty); a validation error mentioning loyalty/mission appears on the guest cart (the accrual path is throwing instead of gracefully skipping a userId-less order)",none,VCST-5319; C24,Draft
+[DATA label=place_guest] data.createOrderFromCart.number is non-null {SPEC}","[EVIDENCE] This case cannot directly assert 'attributes nothing' (no stable userId to re-query) — it is a coverage gap for a future admin-side check (search loyalty-points-history by orderId={{ORDER_NUMBER}} and assert zero rows), flagged in the final report. [EVIDENCE] guest_id is a DELIBERATELY fixed AGENT-TEST-guest identity, not per-run-unique: the runner has no built-in random/timestamp primitive available at Test_Data-parse time, and there is no write API to reset or delete an accumulated LoyaltyOperationLog / mission-progress row for a customer (confirmed — loyalty balance/history has no delete endpoint), so a per-run cleanup of prior progress is not implementable either. Today's assertions do not depend on this guest having zero prior progress (checkout-success only), so the fixed identity is safe now. If a future case adds an 'attributes nothing' check here, it must NOT reuse this fixed identity as-is.","place_guest errors[] non-empty (guest checkout itself broken, unrelated to loyalty); a validation error mentioning loyalty/mission appears on the guest cart (the accrual path is throwing instead of gracefully skipping a userId-less order)",none,VCST-5319; C24 | Promoted: REG-2026-08-27-1846 (2026-08-27),Automated
 MSN-025,"Multiple simultaneous group conditions combine as OR, per the Admin UI's own 'If any of the following criteria' label — verify at accrual",GraphQL > Loyalty Missions > Targeting > Condition composition,Medium,,,"The Admin details blade labels the condition block 'If any of the following criteria:' (confirmed live this session — MSNA-024), which is a UI-level OR hint; the RUNTIME composition when two UserGroupIsCondition entries are both present is not independently confirmed. Creates a scratch Published mission with TWO group conditions (VIP, Wholesaler-like) and drives a VIP-group order through it.",store_id={{STORE_ID}}; mission_name=AGENT-TEST-MSN-ORCOND,"[AUTH role=ADMIN_DEFAULT]
 [REST-OP create_or_mission]
 POST {{BACK_URL}}/api/loyalty-missions

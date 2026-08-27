@@ -2468,9 +2468,9 @@
       "envRiskGate": "staging",
       "customerApplicability": "reference",
       "lanes": {
-        "machine": 26,
+        "machine": 23,
         "browser": 0,
-        "manual": 0
+        "manual": 3
       }
     },
     {
