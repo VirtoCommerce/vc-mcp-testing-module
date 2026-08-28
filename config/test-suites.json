@@ -3,8 +3,8 @@
   "_meta": {
     "version": "3.0",
     "description": "Regression test suite manifest for parallel orchestration with module-aligned directories under Frontend/Backend layers",
-    "generated": "2026-08-27",
-    "totalSuites": 130,
+    "generated": "2026-08-28",
+    "totalSuites": 131,
     "csvFormat": "Enriched Agent-Native CSV (ID, Title, Section, Priority, Business_Rule, Edge_Case_Refs, Preconditions, Test_Data, Steps, Assertions, Cross_Layer_Checks, Failure_Signals, Cleanup, References, Automation_Status)",
     "domains": [
       "purchase-flow",
@@ -2061,6 +2061,31 @@
         "import",
         "export",
         "catalog",
+        "sprint"
+      ],
+      "requiresModules": [
+        "import-export"
+      ],
+      "envRiskGate": "staging",
+      "customerApplicability": "reference"
+    },
+    {
+      "id": "064b",
+      "name": "CSV Export — File Name Template (VCST-5745)",
+      "file": "regression/suites/Backend/import-export/064b-csv-export-filename.csv",
+      "domain": "platform-config",
+      "layer": "backend",
+      "concern": "admin",
+      "priority": "P1",
+      "testCount": 9,
+      "estimatedMinutes": 12,
+      "agent": "qa-backend-expert",
+      "tags": [
+        "csv",
+        "export",
+        "filename",
+        "settings",
+        "security",
         "sprint"
       ],
       "requiresModules": [
