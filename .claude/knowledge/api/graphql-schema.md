@@ -1,6 +1,6 @@
 # GraphQL xAPI Schema Reference
 
-> **Source**: Live introspection of `{{BACK_URL}}/graphql` (2026-08-27)
+> **Source**: Live introspection of `{{BACK_URL}}/graphql` (2026-08-28)
 > **Purpose**: Agents MUST consult this file before writing or reviewing GraphQL queries/mutations.
 > **Refresh**: `npm run schema:refresh` — run when the schema may have changed.
 > **SCOPE — read this before concluding a field does not exist.** The query and mutation
@@ -23,6 +23,31 @@
 9. **Order addresses/payments**: `addresses[]` and `inPayments[]` (not `shippingAddress` or `payment`)
 10. **All cart mutations require `userId`**: `addItem`, `addOrUpdateCartShipment`, `addOrUpdateCartPayment`, `clearCart` — get from `me { id }`
 11. **`addOrUpdateCartShipment` requires `price`**: `CartShipmentValidator` rejects if price doesn't match available shipping rate. Query `availableShippingMethods` first.
+12. **Pass the ambient context — `cultureName`, `storeId`, `userId`, `organizationId` — on almost every query and mutation.**
+    Most xAPI operations resolve against an implied context, and **omitting a context arg is not an error**:
+    the server substitutes a default and returns `200` with data that is wrong, empty, or `null`. There is no
+    message to notice. Measured on this schema (106 queries, derived at refresh):
+
+    | Context arg | Queries accepting it | Required | Optional |
+    |---|---|---|---|
+    | `cultureName` | 59 (56%) | 3 | 56 |
+    | `storeId` | 62 (58%) | 32 | 30 |
+    | `userId` | 31 (29%) | 2 | 29 |
+    | `organizationId` | 13 (12%) | 2 | 11 |
+
+    **82 of 106 queries (77%) accept at least one; 72 (68%) accept one OPTIONALLY** —
+    that last figure is the exposure, because those are the calls that can quietly answer for a context you
+    never chose. Mutations take the same fields inside the `command:` wrapper (see Rule 1), so the same rule applies.
+
+    **Worked example.** `loyaltyMissionProgress.description` returns `null` for *every* item when `cultureName`
+    is omitted — the resolver throws `ARGUMENT_NULL` internally and the field comes back empty, while sibling
+    `name` resolves either way. A test case that omitted the culture therefore asserted an absence **it had
+    caused itself**, and would have been filed as a product defect. Found in REG-2026-08-27-1731 triage.
+
+    **Consequences for authoring:** never conclude a field is empty, missing, or broken until the call carries
+    its full context; a differential result between two callers is a context difference until proven otherwise;
+    and never hardcode these values — resolve them (`{{STORE_ID}}`, `me { id }`, `@td(...)`) per
+    `.claude/rules/test-data.md`.
 
 ---
 

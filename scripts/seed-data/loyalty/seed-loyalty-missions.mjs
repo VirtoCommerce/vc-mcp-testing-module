@@ -69,7 +69,7 @@ import { join } from 'node:path';
 import {
   STORE_ID, DRY_RUN, TEARDOWN, ONLY, ROOT, BACK_URL, ADMIN, ADMIN_PASSWORD,
   log, verbose, assertSafeTarget, auth, api, idsParam,
-  uploadAsset, assetUrlOk,
+  uploadAsset, assetUrlOk, buildStoreSeo,
   writeEnvAliasOverride, verifyRemoved, discoverCatalogProducts,
 } from '../../lib/seed-common.mjs';
 import { roleByKey, resolveRole } from '../../lib/user-roles.mjs';
@@ -78,6 +78,7 @@ import {
   BANNERS, BANNER_FOLDER, BANNER_CONTENT_TYPE, bannerSourceRel, bannerAssetRel, bannerKeyFor,
   missionName, isSeededMissionName, needsGoalItems, resolveCurrencies, resolveLocales,
   buildMissionBody, buildGoalItems, reconcileGoalItems, localizedValues,
+  ZERO_STOCK_PRODUCT, TARGET_PRODUCTS, goalSlotsFor, localeIntentsUsed, localeFieldFor,
   missionSignature, signaturesMatch, windowIsOpen, windowExpectsOpen, validateSpecShape,
   PROGRESS_ORDER, PROGRESS_ORDER_ALIAS, PROGRESS_USER_ROLE, progressOrderNumber,
   predictProgress, percentagesMatch, progressFixtures, DANGER_THRESHOLD_DAYS, WINDOWS,
@@ -467,15 +468,21 @@ async function graphqlToken() {
  * explicit `userId` (the authorization handler allows admin-or-self), which keeps the seeder from
  * needing the customer's password.
  */
-async function verifyViaCustomerQuery(userId) {
+async function verifyViaCustomerQuery(userId, locales) {
   const token = await graphqlToken();
-  const query = `query($s:String!,$u:String){ loyaltyMissionProgress(storeId:$s userId:$u first:100){ totalCount items {
-    missionId name status percentage currentValue targetValue daysRemaining isStarted missionType
+  // `cultureName` is REQUIRED here, and its absence is not a stylistic difference. Measured on vcst-qa
+  // 2026-08-28: without it the `description` resolver throws `ARGUMENT_NULL` for EVERY item and the
+  // field comes back null — including for a mission whose stored description the admin API returns in
+  // full. `name` resolves either way, so a query that omits the culture reads as "no mission has a
+  // description" and a description case would assert an absence that is an artefact of the query.
+  const culture = locales?.['store-default'];
+  const query = `query($s:String!,$u:String,$c:String){ loyaltyMissionProgress(storeId:$s userId:$u first:100 cultureName:$c){ totalCount items {
+    missionId name description status percentage currentValue targetValue daysRemaining isStarted missionType
     items { productId currentQuantity targetQuantity } } } }`;
   const res = await fetch(`${BACK_URL}/graphql`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ query, variables: { s: STORE_ID, u: userId } }),
+    body: JSON.stringify({ query, variables: { s: STORE_ID, u: userId, c: culture } }),
   });
   const json = await res.json();
   if (json.errors) throw new Error(`loyaltyMissionProgress failed: ${JSON.stringify(json.errors).slice(0, 300)}`);
@@ -490,7 +497,10 @@ async function verifyViaCustomerQuery(userId) {
     if (!percentagesMatch(Number(card.percentage), want.percentage)) problems.push(`${spec.aliasName}: percentage ${card.percentage}, expected ${want.percentage}`);
     if (card.isStarted !== true) problems.push(`${spec.aliasName}: isStarted=false — the card renders a transient 0% placeholder, not a real progress row`);
     // The danger badge is a pure function of daysRemaining, and this is the ONLY surface that reports it.
-    if (WINDOWS[spec.window]?.endOffsetDays < DANGER_THRESHOLD_DAYS) {
+    // `Number.isFinite` is load-bearing: an open-ended window declares endOffsetDays === null, and
+    // `null < 10` is TRUE in JS — without the guard this would demand a numeric daysRemaining below the
+    // threshold from the one fixture whose whole point is that it has none.
+    if (Number.isFinite(WINDOWS[spec.window]?.endOffsetDays) && WINDOWS[spec.window].endOffsetDays < DANGER_THRESHOLD_DAYS) {
       if (!(card.daysRemaining < DANGER_THRESHOLD_DAYS)) {
         problems.push(`${spec.aliasName}: daysRemaining=${card.daysRemaining}, not below the ${DANGER_THRESHOLD_DAYS}-day danger threshold — the badge renders warning`);
       }
@@ -503,6 +513,41 @@ async function verifyViaCustomerQuery(userId) {
     }
     log(`  ✓ ${spec.aliasName.padEnd(24)} ${String(card.status).padEnd(11)} ${String(card.percentage).padEnd(5)}% ${card.currentValue}/${card.targetValue} daysRemaining=${card.daysRemaining} rows=${rows.map((r) => `${r.currentQuantity}/${r.targetQuantity}`).join(',') || '—'}`);
   }
+  // MSNF-045: every fixture that AUTHORS a description must SERVE it on the surface the storefront
+  // modal reads. The admin API round-trip the write path already asserts proves only that the text is
+  // STORED; whether the customer-facing resolver hands it back is a separate question, and it is the
+  // question the case asks. A stored-but-unserved description is precisely the half-run the fixture
+  // was added to end, so it is asserted here rather than assumed.
+  for (const spec of MISSIONS) {
+    const want = spec.l10n?.description?.['store-default'];
+    if (!want) continue;
+    const card = byName.get(missionName(spec));
+    if (!card) { log(`  ℹ ${spec.aliasName}: not returned by this query run — description check skipped`); continue; }
+    if (card.description !== want) {
+      problems.push(`${spec.aliasName}: the customer-facing query returns description ${JSON.stringify(card.description)}, expected ${JSON.stringify(want)} for culture ${culture}`);
+    } else {
+      log(`  ✓ ${spec.aliasName.padEnd(24)} description served in ${culture} (${want.length} chars)`);
+    }
+  }
+
+  // MSNF-020: the open-ended fixture is verified on the SAME surface, and it is the only assertion
+  // that can prove it. `daysRemaining` is computed per request and never stored, so nothing static and
+  // nothing in the admin API can tell a null from a number here — and a null is precisely what the
+  // storefront's untested date-badge branch keys on. Reported rather than thrown when the fixture is
+  // simply absent from this run (a --only pass), but a NON-null value is a hard failure: it means the
+  // mission acquired an end date and the fixture has silently become an ordinary one.
+  const openSpec = MISSION_BY_ALIAS.MSN_OPEN_ENDED;
+  if (openSpec) {
+    const card = byName.get(missionName(openSpec));
+    if (!card) {
+      log(`  ℹ ${openSpec.aliasName}: not returned by this query run — skipped (it has no progress row of its own)`);
+    } else if (card.daysRemaining !== null) {
+      problems.push(`${openSpec.aliasName}: daysRemaining=${card.daysRemaining}, expected null — the mission has acquired an end date, so the null-daysRemaining badge branch is unreachable again`);
+    } else {
+      log(`  ✓ ${openSpec.aliasName.padEnd(24)} daysRemaining=null (open-ended)`);
+    }
+  }
+
   if (problems.length) throw new Error(`the customer-facing query does not show the declared states:\n    ${problems.join('\n    ')}`);
 }
 
@@ -593,7 +638,175 @@ async function resolveTargetProducts() {
   }
   const out = {};
   PERSKU_PRODUCTS.forEach((p, i) => { out[p.slot] = usable[i]; });
+  out[ZERO_STOCK_PRODUCT.slot] = await ensureZeroStockProduct(out.A);
   return out;
+}
+
+/* ── MSNF-035: the created zero-stock target ──────────────────────────────────
+ *
+ * Find-or-create by SKU, then hold it at zero stock. Three decisions worth stating:
+ *
+ * 1. IT INHERITS ITS NEIGHBOUR'S CATALOG, CATEGORY AND PRICELIST rather than authoring any of them.
+ *    Slot A is a product this env already sells — it is in the store's catalog, in a category the
+ *    storefront renders, and priced in a pricelist the store resolves. Copying those three from it is
+ *    the GOLDEN RULE applied to provisioning: an authored catalog/category/currency would be a
+ *    committed guess about per-env config, and the failure mode is a product that exists, resolves
+ *    through @td(), and is invisible to the storefront — which reads as the modal being broken.
+ * 2. THE PRICE IS SET, NOT SKIPPED. An unpriced row renders as broken, and "broken" is a different
+ *    observation from "out of stock" — a case that cannot tell them apart files the wrong defect.
+ * 3. THE ZERO IS RE-ASSERTED ON EVERY RUN. Inventory is the one property of this fixture that another
+ *    process can change without touching anything this seeder owns, so it is written every time
+ *    rather than only at create, and read back.
+ */
+async function ensureZeroStockProduct(neighbour) {
+  const spec = ZERO_STOCK_PRODUCT;
+  if (!neighbour?.id) throw new Error('the zero-stock product needs a discovered neighbour to inherit its catalog/category/pricelist from');
+
+  // LOOK-UP ORDER MATTERS, and it is not a micro-optimisation. `/api/catalog/listentries` is
+  // INDEX-backed, so a product that exists in the database but has not been indexed yet is invisible
+  // to it — and the seeder then tries to create it again and gets a raw HTTP 500 duplicate-key SQL
+  // error (observed on vcst-qa, 2026-08-28). The overlay id + `GET /api/catalog/products/{id}` is
+  // DATABASE-backed and authoritative, so it is asked FIRST and the index search is only the fallback
+  // for an env whose overlay has been cleared.
+  let product = null;
+  const knownId = zeroStockIdFromOverlay();
+  if (knownId) {
+    const byId = await api('GET', `/api/catalog/products/${knownId}`, null, { expectStatus: [200, 404] }).catch(() => null);
+    if (byId?.id && byId.code === spec.sku) product = { id: byId.id, sku: spec.sku, name: spec.productName, catalogId: byId.catalogId };
+  }
+  if (!product) {
+    // Deliberately catalog-BLIND. seed-standard-products scopes its equivalent lookup to a catalog
+    // because a generic fixture SKU like WH-001 can collide with a real product on the env; this SKU
+    // is `AGENT-TEST-MSN-` prefixed and therefore globally unique, and scoping it was measured to
+    // return nothing on vcst-qa for a product the unscoped query finds — which sent the seeder
+    // straight into a duplicate-key HTTP 500.
+    const found = await api('POST', '/api/catalog/listentries', {
+      keyword: spec.sku, take: 10,
+    }, { expectStatus: [200, 201, 400, 404] });
+    const hit = (found?.listEntries || found?.results || []).find((p) => p.code === spec.sku && p.type === 'product');
+    if (hit) product = { id: hit.id, sku: spec.sku, name: spec.productName, catalogId: hit.catalogId || neighbour.catalogId };
+  }
+  if (!product) {
+    const full = await api('GET', `/api/catalog/products/${neighbour.id}`);
+    const created = await api('POST', '/api/catalog/products', {
+      catalogId: neighbour.catalogId,
+      categoryId: full?.categoryId || null,
+      code: spec.sku,
+      name: spec.productName,
+      productType: 'Physical',
+      vendor: 'QA',
+      isActive: true,
+      isBuyable: true,
+      trackInventory: true,
+      // A STORE-SCOPED SEO record, because the modal row links to the product's PDP and
+      // `/product/<sku>` does NOT resolve on this storefront — it renders a client-side 404 behind
+      // HTTP 200. Without a slug the out-of-stock row's own link is broken, and a case cannot tell a
+      // broken link from the disabled control it is actually asserting. `buildStoreSeo` is the one
+      // builder that carries slug + title + store + language, which is what td:reconcile [8] requires.
+      seoInfos: [buildStoreSeo({ semanticUrl: spec.sku.toLowerCase(), pageTitle: spec.productName })],
+    }, { expectStatus: [200, 201] });
+    product = { id: created.id, sku: spec.sku, name: spec.productName, catalogId: neighbour.catalogId };
+    log(`  ✓ created zero-stock product ${spec.sku} (${product.id}) in the catalog of ${neighbour.sku}`);
+  } else {
+    verbose(`zero-stock product ${spec.sku} already exists (${product.id})`);
+  }
+
+  // Price: into the SAME pricelist the neighbour is priced in, so it is visible wherever that is.
+  // `POST /api/catalog/products/prices/search` (Pricing module) returns
+  // { results: [{ productId, product, prices: [{ pricelistId, currency, list, ... }] }] } — verified
+  // live on vcst-qa. There is no `/api/pricing/prices/search`; it 404s.
+  const neighbourPrices = await api('POST', '/api/catalog/products/prices/search', { productIds: [neighbour.id], take: 5 }, { expectStatus: [200, 201] });
+  const ref = ((neighbourPrices?.results || [])[0]?.prices || [])[0];
+  if (!ref?.pricelistId) {
+    throw new Error(
+      `no pricelist could be derived from the neighbour product ${neighbour.sku} — the zero-stock fixture would render as an UNPRICED (broken) modal row, `
+      + 'which is a different observation from out-of-stock and would be filed as the wrong defect.',
+    );
+  }
+  await api('PUT', '/api/products/prices', [{
+    productId: product.id,
+    prices: [{ pricelistId: ref.pricelistId, productId: product.id, list: spec.listPrice, currency: ref.currency, minQuantity: 1 }],
+  }], { expectStatus: [200, 204] });
+
+  // Inventory: ZERO, at the store's MAIN fulfilment centre (not ffcs[0] — the storefront reads the
+  // store's own centre). Re-asserted on every run; see decision 3 above.
+  const store = await api('GET', `/api/stores/${encodeURIComponent(STORE_ID)}`);
+  const ffcId = store?.mainFulfillmentCenterId || (store?.additionalFulfillmentCenterIds || [])[0];
+  if (!ffcId) throw new Error(`store ${STORE_ID} declares no fulfillment centre — the zero-stock level cannot be written anywhere the storefront reads`);
+  await api('PUT', '/api/inventory/plenty', [{
+    fulfillmentCenterId: ffcId, productId: product.id,
+    inStockQuantity: spec.inStockQuantity, reservedQuantity: 0, status: 'Enabled',
+  }], { expectStatus: [200, 204] });
+
+  // Read it back. A silently non-zero stock level is exactly the way this fixture goes vacuous: the
+  // product still exists, still resolves, still appears in the modal — as an ordinary in-stock row.
+  const back = await api('POST', '/api/inventory/search', { productIds: [product.id], take: 10 }, { expectStatus: [200, 201] })
+    .catch(() => null);
+  const rows = back?.results || back?.items || [];
+  const here = rows.find((r) => r.fulfillmentCenterId === ffcId);
+  if (here && Number(here.inStockQuantity) !== spec.inStockQuantity) {
+    throw new Error(
+      `${spec.sku}: inStockQuantity read back as ${here.inStockQuantity}, not ${spec.inStockQuantity} — `
+      + 'the out-of-stock row this fixture exists to render would appear as an ordinary in-stock row.',
+    );
+  }
+  const stocked = rows.filter((r) => Number(r.inStockQuantity) > 0);
+  if (stocked.length) {
+    throw new Error(
+      `${spec.sku} carries stock at ${stocked.length} other fulfilment centre(s) (${stocked.map((r) => r.fulfillmentCenterId).join(', ')}) — `
+      + 'the storefront may aggregate, so the product would not read as out of stock.',
+    );
+  }
+
+  // INDEX, THEN PROVE IT. The storefront resolves modal products through the SEARCH INDEX, so a
+  // product that exists in the database and is not indexed is INVISIBLE in the mission modal — the
+  // fixture would be created, aliased, guarded, and testing nothing. That is the exact vacuity this
+  // whole module is written against, so the index is asserted rather than hoped for.
+  //
+  // `rebuild: false` (INCREMENTAL — index what changed) and NOT `ids: [...]`. Both were measured on
+  // vcst-qa on 2026-08-28: the scoped `ids` form returned 2xx and the product was still unfindable
+  // after 60 s of polling, while the incremental form had it indexed inside 10 s. A full
+  // `rebuild: true` is deliberately never issued — on a shared QA env that is somebody else's outage.
+  // Indexing runs AFTER the price and stock writes so the indexed document carries them.
+  const reindex = () => api('POST', '/api/search/indexes/index', [{ documentType: 'CatalogProduct', rebuild: false }], { expectStatus: [200, 201, 202, 204] })
+    .catch((e) => verbose(`reindex trigger: ${String(e.message).slice(0, 120)}`));
+  const findIndexed = async () => {
+    const r = await api('POST', '/api/catalog/listentries', { keyword: spec.sku, take: 5 }, { expectStatus: [200, 201, 400, 404] });
+    return (r?.listEntries || r?.results || []).some((p) => p.code === spec.sku && p.type === 'product');
+  };
+  let indexed = await findIndexed();
+  if (!indexed) {
+    await reindex();
+    for (let i = 0; i < 12 && !indexed; i++) {
+      await new Promise((r) => setTimeout(r, 10000));
+      indexed = await findIndexed();
+      if (!indexed && i === 5) await reindex();
+    }
+  }
+  if (!indexed) {
+    throw new Error(
+      `${spec.sku} exists (${product.id}) but is NOT in the CatalogProduct search index after ~2 min of incremental reindexing. `
+      + 'The storefront resolves mission-modal products through that index, so the out-of-stock row would simply not render — '
+      + 'the fixture would look seeded and test nothing. Fix the index (or run a CatalogProduct rebuild on a NON-shared env) and re-seed.',
+    );
+  }
+
+  log(`  ✓ zero-stock target Z: ${spec.sku} — ${spec.productName} (stock ${spec.inStockQuantity}, priced ${spec.listPrice} ${ref.currency}, indexed)`);
+  return product;
+}
+
+/**
+ * The zero-stock product's id as this env's overlay last recorded it. Read directly rather than
+ * through the resolver so the seeder has no dependency on the resolver's own alias contract, and
+ * returns '' rather than throwing on a missing/unparsable overlay — an absent id is an ordinary
+ * first-seed state, not an error.
+ */
+function zeroStockIdFromOverlay() {
+  const env = process.env.TEST_ENV || 'vcst';
+  try {
+    const raw = readFileSync(join(ROOT, `test-data/aliases.${env}.json`), 'utf8');
+    return JSON.parse(raw)?.[ZERO_STOCK_PRODUCT.aliasName]?.productId || '';
+  } catch { return ''; }
 }
 
 /* ── Main ───────────────────────────────────────────────────────────────────── */
@@ -756,7 +969,12 @@ async function seed() {
     // A LocalizedString posted in the wrong shape is accepted with 201 and persisted as {"values":{}} —
     // no error, no warning, every translation gone. So the translations are RE-READ and asserted rather
     // than assumed: a silently un-localized fixture would let a C11 case pass on the fallback branch.
-    if (spec.l10n && mission?.id && !DRY_RUN) {
+    // A fixture the run deliberately refused to repair (--no-recreate) has NOT been written, so the
+    // read-back assertions below would fail on the pre-existing record and turn a considered refusal
+    // into a run that reads as broken — the same reason the progress verification is skipped after a
+    // refused reset. The KEPT report is where that drift is surfaced.
+    const kept0 = action.startsWith('KEPT');
+    if (spec.l10n && mission?.id && !DRY_RUN && !kept0) {
       const back = await api('GET', `/api/loyalty-missions/${mission.id}`);
       for (const field of Object.keys(spec.l10n)) {
         const apiField = field === 'name' ? 'localizedName' : field;
@@ -779,7 +997,7 @@ async function seed() {
     // plain string the server neither resolves nor validates (it round-trips verbatim — verified live),
     // so a wrong or empty one has no symptom until a storefront card renders blank. A Published mission
     // is immutable, so the only moment this is fixable is now.
-    if (mission?.id && !DRY_RUN) {
+    if (mission?.id && !DRY_RUN && !kept0) {
       const back = await api('GET', `/api/loyalty-missions/${mission.id}`);
       if (back?.bannerUrl !== body.bannerUrl) {
         throw new Error(
@@ -802,9 +1020,11 @@ async function seed() {
     if (spec.goal.currency) writeback[spec.aliasName].goal_currency = currencies[spec.goal.currency];
     // The resolved locale codes are per-env too, so a localization case reads which cultures were
     // really seeded rather than assuming en-US/de-DE.
-    if (spec.l10n) {
-      writeback[spec.aliasName].locale_default = locales['store-default'];
-      writeback[spec.aliasName].locale_alternate = locales['store-alternate'];
+    // …and ONLY for the intents the spec really authors text for. A fixture that localizes into the
+    // store default alone (MSN_PERSKU_ALL's description) must not carry a `locale_alternate` naming a
+    // language it has no text in — a dead field reads as coverage that does not exist.
+    for (const intent of localeIntentsUsed(spec)) {
+      writeback[spec.aliasName][localeFieldFor(intent)] = locales[intent];
     }
     const audienceLabel = isGroupTargeted(spec) ? `groups=[${spec.condition.groups.join(',')}]` : 'any-group';
     log(`✓ ${spec.aliasName.padEnd(26)} ${name.padEnd(34)} ${spec.status}/${spec.public ? 'public' : 'private'} ${audienceLabel.padEnd(13)} banner=${bannerKeyFor(spec)} ${action}${items ? ` (+${items} SKU targets)` : ''}`);
@@ -823,7 +1043,7 @@ async function seed() {
     // …and then re-asks the question through the query the storefront itself reads. The REST search
     // proves rows exist; only this proves the customer can see them, and only this reports
     // daysRemaining, which is computed per request and never stored.
-    await verifyViaCustomerQuery(owner.userId);
+    await verifyViaCustomerQuery(owner.userId, locales);
     writeback[PROGRESS_ORDER_ALIAS] = {
       id: order.id || '', user_id: owner.userId, user_email: owner.email, store_id: STORE_ID,
     };
@@ -849,6 +1069,13 @@ async function seed() {
     const r = products[p.slot];
     if (r) writeback[p.aliasName] = { productId: r.id, sku: r.sku, name: r.name, catalogId: r.catalogId || '' };
   }
+  // The CREATED zero-stock product writes back only its server-assigned ids: its sku and name are
+  // authored business keys committed in aliases.json, so re-writing them here would put an
+  // env-invariant value in the per-env overlay and let the two silently disagree.
+  {
+    const r = products[ZERO_STOCK_PRODUCT.slot];
+    if (r) writeback[ZERO_STOCK_PRODUCT.aliasName] = { productId: r.id, catalogId: r.catalogId || '' };
+  }
 
   // The gate fixture records the OBSERVED state of both switches, so a case reads what is really
   // there rather than assuming the platform defaults.
@@ -869,6 +1096,29 @@ async function seed() {
     log('    Nothing was deleted. Re-run WITHOUT --no-recreate, once no other session depends on these ids, to repair them.');
   }
   log(DRY_RUN ? 'DRY RUN complete (no writes).' : `Seed complete — ${specs.length} mission(s)${kept.length ? `, ${kept.length} kept unrepaired` : ''}.`);
+}
+
+/**
+ * Remove the created zero-stock product and blank its overlay ids. Scoped by SKU — the discovered
+ * slot-A/B products are somebody else's and are never deleted, which is the same reason the fixture
+ * created its own product in the first place. Zero-residue is asserted, not assumed.
+ */
+async function deleteZeroStockProduct() {
+  const spec = ZERO_STOCK_PRODUCT;
+  const find = async () => {
+    const r = await api('POST', '/api/catalog/listentries', { keyword: spec.sku, take: 10 }, { expectStatus: [200, 201, 400, 404] });
+    return (r?.listEntries || r?.results || []).filter((p) => p.code === spec.sku && p.type === 'product');
+  };
+  const hits = await find();
+  if (!hits.length) { log(`ℹ no ${spec.sku} product to delete`); return; }
+  // MUST be `objectIds`: an empty ObjectIds on this endpoint wipes EVERY list entry (see the same
+  // warning in seed-standard-products.mjs), so the guard is the non-empty check above.
+  await api('POST', '/api/catalog/listentries/delete', { objectIds: hits.map((h) => h.id), objectType: 'CatalogProduct' }, { expectStatus: [200, 204, 404] })
+    .catch((e) => log(`⚠ ${spec.sku} delete: ${String(e.message).slice(0, 120)}`));
+  const residue = await verifyRemoved(find);
+  if (residue > 0) throw new Error(`teardown left ${residue} ${spec.sku} product(s) behind`);
+  if (!DRY_RUN) writeEnvAliasOverride({ [spec.aliasName]: { productId: '', catalogId: '' } });
+  log(`✓ deleted the zero-stock product ${spec.sku}`);
 }
 
 async function teardown() {
@@ -942,6 +1192,15 @@ async function teardown() {
     (await searchMissions()).filter((m) => isSeededMissionName(m.name) && (!ONLY || wanted.has(m.name)))
   ));
   if (residue > 0) throw new Error(`teardown left ${residue} ${ONLY ? `${[...wanted][0]} ` : 'AGENT-TEST-MSN- '}mission(s) behind`);
+
+  // The CREATED zero-stock product is ours, so a full teardown removes it — the discovered slot-A/B
+  // products are NOT ours and are never touched. Scoped the same way as the banners: a `--only`
+  // teardown leaves it, because MSN_PERSKU_OOS may still be targeting it.
+  if (!ONLY) {
+    await deleteZeroStockProduct();
+  } else {
+    log(`ℹ ${ZERO_STOCK_PRODUCT.sku} left in place — a scoped teardown cannot know whether MSN_PERSKU_OOS still targets it`);
+  }
 
   // The uploaded artwork is ours too, so a full teardown removes it. A SCOPED teardown must not: the
   // missions it deliberately left alone still point at those URLs, and deleting the bytes would leave

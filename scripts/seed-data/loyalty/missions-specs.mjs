@@ -81,6 +81,11 @@ export const RUNTIME_FIELDS_BY_KIND = {
   // authored half is `banner_key`, which names WHICH artwork the mission carries and is invariant.
   mission: ['id', 'banner_url'],
   perSkuProduct: ['productId', 'sku', 'name', 'catalogId'],
+  // The zero-stock product is CREATED, not discovered, so its `sku`/`name` are AUTHORED business keys
+  // (the seeder finds-or-creates by them) — only the server-assigned ids are runtime. Giving it the
+  // `perSkuProduct` list would demand that its own identifiers be blanked, which is the same category
+  // error the per-kind split exists to prevent.
+  createdProduct: ['productId', 'catalogId'],
   storeSetting: ['store_id', 'missions_enabled', 'base_loyalty_enabled'],
   // The VCST-5346 provisioning order. Its GUID is server-assigned; `user_id` is the target account's
   // per-env SECURITY-ACCOUNT id and `user_email`/`store_id` are per-env identity — all runtime.
@@ -293,6 +298,47 @@ export const PERSKU_PRODUCTS = [
 ];
 
 /**
+ * The THIRD featured-SKU target: a product this seeder CREATES and holds at ZERO stock (MSNF-035).
+ *
+ * WHY IT IS CREATED RATHER THAN DISCOVERED. The other two slots are live-discovered because any
+ * buyable product will do. This one is defined by its INVENTORY, and inventory is shared state: the
+ * only way to make a discovered product out-of-stock is to zero a product somebody else's fixture is
+ * buying. Xerox `55557702` and Pepsi `201482` are exactly that — consumed by other cases and by an
+ * open currency investigation — so the fixture owns its own product or it does not exist.
+ *
+ * WHY IT IS NOT A THIRD ENTRY IN PERSKU_PRODUCTS. `buildGoalItems` maps every PerSku mission over its
+ * slots, so a third shared slot would silently add an unbuyable target to MSN_PERSKU_ALL,
+ * MSN_PERSKU_ANY, MSN_PROGRESS_PARTIAL and MSN_PROGRESS_COMPLETED — re-deriving all three declared
+ * percentages and destroying the completed fixture outright. It is therefore a slot that only the
+ * fixture that wants it opts into, via `goalSlots`.
+ *
+ * `inStockQuantity` is 0 and the guard asserts it: raised to any "sensible" number the product is
+ * still created, still targeted, still resolves through @td() — and the disabled-control state the
+ * fixture exists for is simply never rendered.
+ */
+export const ZERO_STOCK_PRODUCT = {
+  aliasName: 'MSN_ZEROSTOCK_PRODUCT',
+  slot: 'Z',
+  quantity: 1,
+  /** The business key the seeder finds-or-creates by. Env-invariant; the GUID is overlay-only. */
+  sku: `${NAME_PREFIX}-OOS-SKU`,
+  productName: 'AGENT-TEST Missions Out-Of-Stock Target',
+  /** THE fixture. Zero, asserted by the guard — see the block comment above. */
+  inStockQuantity: 0,
+  /** A price is required, not decorative: a modal row with no price renders as broken, not as OOS. */
+  listPrice: 99,
+};
+
+/** Every product slot the fixture set can target — discovered pair plus the created zero-stock one. */
+export const TARGET_PRODUCTS = [...PERSKU_PRODUCTS, ZERO_STOCK_PRODUCT];
+
+/** The slots a spec's goal items cover. Defaults to the shared buyable pair. Pure. */
+export const goalSlotsFor = (spec) => (spec?.goalSlots ? [...spec.goalSlots] : PERSKU_PRODUCTS.map((p) => p.slot));
+
+/** Slot → its product spec, across both kinds. Pure. */
+export const productBySlot = Object.fromEntries(TARGET_PRODUCTS.map((p) => [p.slot, p]));
+
+/**
  * Date-window intents. Kept symbolic rather than as literal dates because a committed literal date
  * silently expires: an "active" fixture whose endDate has passed still exists, still resolves, and
  * turns every mission-completion case into a false negative that reads as a product bug.
@@ -354,6 +400,24 @@ export const WINDOWS = {
    * `expired` from churning, read in the other direction.
    */
   endingSoon: { startOffsetDays: -7, endOffsetDays: 5, expectOpen: true },
+  /**
+   * A window with NO END AT ALL — `endDate: null` (MSNF-020). It is the only intent whose
+   * `endOffsetDays` is null, and that null is the whole fixture.
+   *
+   * WHY IT IS A REAL PRODUCT PATH AND NOT JUST CASE SUPPORT. `daysRemaining` is
+   * `ceil(mission.EndDate - UtcNow)` computed per request in the xAPI resolver; with no EndDate there
+   * is nothing to subtract, so the field comes back NULL and the storefront's date badge takes a
+   * branch that no other fixture can reach — every other mission reports a NUMBER. A mission with no
+   * expiry is an ordinary thing for a merchant to author (an evergreen "first order" mission), so the
+   * null-daysRemaining render path ships to customers and, until this fixture existed, was covered by
+   * nothing at all. `windowIsOpen` already treats a null end as open, so the seeder's reuse check
+   * needs no special case.
+   *
+   * IT IS ALSO THE ONE INTENT THAT CANNOT DRIFT. Every other window is relative to the seed clock and
+   * ages; this one has no boundary to age towards, which is exactly why it is exempt from
+   * WINDOW_CLOCK_SLACK_DAYS — there is no boundary for a clock disagreement to cross.
+   */
+  openEnded: { startOffsetDays: -7, endOffsetDays: null, expectOpen: true },
 };
 
 /**
@@ -466,7 +530,9 @@ export const PROGRESS_ORDER_COUNT = 1;
  * distinction being tested is per-row, within one mission.
  */
 export function goalItemQuantities(spec) {
-  const base = Object.fromEntries(PERSKU_PRODUCTS.map((p) => [p.slot, p.quantity]));
+  // Keyed off the spec's OWN slots, not the shared pair: a fixture that opts into the zero-stock slot
+  // (goalSlots) must get a target quantity for it, and a fixture that does not must never inherit one.
+  const base = Object.fromEntries(goalSlotsFor(spec).map((slot) => [slot, productBySlot[slot]?.quantity]));
   return { ...base, ...(spec?.goalItemQuantities || {}) };
 }
 
@@ -497,10 +563,10 @@ export function predictProgress(spec) {
   if (goal.type === 'PerSkuGoal') {
     const targets = goalItemQuantities(spec);
     const bought = progressOrderQuantities();
-    const rows = PERSKU_PRODUCTS.map((p) => ({
-      slot: p.slot,
-      target: targets[p.slot],
-      current: bought[p.slot] || 0,
+    const rows = goalSlotsFor(spec).map((slot) => ({
+      slot,
+      target: targets[slot],
+      current: bought[slot] || 0,
     }));
     const targetValue = rows.reduce((s, r) => s + r.target, 0);
     // The module clamps EACH row before summing (`Sum(Math.Min(current, target))`), so buying ten of
@@ -769,9 +835,31 @@ export const MISSIONS = [
     condition: { type: 'AnyUserGroupCondition' },
     goal: { type: 'PerSkuGoal', all: true },
     reward: 750,
+    /**
+     * A DESCRIPTION, in the store default locale only (MSNF-045). `description` is a LocalizedString on
+     * the mission, so the only way to set one is through `l10n` — but this fixture is NOT a second
+     * localization fixture and must not become one: it declares ONE locale, and no `name`, so
+     * MSN_LOCALIZED remains the unique subject of every C11 assertion (see the exclusivity rules in
+     * `validateSpecShape`, which now separate "carries a translated NAME / more than one locale" —
+     * still MSN_LOCALIZED's alone — from "carries a description at all").
+     *
+     * WHY IT HAD TO BE A FEATURED-SKU MISSION. The storefront renders a mission's description in two
+     * DIFFERENT modal families — the order-goal modal and the featured-SKU modal — and they are
+     * separate templates. Every fixture that had a description was an OrderCount mission, so the SKU
+     * half of that assertion could only ever half-run: the case opened a SKU modal on a mission whose
+     * description was null and read an absence it could not distinguish from a template that never
+     * renders the field. This is the SKU-side subject.
+     */
+    l10n: {
+      description: {
+        'store-default':
+          'Buy every featured product at its listed quantity to complete this mission and earn points.',
+      },
+    },
     purpose:
       'PerSku with all=true → surfaces as PerSkuAll: EVERY target SKU must be bought at its quantity. '
-      + 'Paired with MSN_PERSKU_ANY over the SAME two targets, so the only variable is the flag.',
+      + 'Paired with MSN_PERSKU_ANY over the SAME two targets, so the only variable is the flag. Also '
+      + 'the SKU-side DESCRIPTION subject (MSNF-045) — see the l10n note above.',
   },
   {
     aliasName: 'MSN_PERSKU_ANY',
@@ -944,6 +1032,65 @@ export const MISSIONS = [
       + 'from the read fixtures above so a mutation case can never strand one of them mid-transition.',
   },
 
+  {
+    aliasName: 'MSN_OPEN_ENDED',
+    key: 'OPEN-ENDED',
+    status: 'Published',
+    public: true,
+    window: 'openEnded',
+    condition: { type: 'AnyUserGroupCondition' },
+    // count=3 against a ONE-order seed: never completed, for the same reason MSN_ENDING_SOON's is 4 —
+    // a completed mission takes the SUCCESS date badge, which overrides every other badge branch,
+    // including the null-daysRemaining one this fixture exists to reach.
+    goal: { type: 'OrderCountGoal', count: 3 },
+    reward: 325,
+    purpose:
+      'MSNF-020 — the ONLY mission with NO END DATE. `daysRemaining` is ceil(EndDate - UtcNow) computed '
+      + 'per request; with no EndDate it comes back NULL, and the storefront date badge takes a branch '
+      + 'no other fixture can reach because every one of them reports a number (180, or 5 on '
+      + 'MSN_ENDING_SOON). An evergreen mission is an ordinary thing for a merchant to author, so this '
+      + 'is a shipped product path that was covered by nothing — not merely case support. It is also '
+      + 'the one fixture with no boundary to age towards, which is why it is exempt from '
+      + 'WINDOW_CLOCK_SLACK_DAYS: there is no threshold for a clock disagreement to cross.',
+  },
+  {
+    aliasName: 'MSN_PERSKU_OOS',
+    key: 'PERSKU-OOS',
+    status: 'Published',
+    public: true,
+    window: 'active',
+    condition: { type: 'AnyUserGroupCondition' },
+    // all=true is LOAD-BEARING, not a preference. With all=false the buyable slot A alone satisfies
+    // the goal, the mission completes, and the SKU modal goes READ-ONLY — hiding the very stepper and
+    // Add-to-cart control whose disabled state this fixture exists to show. See the guard.
+    goal: { type: 'PerSkuGoal', all: true },
+    // Slot A (buyable, bought x2 by the seed order) NEXT TO slot Z (created by us, zero stock, never
+    // bought). The contrast is the fixture: one enabled row beside one disabled row, so the modal
+    // cannot pass by disabling everything or by disabling nothing.
+    goalSlots: ['A', 'Z'],
+    goalItemQuantities: { A: 1, Z: 1 },
+    reward: 275,
+    /*
+     * DELIBERATELY DECLARES NO `progress`, and that is a decision, not an omission. A declared progress
+     * state can only be provisioned by the ONE provisioning order, and a mission created after that
+     * order exists gets no progress row at all (`LoyaltyMissionHandler` fires on EntryState.Added) — so
+     * declaring one would make every seed of this fixture demand the whole-set reset: delete every
+     * mission, delete the order, re-place it. On a shared env that orphans undeletable
+     * LoyaltyMissionProgress rows belonging to whoever else is mid-run.
+     *
+     * It costs nothing here, because MSNF-035 is about STOCK, not progress: the modal renders its SKU
+     * rows whatever the progress, and the only progress property the case depends on is the NEGATIVE
+     * one — that the mission is not Completed, or the modal would go read-only. `validateSpecShape`
+     * still asserts exactly that, against the strongest case (what the order WOULD contribute), so the
+     * property is guarded without the fixture claiming a state nothing provisions.
+     */
+    purpose:
+      'MSNF-035 — an OUT-OF-STOCK featured SKU in the modal, beside an in-stock one. The zero-stock '
+      + 'target is a product this seeder creates and owns (MSN_ZEROSTOCK_PRODUCT); zeroing a discovered '
+      + 'product would take somebody else\'s fixture out of stock, which is why the slot is opt-in via '
+      + '`goalSlots` rather than a third entry in PERSKU_PRODUCTS.',
+  },
+
   /* ── VCST-5346 storefront progress states ─────────────────────────────────
    * The three fixtures below are the PROGRESS axis. Everything above them varies the mission
    * DEFINITION and is judged by the admin API; these vary what the customer's card LOOKS LIKE and are
@@ -1041,7 +1188,10 @@ export const needsGoalItems = (spec) => spec?.goal?.type === 'PerSkuGoal';
 export function windowDates(window, now = new Date()) {
   const w = WINDOWS[window];
   if (!w) throw new Error(`unknown window intent: ${window}`);
-  const at = (days) => new Date(now.getTime() + days * 86400000).toISOString();
+  // A null offset means "no boundary", which serializes as a null date — the MSNF-020 open-ended
+  // fixture. It is NOT the same as omitting the field: the mission body sets endDate explicitly so a
+  // template default can never quietly supply one.
+  const at = (days) => (days == null ? null : new Date(now.getTime() + days * 86400000).toISOString());
   return { startDate: at(w.startOffsetDays), endDate: at(w.endOffsetDays) };
 }
 
@@ -1124,6 +1274,21 @@ export function buildLocalizedFields(spec, locales) {
   if (spec.l10n.description) fields.description = resolve(spec.l10n.description, 'description');
   return fields;
 }
+
+/**
+ * The locale INTENTS a spec actually authors text for, across every localized field. Pure.
+ *
+ * Used to decide WHICH `locale_*` overlay fields a fixture gets. A blanket "every l10n mission gets
+ * both" would give MSN_PERSKU_ALL — which authors a description in the store default only — a
+ * `locale_alternate` naming a language it has no text in, i.e. a dead field that reads as coverage
+ * that does not exist. Same rule the registry already applies to `window_intent` and `goal_currency`.
+ */
+export const localeIntentsUsed = (spec) => [...new Set(
+  Object.values(spec?.l10n || {}).flatMap((byIntent) => Object.keys(byIntent || {})),
+)];
+
+/** The overlay field name a locale intent is recorded under. Pure. */
+export const localeFieldFor = (intent) => (intent === 'store-default' ? 'locale_default' : 'locale_alternate');
 
 /** The locale→text map actually persisted on a record, for either localized field. Pure. */
 export const localizedValues = (v) => (v && typeof v === 'object' ? (v[LOCALIZED_STRING_KEY] || {}) : {});
@@ -1248,10 +1413,10 @@ export function buildGoalItems(spec, missionId, products) {
   // Per-spec quantities, defaulting to the shared PERSKU_PRODUCTS pair. A progress fixture overrides
   // them so one order can land above one target and below another — see `goalItemQuantities`.
   const quantities = goalItemQuantities(spec);
-  return PERSKU_PRODUCTS.map((p) => {
-    const resolved = products?.[p.slot];
-    if (!resolved?.id) throw new Error(`PerSku slot ${p.slot} has no resolved product`);
-    return { missionId, productId: resolved.id, quantity: quantities[p.slot] };
+  return goalSlotsFor(spec).map((slot) => {
+    const resolved = products?.[slot];
+    if (!resolved?.id) throw new Error(`PerSku slot ${slot} has no resolved product`);
+    return { missionId, productId: resolved.id, quantity: quantities[slot] };
   });
 }
 
@@ -1315,8 +1480,11 @@ export function validateSpecShape() {
   // A window intent that does not say whether it is meant to be open is unusable: the seeder cannot
   // tell "the fixture drifted" from "the fixture is doing its job".
   for (const [name, w] of Object.entries(WINDOWS)) {
-    if (typeof w.startOffsetDays !== 'number' || typeof w.endOffsetDays !== 'number') {
-      problems.push(`window intent "${name}" must be declared as day OFFSETS — a committed literal date expires silently`);
+    // `endOffsetDays: null` is the one legal non-number: it means NO END AT ALL (the MSNF-020
+    // open-ended fixture), which is a declared intent rather than a missing offset. A literal date is
+    // still refused in both positions — that is what this rule was written against.
+    if (typeof w.startOffsetDays !== 'number' || !(typeof w.endOffsetDays === 'number' || w.endOffsetDays === null)) {
+      problems.push(`window intent "${name}" must be declared as day OFFSETS (endOffsetDays may be null for an open-ended window) — a committed literal date expires silently`);
     }
     if (typeof w.expectOpen !== 'boolean') {
       problems.push(`window intent "${name}" declares no expectOpen — the seeder cannot tell a drifted window from an intentionally closed one and would recreate the fixture on every run`);
@@ -1530,12 +1698,63 @@ export function validateSpecShape() {
       }
     }
   }
-  // A second fixture quietly acquiring translations would make the guard above non-exclusive. The
-  // BANNER is deliberately NOT part of this exclusivity any more: every mission carries one now, so
-  // C11's banner half is "MSN_LOCALIZED's banner is served like everyone else's", not "only it has one".
+  // MSN_LOCALIZED's exclusivity, narrowed to the two properties C11 actually names.
+  //
+  // The rule used to be "no other fixture may carry l10n at all", and that was too wide by exactly one
+  // case: `description` is a LocalizedString, so a mission that merely wants a DESCRIPTION has no other
+  // way to declare one, and the blanket ban left every describable mission an OrderCount mission —
+  // which is why the SKU-modal half of the description assertion could never run (MSNF-045). What C11
+  // needs to stay unambiguous is narrower: exactly one fixture with a translated NAME, and exactly one
+  // fixture translated into MORE THAN ONE locale. A single-locale description on another mission
+  // touches neither.
   for (const m of MISSIONS) {
     if (m.aliasName === 'MSN_LOCALIZED') continue;
-    if (m.l10n) problems.push(`${m.aliasName} carries l10n, but MSN_LOCALIZED is the declared localization fixture — two of them make the C11 assertions ambiguous`);
+    if (!m.l10n) continue;
+    if (m.l10n.name) {
+      problems.push(`${m.aliasName} carries l10n.name, but MSN_LOCALIZED is the declared localization fixture — two translated NAMES make the C11 assertions ambiguous`);
+    }
+    for (const [field, byIntent] of Object.entries(m.l10n)) {
+      const intents = Object.keys(byIntent || {});
+      if (intents.length >= MIN_LOCALES) {
+        problems.push(`${m.aliasName}.l10n.${field} declares ${intents.length} locales — multi-locale text belongs to MSN_LOCALIZED alone, or C11 can no longer name a single subject`);
+      }
+      for (const i of intents) {
+        if (!LOCALE_INTENTS.includes(i)) {
+          problems.push(`${m.aliasName}.l10n.${field} declares locale intent "${i}", which is not one of ${LOCALE_INTENTS.join('/')} — a LITERAL locale code is per-env store config and must not be committed`);
+        }
+      }
+    }
+  }
+
+  // --- MSNF-045: a description that exists but says nothing is the vacuous case here ---
+  // The assertion under test is "the description RENDERS in both modal families". A description equal
+  // to the mission's own name passes that assertion against a template that renders the NAME twice; a
+  // one-word one passes it against a template that renders any non-empty string; and two fixtures
+  // sharing a description make it impossible to tell WHICH mission's modal is on screen. Each of those
+  // seeds cleanly and resolves through @td().
+  const MIN_DESCRIPTION_CHARS = 20;
+  const describedBy = new Map();
+  for (const m of MISSIONS) {
+    for (const [intent, text] of Object.entries(m.l10n?.description || {})) {
+      const t = String(text || '').trim();
+      const where = `${m.aliasName}.l10n.description["${intent}"]`;
+      if (!t) { problems.push(`${where} is empty — it persists as a blank LocalizedString and reads as a missing description`); continue; }
+      if (t === missionName(m) || t === m.l10n?.name?.[intent]) {
+        problems.push(`${where} repeats the mission's own name — a modal that renders the NAME in the description slot would pass the assertion, so the fixture cannot fail`);
+      }
+      if (t.length < MIN_DESCRIPTION_CHARS) {
+        problems.push(`${where} is ${t.length} chars; a description shorter than ${MIN_DESCRIPTION_CHARS} is satisfied by any non-empty string and cannot distinguish a rendered description from a placeholder`);
+      }
+      const prior = describedBy.get(t);
+      if (prior) problems.push(`${where} is identical to ${prior} — two missions with the same description make it impossible to tell which mission's modal is on screen`);
+      else describedBy.set(t, where);
+    }
+  }
+  // The SKU-modal subject must stay a SKU mission, or MSNF-045's featured-SKU half silently reverts to
+  // the order-goal template it was split out of.
+  const skuDescribed = MISSIONS.filter((m) => m.l10n?.description && needsGoalItems(m));
+  if (!skuDescribed.length) {
+    problems.push('no PerSku fixture declares a description — the featured-SKU modal is a DIFFERENT template from the order-goal modal, so with only OrderCount descriptions the SKU half of the description assertion reads an absence it cannot attribute (MSNF-045)');
   }
 
   // --- banners: the storefront card renders bannerUrl, so an unset one is an invisible failure ---
@@ -1682,6 +1901,90 @@ export function validateSpecShape() {
     problems.push('a fixture sits on the endingSoon window but MSN_ENDING_SOON is gone — the danger-badge fixture is the declared one');
   }
 
+  /* ── MSNF-020: the open-ended (null endDate) fixture ───────────────────────
+   * Every way this one goes vacuous leaves it seeding cleanly: given an end date it becomes an
+   * ordinary `active` mission reporting daysRemaining 180 and the null branch is unreachable again;
+   * made private or Draft it never reaches the customer query at all; made completable it renders the
+   * SUCCESS badge, which overrides the date branch entirely.
+   */
+  const open = MISSION_BY_ALIAS.MSN_OPEN_ENDED;
+  if (open) {
+    const w = WINDOWS[open.window];
+    if (!w) {
+      problems.push(`MSN_OPEN_ENDED declares unknown window intent "${open.window}"`);
+    } else if (w.endOffsetDays !== null) {
+      problems.push(`MSN_OPEN_ENDED sits on window "${open.window}", whose endOffsetDays is ${w.endOffsetDays} rather than null — with an end date the mission reports a NUMERIC daysRemaining like every other fixture and the null render path is unreachable again`);
+    } else if (w.expectOpen !== true) {
+      problems.push('MSN_OPEN_ENDED must sit on an OPEN window — a mission outside its window is dropped from the customer query and has no badge to render');
+    }
+    if (open.status !== 'Published' || open.public !== true) {
+      problems.push('MSN_OPEN_ENDED must stay Published + public=true — otherwise it never reaches loyaltyMissionProgress and the null-daysRemaining branch is never rendered');
+    }
+    if (predictProgress(open)?.status === 'Completed') {
+      problems.push('MSN_OPEN_ENDED is COMPLETED by the seed order — the storefront colours a completed mission SUCCESS, which overrides the date badge, so the null-daysRemaining branch would not render');
+    }
+    if (MISSIONS.filter((m) => WINDOWS[m.window]?.endOffsetDays === null).length !== 1) {
+      problems.push('more than one fixture declares a null-ended window — the open-ended assertions can no longer name a single unambiguous subject');
+    }
+    // The contrast is the point: a null is only observable against fixtures that report a number.
+    if (!MISSIONS.some((m) => m.aliasName !== 'MSN_OPEN_ENDED' && Number.isFinite(WINDOWS[m.window]?.endOffsetDays))) {
+      problems.push('no OTHER fixture has a finite end date — with nothing reporting a numeric daysRemaining, a null one cannot be told from the field being unimplemented');
+    }
+  } else if (MISSIONS.some((m) => WINDOWS[m.window]?.endOffsetDays === null)) {
+    problems.push('a fixture sits on a null-ended window but MSN_OPEN_ENDED is gone — the open-ended fixture is the declared one');
+  }
+
+  /* ── MSNF-035: the zero-stock featured SKU ─────────────────────────────────
+   * The fixture is the ZERO and the CONTRAST. Raise the stock and the row renders like any other;
+   * drop the buyable companion and a modal that disables every row passes; let the seed order buy it
+   * and it is neither out of stock nor unmet; flip the goal to `any` and the buyable row completes the
+   * mission, which makes the whole modal read-only and hides the disabled control being asserted.
+   */
+  if (!(ZERO_STOCK_PRODUCT.inStockQuantity === 0)) {
+    problems.push(`MSN_ZEROSTOCK_PRODUCT declares inStockQuantity ${ZERO_STOCK_PRODUCT.inStockQuantity} — the fixture IS the zero; at any other quantity the product is created, targeted and resolvable while the out-of-stock state it exists for never renders`);
+  }
+  if (!(ZERO_STOCK_PRODUCT.listPrice > 0)) {
+    problems.push('MSN_ZEROSTOCK_PRODUCT has no positive list price — a modal row with no price renders as BROKEN, which is not the same observation as out-of-stock and would be filed as the wrong defect');
+  }
+  if (!isSeededMissionName(ZERO_STOCK_PRODUCT.sku)) {
+    problems.push(`MSN_ZEROSTOCK_PRODUCT's sku "${ZERO_STOCK_PRODUCT.sku}" lacks the ${NAME_PREFIX}- prefix, so teardown cannot sweep the product this seeder creates`);
+  }
+  if (PERSKU_PRODUCTS.some((p) => p.slot === ZERO_STOCK_PRODUCT.slot)) {
+    problems.push('the zero-stock slot has been added to PERSKU_PRODUCTS — every PerSku mission would inherit an unbuyable target, silently re-deriving MSN_PROGRESS_PARTIAL and making MSN_PROGRESS_COMPLETED uncompletable');
+  }
+  if (PROGRESS_ORDER.lines.some((l) => l.slot === ZERO_STOCK_PRODUCT.slot)) {
+    problems.push('the provisioning order buys the zero-stock slot — a product the seed order purchases is neither out of stock nor an unmet row');
+  }
+  const oosUsers = MISSIONS.filter((m) => goalSlotsFor(m).includes(ZERO_STOCK_PRODUCT.slot));
+  if (oosUsers.length !== 1) {
+    problems.push(`${oosUsers.length} fixtures target the zero-stock slot — the out-of-stock assertions need exactly one unambiguous subject (found: ${oosUsers.map((m) => m.aliasName).join(', ') || 'none'})`);
+  }
+  for (const m of oosUsers) {
+    if (m.goal?.type !== 'PerSkuGoal' || m.goal.all !== true) {
+      problems.push(`${m.aliasName} targets the zero-stock slot but is not a PerSkuGoal with all=true — a PerSkuAny goal is satisfied by the buyable companion row alone, the mission completes, and the SKU modal goes READ-ONLY, hiding the disabled control the fixture exists to show`);
+    }
+    const companions = goalSlotsFor(m).filter((s) => s !== ZERO_STOCK_PRODUCT.slot);
+    if (!companions.length) {
+      problems.push(`${m.aliasName} targets ONLY the zero-stock slot — with every row out of stock, a modal that disables all rows unconditionally passes; it needs at least one buyable companion row`);
+    }
+    for (const s of companions) {
+      if (!PERSKU_PRODUCTS.some((p) => p.slot === s)) {
+        problems.push(`${m.aliasName} names companion slot "${s}", which is not a live-discovered buyable product — the in-stock half of the contrast is not guaranteed to be buyable`);
+      }
+    }
+    if (predictProgress(m)?.status === 'Completed') {
+      problems.push(`${m.aliasName} is COMPLETED by the seed order despite carrying an unbuyable target — the modal would be read-only and the disabled control unreachable`);
+    }
+  }
+  for (const m of MISSIONS) {
+    for (const s of goalSlotsFor(m)) {
+      if (!productBySlot[s]) problems.push(`${m.aliasName}.goalSlots names slot "${s}", which no product spec declares — the seeder has nothing to resolve it to`);
+    }
+    if (m.goalSlots && !needsGoalItems(m)) {
+      problems.push(`${m.aliasName} declares goalSlots but its ${m.goal?.type} has no SKU targets — a dead override reads as coverage that does not exist`);
+    }
+  }
+
   const partial = MISSION_BY_ALIAS.MSN_PROGRESS_PARTIAL;
   if (partial) {
     const p = predictProgress(partial);
@@ -1730,7 +2033,7 @@ export function validateSpecShape() {
       problems.push(`${m.aliasName} declares goalItemQuantities but its ${m.goal?.type} has no SKU targets — a dead override reads as coverage that does not exist`);
     }
     for (const [slot, qty] of Object.entries(m.goalItemQuantities)) {
-      if (!PERSKU_PRODUCTS.some((p) => p.slot === slot)) problems.push(`${m.aliasName}.goalItemQuantities names slot "${slot}", which PERSKU_PRODUCTS does not declare — buildGoalItems ignores it silently`);
+      if (!goalSlotsFor(m).includes(slot)) problems.push(`${m.aliasName}.goalItemQuantities names slot "${slot}", which is not one of its goal slots (${goalSlotsFor(m).join('/')}) — buildGoalItems ignores it silently`);
       if (!(qty > 0)) problems.push(`${m.aliasName}.goalItemQuantities.${slot} must be positive — the module treats 0 >= 0 as satisfied WITHOUT the SKU being bought, so a zero target completes the mission on any order at all`);
     }
   }

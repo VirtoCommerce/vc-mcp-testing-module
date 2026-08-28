@@ -1,35 +1,23 @@
 {
-  "runId": "REG-2026-08-27-1731",
+  "runId": "REG-2026-08-28-1154",
   "status": "completed",
-  "selection": "083c",
-  "startedAt": "2026-08-27T17:31:23.000Z",
-  "finishedAt": "2026-08-27T18:11:14.893Z",
+  "startedAt": "2026-08-28T09:54:52.531Z",
+  "finishedAt": "2026-08-28T10:14:00.528Z",
+  "selection": "083d",
   "environment": "vcst-qa",
-  "deployState": {
-    "platform": "3.1061.0",
-    "theme": "2.57.0-pr-2396-5924-59243682",
-    "modules": {
-      "VirtoCommerce.Loyalty": "3.1006.0-pr-14-1be7"
-    }
-  },
   "suites": [
     {
-      "id": "083c",
-      "name": "Loyalty Missions Storefront",
-      "file": "regression/suites/Frontend/loyalty/083c-loyalty-missions-storefront.csv",
+      "id": "083d",
+      "name": "Loyalty Missions E2E",
+      "file": "regression/suites/Frontend/loyalty/083d-loyalty-missions-e2e.csv",
       "status": "done",
       "browser": "playwright-chrome",
-      "lane": 1,
-      "totalCases": 68,
-      "startedAt": "2026-08-27T17:32:25.643Z",
-      "finishedAt": "2026-08-27T18:11:14.893Z",
-      "results": {
-        "pass": 38,
-        "fail": 14,
-        "blocked": 15,
-        "skipped": 1,
-        "total": 68
-      }
+      "testCount": 8,
+      "startedAt": "2026-08-28T09:55:49.508Z",
+      "finishedAt": "2026-08-28T10:14:00.528Z",
+      "passed": 2,
+      "failed": 0,
+      "blocked": 6
     }
   ]
 }

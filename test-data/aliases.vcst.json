@@ -941,8 +941,9 @@
     "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
   },
   "MSN_PERSKU_ALL": {
-    "id": "1c160e3f-9b66-4cf3-b0e6-416840e4785b",
-    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-per-sku.svg"
+    "id": "a3a29889-21bb-4b12-990f-241b3c66c09e",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-per-sku.svg",
+    "locale_default": "en-US"
   },
   "MSN_PERSKU_ANY": {
     "id": "5aa5332c-415d-4e15-9a99-29866735c01c",
@@ -1024,5 +1025,17 @@
   "MSN_GROUP_VIP_PRIVATE": {
     "id": "feca8948-62fb-4e04-a969-fa729ac7200d",
     "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
+  },
+  "MSN_OPEN_ENDED": {
+    "id": "43c034bf-516c-4e6a-bc76-b24f627b37be",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
+  },
+  "MSN_PERSKU_OOS": {
+    "id": "787281d6-71fa-4926-ae0c-8d5d22b27aab",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-per-sku.svg"
+  },
+  "MSN_ZEROSTOCK_PRODUCT": {
+    "productId": "407b2bd3-dede-49be-b4c7-be09d507ffdb",
+    "catalogId": "6032bd3c-77dc-4035-a94f-6f60ee5abb4e"
   }
 }

@@ -24,6 +24,8 @@ import {
   goalItemQuantities, DANGER_THRESHOLD_DAYS, WINDOW_CLOCK_SLACK_DAYS,
   TARGET_GROUP, GROUP_AUDIENCE, GROUP_PAIR_EXEMPT_FIELDS,
   specDifferences, targetedGroups, isGroupTargeted, groupMatches, groupsInclude,
+  ZERO_STOCK_PRODUCT, TARGET_PRODUCTS, goalSlotsFor, productBySlot,
+  localeIntentsUsed, localeFieldFor,
 } from '../seed-data/loyalty/missions-specs.mjs';
 
 /* ── A faithful stand-in for GET /api/loyalty-missions/new ───────────────────
@@ -752,8 +754,10 @@ test('window intents are declared, not inlined as literal dates', () => {
   // completion case becomes a false negative that reads as a product bug.
   for (const [name, w] of Object.entries(WINDOWS)) {
     assert.equal(typeof w.startOffsetDays, 'number', `${name} start must be an offset`);
-    assert.equal(typeof w.endOffsetDays, 'number', `${name} end must be an offset`);
-    assert.ok(w.endOffsetDays > w.startOffsetDays, `${name} must not be inverted`);
+    // `null` is the one legal non-number and it means NO END AT ALL (the MSNF-020 open-ended window),
+    // which is a declared intent rather than a missing offset. A literal DATE is still refused.
+    assert.ok(typeof w.endOffsetDays === 'number' || w.endOffsetDays === null, `${name} end must be an offset or null`);
+    if (w.endOffsetDays !== null) assert.ok(w.endOffsetDays > w.startOffsetDays, `${name} must not be inverted`);
   }
 });
 
@@ -868,9 +872,15 @@ test('the guard catches every way MSN_LOCALIZED can go vacuous', () => {
   assert.deepEqual(validateSpecShape().filter((p) => /MSN_LOCALIZED/.test(p)), [], 'and the committed spec is clean');
 });
 
-test('MSN_LOCALIZED is the only fixture carrying translations — but NOT the only one with a banner', () => {
-  const withL10n = MISSIONS.filter((m) => m.l10n).map((m) => m.aliasName);
-  assert.deepEqual(withL10n, ['MSN_LOCALIZED'], 'two localization fixtures make the C11 assertions ambiguous');
+test('MSN_LOCALIZED is the only fixture with a translated NAME or multi-locale text — but NOT the only one with a banner', () => {
+  // Exclusivity was narrowed for MSNF-045: `description` is a LocalizedString, so a mission that
+  // merely wants a DESCRIPTION has no other way to declare one, and the blanket ban left every
+  // describable mission an OrderCount mission — which is why the SKU-modal half of the description
+  // assertion could never run. What C11 needs is narrower: one translated NAME, one multi-locale text.
+  const withName = MISSIONS.filter((m) => m.l10n?.name).map((m) => m.aliasName);
+  assert.deepEqual(withName, ['MSN_LOCALIZED'], 'two translated names make the C11 assertions ambiguous');
+  const multiLocale = MISSIONS.filter((m) => Object.values(m.l10n || {}).some((f) => Object.keys(f).length >= MIN_LOCALES)).map((m) => m.aliasName);
+  assert.deepEqual(multiLocale, ['MSN_LOCALIZED'], 'multi-locale text belongs to MSN_LOCALIZED alone');
   // Exclusivity used to cover the banner too. It must not any more: every mission carries one, so the
   // C11 banner assertion is "MSN_LOCALIZED's banner serves like everyone else's", not "only it has one".
   for (const m of MISSIONS) assert.ok(bannerKeyFor(m), `${m.aliasName} has no banner`);
@@ -1042,4 +1052,208 @@ test('the endingSoon window resolves to real dates that are open and close insid
   assert.equal(windowExpectsOpen('endingSoon'), true);
   const days = Math.ceil((Date.parse(endDate) - now.getTime()) / 86400000);
   assert.ok(days > 0 && days < DANGER_THRESHOLD_DAYS, `daysRemaining would be ${days}`);
+});
+
+/* ── MSNF-045: the featured-SKU description ──────────────────────────────────
+ * The assertion under test on the storefront is "the description RENDERS in both modal families".
+ * Every way the fixture can go vacuous leaves it seeding cleanly, so each is perturbed here.
+ */
+
+test('a PerSku fixture carries a description, so the SKU modal half of MSNF-045 has a subject', () => {
+  const described = MISSIONS.filter((m) => m.l10n?.description && needsGoalItems(m));
+  assert.ok(described.length >= 1, 'no PerSku mission declares a description — the featured-SKU modal is a different template from the order-goal modal');
+  assert.ok(described.some((m) => m.aliasName === 'MSN_PERSKU_ALL'), 'MSN_PERSKU_ALL is the declared SKU-side description subject');
+});
+
+test('guard catches the SKU description being emptied', () => {
+  withMutation(spec('MSN_PERSKU_ALL'), 'l10n', { description: { 'store-default': '   ' } }, () => {
+    const p = validateSpecShape();
+    assert.ok(p.some((x) => /MSN_PERSKU_ALL.*description.*empty/i.test(x)), `expected an empty-description problem, got ${JSON.stringify(p)}`);
+  });
+});
+
+test('guard catches a description that just repeats the mission name (renders, proves nothing)', () => {
+  withMutation(spec('MSN_PERSKU_ALL'), 'l10n', { description: { 'store-default': missionName(spec('MSN_PERSKU_ALL')) } }, () => {
+    const p = validateSpecShape();
+    assert.ok(p.some((x) => /repeats the mission/.test(x)), `expected a name-repetition problem, got ${JSON.stringify(p)}`);
+  });
+});
+
+test('guard catches a one-word description, which any non-empty-string template satisfies', () => {
+  withMutation(spec('MSN_PERSKU_ALL'), 'l10n', { description: { 'store-default': 'Buy stuff' } }, () => {
+    const p = validateSpecShape();
+    assert.ok(p.some((x) => /chars; a description shorter than/.test(x)), `expected a too-short problem, got ${JSON.stringify(p)}`);
+  });
+});
+
+test('guard catches two fixtures sharing one description text', () => {
+  const shared = spec('MSN_LOCALIZED').l10n.description['store-default'];
+  withMutation(spec('MSN_PERSKU_ALL'), 'l10n', { description: { 'store-default': shared } }, () => {
+    const p = validateSpecShape();
+    assert.ok(p.some((x) => /identical to/.test(x)), `expected a duplicate-description problem, got ${JSON.stringify(p)}`);
+  });
+});
+
+test('a second fixture may carry a description but never a translated NAME (C11 stays unambiguous)', () => {
+  withMutation(spec('MSN_PERSKU_ALL'), 'l10n', {
+    name: { 'store-default': 'AGENT-TEST Second Localized Mission' },
+    description: { 'store-default': 'Buy every featured product at its listed quantity to earn points.' },
+  }, () => {
+    const p = validateSpecShape();
+    assert.ok(p.some((x) => /carries l10n\.name/.test(x)), `expected a second-translated-name problem, got ${JSON.stringify(p)}`);
+  });
+});
+
+test('a second fixture may not go multi-locale — that is MSN_LOCALIZED alone', () => {
+  withMutation(spec('MSN_PERSKU_ALL'), 'l10n', {
+    description: {
+      'store-default': 'Buy every featured product at its listed quantity to earn points.',
+      'store-alternate': 'Kaufen Sie jedes vorgestellte Produkt in der angegebenen Menge.',
+    },
+  }, () => {
+    const p = validateSpecShape();
+    assert.ok(p.some((x) => /multi-locale text belongs to MSN_LOCALIZED alone/.test(x)), `expected a multi-locale problem, got ${JSON.stringify(p)}`);
+  });
+});
+
+test('the description reaches the API body as a LocalizedString, not a flat dict', () => {
+  const body = buildMissionBody(spec('MSN_PERSKU_ALL'), { template: template(), storeId: 'S', now: NOW, ...RESOLVED });
+  const values = localizedValues(body.description);
+  const locale = RESOLVED.locales['store-default'];
+  assert.equal(values[locale], spec('MSN_PERSKU_ALL').l10n.description['store-default']);
+  // A flat {locale:text} dict is accepted with 201 and silently persisted as {"values":{}}.
+  assert.ok(body.description && typeof body.description === 'object' && !(locale in body.description),
+    'the description must be wrapped, not posted flat — a flat dict persists as an empty LocalizedString with no error');
+});
+
+test('only the locale intents a fixture actually uses become overlay fields', () => {
+  assert.deepEqual(localeIntentsUsed(spec('MSN_PERSKU_ALL')), ['store-default']);
+  assert.deepEqual(localeIntentsUsed(spec('MSN_PERSKU_ALL')).map(localeFieldFor), ['locale_default']);
+  assert.deepEqual(localeIntentsUsed(spec('MSN_LOCALIZED')).map(localeFieldFor).sort(), ['locale_alternate', 'locale_default']);
+  assert.deepEqual(localeIntentsUsed(spec('MSN_ORDERCOUNT')), [], 'a fixture with no l10n gets no locale fields at all');
+});
+
+/* ── MSNF-020: the open-ended (null endDate) fixture ─────────────────────── */
+
+test('exactly one fixture has no end date, and every other one has a finite number', () => {
+  const openEnded = MISSIONS.filter((m) => WINDOWS[m.window].endOffsetDays === null);
+  assert.equal(openEnded.length, 1, 'a null daysRemaining needs exactly one unambiguous subject');
+  assert.equal(openEnded[0].aliasName, 'MSN_OPEN_ENDED');
+  const finite = MISSIONS.filter((m) => Number.isFinite(WINDOWS[m.window].endOffsetDays));
+  assert.ok(finite.length >= 1, 'with nothing reporting a numeric daysRemaining, a null one cannot be told from an unimplemented field');
+});
+
+test('the open-ended window serializes endDate as null, not as a far-future date', () => {
+  const { startDate, endDate } = windowDates('openEnded', NOW);
+  assert.equal(endDate, null);
+  assert.ok(typeof startDate === 'string' && startDate.length > 0, 'the start date is still a real date — only the END is open');
+  const body = buildMissionBody(spec('MSN_OPEN_ENDED'), { template: template(), storeId: 'S', now: NOW, ...RESOLVED });
+  assert.equal(body.endDate, null, 'endDate must be sent explicitly as null so a template default cannot supply one');
+});
+
+test('windowIsOpen treats a null end date as open, forever', () => {
+  const mission = { startDate: new Date(NOW.getTime() - 86400000).toISOString(), endDate: null };
+  assert.equal(windowIsOpen(mission, NOW), true);
+  assert.equal(windowIsOpen(mission, new Date(NOW.getTime() + 3650 * 86400000)), true,
+    'an open-ended fixture must never read as drifted, or the seeder churns its GUID on every run');
+  assert.equal(windowExpectsOpen('openEnded'), true);
+});
+
+test('guard catches the open-ended fixture acquiring an end date', () => {
+  withMutation(spec('MSN_OPEN_ENDED'), 'window', 'active', () => {
+    const p = validateSpecShape();
+    assert.ok(p.some((x) => /MSN_OPEN_ENDED/.test(x)), `expected an MSN_OPEN_ENDED problem, got ${JSON.stringify(p)}`);
+  });
+});
+
+test('guard catches the open-ended fixture becoming completable (success badge overrides the date badge)', () => {
+  withMutation(spec('MSN_OPEN_ENDED'), 'goal', { type: 'OrderCountGoal', count: 1 }, () => {
+    const p = validateSpecShape();
+    assert.ok(p.some((x) => /MSN_OPEN_ENDED is COMPLETED/.test(x)), `expected a completability problem, got ${JSON.stringify(p)}`);
+  });
+});
+
+test('guard catches the open-ended fixture being made private', () => {
+  withMutation(spec('MSN_OPEN_ENDED'), 'public', false, () => {
+    const p = validateSpecShape();
+    assert.ok(p.some((x) => /MSN_OPEN_ENDED must stay Published \+ public/.test(x)), `expected a visibility problem, got ${JSON.stringify(p)}`);
+  });
+});
+
+/* ── MSNF-035: the created zero-stock featured SKU ───────────────────────── */
+
+test('the zero-stock product is declared with zero stock, a real price and a sweepable SKU', () => {
+  assert.equal(ZERO_STOCK_PRODUCT.inStockQuantity, 0, 'the fixture IS the zero');
+  assert.ok(ZERO_STOCK_PRODUCT.listPrice > 0, 'an unpriced row renders as broken, which is not the same observation as out-of-stock');
+  assert.ok(isSeededMissionName(ZERO_STOCK_PRODUCT.sku), 'teardown sweeps by the AGENT-TEST-MSN- prefix');
+  assert.ok(!PERSKU_PRODUCTS.some((p) => p.slot === ZERO_STOCK_PRODUCT.slot), 'it must not join the shared buyable pair');
+  assert.equal(TARGET_PRODUCTS.length, PERSKU_PRODUCTS.length + 1);
+});
+
+test('the zero-stock slot is opt-in — no other PerSku mission inherits it', () => {
+  for (const m of MISSIONS.filter(needsGoalItems)) {
+    const has = goalSlotsFor(m).includes(ZERO_STOCK_PRODUCT.slot);
+    assert.equal(has, m.aliasName === 'MSN_PERSKU_OOS', `${m.aliasName} unexpectedly ${has ? 'includes' : 'omits'} the zero-stock slot`);
+  }
+  const items = buildGoalItems(spec('MSN_PERSKU_ALL'), 'M', { A: { id: 'pa' }, B: { id: 'pb' }, Z: { id: 'pz' } });
+  assert.deepEqual(items.map((i) => i.productId), ['pa', 'pb'], 'MSN_PERSKU_ALL must still target exactly its two buyable products');
+});
+
+test('the OOS mission targets one buyable row NEXT TO the zero-stock one', () => {
+  const slots = goalSlotsFor(spec('MSN_PERSKU_OOS'));
+  assert.ok(slots.includes(ZERO_STOCK_PRODUCT.slot));
+  const companions = slots.filter((s) => s !== ZERO_STOCK_PRODUCT.slot);
+  assert.ok(companions.length >= 1, 'a modal that disables every row would pass with no buyable companion');
+  for (const s of companions) assert.ok(PERSKU_PRODUCTS.some((p) => p.slot === s), `companion slot ${s} must be a live-discovered buyable product`);
+  const items = buildGoalItems(spec('MSN_PERSKU_OOS'), 'M', { A: { id: 'pa' }, B: { id: 'pb' }, Z: { id: 'pz' } });
+  assert.deepEqual(items.map((i) => i.productId).sort(), ['pa', 'pz']);
+});
+
+test('the OOS mission is incomplete against the seed order, so its modal stays interactive', () => {
+  const p = predictProgress(spec('MSN_PERSKU_OOS'));
+  assert.equal(p.status, 'InProgress', 'a completed mission renders a READ-ONLY modal, hiding the disabled control under test');
+  assert.equal(p.rowsMet, 1);
+  assert.equal(p.rowsUnmet, 1, 'the unmet row is the out-of-stock one');
+  assert.equal(p.rows.find((r) => r.slot === ZERO_STOCK_PRODUCT.slot).current, 0, 'the provisioning order must never buy the zero-stock product');
+});
+
+test('guard catches the OOS mission being flipped to PerSkuAny (which completes and goes read-only)', () => {
+  withMutation(spec('MSN_PERSKU_OOS'), 'goal', { type: 'PerSkuGoal', all: false }, () => {
+    const p = validateSpecShape();
+    assert.ok(p.some((x) => /READ-ONLY/.test(x)), `expected a read-only-modal problem, got ${JSON.stringify(p)}`);
+  });
+});
+
+test('guard catches the OOS mission losing its in-stock companion row', () => {
+  withMutation(spec('MSN_PERSKU_OOS'), 'goalSlots', [ZERO_STOCK_PRODUCT.slot], () => {
+    const p = validateSpecShape();
+    assert.ok(p.some((x) => /targets ONLY the zero-stock slot/.test(x)), `expected a missing-companion problem, got ${JSON.stringify(p)}`);
+  });
+});
+
+test('guard catches the zero-stock product being restocked', () => {
+  withMutation(ZERO_STOCK_PRODUCT, 'inStockQuantity', 5, () => {
+    const p = validateSpecShape();
+    assert.ok(p.some((x) => /the fixture IS the zero/.test(x)), `expected a restock problem, got ${JSON.stringify(p)}`);
+  });
+});
+
+test('guard catches the zero-stock product losing its price (broken row, not an OOS row)', () => {
+  withMutation(ZERO_STOCK_PRODUCT, 'listPrice', 0, () => {
+    const p = validateSpecShape();
+    assert.ok(p.some((x) => /renders as BROKEN/.test(x)), `expected an unpriced problem, got ${JSON.stringify(p)}`);
+  });
+});
+
+test('guard catches a second fixture claiming the zero-stock slot', () => {
+  withMutation(spec('MSN_PERSKU_ANY'), 'goalSlots', ['A', ZERO_STOCK_PRODUCT.slot], () => {
+    const p = validateSpecShape();
+    assert.ok(p.some((x) => /fixtures target the zero-stock slot/.test(x)), `expected an ambiguous-subject problem, got ${JSON.stringify(p)}`);
+  });
+});
+
+test('productBySlot resolves every declared slot, and goalSlotsFor defaults to the buyable pair', () => {
+  for (const p of TARGET_PRODUCTS) assert.equal(productBySlot[p.slot], p);
+  assert.deepEqual(goalSlotsFor({}), PERSKU_PRODUCTS.map((p) => p.slot));
+  assert.deepEqual(goalSlotsFor(spec('MSN_PERSKU_OOS')), ['A', 'Z']);
 });

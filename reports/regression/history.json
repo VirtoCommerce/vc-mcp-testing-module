@@ -1641,5 +1641,21 @@
     "pass_rate": 86.36,
     "duration_minutes": 27.71,
     "mode": "interactive"
+  },
+  {
+    "runId": "REG-2026-08-27-1731",
+    "date": "2026-08-27",
+    "suiteId": "083c",
+    "suiteName": "Loyalty Missions Storefront",
+    "environment": "vcst",
+    "browser": "playwright-chrome",
+    "total": 68,
+    "passed": 38,
+    "failed": 14,
+    "blocked": 15,
+    "skipped": 1,
+    "pass_rate": 73.08,
+    "duration_minutes": 34.52,
+    "mode": "interactive"
   }
 ]

@@ -1,0 +1,275 @@
+ID,Title,Section,Priority,Business_Rule,Edge_Case_Refs,Preconditions,Test_Data,Steps,Assertions,Cross_Layer_Checks,Failure_Signals,Cleanup,References,Automation_Status
+MSN-E2E-001,"Full customer loop — mission starts at known progress, two real orders placed through storefront checkout, progress advances and completes, reward lands in the balance, points history carries the entry [JOURNEY]",Loyalty > Missions > E2E Journey > [JOURNEY],Critical,BL-LOY-007,"ECL-13.3, ECL-14.7","[PRE:CLEAR_SESSION]
+[PRE:SIGNIN_AS:LOYALTY_VIP_USER]
+[PRE:RESET_CART]
+Store @td(MSN_STORE_SETTINGS.store_id) has @td(MSN_STORE_SETTINGS.setting_name)=true and @td(MSN_STORE_SETTINGS.base_setting_name)=true. @td(MSN_ORDERCOUNT.name) is seeded, Published, public, OrderCountGoal target=2, reward=@td(MSN_ORDERCOUNT.reward) PTS. No BL-* invariant is declared for mission progress/reward mechanics themselves (missions has zero dedicated BL-* entries as of this authoring) — the underlying GraphQL contract (loyaltyMissionProgress.currentValue/targetValue/status/percentage, loyaltyBalance.currentBalance, loyaltyPointsHistory.items[].operationType/amount/object) is proven live in suite 075d's mission field-shape, partial-progress and reward-grant cases (see References for exact ids) — cited as grounding evidence only; this suite is dispatched independently and establishes its own state. This is the storefront analogue those three GraphQL-only cases have no counterpart for — 083c (71 cases) places zero orders.",front_url={{FRONT_URL}}; store_id={{STORE_ID}}; loyalty_currency=@td(LOYALTY_SETTINGS.currency_code),"--- SCREEN: missions (before) ---
+[NAV] {{FRONT_URL}}/account/missions
+[WAIT] the mission card grid has rendered at least one card and no loading skeleton is visible
+[ACT] locate the card for @td(MSN_ORDERCOUNT.name); record its percent as PERCENT_0 and whether a 'Completed' chip is present
+--- SCREEN: points-history (before) ---
+[NAV] {{FRONT_URL}}/account/points-history
+[WAIT] the points-history page has rendered with a page-level Balance value
+[ACT] record the page-level Balance value as BAL_BEFORE
+--- SCREEN: catalog (order 1 of 2) ---
+[NAV] {{FRONT_URL}}/catalog
+[WAIT] the standard catalog grid has rendered with at least one product card
+[ACT] add the first product card to cart at quantity 1
+[WAIT] cart badge shows 1
+--- SCREEN: cart + checkout (order 1 of 2) ---
+[NAV] {{FRONT_URL}}/cart
+[WAIT] cart page loads with 1 line item
+[ACT] select an available Fixed Rate delivery method
+[ACT] proceed to checkout / place order following the store's checkout flow (fill required shipping; select the DefaultManualPaymentMethod, or if a card processor renders inline (CyberSource/Skyflow/Authorize.Net — allowCartPayment) fill it with the matching sandbox card env var — {{CYBERSOURCE_CARD}} / {{SKYFLOW_MASTERCARD}} / {{AUTHORIZNET_CARD}}, never hardcode)
+[WAIT] order confirmation page loads with an order number; record it as ORDER_1_NUMBER
+--- SCREEN: missions (mid-journey, after order 1) ---
+[NAV] {{FRONT_URL}}/account/missions
+[WAIT] the mission card grid has rendered again and no loading skeleton is visible; if the card still reads PERCENT_0, reload up to 3 times over 60s to allow Hangfire settlement (ECL-14.7) before recording
+[ACT] locate the card for @td(MSN_ORDERCOUNT.name); record its percent as PERCENT_1 and whether a 'Completed' chip is present
+--- SCREEN: catalog (order 2 of 2) ---
+[NAV] {{FRONT_URL}}/catalog
+[WAIT] the standard catalog grid has rendered
+[ACT] add the first product card to cart at quantity 1
+[WAIT] cart badge shows 1
+--- SCREEN: cart + checkout (order 2 of 2) ---
+[NAV] {{FRONT_URL}}/cart
+[WAIT] cart page loads with 1 line item
+[ACT] select an available Fixed Rate delivery method
+[ACT] proceed to checkout / place order following the store's checkout flow (same payment handling as order 1)
+[WAIT] order confirmation page loads with an order number; record it as ORDER_2_NUMBER
+--- SCREEN: missions (after, expected complete) ---
+[NAV] {{FRONT_URL}}/account/missions
+[WAIT] the mission card grid has rendered again; reload up to 3 times over 60s to allow settlement before recording
+[ACT] locate the card for @td(MSN_ORDERCOUNT.name); record its percent as PERCENT_2 and whether a 'Completed' chip is present
+--- SCREEN: points-history (after) ---
+[NAV] {{FRONT_URL}}/account/points-history
+[WAIT] the points-history page has rendered with a refreshed page-level Balance value and a new row at the top of the transactions list
+[ACT] record the page-level Balance value as BAL_AFTER
+[ACT] identify the newest row whose Type reads Earned","[REL] PERCENT_1 is greater than PERCENT_0 after order 1 alone (one of two qualifying orders moves the counter; the counter is not all-or-nothing) {DOC}
+[DOM] no 'Completed' chip is present on the card after order 1 alone — the mission has not yet reached its target of 2 {DOC}
+[REL] PERCENT_2 is greater than PERCENT_1 after order 2, and PERCENT_2 = 100 {DOC}
+[DOM] a 'Completed' chip is present on the card after order 2 {DOC}
+[MATH] BAL_AFTER - BAL_BEFORE = @td(MSN_ORDERCOUNT.reward) — the balance moves by exactly the mission's configured reward, no more and no less {SPEC}
+[DOM] the newest Earned row's amount = @td(MSN_ORDERCOUNT.reward) {SPEC}
+[STATE] both order numbers (ORDER_1_NUMBER, ORDER_2_NUMBER) are present and distinct — the journey placed two real, separate orders {OBSERVED}","[API] loyaltyMissionProgress(storeId, userId).items[?missionId=@td(MSN_ORDERCOUNT.id)] carries currentValue, targetValue, status, percentage per the shape confirmed live in 075d MSN-009/MSN-017; a direct query against these fields should corroborate PERCENT_1/PERCENT_2 if a discrepancy is suspected
+[API] loyaltyBalance(userId).currentBalance corroborates BAL_AFTER; loyaltyPointsHistory(userId, sort:""createdDate:desc"").items.0 corroborates the Earned row per the shape confirmed in 075d MSN-019
+[ADMIN] both orders appear in the Admin Orders grid under the VIP account with status New/Processing
+[CONSOLE] no unhandled JS errors during either checkout or on the missions/points-history pages
+[NETWORK] no 4xx/5xx on createOrderFromCart, cart mutations, or the missions/points-history data fetches","Spinner or loading skeleton visible >5s on the missions page after settlement window elapses, 4xx/5xx on createOrderFromCart, cart badge unchanged after add, PERCENT_1 unchanged from PERCENT_0 after order 1 (counter not moving at all), PERCENT_2 stuck below 100 after order 2 within the 60s settle window, BAL_AFTER unchanged from BAL_BEFORE, no Earned row appears, order confirmation never reached",Cancel both created orders via admin if the store does not auto-clear them; remove any leftover cart items; sign out,"VCST-5320; VCST-5319; BL-LOY-007; grounds against 075d MSN-009/MSN-017/MSN-019 (Promoted REG-2026-08-27-1846); fills the E2E gap noted in 083c's design (071 cases, zero orders placed); Archetype:SILENT Technique:ST",Draft
+MSN-E2E-002,"Featured-SKU modal — adding to cart from the modal leaves progress unchanged, completing the purchase through checkout advances it (positive counterpart to MSNF-026) [JOURNEY]",Loyalty > Missions > E2E Journey > [JOURNEY],Critical,,ECL-13.3,"[PRE:CLEAR_SESSION]
+[PRE:SIGNIN_AS:LOYALTY_VIP_USER]
+[PRE:RESET_CART]
+Store @td(MSN_STORE_SETTINGS.store_id) has @td(MSN_STORE_SETTINGS.setting_name)=true. @td(MSN_PERSKU_ALL.name) is seeded, Published, public, PerSkuGoal all=true over @td(MSN_PERSKU_PRODUCT_A.sku) qty @td(MSN_PERSKU_PRODUCT_A.quantity) and @td(MSN_PERSKU_PRODUCT_B.sku) qty @td(MSN_PERSKU_PRODUCT_B.quantity). 083c already proves the negative half of this claim (its cart-only, no-order case, cited in References) with the same fixture family — this case is its positive counterpart and completes the purchase. No BL-* invariant is declared for the cart-vs-order distinction on mission accrual; grounded instead by source (LoyaltyMissionHandler only reacts to OrderChangedEvent/EntryState.Added — a cart mutation raises no such event) and by that already-confirmed negative half (see References) — cited as grounding evidence only, not an execution dependency.",front_url={{FRONT_URL}}; store_id={{STORE_ID}},"--- SCREEN: missions (before) ---
+[NAV] {{FRONT_URL}}/account/missions
+[WAIT] the mission card grid has rendered and no loading skeleton is visible
+[ACT] locate the card for @td(MSN_PERSKU_ALL.name); record its percent as PERCENT_0
+--- SCREEN: featured-SKU modal ---
+[ACT] click the open-mission control on that card
+[WAIT] the featured-SKU modal has rendered its product rows and summary block
+[ACT] record the count-in-cart indicator for @td(MSN_PERSKU_PRODUCT_A.sku) and @td(MSN_PERSKU_PRODUCT_B.sku) as CART_QTY_A_0 / CART_QTY_B_0
+[ACT] raise the @td(MSN_PERSKU_PRODUCT_A.sku) row's stepper to exactly @td(MSN_PERSKU_PRODUCT_A.quantity)
+[ACT] raise the @td(MSN_PERSKU_PRODUCT_B.sku) row's stepper to exactly @td(MSN_PERSKU_PRODUCT_B.quantity)
+[WAIT] the modal summary block has recomputed
+[ACT] click 'Add to cart'
+[WAIT] the operation completes and a result notification is visible
+[ACT] click the modal's Close control
+[WAIT] the modal has been dismissed
+--- SCREEN: missions (cart holds the items, no order yet) ---
+[NAV] {{FRONT_URL}}/account/missions
+[WAIT] the mission card grid has rendered again
+[ACT] read the percent on the same card as PERCENT_CART_ONLY
+--- SCREEN: cart + checkout ---
+[NAV] {{FRONT_URL}}/cart
+[WAIT] cart page loads holding both featured SKUs at their target quantities
+[ACT] select an available Fixed Rate delivery method
+[ACT] proceed to checkout / place order following the store's checkout flow (DefaultManualPaymentMethod, or the matching sandbox card if a card processor renders inline)
+[WAIT] order confirmation page loads with an order number
+--- SCREEN: missions (after order) ---
+[NAV] {{FRONT_URL}}/account/missions
+[WAIT] the mission card grid has rendered again; reload up to 3 times over 60s to allow settlement before recording
+[ACT] locate the card for @td(MSN_PERSKU_ALL.name); record its percent as PERCENT_AFTER
+[ACT] click the open-mission control on that card again
+[WAIT] the modal has rendered
+[ACT] record the count-in-cart or 'target met' indicator for both SKU rows","[MATH] PERCENT_CART_ONLY = PERCENT_0 — adding the target quantities to cart alone does not move progress {DOC}
+[REL] PERCENT_AFTER is strictly greater than PERCENT_CART_ONLY — completing the purchase is what moves it {DOC}
+[MATH] PERCENT_AFTER = 100 given the order alone satisfied both target quantities in full {SPEC}
+[DOM] both product rows in the reopened modal now show their 'target met' state {OBSERVED}
+[STATE] the cart held the added quantities before checkout (CART_QTY_A_0/CART_QTY_B_0 reflect the pre-add state, confirming the earlier cart-only add was real and still did not move progress) {OBSERVED}","[API] loyaltyMissionProgress(storeId, userId).items[?missionId=@td(MSN_PERSKU_ALL.id)].items[] exposes per-target productId/currentQuantity/targetQuantity per the shape confirmed in 075d MSN-014; currentQuantity for both targets should equal their targetQuantity after settlement
+[ADMIN] the order appears in the Admin Orders grid with both featured SKUs as line items at their target quantities
+[CONSOLE] no unhandled JS errors during the modal interaction or checkout
+[NETWORK] no 4xx/5xx on the cart-add mutation or on createOrderFromCart","Percent moves after the cart-only add (progress written on a cart mutation — a real defect), percent unchanged after the order settles within 60s, count-in-cart indicator in the modal does not reflect the added quantities, order confirmation never reached, 4xx/5xx on the add-to-cart or place-order calls",Cancel the created order via admin if the store does not auto-clear it; remove any leftover cart items; sign out,VCST-5320; VCST-5346; positive counterpart to 083c MSNF-026 and MSNF-027; Archetype:SILENT Technique:ST,Draft
+MSN-E2E-003,"OrderValueGoal progress is measured against the order's total (subtotal + shipping), not its subtotal alone",Loyalty > Missions > E2E Journey,High,,ECL-13.3,"[PRE:CLEAR_SESSION]
+[PRE:SIGNIN_AS:LOYALTY_VIP_USER]
+[PRE:RESET_CART]
+Store @td(MSN_STORE_SETTINGS.store_id) has @td(MSN_STORE_SETTINGS.setting_name)=true. @td(MSN_ORDERVALUE.name) is seeded, Published, public, OrderValueGoal target=@td(MSN_ORDERVALUE.goal_target) reward=@td(MSN_ORDERVALUE.reward) in the store's default currency. GROUNDED IN SOURCE (not live-confirmed before this case runs): LoyaltyMissionLogicService.cs:410 computes OrderValueGoal progress from order.Total, not order.SubTotal — so a nonzero shipping charge is included in progress. No BL-* invariant declares this (missions has zero dedicated BL-* entries); this case is the first live check of that source finding. Every seeded order used to validate the fixture set was $30 flat with no shipping/tax leg (per VCST-5319 fixture notes), so this exact claim has never been exercised end-to-end before.",front_url={{FRONT_URL}}; store_id={{STORE_ID}},"--- SCREEN: catalog ---
+[NAV] {{FRONT_URL}}/catalog
+[WAIT] the standard catalog grid has rendered
+[ACT] add product(s) to cart until the running subtotal comfortably exceeds @td(MSN_ORDERVALUE.goal_target) (one high-value item, or several, is fine — the point of this case is which TOTAL is compared, not how close to the boundary it sits)
+--- SCREEN: cart + checkout ---
+[NAV] {{FRONT_URL}}/cart
+[WAIT] cart page loads with the added line item(s)
+[ACT] select an available Fixed Rate delivery method and record its displayed shipping cost as SHIP_COST (must be > 0 — if every available method quotes 0, switch to a different delivery method or address until a nonzero rate is offered, since a zero-shipping order cannot discriminate total from subtotal)
+[ACT] proceed to checkout / place order following the store's checkout flow (DefaultManualPaymentMethod, or the matching sandbox card if a card processor renders inline)
+[WAIT] order confirmation page loads with an order number; record it as ORDER_NUMBER
+--- SCREEN: order details ---
+[NAV] {{FRONT_URL}}/account/orders
+[ACT] open the just-placed order
+[WAIT] order details page loaded; record the order's subtotal and total as SUBTOTAL / TOTAL
+--- SCREEN: missions (after) ---
+[NAV] {{FRONT_URL}}/account/missions
+[WAIT] the mission card grid has rendered again; reload up to 3 times over 60s to allow settlement before recording
+[ACT] locate the card for @td(MSN_ORDERVALUE.name); record its percent as PERCENT_AFTER","[REL] TOTAL is greater than SUBTOTAL by approximately SHIP_COST — the order genuinely carries a nonzero shipping leg, so subtotal and total are distinguishable observations {OBSERVED}
+[MATH] PERCENT_AFTER = 100 (the order's TOTAL, which includes shipping, meets or exceeds @td(MSN_ORDERVALUE.goal_target)) {DOC}
+[STATE] a 'Completed' chip is present on the card {DOC}","[API] order(number: ORDER_NUMBER) returns subTotal and total per the CustomerOrderType shape confirmed in graphql-schema.md; total - subTotal should reconcile with shippingTotal (and taxTotal if the store has tax calculation enabled)
+[API] loyaltyMissionProgress(storeId, userId).items[?missionId=@td(MSN_ORDERVALUE.id)].currentMoneyValue.amount corroborates PERCENT_AFTER against the shape confirmed in 075d MSN-009
+[ADMIN] the order appears in Admin with the same subtotal/total split
+[NETWORK] no 4xx/5xx on createOrderFromCart or the order-details fetch","Every available delivery method quotes 0 shipping (case cannot discriminate — try a different address/method before concluding), PERCENT_AFTER never reaches 100 despite TOTAL clearing the target, mission stays not-Completed after the 60s settle window",Cancel the created order via admin if the store does not auto-clear it; remove any leftover cart items; sign out,"VCST-5320; source: LoyaltyMissionLogicService.cs:410 (order.Total, not order.SubTotal); Archetype:MONEY Technique:EG",Draft
+MSN-E2E-004,A mission-granted reward is not just a bigger balance number — it can be spent in a real Mixed Cart checkout on the very next order [JOURNEY],Loyalty > Missions > E2E Journey > [JOURNEY],Critical,"BL-LOY-007, BL-LOY-010","ECL-7.3, ECL-13.3, ECL-14.7","[PRE:CLEAR_SESSION]
+[PRE:SIGNIN_AS:LOYALTY_VIP_USER]
+[PRE:RESET_CART]
+Store @td(MSN_STORE_SETTINGS.store_id) has @td(MSN_STORE_SETTINGS.setting_name)=true, LOYALTY_VIP_USER's org has a shipping address, and Loyalty.Currency=@td(LOYALTY_SETTINGS.currency_code) in Mixed Cart mode (LOYALTY_SETTINGS). @td(MSN_ORDERVALUE.name) is Published, public, OrderValueGoal target=@td(MSN_ORDERVALUE.goal_target) reward=@td(MSN_ORDERVALUE.reward). suite 075d already proves the reward-grant arithmetic via the GraphQL runner and suite 083b already proves Mixed Cart redemption arithmetic from a pre-existing balance (exact case ids cited in References only, as grounding evidence, not an execution dependency) — this case is the first to chain them: the balance being spent was earned from a MISSION in the same journey, not a pre-funded fixture account.",front_url={{FRONT_URL}}; store_id={{STORE_ID}}; loyalty_currency=@td(LOYALTY_SETTINGS.currency_code),"--- SCREEN: points-history (before) ---
+[NAV] {{FRONT_URL}}/account/points-history
+[WAIT] points-history page has rendered with a page-level Balance value
+[ACT] record the page-level Balance value as BAL_0
+--- SCREEN: catalog (complete the mission) ---
+[NAV] {{FRONT_URL}}/catalog
+[WAIT] the standard catalog grid has rendered
+[ACT] add product(s) to cart until the running subtotal exceeds @td(MSN_ORDERVALUE.goal_target)
+--- SCREEN: cart + checkout (order 1 — earns the reward) ---
+[NAV] {{FRONT_URL}}/cart
+[WAIT] cart page loads with the added line item(s)
+[ACT] select an available Fixed Rate delivery method
+[ACT] proceed to checkout / place order following the store's checkout flow (DefaultManualPaymentMethod, or the matching sandbox card if a card processor renders inline)
+[WAIT] order confirmation page loads with an order number
+--- SCREEN: points-history (reward settled) ---
+[NAV] {{FRONT_URL}}/account/points-history
+[WAIT] the page-level Balance has increased from BAL_0; reload up to 3 times over 60s to allow settlement
+[ACT] record the page-level Balance value as BAL_1 (expected BAL_0 + @td(MSN_ORDERVALUE.reward))
+--- SCREEN: loyalty catalog (spend the reward) ---
+[NAV] {{FRONT_URL}}/loyalty-catalog
+[WAIT] product grid loaded with at least 1 PTS-priced product card
+[ACT] add a PTS-priced product to cart whose PTS price is <= BAL_1; record its price as PTS_LINE_TOTAL
+[WAIT] cart badge increments
+--- SCREEN: standard catalog (cash line required) ---
+[NAV] {{FRONT_URL}}/catalog
+[WAIT] standard catalog grid loaded
+[ACT] add the first cash-priced product to cart (Mixed Cart requires at least one cash line before Place Order — BL-LOY-010)
+[WAIT] cart badge shows 2
+--- SCREEN: cart + checkout (order 2 — spends the reward) ---
+[NAV] {{FRONT_URL}}/cart
+[WAIT] cart page loads with 2 line items; order summary shows a default-currency total block and a 'Total in @td(LOYALTY_SETTINGS.currency_code)' block
+[ACT] select an available Fixed Rate delivery method
+[ACT] set Payment method to Manual — NOT 'Pay with points' (a different rule, LOYALTY_PAYMENT_METHOD_NOT_ALLOWED, would mask this journey)
+[ACT] click 'Place Order'
+[WAIT] order confirmation page loads with an order number
+--- SCREEN: points-history (final) ---
+[NAV] {{FRONT_URL}}/account/points-history
+[WAIT] the page-level Balance has updated; reload up to 3 times over 60s to allow settlement
+[ACT] record the page-level Balance value as BAL_2
+[ACT] identify the newest row whose Type reads Redeemed","[MATH] BAL_1 - BAL_0 = @td(MSN_ORDERVALUE.reward) — the mission reward landed in full before any spend {SPEC}
+[MATH] BAL_2 = BAL_1 - PTS_LINE_TOTAL — the second order's redemption is deducted from a balance that INCLUDES the just-earned mission reward, proving the reward is genuinely spendable and not a display-only figure {BL}
+[DOM] the newest Redeemed row's amount = PTS_LINE_TOTAL {SPEC}
+[STATE] both orders reached confirmation with distinct order numbers {OBSERVED}","[API] loyaltyBalance(userId).currentBalance corroborates BAL_1 and BAL_2 at each checkpoint
+[API] order(number) for order 2 exposes orderTotals[] with one PTS-denominated element per the shape confirmed in BL-LOY-013 / 083b MCO-E2E-001
+[API] loyaltyPointsHistory(userId, sort:""createdDate:desc"") shows the Earned (mission) row ahead of the later Redeemed (spend) row, newest-first
+[ADMIN] both orders appear in the Admin Orders grid under the VIP account
+[CONSOLE] no unhandled JS errors across either checkout
+[NETWORK] no 4xx/5xx on createOrderFromCart for either order","BAL_1 does not reflect the mission reward within the 60s settle window, the loyalty catalog offers no PTS product priced at or below BAL_1, Place Order stays disabled despite a covering balance, BAL_2 does not reconcile to BAL_1 - PTS_LINE_TOTAL, no Redeemed row appears, 'Pay with points' selected by mistake masks the intended payment path (LOYALTY_PAYMENT_METHOD_NOT_ALLOWED)",Cancel both created orders via admin if the store does not auto-clear them; remove any leftover cart items; sign out,VCST-5320; VCST-5104; BL-LOY-007; BL-LOY-010; chains 075d MSN-019 (mission earn) with 083b MCO-E2E-001/007 (Mixed Cart redeem); Archetype:MONEY Technique:DT,Draft
+MSN-E2E-005,A discount applied at checkout reduces OrderValueGoal progress — an order that would have crossed the target pre-discount can fall back below it post-discount,Loyalty > Missions > E2E Journey,Medium,,ECL-13.3,"[PRE:CLEAR_SESSION]
+[PRE:SIGNIN_AS:LOYALTY_VIP_USER]
+[PRE:RESET_CART]
+Store @td(MSN_STORE_SETTINGS.store_id) has @td(MSN_STORE_SETTINGS.setting_name)=true. @td(MSN_ORDERVALUE.name) is Published, public, OrderValueGoal target=@td(MSN_ORDERVALUE.goal_target). @td(COUPON_20PCT.code) is a valid, active 20%-off coupon on this account/catalog. GROUNDED IN SOURCE, not previously live-confirmed: LoyaltyMissionLogicService.cs:410 reads order.Total, which is computed AFTER discounts (order-level discountTotal is subtracted upstream of Total per graphql-schema.md CustomerOrderType) — so a sufficiently large discount is expected to pull a would-have-qualified order back under the goal's target. This is the discriminating boundary case for MSN-E2E-003's claim: it is not enough that shipping is INCLUDED, discounts must also be reflected.",front_url={{FRONT_URL}}; store_id={{STORE_ID}}; coupon_code=@td(COUPON_20PCT.code),"--- SCREEN: catalog ---
+[NAV] {{FRONT_URL}}/catalog
+[WAIT] the standard catalog grid has rendered
+[ACT] add product(s) to cart until the running subtotal is comfortably ABOVE @td(MSN_ORDERVALUE.goal_target) but no more than 25% above it (so a 20% discount is likely to pull the post-discount total back under the target — if the first attempt does not land below target after applying the coupon in the next step, adjust the cart total down and retry before checking out)
+--- SCREEN: cart — apply the coupon ---
+[NAV] {{FRONT_URL}}/cart
+[WAIT] cart page loads with the added line item(s)
+[ACT] enter @td(COUPON_20PCT.code) in the coupon field and apply it
+[WAIT] the discount is reflected in the order summary; record the pre-discount subtotal as SUBTOTAL and the resulting discounted total as CART_TOTAL_DISCOUNTED
+[ACT] IF CART_TOTAL_DISCOUNTED is not below @td(MSN_ORDERVALUE.goal_target), remove one line item's quantity and re-check until it is (the case needs a genuine below-target post-discount total to be meaningful)
+[ACT] select an available Fixed Rate delivery method
+[ACT] proceed to checkout / place order following the store's checkout flow (DefaultManualPaymentMethod, or the matching sandbox card if a card processor renders inline)
+[WAIT] order confirmation page loads with an order number
+--- SCREEN: order details ---
+[NAV] {{FRONT_URL}}/account/orders
+[ACT] open the just-placed order
+[WAIT] order details loaded; record the order's discountTotal and total as ORDER_DISCOUNT / ORDER_TOTAL
+--- SCREEN: missions (after) ---
+[NAV] {{FRONT_URL}}/account/missions
+[WAIT] the mission card grid has rendered again; reload up to 3 times over 60s to allow settlement
+[ACT] locate the card for @td(MSN_ORDERVALUE.name); record its percent as PERCENT_AFTER","[REL] ORDER_DISCOUNT is greater than 0 — the coupon genuinely reduced the order {OBSERVED}
+[REL] ORDER_TOTAL is below @td(MSN_ORDERVALUE.goal_target) — the constructed boundary case actually lands below the target after discount {OBSERVED}
+[NEG] PERCENT_AFTER does NOT reach 100, and no 'Completed' chip is present, despite the cart's pre-discount subtotal having exceeded the target {DOC}","[API] order(number).discountTotal and .total corroborate ORDER_DISCOUNT / ORDER_TOTAL against the shape confirmed in graphql-schema.md CustomerOrderType
+[API] loyaltyMissionProgress(storeId, userId).items[?missionId=@td(MSN_ORDERVALUE.id)].currentMoneyValue.amount should equal ORDER_TOTAL, not SUBTOTAL and not the pre-discount cart value, corroborating PERCENT_AFTER
+[NETWORK] no 4xx/5xx applying the coupon or on createOrderFromCart","Coupon does not apply (case cannot be constructed — verify @td(COUPON_20PCT.code) is still active before concluding), the discounted total cannot be pulled below target after adjustment (retry with a smaller starting cart), PERCENT_AFTER reaches 100 despite ORDER_TOTAL being below target (the defect this case exists to catch — progress computed from a pre-discount value)",Cancel the created order via admin if the store does not auto-clear it; remove any leftover cart items and the applied coupon; sign out,"VCST-5320; source: LoyaltyMissionLogicService.cs:410 (order.Total, computed post-discount); boundary companion to MSN-E2E-003; Archetype:BOUNDARY Technique:BVA",Draft
+MSN-E2E-006,"Between order confirmation and Hangfire settlement, the missions page degrades cleanly — no error, no crash, no premature 'Completed' state — and converges to the correct state once settlement completes",Loyalty > Missions > E2E Journey,Medium,,ECL-14.7,"[PRE:CLEAR_SESSION]
+[PRE:SIGNIN_AS:LOYALTY_VIP_USER]
+[PRE:RESET_CART]
+Store @td(MSN_STORE_SETTINGS.store_id) has @td(MSN_STORE_SETTINGS.setting_name)=true. @td(MSN_ORDERVALUE.name) is Published, public, OrderValueGoal target=@td(MSN_ORDERVALUE.goal_target). Progress is written asynchronously by a Hangfire job reacting to OrderChangedEvent (per VCST-5346 PROGRESS fixture notes) — there is a real window, immediately after order confirmation, where the order exists but the mission has not yet been re-evaluated. No BL-* or documented SLA exists for the settlement window's customer-visible behavior; this case documents what is actually observed, not what is specified — every DOM assertion is {OBSERVED} rather than {SPEC}/{BL}.",front_url={{FRONT_URL}}; store_id={{STORE_ID}},"--- SCREEN: missions (before) ---
+[NAV] {{FRONT_URL}}/account/missions
+[WAIT] the mission card grid has rendered
+[ACT] locate the card for @td(MSN_ORDERVALUE.name); record its percent as PERCENT_0
+--- SCREEN: catalog + checkout (qualifying order) ---
+[NAV] {{FRONT_URL}}/catalog
+[WAIT] the standard catalog grid has rendered
+[ACT] add product(s) to cart until the subtotal exceeds @td(MSN_ORDERVALUE.goal_target)
+[NAV] {{FRONT_URL}}/cart
+[WAIT] cart page loads with the added line item(s)
+[ACT] select an available Fixed Rate delivery method
+[ACT] proceed to checkout / place order following the store's checkout flow
+[WAIT] order confirmation page loads with an order number
+--- SCREEN: missions (immediately, likely pre-settlement) ---
+[NAV] {{FRONT_URL}}/account/missions
+[WAIT] the page finishes its own loading state (its own skeleton/spinner, not the settlement job)
+[ACT] read the current state of the card for @td(MSN_ORDERVALUE.name) — record whether it still reads PERCENT_0, shows a pending/in-flight affordance, shows a stale error, or already reads 100
+--- SCREEN: missions (poll to convergence) ---
+[ACT] reload {{FRONT_URL}}/account/missions at ~10s intervals for up to 60s, recording the card's percent on each read, until it reaches 100 or the 60s budget is exhausted","[DOM] the missions page never renders an error state, a broken layout, or a JS exception overlay during the pre-settlement read, whatever percent the card shows {OBSERVED}
+[NEG] the card does NOT show a 'Completed' chip while its percent is still below 100 during any poll {OBSERVED}
+[REL] the sequence of recorded percents is monotonically non-decreasing across the polls — it never regresses from a higher value back to a lower one {OBSERVED}
+[INV] the final poll within the 60s budget reads percent = 100 with a 'Completed' chip present {OBSERVED}","[API] a direct loyaltyMissionProgress(storeId, userId) read during the same poll window corroborates whichever percent the storefront card is showing at that moment
+[CONSOLE] no unhandled JS errors on any of the polled page loads
+[NETWORK] no 4xx/5xx on any of the polled missions-page data fetches","An error toast, blank card, or JS exception appears on the immediate post-order read, percent regresses between two polls, the card never reaches 100/Completed within the 60s budget (settlement slower than expected or broken)",Cancel the created order via admin if the store does not auto-clear it; remove any leftover cart items; sign out,"VCST-5320; ECL-14.7; documents observed behavior only, no declared SLA; Archetype:STALE Technique:ST",Draft
+MSN-E2E-007,"BLOCKED ON DATA — whether a PTS-priced (points-currency) line item counts toward a PerSku mission's quantity target, given the accrual code applies no currency filter",Loyalty > Missions > E2E Journey,Low,,"ECL-14.4, ECL-13.3","[PRE:CLEAR_SESSION]
+[PRE:SIGNIN_AS:LOYALTY_VIP_USER]
+[PRE:RESET_CART]
+BLOCKED ON DATA — do not attempt to substitute a different fixture pair to unblock this case; report it blocked instead. GROUNDED IN SOURCE: the PerSkuGoal accrual path (LoyaltyMissionLogicService.cs:~416) increments a target's CurrentQuantity by summing order.Items with NO currency filter — unlike the sibling product-points-earning path (LoyaltyProgramHandler.cs:199, BL-LOY-009), which explicitly filters !x.Currency.EqualsIgnoreCase(loyaltyCurrency). That asymmetry means a PTS-priced (points-currency) line item for a target SKU is a live candidate to satisfy a PerSku goal quantity, the same way BL-LOY-009 proves the opposite for product-points earning. Executing this requires a product that is SIMULTANEOUSLY (a) a PerSkuGoal target on a seeded mission (`MSN_PERSKU_PRODUCT_A` or `MSN_PERSKU_PRODUCT_B`, which are live-discovered STANDARD-catalog products with no seeded PTS price) and (b) available for purchase in PTS on /loyalty-catalog. No such fixture exists in test-data/aliases.json as of this authoring — MSN_PERSKU_PRODUCT_A/B are discovered from the standard catalog specifically because a PerSku target needs no PTS price, and the loyalty-catalog's PTS-priced product set is a separate, unrelated pricelist assignment. Provisioning one requires either assigning a PTS price to an existing PerSku target SKU or pointing a PerSku goal at an existing PTS-priced SKU — both are test-data authoring, out of scope for this suite-authoring task (delegate to test-data-engineer via /qa-generate-data if this case is picked up).",front_url={{FRONT_URL}}; store_id={{STORE_ID}},[BLOCKED] No fixture exists that is both a PerSku mission target and a PTS-priced loyalty-catalog product — see Preconditions. Do not execute; report BLOCKED ON DATA and stop.,[NEG] this case is not executed until the fixture gap above is closed {HYPOTHESIS},none — blocked before any layer is exercised,none — blocked before any layer is exercised,none,"VCST-5320; BLOCKED ON DATA — fixture gap, see Preconditions; source asymmetry: LoyaltyMissionLogicService.cs:~416 (no currency filter) vs LoyaltyProgramHandler.cs:199 / BL-LOY-009 (currency filter present); Archetype:MONEY Technique:EG",Draft
+MSN-E2E-008,Cancelling an order after its mission reward has been granted does not reverse the grant — the balance and the mission's Completed state both survive the cancellation,Loyalty > Missions > E2E Journey,Medium,,ECL-13.3,"[PRE:CLEAR_SESSION]
+[PRE:SIGNIN_AS:LOYALTY_VIP_USER]
+[PRE:RESET_CART]
+Store @td(MSN_STORE_SETTINGS.store_id) has @td(MSN_STORE_SETTINGS.setting_name)=true. @td(MSN_ORDERVALUE.name) is Published, public, OrderValueGoal target=@td(MSN_ORDERVALUE.goal_target) reward=@td(MSN_ORDERVALUE.reward). GROUNDED IN SOURCE, not previously live-confirmed: LoyaltyMissionHandler only subscribes to OrderChangedEvent where EntryState == Added — a status change to Cancelled is a Modified entry, not a new Added one, so no mission-side handler observes it. The operation-log/reward-grant model recognizes exactly two operation types, Earned and Redeemed, with no reversal/clawback identifier anywhere in vc-module-loyalty's src/. The expected behavior below is therefore what the ABSENCE of a handler predicts, not a documented product decision — treat a mismatch (i.e., if the grant IS reversed) as informational, not confirmation of a bug in the reverse direction, since either outcome not being reversed vs. silently orphaning the order without ever reconciling is undesirable in its own way; this case exists to make the ACTUAL behavior visible and repeatable, not to assert which behavior is 'correct'.",front_url={{FRONT_URL}}; store_id={{STORE_ID}}; admin_url={{BACK_URL}},"--- SCREEN: points-history (before) ---
+[NAV] {{FRONT_URL}}/account/points-history
+[WAIT] points-history page rendered
+[ACT] record the page-level Balance as BAL_0
+--- SCREEN: catalog + checkout (qualifying order) ---
+[NAV] {{FRONT_URL}}/catalog
+[WAIT] catalog grid rendered
+[ACT] add product(s) to cart until the subtotal exceeds @td(MSN_ORDERVALUE.goal_target)
+[NAV] {{FRONT_URL}}/cart
+[ACT] select an available Fixed Rate delivery method
+[ACT] proceed to checkout / place order following the store's checkout flow
+[WAIT] order confirmation page loads with an order number; record it as ORDER_NUMBER
+--- SCREEN: points-history + missions (reward settled) ---
+[NAV] {{FRONT_URL}}/account/points-history
+[WAIT] Balance increased from BAL_0; reload up to 3 times over 60s to allow settlement
+[ACT] record the Balance as BAL_1 (expected BAL_0 + @td(MSN_ORDERVALUE.reward))
+[NAV] {{FRONT_URL}}/account/missions
+[WAIT] mission card grid rendered
+[ACT] confirm the card for @td(MSN_ORDERVALUE.name) shows a 'Completed' chip
+--- ADMIN: cancel the order ---
+[NAV] {{BACK_URL}}
+[ACT] open the Orders module and locate ORDER_NUMBER
+[BLADE] order details blade opens
+[ACT] set the order Status to Cancelled (or use the Cancel order control if offered) and confirm
+[SAVE] the status change persists
+--- SCREEN: points-history + missions (after cancellation) ---
+[NAV] {{FRONT_URL}}/account/points-history
+[WAIT] page rendered; reload up to 3 times over 60s in case a reversal is itself asynchronous
+[ACT] record the Balance as BAL_2
+[ACT] check the transactions list for any new row referencing ORDER_NUMBER since BAL_1 was recorded
+[NAV] {{FRONT_URL}}/account/missions
+[WAIT] mission card grid rendered
+[ACT] read the current state of the card for @td(MSN_ORDERVALUE.name)","[MATH] BAL_2 = BAL_1 — the balance is unchanged by the cancellation; the mission reward is not clawed back {DOC}
+[NEG] no new transactions-list row referencing ORDER_NUMBER appears after cancellation {DOC}
+[DOM] the mission card for @td(MSN_ORDERVALUE.name) still shows its 'Completed' chip after the order is cancelled {DOC}","[ADMIN] the order's Status reads Cancelled in the Admin Orders grid, confirming the cancellation itself took effect (the point of comparison is the mission side, not whether the cancel succeeded)
+[API] loyaltyBalance(userId).currentBalance corroborates BAL_2; loyaltyPointsHistory(userId) shows no new row for ORDER_NUMBER after the cancellation timestamp
+[CONSOLE] no unhandled JS errors on the Admin cancel action or the storefront re-checks","Order Status does not persist as Cancelled in Admin (cancellation itself failed — retry before concluding anything about the loyalty side), BAL_2 differs from BAL_1 in either direction without a corresponding points-history row explaining why, mission card silently disappears from the grid post-cancellation (neither confirmed-reversed nor confirmed-intact — report as a distinct finding)","Order is already Cancelled by design of this case, no further cleanup needed; sign out","VCST-5320; source: LoyaltyMissionHandler (EntryState.Added only) + operation-log model (Earned/Redeemed only, no reversal type) in vc-module-loyalty src/; documents observed behavior against an absence in source, not a declared spec; Archetype:LIFECYCLE Technique:ST",Draft

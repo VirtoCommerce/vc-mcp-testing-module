@@ -31,11 +31,13 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  MISSIONS, PERSKU_PRODUCTS, STORE_SETTING, RUNTIME_FIELDS_BY_KIND, NAME_PREFIX,
+  MISSIONS, PERSKU_PRODUCTS, ZERO_STOCK_PRODUCT, TARGET_PRODUCTS,
+  STORE_SETTING, RUNTIME_FIELDS_BY_KIND, NAME_PREFIX,
   BANNERS, bannerKeyFor, bannerSourceRel,
   missionName, validateSpecShape,
   PROGRESS_ORDER, PROGRESS_ORDER_ALIAS, PROGRESS_USER_ROLE, progressOrderNumber,
   goalItemQuantities, needsGoalItems, predictProgress, percentagesMatch, progressFixtures,
+  localeIntentsUsed, localeFieldFor,
   WINDOWS, DANGER_THRESHOLD_DAYS,
   TARGETING, TARGET_GROUP, GROUP_AUDIENCE, MISSION_BY_ALIAS,
   targetedGroups, isGroupTargeted, groupMatches,
@@ -66,6 +68,9 @@ const RUNTIME_BY_ALIAS = {
   [PROGRESS_ORDER_ALIAS]: RUNTIME_FIELDS_BY_KIND.progressOrder,
   [GROUP_AUDIENCE.aliasName]: RUNTIME_FIELDS_BY_KIND.groupAudience,
   ...Object.fromEntries(PERSKU_PRODUCTS.map((p) => [p.aliasName, RUNTIME_FIELDS_BY_KIND.perSkuProduct])),
+  // The zero-stock product is CREATED by this seeder, so its sku/name are authored business keys and
+  // only the server-assigned ids are runtime — see RUNTIME_FIELDS_BY_KIND.createdProduct.
+  [ZERO_STOCK_PRODUCT.aliasName]: RUNTIME_FIELDS_BY_KIND.createdProduct,
   // A currency-carrying mission has one MORE runtime field: the resolved code. The INTENT is authored
   // and committed; the code it resolves to is per-env store config.
   ...Object.fromEntries(MISSIONS.map((m) => [
@@ -74,9 +79,11 @@ const RUNTIME_BY_ALIAS = {
       ...RUNTIME_FIELDS_BY_KIND.mission,
       // A currency-carrying mission has one MORE runtime field: the resolved code.
       ...(m.goal.currency ? ['goal_currency'] : []),
-      // ...and a localized one has two: the locale CODES its intents resolved to. The TEXT is authored
-      // and committed; the codes are per-env store config, exactly like a currency.
-      ...(m.l10n ? ['locale_default', 'locale_alternate'] : []),
+      // ...and a localized one has one per INTENT IT ACTUALLY USES: the locale CODE that intent
+      // resolved to. The TEXT is authored and committed; the code is per-env store config, exactly
+      // like a currency. Only the used intents, so a single-locale fixture does not carry a dead
+      // `locale_alternate` naming a language it has no text in.
+      ...localeIntentsUsed(m).map(localeFieldFor),
     ],
   ])),
 };
@@ -89,7 +96,7 @@ const owned = [
   STORE_SETTING.aliasName,
   PROGRESS_ORDER_ALIAS,
   GROUP_AUDIENCE.aliasName,
-  ...PERSKU_PRODUCTS.map((p) => p.aliasName),
+  ...TARGET_PRODUCTS.map((p) => p.aliasName),
   ...MISSIONS.map((m) => m.aliasName),
 ];
 for (const name of owned) {
@@ -238,11 +245,35 @@ for (const key of Object.keys(BANNERS)) {
   const rel = bannerSourceRel(key);
   if (!existsSync(join(ROOT, rel))) fail(`[3] banner "${key}" declares ${rel}, which is not committed — the seeder cannot upload it`);
 }
-for (const p of PERSKU_PRODUCTS) {
+for (const p of TARGET_PRODUCTS) {
   const a = aliases[p.aliasName];
   if (!a) continue;
   if (a.slot !== p.slot) fail(`[3] ${p.aliasName}.slot is ${JSON.stringify(a.slot)} but the spec says ${JSON.stringify(p.slot)}`);
   if (a.quantity !== p.quantity) fail(`[3] ${p.aliasName}.quantity is ${JSON.stringify(a.quantity)} but the spec says ${p.quantity}`);
+}
+
+/* [3z] MSNF-035 — the CREATED zero-stock product's own registry entry ────────
+ * Its authored half must be mirrored, because a case has to name the SKU it expects to find disabled
+ * and the stock level it is asserting. `in_stock_quantity` is mirrored from the spec rather than left
+ * to the seeder, so a registry quietly saying "5" while the spec says 0 is a STATIC failure instead of
+ * a case that reads a stocked row and concludes the product bug is fixed.
+ */
+{
+  const a = aliases[ZERO_STOCK_PRODUCT.aliasName];
+  if (a) {
+    const expect = {
+      sku: ZERO_STOCK_PRODUCT.sku,
+      name: ZERO_STOCK_PRODUCT.productName,
+      in_stock_quantity: String(ZERO_STOCK_PRODUCT.inStockQuantity),
+      list_price: ZERO_STOCK_PRODUCT.listPrice,
+    };
+    for (const [k, v] of Object.entries(expect)) {
+      if (a[k] !== v) fail(`[3] ${ZERO_STOCK_PRODUCT.aliasName}.${k} is ${JSON.stringify(a[k])} in aliases.json but ${JSON.stringify(v)} in missions-specs.mjs — a case would assert against a product the seeder never provisions`);
+    }
+    if (a.in_stock_quantity !== '0') {
+      fail(`[3] ${ZERO_STOCK_PRODUCT.aliasName}.in_stock_quantity is ${JSON.stringify(a.in_stock_quantity)} — the whole fixture is the zero; at any other value the modal row renders like every other row and the out-of-stock assertion cannot fail`);
+    }
+  }
 }
 
 /* [4] ─────────────────────────────────────────────────────────────────────── */

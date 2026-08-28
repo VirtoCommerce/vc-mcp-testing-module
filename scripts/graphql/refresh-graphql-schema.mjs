@@ -79,6 +79,72 @@ function formatField(f) {
   return f.name;
 }
 
+// The four ambient-context args. Order is the order a caller should think in:
+// WHO is asking (user, org), WHERE (store), and in WHICH language (culture).
+const CONTEXT_ARGS = ['cultureName', 'storeId', 'userId', 'organizationId'];
+
+// Rule 12 is DERIVED from the live introspection, never transcribed — the whole
+// point is that a caller can re-run `schema:refresh` and see whether the shape
+// still holds, instead of trusting a number someone typed once. See
+// `.claude/rules/test-data.md` §GOLDEN RULE.
+//
+// Why the rule needs stating at all: these args are overwhelmingly OPTIONAL, so
+// omitting one is not an error. The server silently substitutes a default and
+// returns HTTP 200 with data that is wrong, empty, or null — the single hardest
+// failure mode to notice, because nothing anywhere says anything went wrong.
+function renderContextArgRule(queries) {
+  const isRequired = (t) => t && t.kind === 'NON_NULL';
+  const findArg = (q, name) => (q.args || []).find((a) => a.name === name);
+
+  const stats = CONTEXT_ARGS.map((name) => {
+    let req = 0;
+    let opt = 0;
+    for (const q of queries) {
+      const a = findArg(q, name);
+      if (!a) continue;
+      if (isRequired(a.type)) req++;
+      else opt++;
+    }
+    return { name, req, opt, total: req + opt };
+  });
+
+  // The population that actually bites: accepts at least one context arg, and at
+  // least one of them is optional ⇒ the caller can silently get a server default.
+  const silentDefault = queries.filter((q) =>
+    CONTEXT_ARGS.some((name) => {
+      const a = findArg(q, name);
+      return a && !isRequired(a.type);
+    })
+  ).length;
+
+  const accepting = queries.filter((q) => CONTEXT_ARGS.some((name) => findArg(q, name))).length;
+  const pct = (n) => ((n / queries.length) * 100).toFixed(0);
+
+  let s = '';
+  s += `12. **Pass the ambient context — \`cultureName\`, \`storeId\`, \`userId\`, \`organizationId\` — on almost every query and mutation.**\n`;
+  s += `    Most xAPI operations resolve against an implied context, and **omitting a context arg is not an error**:\n`;
+  s += `    the server substitutes a default and returns \`200\` with data that is wrong, empty, or \`null\`. There is no\n`;
+  s += `    message to notice. Measured on this schema (${queries.length} queries, derived at refresh):\n\n`;
+  s += `    | Context arg | Queries accepting it | Required | Optional |\n`;
+  s += `    |---|---|---|---|\n`;
+  for (const st of stats) {
+    s += `    | \`${st.name}\` | ${st.total} (${pct(st.total)}%) | ${st.req} | ${st.opt} |\n`;
+  }
+  s += `\n`;
+  s += `    **${accepting} of ${queries.length} queries (${pct(accepting)}%) accept at least one; ${silentDefault} (${pct(silentDefault)}%) accept one OPTIONALLY** —\n`;
+  s += `    that last figure is the exposure, because those are the calls that can quietly answer for a context you\n`;
+  s += `    never chose. Mutations take the same fields inside the \`command:\` wrapper (see Rule 1), so the same rule applies.\n\n`;
+  s += `    **Worked example.** \`loyaltyMissionProgress.description\` returns \`null\` for *every* item when \`cultureName\`\n`;
+  s += `    is omitted — the resolver throws \`ARGUMENT_NULL\` internally and the field comes back empty, while sibling\n`;
+  s += `    \`name\` resolves either way. A test case that omitted the culture therefore asserted an absence **it had\n`;
+  s += `    caused itself**, and would have been filed as a product defect. Found in REG-2026-08-27-1731 triage.\n\n`;
+  s += `    **Consequences for authoring:** never conclude a field is empty, missing, or broken until the call carries\n`;
+  s += `    its full context; a differential result between two callers is a context difference until proven otherwise;\n`;
+  s += `    and never hardcode these values — resolve them (\`{{STORE_ID}}\`, \`me { id }\`, \`@td(...)\`) per\n`;
+  s += `    \`.claude/rules/test-data.md\`.\n`;
+  return s;
+}
+
 // Render a GraphQL type reference to standard notation, unwrapping NON_NULL (`!`)
 // and LIST (`[...]`) so e.g. emails: [String!]! renders faithfully (not `String`).
 function renderType(t) {
@@ -253,7 +319,9 @@ async function main() {
   md += `8. **Variations**: \`availabilityData\` (not \`availability\`)\n`;
   md += `9. **Order addresses/payments**: \`addresses[]\` and \`inPayments[]\` (not \`shippingAddress\` or \`payment\`)\n`;
   md += `10. **All cart mutations require \`userId\`**: \`addItem\`, \`addOrUpdateCartShipment\`, \`addOrUpdateCartPayment\`, \`clearCart\` — get from \`me { id }\`\n`;
-  md += `11. **\`addOrUpdateCartShipment\` requires \`price\`**: \`CartShipmentValidator\` rejects if price doesn't match available shipping rate. Query \`availableShippingMethods\` first.\n\n`;
+  md += `11. **\`addOrUpdateCartShipment\` requires \`price\`**: \`CartShipmentValidator\` rejects if price doesn't match available shipping rate. Query \`availableShippingMethods\` first.\n`;
+  md += renderContextArgRule(queries);
+  md += `\n`;
 
   md += `---\n\n`;
 
