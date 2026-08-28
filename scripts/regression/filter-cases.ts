@@ -62,6 +62,31 @@ for (const [tier, spellings] of Object.entries(TIER_ALIASES)) {
   for (const s of spellings) TIER_OF.set(s, tier);
 }
 
+/**
+ * The scope sidecar — what a scoped run must carry forward, and WHY it is not optional.
+ *
+ * A filtered run is a partial run, and every consumer downstream computes from the plan it is
+ * handed. `suite-results-merge.ts` derives `totalCases` from the lanes plan (which is built from
+ * the filtered CSV), `regression-triage.ts` writes that into `history.json`, and
+ * `estimate-calibration.ts` rejects an observation only when `casesReported / totalCases < 0.95`.
+ * Without this record a 6-of-44 run reports 6/6 = 100% coverage, sails through that guard, and
+ * feeds `regression:recalibrate` a six-case duration as a full observation of a 44-case suite —
+ * silently falsifying the very calibration data the 40-minute window depends on.
+ *
+ * So `sourceCases` is the load-bearing field: it is the ONLY place the unfiltered size survives
+ * once the scoped CSV replaces the full one.
+ */
+export interface CaseFilterScope {
+  readonly tiers: readonly string[];
+  readonly alsoIds: readonly string[];
+  /** Cases in the filtered output. */
+  readonly keptCases: number;
+  /** Cases in the suite BEFORE filtering — the real denominator. */
+  readonly sourceCases: number;
+  readonly untypeable: ReadonlyArray<{ id: string; priority: string }>;
+  readonly missingAlsoIds: readonly string[];
+}
+
 export interface FilterResult {
   readonly kept: Row[];
   readonly keptIds: string[];
@@ -137,23 +162,46 @@ export function renderFiltered(rawText: string, kept: readonly Row[]): string {
   return withSingleTrailingNewline(normaliseEol(text, eol), eol);
 }
 
-interface Args {
+export interface Args {
   source: string;
   tiers: string[];
   alsoIds: string[];
   out: string | null;
+  scopeOut: string | null;
   json: boolean;
 }
 
-function parseArgs(argv: readonly string[]): Args | { error: string } {
-  const a: Args = { source: "", tiers: [], alsoIds: [], out: null, json: false };
+/**
+ * Exported so the argument surface is testable WITHOUT spawning the CLI.
+ *
+ * Spawning is not an option here: the house helper hardcodes
+ * `../../node_modules/tsx/dist/cli.mjs`, which does not exist in a git worktree, and four sibling
+ * test files fail for exactly that reason. `select-suites.ts` sets the precedent by exporting its
+ * own `parseArgs` for the same purpose.
+ */
+export function parseArgs(argv: readonly string[]): Args | { error: string } {
+  const a: Args = { source: "", tiers: [], alsoIds: [], out: null, scopeOut: null, json: false };
+  // A value-taking flag must never swallow the NEXT flag as its value. `--out --json` used to
+  // create a file literally named `--json` and silently leave `--json` unset; `--out` as the last
+  // token used to mean "write nothing" while still exiting 0 — which, at the documented in-place
+  // call site, left the run reading an UNFILTERED csv while reporting a scoped run. Same lookahead
+  // guard `plan-lanes.ts` already uses.
+  const valueOf = (flag: string, i: number): string | { error: string } => {
+    const nxt = argv[i + 1];
+    if (nxt === undefined || nxt.startsWith("--")) return { error: `${flag} requires a value` };
+    return nxt;
+  };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i];
-    const next = () => argv[++i];
-    if (v === "--priority") a.tiers.push(...(next() ?? "").split(",").map((s) => s.trim()).filter(Boolean));
-    else if (v === "--also-ids") a.alsoIds.push(...(next() ?? "").split(",").map((s) => s.trim()).filter(Boolean));
-    else if (v === "--out") a.out = next() ?? null;
-    else if (v === "--json") a.json = true;
+    if (v === "--priority" || v === "--also-ids" || v === "--out" || v === "--scope-out") {
+      const got = valueOf(v, i);
+      if (typeof got !== "string") return got;
+      i++;
+      if (v === "--priority") a.tiers.push(...got.split(",").map((s) => s.trim()).filter(Boolean));
+      else if (v === "--also-ids") a.alsoIds.push(...got.split(",").map((s) => s.trim()).filter(Boolean));
+      else if (v === "--out") a.out = got;
+      else a.scopeOut = got;
+    } else if (v === "--json") a.json = true;
     else if (v.startsWith("--")) return { error: `unknown argument '${v}'` };
     else if (!a.source) a.source = v;
     else return { error: `unexpected extra argument '${v}'` };
@@ -171,7 +219,7 @@ function main(argv: readonly string[]): number {
   const parsed = parseArgs(argv);
   if ("error" in parsed) {
     console.error(`filter-cases: ${parsed.error}`);
-    console.error("Usage: npm run suites:filter -- <resolved.csv> --priority Critical [--also-ids ID,ID] [--out <path>] [--json]");
+    console.error("Usage: npm run suites:filter -- <resolved.csv> --priority Critical [--also-ids ID,ID] [--out <path>] [--scope-out <path>] [--json]");
     return 1;
   }
   const args = parsed;
@@ -180,7 +228,16 @@ function main(argv: readonly string[]): number {
     console.error(`filter-cases: source not found: ${args.source}`);
     return 1;
   }
-  const rawText = readFileSync(args.source, "utf-8");
+  // An I/O failure must not surface as a raw stack trace on exit 1 — that is the SAME exit code
+  // as a bad flag, so the caller could not tell a typo from an unreadable file. `merge-suite-lanes.ts`
+  // sets the precedent: catch, say what failed, exit deliberately.
+  let rawText: string;
+  try {
+    rawText = readFileSync(args.source, "utf-8");
+  } catch (err) {
+    console.error(`filter-cases: cannot read ${args.source}: ${(err as Error).message}`);
+    return 1;
+  }
 
   // Same refusal `plan-lanes.ts` makes, for the same reason: `parseSuite` maps fields POSITIONALLY,
   // so on an 11-column legacy suite the legacy `Steps` lands in `Test_Data` — filtering on
@@ -193,14 +250,33 @@ function main(argv: readonly string[]): number {
 
   const { rows } = parseSuite(rawText);
   const result = filterRows(rows, { tiers: args.tiers, alsoIds: args.alsoIds });
+  const sourceCases = rows.filter((r) => (r.ID ?? "").trim()).length;
 
-  if (args.out) writeFileSync(args.out, renderFiltered(rawText, result.kept), "utf-8");
+  const scope: CaseFilterScope = {
+    tiers: args.tiers,
+    alsoIds: args.alsoIds,
+    keptCases: result.kept.length,
+    sourceCases,
+    untypeable: result.untypeable,
+    missingAlsoIds: result.missingAlsoIds,
+  };
+
+  try {
+    if (args.out) writeFileSync(args.out, renderFiltered(rawText, result.kept), "utf-8");
+    // The sidecar is what keeps the run's own scope re-derivable after the fact. Written next to
+    // `suite-{ID}-lanes.json` in the same run dir, and read by `suites:merge`.
+    if (args.scopeOut) writeFileSync(args.scopeOut, `${JSON.stringify(scope, null, 2)}\n`, "utf-8");
+  } catch (err) {
+    console.error(`filter-cases: cannot write output: ${(err as Error).message}`);
+    return 1;
+  }
 
   const report = {
     source: args.source,
     out: args.out,
+    scopeOut: args.scopeOut,
     tiers: args.tiers,
-    total: rows.filter((r) => (r.ID ?? "").trim()).length,
+    total: sourceCases,
     kept: result.kept.length,
     dropped: result.droppedCount,
     keptIds: result.keptIds,
@@ -227,6 +303,7 @@ function main(argv: readonly string[]): number {
     console.log(`  ! --also-ids ${id}: no such case in this suite`);
   }
   if (args.out) console.log(`  wrote ${args.out}`);
+  if (args.scopeOut) console.log(`  wrote ${args.scopeOut} (scope sidecar — carries sourceCases=${sourceCases})`);
   return 0;
 }
 

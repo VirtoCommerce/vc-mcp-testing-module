@@ -37,7 +37,7 @@ never restate its matrix here:
 | Path (feature-test only) | When | What runs |
 |---|---|---|
 | **FAST — a checklist, and nothing else** | Bug fix / copy-tweak / config / Technical task; **P2–P3**, single-layer, single-domain, obvious surface | `1a` + `1b` → **Artifact B checklist only** → one execution agent + the critical-case regression → `5a` triage → `5b` reconcile → `5c` verdict → `5d` file → `5e` report → `5f` status. **No `1c`/`1d` agents · no `1e` Test Model · no archetype/UIP/`VC-*` sweeps · no Artifact A authoring · no `5g` promotion · no independent verifier** |
-| **FULL** | New feature / Story / Epic; **P0–P1**; cross-layer; ≥2 domains; critical-revenue flow; unclear surface | `1c` ‖ `1d` (concurrent) → full Test Model → full authoring → both hard-STOP independent verifiers → `5g` promotion |
+| **FULL** | New feature / Story / Epic; **P0–P1**; cross-layer; ≥2 domains; critical-revenue flow; unclear surface | `1c` ‖ `1d` (concurrent) → full Test Model → full authoring → the three hard-STOP independent verifier gates → `5g` promotion |
 
 **When in doubt, take the FULL path** (fail-safe: a real regression is worse missed than a fast run saved).
 
@@ -406,7 +406,7 @@ scenarios + user-flow diagram + `1d` AC conditions (story + gap-ACs) + `E2E-*` s
   archetype and technique into the free-text `References` column: `Archetype:<TOKEN> · Technique:<TOKEN>`
   (+ `Probe:VC-*-NNN` when the row came from a `vc-bug-catalog` Detection probe). The appender
   **rejects a row without them** — this is the deterministic gate for the whole change, and it exists here
-  because the Test Model is terminal-only. No new CSV column: these join the `Synced:` / `Audited:` /
+  because nothing lints the Test Model yet and the appender is the one door into `regression/suites/` a script already guards. No new CSV column: these join the `Synced:` / `Audited:` /
   `Promoted:` stamps `References` already carries.
 - **Append into the target `regression/suites/<layer>/<module>/*.csv` as `Automation_Status = Draft`**, using the deterministic appender (never a hand-rolled append):
   `npx tsx scripts/test-cases/append-test-cases-to-suite.ts <target-suite.csv> --rows <new-rows.csv> --check-global-ids --dry-run` (drop `--dry-run` on a clean pass). Existing-suite sync/review edits happen in place. `--check-global-ids` rejects an ID already used anywhere under `regression/suites/`.
@@ -642,6 +642,19 @@ Output: every finding carrying `class` + `provenance` + `severity` + `duplicate-
 closes it against what the agents observed **live** (the authoritative AC↔implementation check), and adds
 the DoD confirmation the `1e` Test Model deferred.
 
+> **Where the conditions come from, per path.** This phase runs on BOTH paths — it is what produces
+> the verdict, so 5c has nothing to decide without it. But FAST builds neither a `1d` AC table nor a
+> `1e` Test Model, so read every "`1d`"/"`1e`" reference below as:
+> - **FULL** — the `1d` AC table (story ACs + gap-ACs) and the `1e` Test Model's `DoD:` field.
+> - **FAST** — the atomic conditions taken straight from `1a`'s ticket ACs, which are the same
+>   conditions Artifact B's checklist was built from; the **executed checklist is the condition
+>   inventory**, and its per-item verdicts are the evidence. DoD comes from the ticket if it declares
+>   one, else `none stated` → `dod_pct: null`.
+>
+> Do not invent a Test Model table to reconcile against on FAST, and do not skip the reconciliation
+> for want of one — either would silently degrade the AC-coverage percentage the Feature Release Gate
+> consumes.
+
 - **AC reconciliation** — for each condition in the `1d` AC table (working context, no `ac-analysis.md`):
   **SATISFIED live** (confirmed) · **DRIFT / CONTRADICTS confirmed live** (filing-grade; feeds 5a item 3 as
   an IN-SCOPE candidate and a 5c FAIL — CONTRADICTS-live is highest priority, surface it explicitly) ·
@@ -656,7 +669,8 @@ the DoD confirmation the `1e` Test Model deferred.
   `conditions_with_evidence / conditions_total`; **DoD-completion %** = `dod_met / dod_total` (when a DoD
   exists). `scripts/regression/compute-metrics.ts` (the `qa-metrics` deterministic core) does not expose an
   AC/DoD-shaped metric today — it aggregates regression run entries, not per-condition/per-checklist-item
-  counts — so this ratio is computed inline from the `1e` Test Model's own tables, in the same style
+  counts — so this ratio is computed inline from the condition inventory named in the box above (the
+  `1e` Test Model's tables on FULL; the executed Artifact-B checklist on FAST), in the same style
   `qa-metrics`' catalog uses for its other percentages (`.claude/skills/qa-metrics/quality-metrics-catalog.md`),
   not invented ad hoc.
 
