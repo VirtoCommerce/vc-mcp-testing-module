@@ -53,7 +53,7 @@ Themes A–C are symptoms of one underlying fact: this module ships **two indepe
 3. Why was `AGENT-TEST-MSN-PROBE` not credited? (see Evidence Strength above)
 4. B2B org-context / impersonation seam (whose mission progress advances under impersonation) — not reached this session; an honest gap, not a null result.
 
-Eight separate mission defects (currency-price mismatch, mixed-currency subtotal, date-severity ladder, mobile truncation, CLS, pagination-in-URL, touch target, design drift) are already filed at `reports/bugs/open/` and are out of scope here.
+Eight mission defects were filed separately and are out of scope here. **Four survived human triage** and remain at `reports/bugs/open/`: currency-price mismatch, date-severity ladder, mobile truncation, touch target, design drift. **Four were rejected as low quality** and now sit in `reports/bugs/rejected/`: mixed-currency subtotal, CLS 0.2195, pagination-in-URL, German-locale sidebar casing. The mixed-currency rejection is the instructive one — it was an artefact of an unconstrained live-discovered fixture (a EUR row seeded beside a USD row), not a product defect, and it is now the worked example in `.claude/rules/test-data.md` §SECOND RULE.
 
 ## Proposed `BL-*` / `ECL-*` Additions (route via `/qa-review-oracles`)
 

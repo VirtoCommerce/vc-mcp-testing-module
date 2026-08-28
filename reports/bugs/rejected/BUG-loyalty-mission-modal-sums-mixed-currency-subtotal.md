@@ -3,6 +3,7 @@
 ## Status: CONFIRMED
 **Found by:** REG-2026-08-27-1731 · suite 083c (MSNF-029) · triaged REAL_BUG (live-verified)
 **Archetype:** `MONEY`
+**Status:** REJECTED
 
 **Env:** vcst-qa @ Theme `2.57.0-pr-2396-5924`, store `B2B-store`, session currency USD, chrome/1920px, signed in.
 

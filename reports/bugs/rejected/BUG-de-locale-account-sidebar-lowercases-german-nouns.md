@@ -4,6 +4,7 @@
 **Found by:** `/qa-design VCST-5346` (2026-08-28)
 **Tracker:** VCST-5839 (standalone Bug)
 **Archetype:** `CONVENTION`
+**Status:** REJECTED
 
 **Env:** vcst-qa @ Theme `2.57.0-pr-2396-5924`, store `B2B-store`, locale **de-DE**, chrome, signed in.
 

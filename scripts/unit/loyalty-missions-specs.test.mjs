@@ -19,8 +19,8 @@ import {
   missionSignature, signaturesMatch, windowIsOpen, windowExpectsOpen,
   BANNERS, BANNER_FOLDER, bannerKeyFor, bannerSourceRel, bannerAssetRel, resolveBannerUrl,
   resolveLocales, localizedString, localizedValues, buildLocalizedFields, LOCALE_INTENTS, MIN_LOCALES,
-  buildGoalItems, reconcileGoalItems, validateSpecShape,
-  PROGRESS_ORDER, PROGRESS_ORDER_COUNT, progressOrderNumber, predictProgress, progressFixtures,
+  buildGoalItems, reconcileGoalItems, validateSpecShape, separatorTarget, predictOrderValueByReading,
+  PROGRESS_ORDER, PROGRESS_ORDERS, PROGRESS_ORDER_COUNT, progressOrderNumber, predictProgress, progressFixtures,
   goalItemQuantities, DANGER_THRESHOLD_DAYS, WINDOW_CLOCK_SLACK_DAYS,
   TARGET_GROUP, GROUP_AUDIENCE, GROUP_PAIR_EXEMPT_FIELDS,
   specDifferences, targetedGroups, isGroupTargeted, groupMatches, groupsInclude,
@@ -315,7 +315,11 @@ test('buildGoalNode overlays the spec onto the live prototype rather than writin
   const goals = blockOf(template().dynamicExpression, BLOCK.goals);
   const node = buildGoalNode(spec('MSN_ORDERVALUE'), goals, { currencies: CURRENCIES });
   assert.equal(node.id, 'OrderValueGoal');
-  assert.equal(node.value, 250);
+  // DERIVED, not transcribed. The target is a separator midpoint computed from the seed orders'
+  // money shape, so a literal here would go stale the first time a price or the shipping charge
+  // moved — which is the failure mode the fixture set itself was rewritten to remove.
+  assert.equal(node.value, spec('MSN_ORDERVALUE').goal.value);
+  assert.equal(node.value, separatorTarget(...spec('MSN_ORDERVALUE').separates));
   // The currency INTENT is resolved against the store, never left null: verified live on vcst-qa
   // 2026-08-27 that the server rejects null, "" and an omitted currencyCode alike with HTTP 400
   // "Currency code is required for the order value goal".
@@ -632,11 +636,16 @@ test('only PerSku missions need separate goal items', () => {
 
 test('buildGoalItems produces one row per slot, keyed to the mission', () => {
   const products = { A: { id: 'prod-a' }, B: { id: 'prod-b' } };
-  const rows = buildGoalItems(spec('MSN_PERSKU_ALL'), 'mission-1', products);
+  const m = spec('MSN_PERSKU_ALL');
+  const rows = buildGoalItems(m, 'mission-1', products);
   assert.equal(rows.length, PERSKU_PRODUCTS.length);
   assert.deepEqual(rows.map((r) => r.missionId), rows.map(() => 'mission-1'));
   assert.deepEqual(rows.map((r) => r.productId).sort(), ['prod-a', 'prod-b']);
-  assert.deepEqual(rows.map((r) => r.quantity), PERSKU_PRODUCTS.map((p) => p.quantity));
+  // Read from the mission's OWN resolved quantities, not from the product defaults: the ALL/ANY pair
+  // overrides them so the two halves can diverge, and asserting the defaults here would pin the
+  // fixture back to the state in which ALL and ANY agreed on every observable.
+  const q = goalItemQuantities(m);
+  assert.deepEqual(rows.map((r) => r.quantity), goalSlotsFor(m).map((s) => q[s]));
 });
 
 test('buildGoalItems refuses to build a PerSku mission with an unresolved product', () => {
@@ -727,8 +736,11 @@ test('runtime fields are declared per alias kind, and none of them is that kind\
 
   // A mission's id is server-assigned; its NAME is the business key the seeder looks it up by.
   // banner_url joins it for the same reason: the platform hands back an absolute, host-bearing URL.
-  assert.deepEqual(mission, ['id', 'banner_url']);
+  // `accrued_*`/`progress_*_at_seed` join them: they are what the platform REPORTED after the seed
+  // orders landed, which is the observation the OrderValue falsifiability guard reads back.
+  assert.deepEqual(mission, ['id', 'banner_url', 'accrued_value_at_seed', 'progress_status_at_seed', 'progress_percent_at_seed']);
   assert.ok(!mission.includes('banner_key'), 'WHICH artwork a mission carries is authored and env-invariant');
+  assert.ok(!mission.includes('goal_target'), 'a goal target is derived from the committed spec, never observed');
   assert.ok(!mission.includes('name'), 'a mission name is authored, not runtime');
   for (const f of ['status', 'reward', 'public']) {
     assert.ok(!mission.includes(f), `${f} is authored, not runtime`);
@@ -741,6 +753,17 @@ test('runtime fields are declared per alias kind, and none of them is that kind\
     assert.ok(perSkuProduct.includes(f), `${f} must be runtime on a discovered product`);
   }
   assert.ok(!perSkuProduct.includes('quantity'), 'the target quantity is authored by the fixture, not discovered');
+
+  // The PerSku TARGETS no longer use that kind: they are created now, so their sku/name are authored
+  // business keys. What IS runtime on them is the currency the pricelist actually resolved to — the
+  // field the mixed-currency guard reads back, and the one whose absence let a EUR row into a modal
+  // that sums its rows.
+  const { createdProduct, foundProduct } = RUNTIME_FIELDS_BY_KIND;
+  assert.ok(createdProduct.includes('currency'), 'the resolved price currency is per-env and must be observed');
+  for (const f of ['sku', 'name']) {
+    assert.ok(!createdProduct.includes(f), `${f} is an authored business key on a product this seeder creates`);
+  }
+  assert.ok(foundProduct.includes('sku'), 'a product found through another fixture\'s alias does not own its SKU');
 
   // The gate's setting NAME is invariant; only the observed values and the store are per-env.
   assert.ok(!storeSetting.includes('setting_name'), 'the setting name is the same on every env');
@@ -899,11 +922,23 @@ test('predictProgress mirrors the module arithmetic the fixtures are designed ag
   const partial = predictProgress(spec('MSN_PROGRESS_PARTIAL'));
   assert.deepEqual(
     { current: partial.currentValue, target: partial.targetValue, pct: partial.percentage, status: partial.status },
-    { current: 3, target: 4, pct: 75, status: 'InProgress' },
-    'A x2 against target 2 plus B x1 against target 2 is min(2,2)+min(1,2)=3 of 4',
+    { current: 3, target: 5, pct: 60, status: 'InProgress' },
+    'A x2 against target 2 plus B x1 against target 3 is min(2,2)+min(1,3)=3 of 5',
   );
   assert.equal(partial.rowsMet, 1);
   assert.equal(partial.rowsUnmet, 1);
+
+  // The ALL/ANY pair is the minimal-difference control: SAME targets, SAME data, one flag. It must
+  // diverge on BOTH observables, because the module computes an ANY percentage as a binary 0-or-100
+  // and an ALL percentage as a clamped per-row sum. Before the falsifiability rewrite both inherited
+  // the product defaults, so both sat at Completed 100% and an implementation ignoring `all` entirely
+  // would have passed.
+  const all = predictProgress(spec('MSN_PERSKU_ALL'));
+  const any = predictProgress(spec('MSN_PERSKU_ANY'));
+  assert.deepEqual(goalItemQuantities(spec('MSN_PERSKU_ALL')), goalItemQuantities(spec('MSN_PERSKU_ANY')));
+  assert.equal(all.status, 'InProgress');
+  assert.equal(any.status, 'Completed');
+  assert.notEqual(all.percentage, any.percentage);
 
   const done = predictProgress(spec('MSN_PROGRESS_COMPLETED'));
   assert.deepEqual(
@@ -912,14 +947,22 @@ test('predictProgress mirrors the module arithmetic the fixtures are designed ag
     'over-buying is clamped: min(2,1)+min(1,1)=2 of 2, not 3 of 2',
   );
 
-  // OrderCount contributes exactly one per order, and the module guards the division.
-  assert.equal(predictProgress(spec('MSN_ENDING_SOON')).percentage, 25);
+  // OrderCount contributes exactly one per order, and the module guards the division. Derived from
+  // PROGRESS_ORDER_COUNT rather than transcribed: the seed places two orders now (a cash one and an
+  // all-points one), and a literal here would silently pin the test to the one-order world.
+  assert.equal(
+    predictProgress(spec('MSN_ENDING_SOON')).percentage,
+    (PROGRESS_ORDER_COUNT / spec('MSN_ENDING_SOON').goal.count) * 100,
+  );
   assert.equal(predictProgress(spec('MSN_ZEROTARGET')).percentage, 0, 'a zero target must not divide by zero or read as complete');
   assert.equal(predictProgress(spec('MSN_ZEROTARGET')).status, 'InProgress');
 
-  // An OrderValueGoal's contribution is the SERVER-RECOMPUTED order total, so it is not predictable —
-  // and saying so is the point: a fixture may not declare a percentage nothing can derive.
+  // An OrderValueGoal's contribution is the SERVER-RECOMPUTED order total, so `predictProgress`
+  // still returns null — a fixture may not declare a percentage nothing can derive. What CAN be
+  // derived is the set of candidate readings and what each one would predict, which is what
+  // `predictOrderValueByReading` is for; the seeder records which one the platform actually used.
   assert.equal(predictProgress(spec('MSN_ORDERVALUE')), null);
+  assert.ok(predictOrderValueByReading(spec('MSN_ORDERVALUE')), 'the money axis is predicted per reading instead');
 });
 
 test('PerSkuAny has no partial state at all, which is why the partial fixture must be PerSkuAll', () => {
@@ -928,7 +971,14 @@ test('PerSkuAny has no partial state at all, which is why the partial fixture mu
 });
 
 test('the three progress fixtures cover three DISTINCT storefront states', () => {
-  const states = progressFixtures().map((m) => `${m.progress.status}:${m.progress.percentage}`);
+  // Scoped to the fixtures whose ROLE is the storefront card. The semantics fixtures (the ALL/ANY
+  // pair, the two currency-blindness discriminators) legitimately share a rendered state with one of
+  // them — what they discriminate is which figure or which flag produced the card, not how it looks —
+  // and forcing an artificial difference on them would destroy the minimal-difference pairing that
+  // makes them attributable in the first place.
+  const storefront = progressFixtures().filter((m) => m.stateRole === 'storefront');
+  assert.ok(storefront.length >= 3, 'a fixture untagged by role would be exempt from this rule by accident');
+  const states = storefront.map((m) => `${m.progress.status}:${m.progress.percentage}`);
   assert.equal(new Set(states).size, states.length, 'a collapsed pair silently drops a state from coverage');
   assert.ok(progressFixtures().some((m) => predictProgress(m).status === 'Completed' && m.goal.type === 'PerSkuGoal'),
     'the read-only-modal branch only exists on the SKU modal, so the completed fixture must be PerSku');
@@ -946,11 +996,11 @@ test('a declared progress state that the seed order does not produce is caught',
 
   // The declaration drifting from the fixture — the failure the re-derivation exists to make impossible.
   assert.ok(perturb({ progress: { ...orig.progress, percentage: 50 } })
-    .some((p) => /declares percentage 50 but the seed order yields 75/.test(p)));
+    .some((p) => /declares percentage 50 but the seed order yields 60/.test(p)));
   assert.ok(perturb({ progress: { ...orig.progress, status: 'Completed' } })
     .some((p) => /declares status "Completed" but the seed order yields "InProgress"/.test(p)));
 
-  // Equalising the two targets at or below what the order buys makes the "partial" fixture complete.
+  // Equalising the two targets at or below what the orders buy makes the "partial" fixture complete.
   assert.ok(perturb({ goalItemQuantities: { A: 1, B: 1 } })
     .some((p) => /MSN_PROGRESS_PARTIAL is completed by the seed order/.test(p)));
   // …and pushing both above it makes every row unmet, so the per-row styling has one state again.
@@ -1012,29 +1062,37 @@ test('a completable danger fixture is rejected — success overrides the danger 
   const p = validateSpecShape();
   Object.assign(m, orig);
   assert.ok(p.some((x) => /is COMPLETED by the seed order/.test(x)));
-  assert.ok(p.some((x) => /is not above the 1 order the seed places/.test(x)));
+  assert.ok(p.some((x) => new RegExp(`is not above the ${PROGRESS_ORDER_COUNT} order the seed places`).test(x)));
   assert.deepEqual(validateSpecShape(), []);
 });
 
-test('the provisioning order is the only lever, so its shape is guarded too', () => {
+test('the provisioning orders are the only lever, so their shape is guarded too', () => {
   assert.equal(progressOrderNumber(), `${NAME_PREFIX}-ORDER`, 'teardown sweeps by the NAME_PREFIX');
-  assert.ok(isSeededMissionName(progressOrderNumber()));
-  assert.equal(PROGRESS_ORDER_COUNT, 1);
+  for (const o of PROGRESS_ORDERS) assert.ok(isSeededMissionName(progressOrderNumber(o)));
+  // DERIVED from the order list. The seed places two orders — a cash one and an all-points one — and
+  // MSN_ORDERCOUNT's target is derived from this same number, so a literal here would let the two
+  // drift apart and quietly leave that fixture asking nothing.
+  assert.equal(PROGRESS_ORDER_COUNT, PROGRESS_ORDERS.length);
   // Every line must name a declared slot, or buildGoalItems and the order body disagree about products.
-  for (const l of PROGRESS_ORDER.lines) {
-    assert.ok(PERSKU_PRODUCTS.some((p) => p.slot === l.slot), `line ${l.slot} has no product slot`);
+  for (const o of PROGRESS_ORDERS) {
+    for (const l of o.lines) {
+      assert.ok(TARGET_PRODUCTS.some((p) => p.slot === l.slot), `line ${l.slot} has no product slot`);
+    }
   }
   const orig = PROGRESS_ORDER.lines.slice();
   PROGRESS_ORDER.lines.splice(0, PROGRESS_ORDER.lines.length, { slot: 'A', quantity: 2 }, { slot: 'A', quantity: 1 });
   const dup = validateSpecShape();
   PROGRESS_ORDER.lines.splice(0, PROGRESS_ORDER.lines.length, ...orig);
-  assert.ok(dup.some((p) => /repeats a slot/.test(p)));
+  assert.ok(dup.some((p) => /repeat a slot/.test(p)));
   assert.deepEqual(validateSpecShape(), []);
 });
 
 test('goalItemQuantities overrides only the slots it names, and buildGoalItems follows', () => {
-  assert.deepEqual(goalItemQuantities(spec('MSN_PERSKU_ALL')), { A: 2, B: 1 }, 'no override -> the shared pair');
-  assert.deepEqual(goalItemQuantities(spec('MSN_PROGRESS_PARTIAL')), { A: 2, B: 2 });
+  // MSN_PERSKU_OOS carries no override for slot A, so it still inherits the product default — the
+  // "override only what you name" property, asserted on a fixture that actually relies on it.
+  assert.equal(goalItemQuantities(spec('MSN_PERSKU_OOS')).A, 1, 'a named override wins');
+  assert.deepEqual(goalItemQuantities(spec('MSN_PERSKU_ALL')), { A: 2, B: 2 }, 'the ALL/ANY pair overrides both slots so it can diverge from ANY');
+  assert.deepEqual(goalItemQuantities(spec('MSN_PROGRESS_PARTIAL')), { A: 2, B: 3 });
   const products = { A: { id: 'prod-a' }, B: { id: 'prod-b' } };
   assert.deepEqual(
     buildGoalItems(spec('MSN_PROGRESS_COMPLETED'), 'mission-1', products),
@@ -1187,7 +1245,8 @@ test('the zero-stock product is declared with zero stock, a real price and a swe
   assert.ok(ZERO_STOCK_PRODUCT.listPrice > 0, 'an unpriced row renders as broken, which is not the same observation as out-of-stock');
   assert.ok(isSeededMissionName(ZERO_STOCK_PRODUCT.sku), 'teardown sweeps by the AGENT-TEST-MSN- prefix');
   assert.ok(!PERSKU_PRODUCTS.some((p) => p.slot === ZERO_STOCK_PRODUCT.slot), 'it must not join the shared buyable pair');
-  assert.equal(TARGET_PRODUCTS.length, PERSKU_PRODUCTS.length + 1);
+  // The buyable pair, the zero-stock target, and the found points-priced one.
+  assert.equal(TARGET_PRODUCTS.length, PERSKU_PRODUCTS.length + 2);
 });
 
 test('the zero-stock slot is opt-in — no other PerSku mission inherits it', () => {

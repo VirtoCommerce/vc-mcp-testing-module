@@ -79,17 +79,47 @@ export const RUNTIME_FIELDS_BY_KIND = {
   // `banner_url` is the URL the platform asset store hands back — an ABSOLUTE, host-bearing address
   // (`https://<env-host>/cms-content/assets/…`), so it is per-env in exactly the way a GUID is. The
   // authored half is `banner_key`, which names WHICH artwork the mission carries and is invariant.
-  mission: ['id', 'banner_url'],
+  // `goal_currency` is the code the store resolved the mission's currency INTENT to, and the observed
+  // accrual fields are what the platform reported after the seed orders landed — both per-env runtime.
+  mission: ['id', 'banner_url', 'accrued_value_at_seed', 'progress_status_at_seed', 'progress_percent_at_seed'],
+  // RETAINED for a fixture that is genuinely discovered. It is no longer used by the PerSku targets:
+  // they are created now (see PERSKU_PRODUCTS), so their `sku`/`name` are authored business keys.
   perSkuProduct: ['productId', 'sku', 'name', 'catalogId'],
-  // The zero-stock product is CREATED, not discovered, so its `sku`/`name` are AUTHORED business keys
-  // (the seeder finds-or-creates by them) — only the server-assigned ids are runtime. Giving it the
+  // A product this seeder CREATES: its `sku`/`name` are AUTHORED business keys (the seeder
+  // finds-or-creates by them) — only the server-assigned ids are runtime. Giving it the
   // `perSkuProduct` list would demand that its own identifiers be blanked, which is the same category
   // error the per-kind split exists to prevent.
-  createdProduct: ['productId', 'catalogId'],
+  //
+  // `currency` is runtime and it is the field that closes the mixed-currency defect: the modal sums
+  // its rows, so which currency the product actually RESOLVED to is the thing a guard has to read
+  // back. `slug`/`url` are the storefront path — resolved, never composed (a hand-built /product/<sku>
+  // renders a client-side 404 behind HTTP 200).
+  createdProduct: ['productId', 'catalogId', 'currency', 'slug', 'url'],
+  // A product this seeder FINDS by way of another fixture's alias (the points-priced unit). Its SKU
+  // is owned elsewhere, so it is runtime here — committing it would be a second, drifting copy of a
+  // business key this repo already declares once.
+  foundProduct: ['productId', 'catalogId', 'sku', 'currency'],
   storeSetting: ['store_id', 'missions_enabled', 'base_loyalty_enabled'],
   // The VCST-5346 provisioning order. Its GUID is server-assigned; `user_id` is the target account's
   // per-env SECURITY-ACCOUNT id and `user_email`/`store_id` are per-env identity — all runtime.
-  progressOrder: ['id', 'user_id', 'user_email', 'store_id'],
+  //
+  // The `observed_*` money fields are the platform's OWN recomputed totals, read back after the POST.
+  // They are runtime rather than authored on purpose: the whole point of the money model is that the
+  // committed spec PREDICTS four readings and the guard checks the OBSERVATION against them, so a
+  // committed total would be the fixture asserting itself. This is also what makes the guard able to
+  // fail when the levers silently collapse — a shipping charge the platform dropped shows up here as
+  // an observed 0 while the spec still says 24.50.
+  progressOrder: [
+    'id', 'user_id', 'user_email', 'store_id', 'currency',
+    'observed_sub_total', 'observed_discount_total', 'observed_shipping_total',
+    'observed_tax_total', 'observed_total',
+  ],
+  // The all-points order. It carries no cash money shape to observe — its whole contribution is its
+  // line value and the fact that it EXISTS as a countable order.
+  pointsOrder: ['id', 'user_id', 'store_id', 'currency', 'observed_line_value', 'observed_total'],
+  // The spendability check. `reward_buys_units` is derived at seed time from the reward and the
+  // points product's OBSERVED price, so it cannot go stale against a price this seeder does not own.
+  rewardSpend: ['reward', 'unit_price', 'currency', 'reward_buys_units'],
   // The group-targeting control pair. The GROUP NAME is authored and env-invariant (same treatment as
   // USER_GROUP_VIP.name), and so are the two role KEYS — but the accounts those roles resolve to are
   // per-env identity, and their observed group membership is live state read off the target env. The
@@ -287,14 +317,70 @@ export const STATUSES = ['Draft', 'Published', 'Archived'];
 export const ALLOWED_TRANSITION = { from: 'Published', to: 'Archived' };
 
 /**
- * The two live-discovered catalog products the PerSku goals target. Nothing is authored here: the
- * seeder resolves real, buyable products off the target env and writes id/sku/name into the overlay.
- * Declared as specs only so the aliases have a stable NAME and the guard can assert the CSV/base file
- * carries no product id.
+ * The two PerSku target products. OWNED AND CREATED — deliberately no longer live-discovered.
+ *
+ * WHY THIS CHANGED (the falsifiability rewrite). They used to be whatever the first two buyable
+ * products `discoverCatalogProducts` happened to return, on the reasoning that "any buyable product
+ * will do" for a SKU target. That reasoning is wrong for this surface, and it was measured wrong on
+ * vcst-qa on 2026-08-28:
+ *
+ *   201482    prices: [{ USD 25 }]
+ *   55557702  prices: [{ USD 349 }, { EUR 455 }]        <- slot B
+ *
+ * The featured-SKU modal SUMS the rows it renders, so it reads price AND currency; discovery selects
+ * on availability and reads neither. The modal was therefore seeded with a EUR 455 row beside a USD
+ * 25 row, a mixed-currency subtotal was filed as a bug, and the bug was REJECTED as an artefact of
+ * this fixture (reports/bugs/rejected/BUG-loyalty-mission-modal-sums-mixed-currency-subtotal.md) —
+ * reviewer time spent on our own data. `.claude/rules/test-data.md` SECOND RULE: constrain live
+ * discovery on every dimension the feature is sensitive to, and this feature reads currency.
+ *
+ * The same measurement caught a second, quieter blocker: `55557702` carries `minQuantity: 2`, so a
+ * case step reading "set the quantity to exactly 1" is unachievable against it and reads as a
+ * stepper defect rather than as a fixture that cannot express the step.
+ *
+ * So the fixture owns its targets, exactly as MSNF-035's zero-stock target already did:
+ *   - priced in ONE currency, the STORE DEFAULT, in the store's own default-currency pricelist (the
+ *     seeder now selects that pricelist BY CURRENCY — `prices[0]` is the index that let EUR in);
+ *   - `minQuantity` 1 and pack size 1, so every stepper value from 1 upward is reachable;
+ *   - `trackInventory: false`, so a fixture bought on every run cannot decay into a stock-blocked
+ *     case that reads as a product failure;
+ *   - a small whole price, so the order arithmetic below is composable in closed form instead of
+ *     being inherited from whatever the catalog happened to charge.
+ *
+ * `listPrice` is also the SINGLE source of the seed order's line price (`PROGRESS_ORDER` reads it),
+ * so the price a case sees on the PDP and the price its order line carries cannot drift apart.
  */
 export const PERSKU_PRODUCTS = [
-  { aliasName: 'MSN_PERSKU_PRODUCT_A', slot: 'A', quantity: 2 },
-  { aliasName: 'MSN_PERSKU_PRODUCT_B', slot: 'B', quantity: 1 },
+  {
+    aliasName: 'MSN_PERSKU_PRODUCT_A',
+    slot: 'A',
+    quantity: 2,
+    sku: `${NAME_PREFIX}-TARGET-A`,
+    productName: 'AGENT-TEST Missions PerSku Target A',
+    listPrice: 30,
+    currencyIntent: 'store-default',
+    minQuantity: 1,
+    packSize: 1,
+    trackInventory: false,
+    inStockQuantity: 100000,
+  },
+  {
+    aliasName: 'MSN_PERSKU_PRODUCT_B',
+    slot: 'B',
+    quantity: 1,
+    sku: `${NAME_PREFIX}-TARGET-B`,
+    productName: 'AGENT-TEST Missions PerSku Target B',
+    // DIFFERENT from A on purpose, and not a round number. Two targets priced identically make the
+    // modal's row arithmetic unfalsifiable (a row-ordering or row-duplication defect sums to the same
+    // number either way), and the .50 is what keeps gross merchandise, net merchandise and order
+    // total from ever being mistaken for one another or for a coincidence.
+    listPrice: 42.50,
+    currencyIntent: 'store-default',
+    minQuantity: 1,
+    packSize: 1,
+    trackInventory: false,
+    inStockQuantity: 100000,
+  },
 ];
 
 /**
@@ -327,10 +413,131 @@ export const ZERO_STOCK_PRODUCT = {
   inStockQuantity: 0,
   /** A price is required, not decorative: a modal row with no price renders as broken, not as OOS. */
   listPrice: 99,
+  /**
+   * The same currency as its companions, for the same reason (see PERSKU_PRODUCTS): the modal sums
+   * the rows it renders, so a foreign-currency out-of-stock row would manufacture a mixed-currency
+   * subtotal on top of the state this fixture actually exists to show.
+   */
+  currencyIntent: 'store-default',
+  minQuantity: 1,
+  packSize: 1,
+  /** The one product here that MUST track inventory — the zero it holds is the fixture. */
+  trackInventory: true,
 };
 
-/** Every product slot the fixture set can target — discovered pair plus the created zero-stock one. */
-export const TARGET_PRODUCTS = [...PERSKU_PRODUCTS, ZERO_STOCK_PRODUCT];
+/**
+ * The LOYALTY-CURRENCY target, slot P. FOUND, never created, and never priced by this seeder.
+ *
+ * It is `LOY_SKU_PTS_UNIT` — the repo's existing 1-PTS unit product. Minting a second points-priced
+ * unit product would be a second implementation of a solved fixture, and the two would drift on the
+ * one property that matters (its price is the divisor every points arithmetic in the repo uses).
+ *
+ * WHAT IT MAKES DECIDABLE. `ApplyContribution` sums `lineItem.Quantity` for a `PerSkuGoal` with NO
+ * currency predicate, while the sibling `LoyaltyProgramHandler` filters
+ * `!x.Currency.EqualsIgnoreCase(loyaltyCurrency)`. Two accrual paths in one module disagree about
+ * whether points-priced spend is spend, and until this slot existed the disagreement was
+ * unobservable from outside the source. MSN_PERSKU_PTS targets slot P ALONE (`all=false`), so its
+ * outcome is the answer and nothing dilutes it.
+ *
+ * `listPrice` is the price the arithmetic assumes. It is the ONE transcribed number in this module,
+ * and it is transcribed because the spec module is side-effect-free and cannot read the alias
+ * registry. It is reconciled in TWO places that can: the drift guard checks it against
+ * `LOY_SKU_PTS_UNIT.price` in `test-data/aliases.json`, and the seeder checks it against the price
+ * the platform actually returned. A silent drift here would move every points target, so it is
+ * guarded twice rather than trusted once.
+ */
+export const POINTS_PRODUCT = {
+  aliasName: 'MSN_POINTS_PRODUCT',
+  slot: 'P',
+  /** The PerSku goal target quantity. One is enough: the question is "does it count at all?". */
+  quantity: 1,
+  /** Resolved through this alias at seed time; this module never names the SKU. */
+  sourceAlias: 'LOY_SKU_PTS_UNIT',
+  productName: 'AGENT-TEST PTS Unit Divisor',
+  listPrice: 1,
+  currencyIntent: 'loyalty',
+  minQuantity: 1,
+  packSize: 1,
+  /** Owned by the loyalty-fixture seeder, not by this one — it is found, never created or deleted. */
+  created: false,
+};
+
+/**
+ * Every product slot the fixture set can target: the owned buyable pair, the owned zero-stock
+ * target, and the found points-priced one.
+ */
+export const TARGET_PRODUCTS = [...PERSKU_PRODUCTS, ZERO_STOCK_PRODUCT, POINTS_PRODUCT];
+
+/** The products this seeder CREATES (and may therefore delete on teardown). Pure. */
+export const OWNED_PRODUCTS = TARGET_PRODUCTS.filter((p) => p.created !== false);
+
+/**
+ * SPENDABILITY — the last link of the chain, and the one a "the balance went up" assertion misses.
+ *
+ * `customer sees a mission -> orders -> progress -> completion -> POINTS CREDITED -> POINTS SPENDABLE`.
+ * The credit is easy to assert and easy to satisfy vacuously: a 1-point reward moves the ledger and
+ * proves the grant path works, while proving nothing about whether those points can buy anything. In
+ * Mixed Cart the points are spent through the ordinary redeem / LoyaltyPaymentMethod path against a
+ * loyalty-currency line, so "spendable" has a concrete, checkable meaning — the reward must cover a
+ * real multi-unit purchase of the points-priced product.
+ *
+ * `minSpendableUnits` is 2 and not 1 deliberately: at one unit, "the reward covers a purchase" and
+ * "the reward equals the smallest possible price" are the same observation, and a quantity of one
+ * cannot show that a partial redemption leaves a remaining balance.
+ */
+export const REWARD_SPEND = {
+  aliasName: 'MSN_REWARD_SPEND',
+  /** The mission whose grant must be big enough to spend. */
+  rewardAlias: 'MSN_ORDERVALUE',
+  /** What it must be spendable ON. */
+  productAlias: POINTS_PRODUCT.aliasName,
+  minSpendableUnits: 2,
+};
+
+/** How many units of a points-priced line a reward can pay for. Pure. */
+export const rewardBuysUnits = (reward, unitPrice) => (
+  Number(unitPrice) > 0 ? Math.floor(Number(reward) / Number(unitPrice)) : 0
+);
+
+/**
+ * DECLARED FIXTURE LIMITS — states this set CANNOT provision, recorded here rather than left to be
+ * rediscovered. `.claude/rules/test-data.md` SECOND RULE: state the fixture's own limits where they
+ * exist, so a green case never implies an answer the data cannot give.
+ *
+ * A case whose question appears here must carry the reason in its `Preconditions`, not a silent pass.
+ */
+export const FIXTURE_LIMITS = [
+  {
+    question: 'Does an OrderValueGoal with an EMPTY currencyCode accrue any currency\'s raw Total?',
+    why:
+      'Source shows the currency gate self-disables when CurrencyCode is empty, so the state exists in '
+      + 'the module. It is NOT reachable through the write API: POST /api/loyalty-missions rejects both '
+      + '"" and null with HTTP 400 "Currency code is required for the order value goal" (re-verified live '
+      + 'on vcst-qa 2026-08-28, both spellings). Seeding it would need a direct database write, which no '
+      + 'seeder in this repo does and none should. The adjacent question — does the gate work when the '
+      + 'currency is PRESENT but wrong — is covered by the MSN_ORDERVALUE / MSN_ORDERVALUE_ALTCURRENCY pair.',
+  },
+  {
+    question: 'Does cancelling an order reverse mission progress or claw back granted points?',
+    why:
+      'No reversal path exists in the product: both loyalty handlers filter EntryState.Added, so nothing '
+      + 'observes Modified or Deleted, and the operation vocabulary is exactly Earned/Redeemed with no '
+      + 'cancelled or reversed member. A fixture that DEMONSTRATES the absence needs a third order that is '
+      + 'completed and then cancelled — and a third order would change PROGRESS_ORDER_COUNT, taking '
+      + 'MSN_ORDERCOUNT past its derived target and MSN_ENDING_SOON off its declared 50%, i.e. it would '
+      + 'destroy two working fixtures to add one. That demonstration belongs in the RUN-SCOPED e2e set '
+      + '(missions-e2e-specs.mjs), whose missions are minted per run and whose order history is its own.',
+  },
+  {
+    question: 'Does a PTS-priced line inflate an OrderValueGoal in a MIXED single order (cash + points on ONE order)?',
+    why:
+      'The points line is on its own order here, not mixed into the cash one, because a mixed order '
+      + 'cannot separate "the points line contributed nothing" from "the points line contributed and the '
+      + 'cash figure absorbed it". Measured on a genuinely mixed order (vcst-qa 2026-08-28): subTotal and '
+      + 'total both excluded the PTS line entirely. MSN_ORDERVALUE_POINTS asks the same question in the '
+      + 'separable form; a single-order mixed variant would be a second fixture for one answer.',
+  },
+];
 
 /** The slots a spec's goal items cover. Defaults to the shared buyable pair. Pure. */
 export const goalSlotsFor = (spec) => (spec?.goalSlots ? [...spec.goalSlots] : PERSKU_PRODUCTS.map((p) => p.slot));
@@ -504,21 +711,99 @@ export const PROGRESS_USER_ROLE = 'USER';
 export const PROGRESS_ORDER = {
   key: 'ORDER',
   status: 'New',
-  unitPrice: 10,
+  currencyIntent: 'store-default',
+  /**
+   * The CASH lines. A line's unit price is NOT declared here — it is read from the slot's own
+   * `listPrice`, so the catalog price a case sees on the PDP and the price its order line carries
+   * have exactly one definition and cannot drift apart.
+   *
+   * `unitDiscount` is a PER-UNIT `discountAmount` on the line. Measured live on vcst-qa
+   * (2026-08-28): a line of quantity 2 carrying `discountAmount: 3` stored `subTotalDiscount: 6`
+   * and `discountTotal: 6` while `subTotal` stayed at the UNDISCOUNTED 30. That is what makes gross
+   * merchandise, net merchandise and order total three DIFFERENT numbers on one order.
+   */
   lines: [
-    { slot: 'A', quantity: 2 },
-    { slot: 'B', quantity: 1 },
+    { slot: 'A', quantity: 2, unitDiscount: 5.25 },
+    { slot: 'B', quantity: 1, unitDiscount: 0 },
   ],
+  /**
+   * A real shipping charge. Measured live: an authored `shipments[0].price` of 17 survived the
+   * platform's recompute verbatim and raised `order.Total` from 30 to 47 with `subTotal` unmoved.
+   * This is the lever that makes "does the goal read Total or merchandise?" answerable at all.
+   */
+  shippingPrice: 24.50,
+  /**
+   * Tax is declared at ZERO, and that is a decision rather than an omission. An authored item
+   * `taxTotal` DOES reach `order.TaxTotal` (measured: 4 -> 4), but the platform re-derives the
+   * line's own tax from `taxPercentRate` and stored 4.002 against an authored 4. Shipping and the
+   * line discount are EXACT levers; tax is a fuzzy one, and a third lever buys no additional
+   * separation. Left declared so a fixture that later needs it turns it on in one place — the guard
+   * reads OBSERVED totals, so a non-zero tax adds noise but breaks nothing.
+   */
+  taxTotal: 0,
 };
 
-/** The provisioning order's business key — deterministic, so the seeder finds and reuses it. Pure. */
-export const progressOrderNumber = () => `${NAME_PREFIX}-${PROGRESS_ORDER.key}`;
+/**
+ * THE SECOND ORDER: all loyalty currency, no cash at all.
+ *
+ * WHY A SECOND ORDER EXISTS AT ALL — it is the only shape that can answer two questions the cash
+ * order cannot, and it costs exactly one `OrderCountGoal` contribution, which is re-derived below
+ * rather than left to rot.
+ *
+ *   1. IS `OrderCountGoal` CURRENCY-BLIND? `ApplyContribution` adds exactly `1m` per qualifying
+ *      order and the currency gate matches only `goal is OrderValueGoal` — `OrderCountGoal` carries
+ *      no `CurrencyCode` field at all. So the discriminating observation is an order with NOTHING
+ *      the store would call money in it that still increments the count. MSN_ORDERCOUNT's target of
+ *      2 is exactly that test: it completes only if this order counted. If the count were ever
+ *      currency-filtered it would sit at 1 of 2, InProgress — a different, visible state.
+ *   2. DOES A POINTS LINE FEED A `PerSkuGoal` QUANTITY? `ApplyContribution` sums
+ *      `lineItem.Quantity` with no currency predicate, while the sibling `LoyaltyProgramHandler`
+ *      filters `!x.Currency.EqualsIgnoreCase(loyaltyCurrency)`. MSN_PERSKU_PTS targets slot P alone,
+ *      so it completes iff the points line counted.
+ *
+ * AND IT COSTS NOTHING ON THE MONEY AXIS. Measured live on vcst-qa: a PTS line on a USD order
+ * contributes ZERO to `subTotal` and ZERO to `total` (sub=60, TOTAL=60, with the PTS line's own
+ * `extendedPrice: 500` stored on the line and excluded from both). So this order adds a full
+ * `pointsLineValue` to the `totalPlusPoints` reading and nothing to the other three — which is
+ * precisely the separation MSN_ORDERVALUE_POINTS is targeted into.
+ *
+ * The line reuses `LOY_SKU_PTS_UNIT` (a 1-PTS unit product) rather than minting one: a second
+ * points-priced unit product would be a second implementation of a solved fixture and the two would
+ * drift. Its `unitPrice` IS declared on the line, because an order line price is authored and
+ * survives verbatim — and the drift guard reconciles that authored number against the alias
+ * registry's price AND against the price the seeder actually resolved.
+ */
+export const POINTS_ORDER = {
+  key: 'ORDER-PTS',
+  status: 'New',
+  currencyIntent: 'loyalty',
+  lines: [
+    { slot: 'P', quantity: 500, unitPrice: 1, unitDiscount: 0 },
+  ],
+  shippingPrice: 0,
+  taxTotal: 0,
+};
 
-/** Alias that carries the provisioning order's runtime ids. */
+/** Every order the seed places, in the order it places them. Cash first — see `POINTS_ORDER`. */
+export const PROGRESS_ORDERS = [PROGRESS_ORDER, POINTS_ORDER];
+
+/**
+ * An order's business key — deterministic, so the seeder finds and reuses it rather than placing a
+ * duplicate. Defaults to the cash order so existing single-order call sites keep working. Pure.
+ */
+export const progressOrderNumber = (order = PROGRESS_ORDER) => `${NAME_PREFIX}-${order.key}`;
+
+/** Alias that carries the cash order's runtime ids (and the observed money shape). */
 export const PROGRESS_ORDER_ALIAS = 'MSN_PROGRESS_ORDER';
+/** Alias that carries the points order's runtime ids. */
+export const POINTS_ORDER_ALIAS = 'MSN_POINTS_ORDER';
 
-/** How many orders the seed places. `OrderCountGoal` contributions are exactly this. Pure. */
-export const PROGRESS_ORDER_COUNT = 1;
+/**
+ * How many orders the seed places. `OrderCountGoal` contributions are exactly this — DERIVED from
+ * the order list, never a second literal, so adding or removing an order re-derives every
+ * order-count prediction instead of silently invalidating them.
+ */
+export const PROGRESS_ORDER_COUNT = PROGRESS_ORDERS.length;
 
 /**
  * The per-slot target quantities a PerSku mission's goal items carry. Defaults to `PERSKU_PRODUCTS`
@@ -536,10 +821,196 @@ export function goalItemQuantities(spec) {
   return { ...base, ...(spec?.goalItemQuantities || {}) };
 }
 
-/** What the seed order buys, per slot. Pure. */
-export const progressOrderQuantities = () => Object.fromEntries(
-  PROGRESS_ORDER.lines.map((l) => [l.slot, l.quantity]),
+/**
+ * What the seed orders buy, per slot, ACROSS EVERY ORDER. Pure.
+ *
+ * Summed rather than read off the cash order because `PerSkuGoal` accrual is cumulative across
+ * orders and applies no currency filter — so the points order's slot-P quantity is part of what a
+ * PerSku goal sees, and a per-order view would predict a state the module never produces.
+ */
+export const progressOrderQuantities = () => {
+  const out = {};
+  for (const order of PROGRESS_ORDERS) {
+    for (const l of order.lines) out[l.slot] = (out[l.slot] || 0) + Number(l.quantity);
+  }
+  return out;
+};
+
+/** A line's unit price: the order line's own where declared, else the slot product's list price. Pure. */
+export const lineUnitPrice = (line, products = productBySlot) => Number(
+  line?.unitPrice ?? products[line?.slot]?.listPrice ?? NaN,
 );
+
+/* ── The money model: what makes an OrderValueGoal FALSIFIABLE ────────────────
+ *
+ * THE DEFECT THIS REPLACES. The seed order used to be three units at a flat 10 with no shipping, no
+ * tax and no discount — a $30.00 order. `LoyaltyMissionLogicService.ApplyContribution` contributes
+ * `order.Total` for an `OrderValueGoal`, and the exploratory session that found that had to record
+ * this fixture's own limit in as many words: *"the only in-window orders were API-seeded at exactly
+ * $30 with no shipping or tax, so `$30.00 spent` is consistent with both readings."* On a flat
+ * order, merchandise value and order total are THE SAME NUMBER, so no case built on it could fail if
+ * the accrual read the wrong one. The defect was found by reading source, not by any of 127 cases.
+ *
+ * THE FIX IS DIVERGENCE, THEN A DECISION TABLE. The two seed orders now yield FOUR distinct
+ * candidate contributions, and three goals are targeted into the three gaps between them, so the
+ * observed outcome identifies the reading UNIQUELY:
+ *
+ *     netMerchandise    92.00   subTotal - discountTotal
+ *     grossMerchandise 102.50   subTotal (merchandise before line discounts)
+ *     orderTotal       116.50   net + shipping + tax    <- what the module contributes today
+ *     totalPlusPoints  616.50   orderTotal + the points order's line value
+ *
+ *   reading            | MSN_ORDERVALUE_NET | MSN_ORDERVALUE  | MSN_ORDERVALUE_POINTS
+ *                      |    target 97.25    |  target 109.50  |     target 366.50
+ *   -------------------+--------------------+-----------------+----------------------
+ *   netMerchandise     | 94.60%  InProgress | 84.02% InProg   | 25.10%  InProgress
+ *   grossMerchandise   |  100%   COMPLETED  | 93.61% InProg   | 27.97%  InProgress
+ *   orderTotal         |  100%   COMPLETED  |  100%  COMPLETED| 31.79%  InProgress
+ *   totalPlusPoints    |  100%   COMPLETED  |  100%  COMPLETED|  100%   COMPLETED
+ *
+ * Every row is distinct in its pattern of completion, and every cell is distinct in percentage — so
+ * even a single card read off the storefront names the reading. If the implementation were wrong in
+ * any of the three ways above, at least one of these three missions would land in a visibly
+ * different state. That is the test `.claude/rules/test-data.md` SECOND RULE asks for, and the flat
+ * $30 order failed it.
+ *
+ * THE NUMBERS ARE DELIBERATELY NOT ROUND. 92.00 / 102.50 / 116.50 cannot be confused with each
+ * other, with a price, or with a coincidence; a set of round numbers invites exactly the "well,
+ * $30 is $30" reading that made the original fixture undecidable. The cents are chosen so every
+ * separator midpoint lands on an exact cent, so no target depends on a rounding rule.
+ *
+ * NOTHING BELOW IS AN ORACLE. The predicted contributions place the targets and prove the fixture
+ * still discriminates. The SEEDER records what the platform actually accrued, and the drift guard
+ * fails when that observation matches ZERO readings (the module is doing something none of these
+ * describes — a finding) or MORE THAN ONE (two readings collapsed onto one number — a data defect).
+ * The product is never asserted against these numbers.
+ */
+
+const round2 = (n) => Number(Number(n).toFixed(2));
+
+/** The candidate readings of "what an OrderValueGoal measures". */
+export const ORDER_VALUE_READINGS = {
+  netMerchandise: 'merchandise value AFTER line discounts (order.SubTotal - order.DiscountTotal)',
+  grossMerchandise: 'merchandise value BEFORE line discounts (order.SubTotal)',
+  orderTotal: 'order.Total — merchandise, less discounts, plus shipping and tax (the implemented reading)',
+  totalPlusPoints: 'order.Total plus the loyalty-currency line value (points spend counted as spend)',
+};
+
+/** Reading keys, ASCENDING by the value they predict. `separatorTarget` asserts against this order. */
+export const READING_ORDER = ['netMerchandise', 'grossMerchandise', 'orderTotal', 'totalPlusPoints'];
+
+/**
+ * The seed orders' money shape, in closed form, from the committed spec. Pure.
+ *
+ * Mirrors the platform's own composition, which was MEASURED rather than assumed (vcst-qa,
+ * 2026-08-28): `total = subTotal - discountTotal + shippingTotal + taxTotal`, with a
+ * loyalty-currency line contributing to NEITHER `subTotal` NOR `total`. Cash and points lines are
+ * separated by the ORDER's `currencyIntent`, not by guessing from the price.
+ */
+export function orderMoney(orders = PROGRESS_ORDERS, { products = productBySlot } = {}) {
+  let grossMerchandise = 0; let discountTotal = 0; let shippingTotal = 0; let taxTotal = 0; let pointsLineValue = 0;
+  for (const order of orders) {
+    const isPoints = order.currencyIntent === 'loyalty';
+    for (const l of order.lines) {
+      const ext = Number(l.quantity) * lineUnitPrice(l, products);
+      if (isPoints) { pointsLineValue += ext; continue; }
+      grossMerchandise += ext;
+      discountTotal += Number(l.quantity) * Number(l.unitDiscount || 0);
+    }
+    if (isPoints) continue;
+    shippingTotal += Number(order.shippingPrice || 0);
+    taxTotal += Number(order.taxTotal || 0);
+  }
+  grossMerchandise = round2(grossMerchandise);
+  discountTotal = round2(discountTotal);
+  shippingTotal = round2(shippingTotal);
+  taxTotal = round2(taxTotal);
+  pointsLineValue = round2(pointsLineValue);
+  const netMerchandise = round2(grossMerchandise - discountTotal);
+  const orderTotal = round2(netMerchandise + shippingTotal + taxTotal);
+  return {
+    grossMerchandise, discountTotal, netMerchandise, shippingTotal, taxTotal,
+    orderTotal, pointsLineValue, totalPlusPoints: round2(orderTotal + pointsLineValue),
+  };
+}
+
+/** Reading key -> the contribution that reading predicts, for a money shape. Pure. */
+export function readingValues(money = orderMoney()) {
+  return {
+    netMerchandise: money.netMerchandise,
+    grossMerchandise: money.grossMerchandise,
+    orderTotal: money.orderTotal,
+    totalPlusPoints: money.totalPlusPoints,
+  };
+}
+
+/**
+ * The goal target that SEPARATES two readings: the midpoint of the gap between them, so the reading
+ * below falls short and the reading above completes.
+ *
+ * DERIVED, never a literal (`.claude/rules/test-data.md` GOLDEN RULE). Edit a quantity, a price, the
+ * discount or the shipping charge and every target moves with it, instead of going quietly stale —
+ * which is the failure mode a hand-written `value: 250` has, and had.
+ */
+export function separatorTarget(above, below, money = orderMoney()) {
+  const v = readingValues(money);
+  return round2((Number(v[above]) + Number(v[below])) / 2);
+}
+
+/**
+ * What each candidate reading predicts for one OrderValueGoal spec: the contribution, the percentage
+ * the card would show, and whether the mission completes. Pure. `null` for a non-money goal.
+ */
+export function predictOrderValueByReading(spec, money = orderMoney()) {
+  if (spec?.goal?.type !== 'OrderValueGoal') return null;
+  const target = Number(spec.goal.value);
+  const v = readingValues(money);
+  const out = {};
+  for (const key of READING_ORDER) {
+    const contribution = Number(v[key]);
+    const percentage = target > 0 ? round2(Math.min(100, (contribution / target) * 100)) : 0;
+    out[key] = {
+      contribution,
+      percentage,
+      status: (target > 0 && contribution >= target) ? 'Completed' : 'InProgress',
+    };
+  }
+  return out;
+}
+
+/**
+ * Which readings are consistent with a contribution the platform ACTUALLY reported. Pure.
+ *
+ * This is the falsifiability check itself, run against observation rather than intent. EXACTLY ONE
+ * match means the fixture identified the reading. ZERO means the module is doing something none of
+ * the four readings describes — a finding, not a fixture fault. TWO OR MORE means two readings
+ * collapsed onto the same number and the fixture has stopped discriminating — a data defect, and
+ * the one this whole redesign exists to make impossible.
+ */
+export function readingsConsistentWith(observed, money = orderMoney(), tolerance = 0.01) {
+  const v = readingValues(money);
+  if (observed == null || observed === '' || !Number.isFinite(Number(observed))) return [];
+  return READING_ORDER.filter((k) => Math.abs(Number(v[k]) - Number(observed)) <= tolerance);
+}
+
+/**
+ * The decision table above, computed: one row per reading, one cell per store-default OrderValue
+ * fixture. Pure. `validateSpecShape` asserts every row's completion pattern is unique — which is
+ * exactly the property "the observed outcome names the reading". The unit tests assert its shape.
+ */
+export function orderValueDecisionTable(money = orderMoney()) {
+  const specs = MISSIONS.filter((m) => m.goal?.type === 'OrderValueGoal' && m.goal?.currency === 'store-default');
+  return READING_ORDER.map((reading) => ({
+    reading,
+    cells: specs.map((s) => {
+      const p = predictOrderValueByReading(s, money)[reading];
+      return { aliasName: s.aliasName, target: Number(s.goal.value), ...p };
+    }),
+  }));
+}
+
+/** A reading row's completion signature — the pattern the storefront would actually show. Pure. */
+export const decisionRowSignature = (row) => row.cells.map((c) => (c.status === 'Completed' ? '1' : '0')).join('');
 
 /**
  * Predict, in closed form, what the single seed order does to a fixture's progress.
@@ -787,14 +1258,67 @@ export const MISSIONS = [
     public: true,
     window: 'active',
     condition: { type: 'AnyUserGroupCondition' },
-    goal: { type: 'OrderValueGoal', value: 250, currency: 'store-default' },
+    /**
+     * TARGET IS DERIVED, not chosen: the midpoint between what the order is worth as MERCHANDISE and
+     * what it is worth as a TOTAL. Edit a price, a quantity, the discount or the shipping charge and
+     * this moves with them.
+     */
+    separates: ['grossMerchandise', 'orderTotal'],
+    goal: { type: 'OrderValueGoal', value: separatorTarget('grossMerchandise', 'orderTotal'), currency: 'store-default' },
     reward: 500,
+    stateRole: 'money-discriminator',
     purpose:
-      'Order-value goal in the STORE DEFAULT currency. It was originally specified with currencyCode=null '
-      + '("accepts any currency", C19) — but a save-time validator rejects both null and "" with "Currency '
-      + 'code is required for the order value goal", so a currency-agnostic order-value mission is not '
-      + 'expressible at all. The C19 question therefore moved: it is now answered by running this against '
-      + 'MSN_ORDERVALUE_ALTCURRENCY, not by a null field.',
+      'THE merchandise-vs-total discriminator, and the reason this fixture set was rewritten. Its target '
+      + '(109.50) sits strictly between the seed order\'s merchandise value (102.50) and its order total '
+      + '(116.50), so the two readings predict DIFFERENT outcomes: under order.Total it completes at 100%, '
+      + 'under any merchandise reading it stays InProgress at 93.61% (gross) or 84.02% (net of discount). '
+      + 'The previous fixture was a flat $30 order against a target of 250 — both readings predicted the '
+      + 'same $30.00, so no case built on it could fail however the accrual was implemented, and the defect '
+      + '(ApplyContribution contributes order.Total, so shipping and tax inflate a spend goal and a discount '
+      + 'deflates it) had to be found by reading source instead. It was ALSO originally specified with '
+      + 'currencyCode=null ("accepts any currency", C19); a save-time validator rejects both null and "" '
+      + 'with "Currency code is required for the order value goal" (re-verified live 2026-08-28: HTTP 400 '
+      + 'for both), so that question moved to the MSN_ORDERVALUE_ALTCURRENCY pair and cannot be seeded as a '
+      + 'field. See ORDER_VALUE_READINGS for the full decision table.',
+  },
+  {
+    aliasName: 'MSN_ORDERVALUE_NET',
+    key: 'ORDERVALUE-NET',
+    status: 'Published',
+    public: true,
+    window: 'active',
+    condition: { type: 'AnyUserGroupCondition' },
+    separates: ['netMerchandise', 'grossMerchandise'],
+    goal: { type: 'OrderValueGoal', value: separatorTarget('netMerchandise', 'grossMerchandise'), currency: 'store-default' },
+    reward: 500,
+    stateRole: 'money-discriminator',
+    purpose:
+      'The DISCOUNT discriminator. Its target (97.25) sits strictly between the order\'s merchandise value '
+      + 'net of line discounts (92.00) and gross of them (102.50), so it completes under a gross reading and '
+      + 'falls short under a net one. Without it, "does a discount push a customer AWAY from a spend goal?" '
+      + 'is unanswerable: MSN_ORDERVALUE alone cannot separate net from gross, because both fall short of '
+      + 'its own target. Together the two targets partition the three cash readings uniquely.',
+  },
+  {
+    aliasName: 'MSN_ORDERVALUE_POINTS',
+    key: 'ORDERVALUE-POINTS',
+    status: 'Published',
+    public: true,
+    window: 'active',
+    condition: { type: 'AnyUserGroupCondition' },
+    separates: ['orderTotal', 'totalPlusPoints'],
+    goal: { type: 'OrderValueGoal', value: separatorTarget('orderTotal', 'totalPlusPoints'), currency: 'store-default' },
+    reward: 500,
+    stateRole: 'money-discriminator',
+    purpose:
+      'The POINTS-SPEND discriminator: is loyalty-currency spend counted as spend by a money goal? Its '
+      + 'target (366.50) sits strictly between the cash order total (116.50) and that total plus the points '
+      + 'order\'s line value (616.50), so it completes ONLY if points spend reaches the figure the goal '
+      + 'reads. Measured live on vcst-qa 2026-08-28, a PTS line contributes zero to both order.SubTotal and '
+      + 'order.Total, so today it must stay InProgress at 31.79% — and that is exactly why it has to exist: '
+      + 'the module\'s two accrual paths disagree about points (LoyaltyProgramHandler filters the loyalty '
+      + 'currency, ApplyContribution does not), so a change that starts folding points into the total would '
+      + 'otherwise move no assertion anywhere in the corpus.',
   },
   {
     aliasName: 'MSN_ORDERVALUE_ALTCURRENCY',
@@ -803,15 +1327,21 @@ export const MISSIONS = [
     public: true,
     window: 'active',
     condition: { type: 'AnyUserGroupCondition' },
-    goal: { type: 'OrderValueGoal', value: 250, currency: 'store-alternate' },
+    /**
+     * The control half of a MINIMAL-DIFFERENCE PAIR: the target is DERIVED FROM THE SAME SEPARATOR as
+     * MSN_ORDERVALUE, so the two fixtures differ in EXACTLY ONE field — the currency. A pair that also
+     * differed in threshold could not attribute a divergence to currency, which is the whole claim.
+     */
+    separates: ['grossMerchandise', 'orderTotal'],
+    goal: { type: 'OrderValueGoal', value: separatorTarget('grossMerchandise', 'orderTotal'), currency: 'store-alternate' },
     reward: 500,
     purpose:
-      'The discriminating half of the currency pair: SAME threshold and SAME reward as MSN_ORDERVALUE, '
-      + 'differing ONLY in currency. It exists because the server enforces that a currency is PRESENT but '
-      + 'never that it is VALID ("XYZ" and lowercase "usd" both persist verbatim), so a wrong-currency '
-      + 'defect cannot surface at save time and must be caught at accrual: an order in the default currency '
-      + 'must satisfy MSN_ORDERVALUE and must NOT satisfy this one. With a single order-value fixture that '
-      + 'comparison has nothing to compare against.',
+      'The discriminating half of the currency pair: SAME derived threshold and SAME reward as '
+      + 'MSN_ORDERVALUE, differing ONLY in currency. It exists because the server enforces that a currency '
+      + 'is PRESENT but never that it is VALID ("XYZ" and lowercase "usd" both persist verbatim), so a '
+      + 'wrong-currency defect cannot surface at save time and must be caught at accrual: an order in the '
+      + 'default currency must satisfy MSN_ORDERVALUE and must NOT satisfy this one. Its expected state is '
+      + '0% — and 0% is only meaningful BECAUSE its twin reaches 100% on the same order.',
   },
   {
     aliasName: 'MSN_ORDERCOUNT',
@@ -820,11 +1350,21 @@ export const MISSIONS = [
     public: true,
     window: 'active',
     condition: { type: 'AnyUserGroupCondition' },
-    goal: { type: 'OrderCountGoal', count: 2 },
+    /** DERIVED: it must equal the number of orders the seed places, or the fixture asks nothing. */
+    goal: { type: 'OrderCountGoal', count: PROGRESS_ORDER_COUNT },
     reward: 300,
+    progress: { status: 'Completed', percentage: 100 },
+    stateRole: 'semantics',
     purpose:
-      'Order-count goal with a small threshold so a case can cross it in two orders. Count is >1 on '
-      + 'purpose: at count=1 "counts orders" and "fires on any order" are indistinguishable.',
+      'The ORDER-COUNT CURRENCY-BLINDNESS discriminator. ApplyContribution adds exactly 1 per qualifying '
+      + 'order and the currency gate matches only `goal is OrderValueGoal` — OrderCountGoal has no '
+      + 'CurrencyCode field at all — so the count should include an order containing nothing the store '
+      + 'would call money. The seed places exactly two orders and one of them is ALL loyalty currency, so a '
+      + 'target of 2 completes iff the points-only order counted; were the count ever currency-filtered it '
+      + 'would sit at 1 of 2, InProgress, which is a visibly different state. The target is derived from '
+      + 'PROGRESS_ORDER_COUNT so adding or removing a seed order can never leave it quietly unfalsifiable. '
+      + 'Count is >1 on purpose for the older reason too: at count=1, "counts orders" and "fires on any '
+      + 'order" are the same observation.',
   },
   {
     aliasName: 'MSN_PERSKU_ALL',
@@ -856,10 +1396,20 @@ export const MISSIONS = [
           'Buy every featured product at its listed quantity to complete this mission and earn points.',
       },
     },
+    // The seed orders buy A x2 and B x1. Targeting BOTH at 2 leaves A exactly met and B one short,
+    // which is what makes this pair mean anything — see the purpose note.
+    goalItemQuantities: { A: 2, B: 2 },
+    progress: { status: 'InProgress', percentage: 75, rowsMet: 1, rowsUnmet: 1 },
+    stateRole: 'semantics',
     purpose:
       'PerSku with all=true → surfaces as PerSkuAll: EVERY target SKU must be bought at its quantity. '
-      + 'Paired with MSN_PERSKU_ANY over the SAME two targets, so the only variable is the flag. Also '
-      + 'the SKU-side DESCRIPTION subject (MSNF-045) — see the l10n note above.',
+      + 'Paired with MSN_PERSKU_ANY over the SAME two targets AT THE SAME QUANTITIES, so the flag is the '
+      + 'only variable. The quantities are the fix: they used to default to what the seed order buys '
+      + 'exactly, so ALL and ANY were BOTH Completed at 100% and the pair agreed on every observable — '
+      + 'a control pair that cannot disagree tests nothing, and an implementation that ignored the flag '
+      + 'entirely would have passed. At {A:2, B:2} against an order of A x2 + B x1 this sits at 75% '
+      + 'InProgress (one row met, one short) while its twin sits at 100% Completed on identical data. '
+      + 'Also the SKU-side DESCRIPTION subject (MSNF-045) — see the l10n note above.',
   },
   {
     aliasName: 'MSN_PERSKU_ANY',
@@ -869,10 +1419,43 @@ export const MISSIONS = [
     window: 'active',
     condition: { type: 'AnyUserGroupCondition' },
     goal: { type: 'PerSkuGoal', all: false },
+    // IDENTICAL to MSN_PERSKU_ALL's. A minimal-difference pair differs in one field or it attributes
+    // nothing; here that field is `all`.
+    goalItemQuantities: { A: 2, B: 2 },
     reward: 400,
+    progress: { status: 'Completed', percentage: 100 },
+    stateRole: 'semantics',
     purpose:
       'PerSku with all=false → surfaces as PerSkuAny: ONE target SKU at quantity suffices. The '
-      + 'discriminating half of the ALL/ANY pair.',
+      + 'discriminating half of the ALL/ANY pair, and it now actually discriminates: on the SAME two '
+      + 'targets at the SAME quantities as MSN_PERSKU_ALL it reaches Completed 100% where its twin '
+      + 'reaches InProgress 75%. The percentage divergence matters as much as the completion one — the '
+      + 'module computes an ANY percentage as a BINARY completed?100:0 and an ALL percentage as a '
+      + 'clamped per-row sum, so a pair that agreed on the number could not tell the two branches apart.',
+  },
+  {
+    aliasName: 'MSN_PERSKU_PTS',
+    key: 'PERSKU-PTS',
+    status: 'Published',
+    public: true,
+    window: 'active',
+    condition: { type: 'AnyUserGroupCondition' },
+    goal: { type: 'PerSkuGoal', all: false },
+    /** Slot P ALONE: a second, cash-priced row would dilute the observation into ambiguity. */
+    goalSlots: ['P'],
+    goalItemQuantities: { P: 1 },
+    reward: 150,
+    progress: { status: 'Completed', percentage: 100 },
+    stateRole: 'semantics',
+    purpose:
+      'The PER-SKU CURRENCY-BLINDNESS discriminator: does a LOYALTY-CURRENCY line advance a quantity '
+      + 'target? ApplyContribution sums lineItem.Quantity with no currency predicate while the sibling '
+      + 'LoyaltyProgramHandler explicitly filters the loyalty currency, so the module contains two '
+      + 'accrual paths that disagree, and until this fixture existed the disagreement was observable '
+      + 'only by reading source. all=false and a single slot are both deliberate: with one target, the '
+      + 'ALL/ANY distinction adds a variable the case is not asking about, and a second cash-priced row '
+      + 'would let the mission advance for a reason that has nothing to do with currency. It completes '
+      + 'iff the points order counted.',
   },
   {
     aliasName: 'MSN_PUBLISHED_PRIVATE',
@@ -1039,7 +1622,7 @@ export const MISSIONS = [
     public: true,
     window: 'openEnded',
     condition: { type: 'AnyUserGroupCondition' },
-    // count=3 against a ONE-order seed: never completed, for the same reason MSN_ENDING_SOON's is 4 —
+    // count=3 against the TWO-order seed: never completed, for the same reason MSN_ENDING_SOON's is 4 —
     // a completed mission takes the SUCCESS date badge, which overrides every other badge branch,
     // including the null-daysRemaining one this fixture exists to reach.
     goal: { type: 'OrderCountGoal', count: 3 },
@@ -1107,11 +1690,12 @@ export const MISSIONS = [
     public: true,
     window: 'endingSoon',
     condition: { type: 'AnyUserGroupCondition' },
-    // count=4 against a ONE-order seed: comfortably un-completable, and 25% exactly (no repeating
+    // count=4 against the TWO-order seed: comfortably un-completable, and 50% exactly (no repeating
     // decimal to compare against). See the purpose note for why un-completable is load-bearing.
     goal: { type: 'OrderCountGoal', count: 4 },
     reward: 350,
-    progress: { status: 'InProgress', percentage: 25 },
+    progress: { status: 'InProgress', percentage: 50 },
+    stateRole: 'storefront',
     purpose:
       'The DANGER date badge (VCST-5346). The storefront colours the badge success when the mission is '
       + 'completed, DANGER when daysRemaining < DANGER_THRESHOLD_DAYS, and warning otherwise — and '
@@ -1131,11 +1715,16 @@ export const MISSIONS = [
     window: 'active',
     condition: { type: 'AnyUserGroupCondition' },
     goal: { type: 'PerSkuGoal', all: true },
-    // Against the seed order (A x2, B x1): A is exactly met (2/2), B is left short (1/2).
-    // currentValue = min(2,2) + min(1,2) = 3 of 4 => 75%, InProgress.
-    goalItemQuantities: { A: 2, B: 2 },
+    // Against the seed orders (A x2, B x1): A is exactly met (2/2), B is left short (1/3).
+    // currentValue = min(2,2) + min(1,3) = 3 of 5 => 60%, InProgress.
+    //
+    // B's target is 3 and not 2 so this fixture's percentage DIFFERS from MSN_PERSKU_ALL's 75%. Two
+    // storefront fixtures sharing a percentage is not a tidy coincidence — it means one of them is
+    // covering a state the other already covers, and the state it was supposed to cover is uncovered.
+    goalItemQuantities: { A: 2, B: 3 },
     reward: 450,
-    progress: { status: 'InProgress', percentage: 75, rowsMet: 1, rowsUnmet: 1 },
+    progress: { status: 'InProgress', percentage: 60, rowsMet: 1, rowsUnmet: 1 },
+    stateRole: 'storefront',
     purpose:
       'PARTIAL progress — a bar strictly between empty and full, a non-trivial "{current} of {target} '
       + 'SKUs" label, and the only fixture in the set where the SKU modal shows a target-MET row next '
@@ -1154,11 +1743,12 @@ export const MISSIONS = [
     window: 'active',
     condition: { type: 'AnyUserGroupCondition' },
     goal: { type: 'PerSkuGoal', all: true },
-    // Against the seed order (A x2, B x1): both targets met.
+    // Against the seed orders (A x2, B x1): both targets met.
     // currentValue = min(2,1) + min(1,1) = 2 of 2 => 100%, Completed.
     goalItemQuantities: { A: 1, B: 1 },
     reward: 550,
     progress: { status: 'Completed', percentage: 100, rowsMet: 2, rowsUnmet: 0 },
+    stateRole: 'storefront',
     purpose:
       'COMPLETED progress — the green chip, the success-coloured bar, the "Mission completed" label, '
       + 'the success date badge, and the READ-ONLY SKU modal (steppers and Add-to-cart hidden once the '
@@ -1817,20 +2407,171 @@ export function validateSpecShape() {
    * rather than trusted, so an edited goal quantity cannot leave a stale declaration behind.
    */
 
-  // The seed order is what every prediction is relative to; a malformed one invalidates all three.
-  const orderSlots = PROGRESS_ORDER.lines.map((l) => l.slot);
-  if (new Set(orderSlots).size !== orderSlots.length) {
-    problems.push('PROGRESS_ORDER repeats a slot — two lines on one product would double its quantity in a way no fixture accounts for');
+  // The seed orders are what every prediction is relative to; a malformed one invalidates all of them.
+  const allOrderSlots = PROGRESS_ORDERS.flatMap((o) => o.lines.map((l) => l.slot));
+  if (new Set(allOrderSlots).size !== allOrderSlots.length) {
+    problems.push('the seed orders repeat a slot — two lines on one product would double its quantity in a way no fixture accounts for');
   }
-  for (const l of PROGRESS_ORDER.lines) {
-    if (!PERSKU_PRODUCTS.some((p) => p.slot === l.slot)) problems.push(`PROGRESS_ORDER line references slot "${l.slot}", which PERSKU_PRODUCTS does not declare — the seeder has no product to resolve it to`);
-    if (!(l.quantity > 0)) problems.push(`PROGRESS_ORDER line ${l.slot} needs a positive quantity`);
+  const orderKeys = PROGRESS_ORDERS.map((o) => o.key);
+  if (new Set(orderKeys).size !== orderKeys.length) {
+    problems.push(`two seed orders share the key ${JSON.stringify(orderKeys)} — they resolve to one order number, so the seeder would place one order and every OrderCount prediction would be off by one`);
   }
-  if (PROGRESS_ORDER_COUNT !== 1) {
-    problems.push('PROGRESS_ORDER_COUNT is not 1, but the seeder places exactly one order — every OrderCount prediction would be wrong by construction');
+  for (const order of PROGRESS_ORDERS) {
+    for (const l of order.lines) {
+      if (!productBySlot[l.slot]) problems.push(`order ${order.key} references slot "${l.slot}", which TARGET_PRODUCTS does not declare — the seeder has no product to resolve it to`);
+      if (!(l.quantity > 0)) problems.push(`order ${order.key} line ${l.slot} needs a positive quantity`);
+      if (!(lineUnitPrice(l) > 0)) problems.push(`order ${order.key} line ${l.slot} has no positive unit price (neither an order-line unitPrice nor a product listPrice) — the order's money shape would be undefined and every OrderValue target derived from it meaningless`);
+    }
+    if (!isSeededMissionName(progressOrderNumber(order))) {
+      problems.push(`seed order "${progressOrderNumber(order)}" lacks the ${NAME_PREFIX}- prefix — teardown sweeps by that prefix and would leave it behind`);
+    }
   }
-  if (!isSeededMissionName(progressOrderNumber())) {
-    problems.push(`the provisioning order is named "${progressOrderNumber()}", which lacks the ${NAME_PREFIX}- prefix — teardown sweeps by that prefix and would leave it behind`);
+  if (PROGRESS_ORDER_COUNT !== PROGRESS_ORDERS.length) {
+    problems.push(`PROGRESS_ORDER_COUNT (${PROGRESS_ORDER_COUNT}) disagrees with the ${PROGRESS_ORDERS.length} order(s) the seeder places — every OrderCount prediction would be wrong by construction`);
+  }
+
+  /* ── FALSIFIABILITY OF THE MONEY AXIS ───────────────────────────────────────
+   *
+   * These are not hygiene rules. Each names a way the fixture set keeps seeding, keeps resolving and
+   * keeps passing every other guard while making the question it exists to answer UNDECIDABLE — which
+   * is exactly what the flat $30 order did for two sprints. `.claude/rules/test-data.md` SECOND RULE.
+   */
+  const money = orderMoney();
+
+  // 1. THE LEVERS MUST NOT COLLAPSE. Without shipping there is no gap between merchandise and total;
+  //    without a discount there is no gap between gross and net. Either one at zero silently merges
+  //    two readings and the fixture stops being able to tell them apart.
+  if (!(money.shippingTotal + money.taxTotal > 0)) {
+    problems.push('the seed orders carry NO shipping and NO tax, so order.Total equals merchandise value minus discounts — "does an OrderValueGoal read the total or the merchandise?" becomes undecidable, which is the exact defect (a flat $30 order) this fixture set was rewritten to remove');
+  }
+  if (!(money.discountTotal > 0)) {
+    problems.push('the seed orders carry NO line discount, so gross and net merchandise are the same number — "does a discount push a customer away from a spend goal?" cannot fail however it is implemented');
+  }
+  if (!(money.pointsLineValue > 0)) {
+    problems.push('no seed order carries a loyalty-currency line, so orderTotal and totalPlusPoints are the same number — "is points spend counted as spend?" is unfalsifiable and MSN_ORDERVALUE_POINTS asserts nothing');
+  }
+
+  // 2. THE FOUR READINGS MUST BE STRICTLY ORDERED AND STRICTLY DISTINCT. Two readings landing on one
+  //    number is the collapse itself; a tiny gap is the same collapse waiting for a price edit.
+  const rv = readingValues(money);
+  const MIN_READING_GAP = 1;
+  for (let i = 1; i < READING_ORDER.length; i++) {
+    const lo = READING_ORDER[i - 1]; const hi = READING_ORDER[i];
+    const gap = Number(rv[hi]) - Number(rv[lo]);
+    if (!(gap > 0)) {
+      problems.push(`readings ${lo} (${rv[lo]}) and ${hi} (${rv[hi]}) are not strictly increasing — the two are indistinguishable in the data, so no observation can tell which one the module used`);
+    } else if (gap < MIN_READING_GAP) {
+      problems.push(`readings ${lo} and ${hi} are only ${gap} apart — below ${MIN_READING_GAP} a rounding difference or a one-cent price edit merges them, and the fixture stops discriminating without anything failing`);
+    }
+  }
+
+  // 3. EVERY OrderValue TARGET MUST SIT STRICTLY INSIDE THE GAP IT CLAIMS TO SEPARATE. A target that
+  //    has drifted outside its band still seeds a valid mission — it just predicts the same outcome
+  //    for both readings, which is a fixture that agrees with itself.
+  for (const m of MISSIONS.filter((x) => x.goal?.type === 'OrderValueGoal')) {
+    if (!m.separates) {
+      problems.push(`${m.aliasName} is an OrderValueGoal with no declared \`separates\` pair — its target is then a bare literal, and nothing can check that it still divides two readings`);
+      continue;
+    }
+    const [above, below] = m.separates;
+    if (!(above in rv) || !(below in rv)) {
+      problems.push(`${m.aliasName}.separates names ${JSON.stringify(m.separates)}, which is not a pair of readings from ${READING_ORDER.join('/')}`);
+      continue;
+    }
+    const t = Number(m.goal.value);
+    if (!(Number(rv[above]) < t && t < Number(rv[below]))) {
+      problems.push(`${m.aliasName}'s target ${t} does not sit strictly between ${above} (${rv[above]}) and ${below} (${rv[below]}) — both readings then predict the SAME outcome and the mission cannot distinguish them`);
+    }
+  }
+
+  // 4. THE DECISION TABLE MUST IDENTIFY EVERY READING. If two readings produce the same completion
+  //    pattern across the whole OrderValue set, the set cannot name which one the module used — the
+  //    fixtures are individually discriminating and collectively ambiguous.
+  const table = orderValueDecisionTable(money);
+  const sigs = new Map();
+  for (const row of table) {
+    const sig = decisionRowSignature(row);
+    if (sigs.has(sig)) {
+      problems.push(`readings "${sigs.get(sig)}" and "${row.reading}" produce the SAME completion pattern (${sig}) across every OrderValue fixture — an observed result cannot tell them apart, so the set answers "which figure does the goal read?" only partially`);
+    }
+    sigs.set(sig, row.reading);
+  }
+
+  // (The currency PAIR — same threshold, same reward, different currency — is already enforced
+  // above, beside the other currency-intent rules. Restating it here would be a second enforcer that
+  // can drift from the first.)
+
+  /* ── FALSIFIABILITY OF THE PER-SKU AXIS ─────────────────────────────────── */
+
+  // ALL vs ANY is a minimal-difference pair: same targets, same quantities, one flag. It must
+  // DIVERGE on the observable, or an implementation that ignored the flag entirely would pass.
+  const pAll = MISSION_BY_ALIAS.MSN_PERSKU_ALL;
+  const pAny = MISSION_BY_ALIAS.MSN_PERSKU_ANY;
+  if (pAll && pAny) {
+    const qAll = goalItemQuantities(pAll); const qAny = goalItemQuantities(pAny);
+    if (JSON.stringify(qAll) !== JSON.stringify(qAny)) {
+      problems.push(`MSN_PERSKU_ALL targets ${JSON.stringify(qAll)} and MSN_PERSKU_ANY targets ${JSON.stringify(qAny)} — the pair now differs in TWO variables, so a divergence cannot be attributed to the all/any flag`);
+    }
+    const a = predictProgress(pAll); const b = predictProgress(pAny);
+    if (a && b) {
+      if (a.status === b.status) {
+        problems.push(`MSN_PERSKU_ALL and MSN_PERSKU_ANY both reach ${a.status} on the seed orders — a control pair that cannot disagree tests nothing, and an implementation that ignored \`all\` entirely would pass identically`);
+      }
+      if (percentagesMatch(a.percentage, b.percentage)) {
+        problems.push(`MSN_PERSKU_ALL and MSN_PERSKU_ANY both report ${a.percentage}% — the module computes an ANY percentage as a binary 0-or-100 and an ALL percentage as a clamped per-row sum, so an equal percentage means the two branches are indistinguishable in the data`);
+      }
+    }
+  }
+
+  // The points-currency target must be a LOYALTY-currency product, alone, and actually bought.
+  const pPts = MISSION_BY_ALIAS.MSN_PERSKU_PTS;
+  if (pPts) {
+    const slots = goalSlotsFor(pPts);
+    if (slots.length !== 1 || slots[0] !== POINTS_PRODUCT.slot) {
+      problems.push(`MSN_PERSKU_PTS targets ${JSON.stringify(slots)} rather than the points slot "${POINTS_PRODUCT.slot}" alone — a second, cash-priced row would let it advance for a reason that has nothing to do with currency`);
+    }
+    if (POINTS_PRODUCT.currencyIntent === PERSKU_PRODUCTS[0]?.currencyIntent) {
+      problems.push(`the points target and the cash targets share the currency intent "${POINTS_PRODUCT.currencyIntent}" — the fixture asks whether a NON-default-currency line counts, and cannot ask it in the default currency`);
+    }
+    if (!(progressOrderQuantities()[POINTS_PRODUCT.slot] > 0)) {
+      problems.push('no seed order buys the points-currency target, so MSN_PERSKU_PTS sits at 0% whether or not the module filters currency — the two answers are identical and the fixture asks nothing');
+    }
+  }
+
+  /* ── PRODUCT PINNING: the mixed-currency modal defect ───────────────────── */
+
+  // Every product a mission MODAL renders must settle in ONE currency. The modal sums its rows, so a
+  // second currency there manufactures a mixed-currency subtotal that reads as a product defect — it
+  // was filed once and rejected, which is reviewer time spent on our own data.
+  const cashIntents = new Set([...PERSKU_PRODUCTS, ZERO_STOCK_PRODUCT].map((p) => p.currencyIntent));
+  if (cashIntents.size !== 1) {
+    problems.push(`the cash-side target products declare ${cashIntents.size} different currency intents (${[...cashIntents].join(', ')}) — the featured-SKU modal sums the rows it renders, so a mixed-currency subtotal would be manufactured by the fixture and filed as a bug`);
+  }
+  for (const p of TARGET_PRODUCTS) {
+    if (!p.currencyIntent) problems.push(`${p.aliasName} declares no currencyIntent — it would be priced in whatever pricelist happened to come first, which is exactly how a EUR 455 row landed beside a USD 25 one`);
+    if (!CURRENCY_INTENTS.includes(p.currencyIntent) && p.currencyIntent !== 'loyalty') {
+      problems.push(`${p.aliasName}: currencyIntent "${p.currencyIntent}" is not one of ${CURRENCY_INTENTS.join('/')}/loyalty`);
+    }
+    if (Number(p.packSize || 1) !== 1 || Number(p.minQuantity || 1) !== 1) {
+      problems.push(`${p.aliasName} declares packSize ${p.packSize} / minQuantity ${p.minQuantity} — above 1 the storefront stepper jumps, so a case step reading "set the quantity to exactly 1" is unachievable and reads as a stepper defect (measured: the previously-discovered slot B, 55557702, carries minQuantity 2)`);
+    }
+    if (p.aliasName !== ZERO_STOCK_PRODUCT.aliasName && p.created !== false && p.trackInventory !== false) {
+      problems.push(`${p.aliasName} tracks inventory — it is bought by the seed order on EVERY run, so a tracked fixture drains and eventually blocks cases for a reason that has nothing to do with missions`);
+    }
+  }
+
+  /* ── REWARD SPENDABILITY ────────────────────────────────────────────────── */
+
+  // "The reward landed" is only half the chain; the other half is that it can be SPENT. A grant
+  // smaller than one unit of the cheapest points-priced line proves the ledger moved and nothing more.
+  const rewardMission = MISSION_BY_ALIAS[REWARD_SPEND.rewardAlias];
+  if (!rewardMission) {
+    problems.push(`REWARD_SPEND.rewardAlias "${REWARD_SPEND.rewardAlias}" is not a declared mission`);
+  } else {
+    const units = rewardBuysUnits(rewardMission.reward, POINTS_PRODUCT.listPrice);
+    if (!(units >= REWARD_SPEND.minSpendableUnits)) {
+      problems.push(`${REWARD_SPEND.rewardAlias}'s ${rewardMission.reward}-point reward buys ${units} unit(s) of the ${POINTS_PRODUCT.listPrice}-point line, below the ${REWARD_SPEND.minSpendableUnits} the fixture needs — a reward that cannot pay for a real next order in Mixed Cart cannot demonstrate that mission points are spendable, only that a number changed`);
+    }
   }
 
   const withProgress = progressFixtures();
@@ -2019,11 +2760,25 @@ export function validateSpecShape() {
     }
   }
 
-  // The three states must be DISTINCT. Collapse two of them and the set still seeds, still resolves,
-  // and quietly covers two states instead of three.
-  const states = withProgress.map((m) => `${m.progress.status}:${m.progress.percentage}`);
+  // The STOREFRONT states must be DISTINCT. Collapse two of them and the set still seeds, still
+  // resolves, and quietly covers two states instead of three.
+  //
+  // Scoped to `stateRole: 'storefront'` on purpose. The semantics fixtures (the ALL/ANY pair, the two
+  // currency-blindness discriminators) legitimately SHARE a rendered state with a storefront one —
+  // "Completed 100%" is what three of them are supposed to reach — because what they discriminate is
+  // not the card's appearance but which figure or which flag produced it. Applying the rendering
+  // rule to them would force an artificial difference and destroy the minimal-difference pairing
+  // that makes them attributable. Every such fixture must SAY it is one.
+  const roled = withProgress.filter((m) => m.stateRole === 'storefront');
+  const states = roled.map((m) => `${m.progress.status}:${m.progress.percentage}`);
   if (new Set(states).size !== states.length) {
-    problems.push(`two progress fixtures declare the SAME state (${states.join(', ')}) — one of them is redundant and the state it was meant to cover is now uncovered`);
+    problems.push(`two storefront progress fixtures declare the SAME state (${states.join(', ')}) — one of them is redundant and the state it was meant to cover is now uncovered`);
+  }
+  if (roled.length < 3) {
+    problems.push(`only ${roled.length} fixture(s) declare stateRole "storefront" — the VCST-5346 card needs at least a partial, a completed and a danger-badge state, and an untagged fixture is exempt from the distinctness rule by accident rather than by decision`);
+  }
+  for (const m of withProgress) {
+    if (!m.stateRole) problems.push(`${m.aliasName} declares a progress expectation but no stateRole — it is then neither checked for distinctness nor documented as a deliberate duplicate`);
   }
 
   // A per-slot override that names a slot nobody declares is silently ignored by buildGoalItems.
@@ -2036,6 +2791,150 @@ export function validateSpecShape() {
       if (!goalSlotsFor(m).includes(slot)) problems.push(`${m.aliasName}.goalItemQuantities names slot "${slot}", which is not one of its goal slots (${goalSlotsFor(m).join('/')}) — buildGoalItems ignores it silently`);
       if (!(qty > 0)) problems.push(`${m.aliasName}.goalItemQuantities.${slot} must be positive — the module treats 0 >= 0 as satisfied WITHOUT the SKU being bought, so a zero target completes the mission on any order at all`);
     }
+  }
+
+  return problems;
+}
+
+/* ── The OBSERVED-state guard: falsifiability checked against what actually landed ──────────
+ *
+ * `validateSpecShape` above proves the COMMITTED fixture set is still discriminating. It cannot prove
+ * that the platform agreed — a shipping charge silently dropped, a product priced into a foreign
+ * pricelist, an accrual that matched no reading at all. Those are the failures that leave a fixture
+ * looking perfectly seeded while the case built on it has stopped being able to fail.
+ *
+ * So this reads the OVERLAY (`test-data/aliases.<env>.json`), i.e. what the last seed observed, and
+ * is pure: no network, no fs. It is the analogue of `validate-missions-e2e-data.mjs`'s
+ * `validateSeededState` and of `td:validate:variation-stock`'s "the quantities must DIVERGE" rule.
+ *
+ * An overlay with no seeded money at all is reported as UNSEEDED — one problem, never silence.
+ */
+export function validateSeededMoney(overlay, { tolerance = 0.01 } = {}) {
+  const problems = [];
+  const o = overlay || {};
+  const order = o[PROGRESS_ORDER_ALIAS] || {};
+  const num = (v) => (v === '' || v == null ? null : Number(v));
+
+  const sub = num(order.observed_sub_total);
+  const disc = num(order.observed_discount_total);
+  const ship = num(order.observed_shipping_total);
+  const tax = num(order.observed_tax_total);
+  const total = num(order.observed_total);
+  if (sub == null || total == null) {
+    return [
+      `${PROGRESS_ORDER_ALIAS} carries no observed money shape — suite 083c/075d has never been seeded against this env `
+      + 'with the money-bearing order, so every OrderValue fixture would resolve against an order that does not exist. '
+      + 'Run `TEST_ENV=<env> npm run seed:loyalty-missions`.',
+    ];
+  }
+
+  // 1. THE LEVERS, AS THE PLATFORM STORED THEM. The spec asking for shipping is not evidence the
+  //    platform kept it; a dropped charge collapses merchandise and total onto one number.
+  if (!(ship > 0 || tax > 0)) {
+    problems.push(`the seeded order's observed shipping (${ship}) and tax (${tax}) are both zero, so its total (${total}) carries nothing beyond merchandise — "does an OrderValueGoal read order.Total or merchandise value?" is undecidable from this data, which is the exact defect the flat $30 order had`);
+  }
+  if (!(disc > 0)) {
+    problems.push(`the seeded order's observed discount is ${disc}, so gross and net merchandise are the same number — a case asserting that a discount reduces spend progress cannot fail`);
+  }
+
+  // 2. THE OBSERVED READINGS MUST STILL BE STRICTLY DISTINCT.
+  const pts = num((o[POINTS_ORDER_ALIAS] || {}).observed_line_value) ?? 0;
+  const observedReadings = {
+    netMerchandise: sub - (disc || 0),
+    grossMerchandise: sub,
+    orderTotal: total,
+    totalPlusPoints: total + pts,
+  };
+  for (let i = 1; i < READING_ORDER.length; i++) {
+    const lo = READING_ORDER[i - 1]; const hi = READING_ORDER[i];
+    if (!(observedReadings[hi] - observedReadings[lo] > tolerance)) {
+      problems.push(`observed readings ${lo} (${observedReadings[lo]}) and ${hi} (${observedReadings[hi]}) are not distinct on the seeded data — whatever the spec predicts, no observation on this env can tell the two apart`);
+    }
+  }
+
+  // 3. EVERY TARGET MUST STILL SIT INSIDE ITS OBSERVED BAND. The spec's own targets were derived from
+  //    the PREDICTED money shape; if the platform stored something else, a target can end up outside
+  //    the gap it was chosen to divide, and the mission silently predicts one outcome for both readings.
+  for (const m of MISSIONS.filter((x) => x.goal?.type === 'OrderValueGoal' && x.separates)) {
+    const [above, below] = m.separates;
+    const t = Number(m.goal.value);
+    if (!(observedReadings[above] < t && t < observedReadings[below])) {
+      problems.push(`${m.aliasName}'s target ${t} does not sit between the OBSERVED ${above} (${observedReadings[above]}) and ${below} (${observedReadings[below]}) — the platform stored a different money shape than the spec predicts, and this mission no longer separates the two readings`);
+    }
+  }
+
+  // 4. THE ACCRUAL MUST NAME EXACTLY ONE READING. This is the falsifiability check itself, and the
+  //    only one that can be run against reality rather than intent.
+  const money = orderMoney();
+  for (const m of MISSIONS.filter((x) => x.goal?.type === 'OrderValueGoal' && x.goal?.currency === 'store-default')) {
+    const a = o[m.aliasName] || {};
+    const observed = num(a.accrued_value_at_seed);
+    if (observed == null) {
+      problems.push(`${m.aliasName}: no accrued_value_at_seed was recorded — the seeder never checked what the goal actually measured, so nothing in the repo can tell whether the fixture discriminated or merely seeded`);
+      continue;
+    }
+    const matches = readingsConsistentWith(observed, money, Math.max(tolerance, 0.01));
+    if (matches.length === 0) {
+      problems.push(`${m.aliasName} accrued ${observed}, which matches NONE of the four readings (${READING_ORDER.map((k) => `${k}=${readingValues(money)[k]}`).join(', ')}) — that is a FINDING about the module, not a fixture fault: the goal is measuring something none of these describes. Investigate before editing the fixture.`);
+    } else if (matches.length > 1) {
+      problems.push(`${m.aliasName} accrued ${observed}, which is consistent with ${matches.length} readings (${matches.join(', ')}) — two candidate readings have collapsed onto one number and the fixture has stopped discriminating`);
+    }
+  }
+
+  // 5. THE ALT-CURRENCY CONTROL MUST HAVE ACCRUED NOTHING. A zero here is only meaningful because its
+  //    twin reached its target on the same order; a non-zero means the currency gate is not gating.
+  const alt = o.MSN_ORDERVALUE_ALTCURRENCY || {};
+  const altAccrued = num(alt.accrued_value_at_seed);
+  if (altAccrued != null && altAccrued > tolerance) {
+    problems.push(`MSN_ORDERVALUE_ALTCURRENCY accrued ${altAccrued} from an order in the default currency — either the currency gate is not gating (a finding) or the pair's currencies have converged (a fixture fault). Check ${PROGRESS_ORDER_ALIAS}.currency against the alt intent before deciding.`);
+  }
+
+  // 6. ONE CURRENCY ACROSS EVERY CASH-SIDE MODAL ROW. The rejected mixed-currency bug, made
+  //    impossible: the guard reads the currency each product actually RESOLVED to, not the one the
+  //    spec asked for.
+  const cashCurrencies = new Map();
+  for (const p of [...PERSKU_PRODUCTS, ZERO_STOCK_PRODUCT]) {
+    const c = (o[p.aliasName] || {}).currency;
+    if (!c) { problems.push(`${p.aliasName}.currency is empty — the price currency the product actually resolved to was never recorded, so nothing can tell whether the featured-SKU modal is about to sum two currencies again`); continue; }
+    cashCurrencies.set(p.aliasName, c);
+  }
+  const distinctCash = new Set(cashCurrencies.values());
+  if (distinctCash.size > 1) {
+    problems.push(`the cash-side target products resolved to ${distinctCash.size} different currencies (${[...cashCurrencies].map(([k, v]) => `${k}=${v}`).join(', ')}) — the featured-SKU modal sums the rows it renders, so this fixture is about to manufacture a mixed-currency subtotal. That was filed as a bug once and rejected as our own data.`);
+  }
+  if (order.currency && distinctCash.size === 1 && !distinctCash.has(order.currency)) {
+    problems.push(`the seed order settles in ${order.currency} but its target products are priced in ${[...distinctCash][0]} — the order lines and the modal rows would show different currencies for the same products`);
+  }
+
+  // 7. THE POINTS TARGET MUST NOT HAVE COLLAPSED INTO THE CASH CURRENCY.
+  const ptsCur = (o[POINTS_PRODUCT.aliasName] || {}).currency;
+  if (!ptsCur) {
+    problems.push(`${POINTS_PRODUCT.aliasName}.currency is empty — MSN_PERSKU_PTS and MSN_ORDERVALUE_POINTS both rest on this line settling in the LOYALTY currency, and nothing recorded that it did`);
+  } else if (distinctCash.size === 1 && distinctCash.has(ptsCur)) {
+    problems.push(`${POINTS_PRODUCT.aliasName} resolved to ${ptsCur}, the same currency as the cash targets — both points fixtures ask whether a NON-cash line counts, and can no longer ask it`);
+  }
+
+  // 8. SPENDABILITY, AGAINST THE OBSERVED UNIT PRICE.
+  const rs = o[REWARD_SPEND.aliasName] || {};
+  const unitPrice = num(rs.unit_price);
+  const reward = num(rs.reward);
+  if (unitPrice == null || reward == null) {
+    problems.push(`${REWARD_SPEND.aliasName} carries no observed reward/unit price — whether the granted points can pay for a real next order was never checked, only that a number changed`);
+  } else {
+    const units = rewardBuysUnits(reward, unitPrice);
+    if (!(units >= REWARD_SPEND.minSpendableUnits)) {
+      problems.push(`${REWARD_SPEND.aliasName}: a ${reward}-point reward buys ${units} unit(s) at the observed ${unitPrice}/unit, below the ${REWARD_SPEND.minSpendableUnits} required — the last link of the chain ("the points are spendable") cannot be demonstrated`);
+    }
+    if (POINTS_PRODUCT.listPrice !== unitPrice) {
+      problems.push(`${REWARD_SPEND.aliasName}.unit_price is ${unitPrice} but POINTS_PRODUCT.listPrice declares ${POINTS_PRODUCT.listPrice} — the one transcribed number in missions-specs.mjs has drifted from the product it describes, so every points target derived from it is off`);
+    }
+  }
+
+  // 9. THE ORDER COUNT MUST STILL BE WHAT THE SPEC DERIVED FROM. A missing second order takes
+  //    MSN_ORDERCOUNT off its target without anything else looking wrong.
+  const ptsOrder = o[POINTS_ORDER_ALIAS] || {};
+  if (!ptsOrder.id) {
+    problems.push(`${POINTS_ORDER_ALIAS}.id is empty — the all-points order was never placed, so MSN_ORDERCOUNT sits at 1 of ${PROGRESS_ORDER_COUNT} for a provisioning reason that is indistinguishable from the currency-filter defect it exists to detect, and MSN_PERSKU_PTS asks nothing`);
   }
 
   return problems;

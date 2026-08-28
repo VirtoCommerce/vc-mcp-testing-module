@@ -4,6 +4,7 @@
 **Found by:** `/qa-design VCST-5346` (2026-08-28)
 **Tracker:** VCST-5837 (standalone Bug)
 **Archetype:** `RACE`
+**Status:** REJECTED
 
 **Env:** vcst-qa @ Theme `2.57.0-pr-2396-5924`, store `B2B-store`, chrome 1280 px, signed in, first load (cold).
 

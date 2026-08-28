@@ -44,6 +44,39 @@
     `name` resolves either way. A test case that omitted the culture therefore asserted an absence **it had
     caused itself**, and would have been filed as a product defect. Found in REG-2026-08-27-1731 triage.
 
+    **The more dangerous neighbour: an argument that IS honoured, but means something else.** The trap above
+    is an ignored/absent context producing an empty answer. The worse one is an argument that does something
+    real, plausible, and different from what the caller assumed — because the result is stable, non-null, and
+    *differs from the unscoped read*, so it looks like the argument worked.
+
+    **Worked example — `loyaltyBalance(userId, orderId)`.** The `orderId` argument reads like per-order
+    attribution ("what did this order contribute?"). It is not. Resolved from source at `1be73b4`:
+    `GetLoyaltyBalanceQueryBuilder.BeforeMediatorSend` uses `orderId` **only to authorize** (it loads the order and
+    runs `CanAccessLoyaltyAuthorizationRequirement` against it); the handler's entire remaining effect is
+    `CurrentBalance = ResultBalance = GetUserBalanceAsync(userId)`, then, if an order was loaded,
+    `ResultBalance = CurrentBalance − order.Total`. So `currentBalance` is **always the full user balance**, and
+    `resultBalance` is a **pay-with-points affordability preview** — *what your balance would be if you settled
+    THIS order with points* — not this order's effect on it. That is also why the two fields exist: `resultBalance`
+    is not a variant of the balance, it answers a different question.
+
+    A case reading `resultBalance` as "this order's contribution" gets `full_balance − order_total`: a confident
+    wrong number that passes a naive sanity check (on the VIP fixture account it reads as roughly
+    964,192,343 − 240). **An argument that is honoured but misread is worse than one that is silently ignored**,
+    because the ignored one at least returns the same value as the unscoped call and eventually looks suspicious.
+    Audited 2026-08-28: no suite case asserts on `resultBalance` — `075b` `MCO-GQL-004` names it only in
+    precondition prose and `075c` `LOY-038` correctly asserts on `currentBalance` — but both **select** it, so the
+    field is one edit away from a future author. **Assert on `currentBalance` unless the case is specifically
+    testing pay-with-points affordability.**
+
+    **There is no per-mission attribution on the points ledger at all.** `LoyaltyOperationLogObject` exposes only
+    `type` / `orderId` / `orderNumber` (verified by live introspection, 2026-08-28), and `LoyaltyMissionTransaction`
+    — which *does* carry `MissionId`, `ObjectId`, `UserId` with a composite index, and is how the accrual dedup
+    works — is **not exposed through GraphQL in any form**. One order settles every mission applicable to its
+    user (measured: four missions at `+250 / +200 / +100 / +0` on one order), so **a balance total, a history
+    length, or any other aggregate is not an oracle for one mission's contribution**. The maximum attribution
+    the API permits is amount + `orderId` on the ledger entry — pin both, and never assert positionally on
+    `items.0` when several rows can land from one event.
+
     **Consequences for authoring:** never conclude a field is empty, missing, or broken until the call carries
     its full context; a differential result between two callers is a context difference until proven otherwise;
     and never hardcode these values — resolve them (`{{STORE_ID}}`, `me { id }`, `@td(...)`) per

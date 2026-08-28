@@ -219,12 +219,25 @@ proceeds to the Artifact B checklist.
 Distill `1c` context + `1d` story analysis + `1a` scope/domains into one structured model — the **fault
 model** Step 3 authors cases from. It answers *"how can this feature be wrong, and what would catch each
 way?"*, not *"is every acceptance criterion represented?"* — coverage is necessary but it is not the goal,
-and a model that only traces ACs produces a suite that confirms the feature instead of attacking it. Keep
+and a model that only traces ACs produces a suite that confirms the feature instead of attacking it.
+
+**It opens with the VALUE CHAIN, and the chain is drawn.** A fault model needs something to hang faults
+on, and what a feature can most expensively be wrong about is the end-to-end mechanism it exists to
+deliver — not the screens it renders on the way. So Part 0 below (chain · diagrams · variants · the
+variants × links matrix) is derived FIRST, via `/qa-test-design` §1a (`FLOW`), and the condition space is
+built **per link** on top of it. The order is not a style preference: it is the difference between a suite
+that proves the feature works and a suite of individually well-formed per-screen checks that all pass
+while it does not. Measured on Loyalty Missions (VCST-5320/5346): 127 cases, of which the 71-case
+storefront suite placed **zero** orders and 54 of its cases never left one page; the mechanism end-to-end
+got 11% of the cases; the last link — spending what the feature grants — got one, written on the final
+day; and the model itself was never written at all (`reports/ba/test-models/` was empty).
+
+**Write it to
 **Write it to `reports/ba/test-models/<TICKET>-<date>.md`** — a durable artifact, not a terminal
 dump. Three reasons it has to be a file: a model nobody can re-open cannot be *argued with*, which
 is the whole point of having one; the parameter model for a surface (cart, checkout, org roles) does
 not change per ticket, so as a file it is **reused** and as terminal output it dies with the session;
-and a file is *lintable in principle*, so the five parts and the resolved sweeps could be checked
+and a file is *lintable in principle*, so Part 0, the five fault-model parts and the resolved sweeps could be checked
 rather than asserted — **`npm run model:lint` is not implemented yet**, so today that third reason is
 an intention, not a gate. Do not cite it as though a script were enforcing it. It is `reports.md`
 **category 3** — the same durable BA test-design model the rules already provide for. The AC table and
@@ -243,6 +256,16 @@ Flows & boundaries: [cart ↔ checkout, ...]
 Risk areas:  [VC-* pain points / historical failures]
 AC traceability: [N atomic conditions — story ACs + gap-ACs, each w/ Impl verdict]   (from 1d)
 DoD (optional — only when the ticket declares one): [Definition-of-Done items, each marked confirmed-now / confirm-at-5b]   (from 1d)
+--- Part 0 — VALUE CHAIN (derived FIRST; /qa-test-design test-design-techniques.md §1a, FLOW) ---
+Value chain:  [one line per link, in the user's words: trigger → effect → persisted state → user-visible surface → what it unlocks]
+Chain diagrams: [Mermaid, in the file. `flowchart` ALWAYS (the journey: primary path + alternate/error branches);
+                 + `sequenceDiagram` when the chain crosses layers or any part is async (job/queue/webhook/settlement);
+                 + `stateDiagram-v2` when the entity has a lifecycle, or an effect is expected to REVERSE (cancel/refund/expire/revoke)]
+Variants:     [the kinds of the thing — goal types / processors / product kinds / role kinds. Different code paths through the SAME link, so they are matrix ROWS, not input partitions]
+Mechanism coverage matrix: [variants × chain links; every cell holds a scenario # or `GAP` / `WAIVED + reason`. No blank cells — a blank is a hole nobody can see, a GAP is a decision someone can argue with]
+Reverse edges: [per forward effect that moves money/points/stock/entitlement: what moves it back → covered by # | ABSENT IN PRODUCT (a finding to report, never a blank)]
+Fixture lifecycle: [any state that is TERMINAL once reached (a completed mission, a consumed coupon, a shipped order) — a case that must observe an ADVANCE needs a per-run fixture, not a shared one, or it passes once and never again]
+--- Parts 1–5 — FAULT MODEL (built per link, on top of Part 0) ---
 Condition space: [factor → value classes, one line per factor; + constraints (infeasible combos); raw cells = N]
 Reduction:       [technique + WHAT was collapsed and WHY — name the dropped factor and what subsumes it; N → M]
 Test scenarios (M rows — one per surviving cell)   ← authored from in Step 3
@@ -250,17 +273,33 @@ Test scenarios (M rows — one per surviving cell)   ← authored from in Step 3
 Probes carried in: [vc-bug-catalog VC-*-NNN whose Detection probe hits this surface → scenario # | N/A + reason]   (filled in Step 2)
 Archetype sweep:  [archetypes in scope for these domains → covered by # | WAIVED + reason]                        (filled in Step 2)
 UIP sweep (UI only): [UIP-BACK/DEEP/REFRESH/TABS/EXPIRE/STORAGE/NET/INPUT/VIEW/DATA → covered by # | WAIVED + reason]  (filled in Step 2)
-User-flow diagram: [Mermaid flowchart of the primary + alternate user paths]         ← authored from in Step 3
 Business Rules: [BL-CART-001, BL-PAY-003, ...]   (filled in Step 2)
 Edge cases:  [ECL-* patterns]                    (filled in Step 2)
 Docs grounding: [VirtoOZ / VC-doc refs]
 Agents to dispatch: [list]
 ```
-**`Test scenarios` + `User-flow diagram` are the artifact `test-management-specialist` authors test cases
-from in Step 3.** Draw the user flow as a Mermaid `flowchart` (primary path + the alternate/error branches
-a test must exercise). The scenario table is not a list of things to try — it is a **fault model**: each
-row names a way this feature can be *wrong*, and the case authored from it is the thing that would catch
-that. Five rules make it that rather than a relabelled walkthrough:
+**`Value chain` + `Chain diagrams` + `Mechanism coverage matrix` + `Test scenarios` are the artifact
+`test-management-specialist` authors test cases from in Step 3.** The scenario table is not a list of
+things to try — it is a **fault model**: each row names a way this feature can be *wrong*, and the case
+authored from it is the thing that would catch that. Eight rules make it that rather than a relabelled
+walkthrough:
+
+- **The journey row comes first, and there is exactly one.** The table opens with a `Technique:FLOW` row
+  that traverses the WHOLE chain in one run, on the surface a customer actually uses, with data that
+  makes every link's outcome decidable. Step 3 authors it as the suite's first case, titled `[JOURNEY]`.
+  Every other row is a refinement of a link that row already crosses. A state-changing feature with no
+  journey row fails the gate — that row is the one answering *"does this feature work at all?"*, and it
+  is the one everybody assumes someone else wrote.
+- **A link is crossed only by an observation on the far side of it.** Reading a value out of the API and
+  reading the same value off the page are two observations of ONE link; the link between them is crossed
+  only by a row that causes the effect and then observes it on the other surface. This is what stops
+  "the API moves the number" plus "the page renders a number" from counting as coverage of the join
+  between them — which is exactly where integration defects live.
+- **No row may certify a defect.** Where the correct expectation is currently unmet, the row keeps the
+  SPEC-derived expectation and names the bug; the case authored from it is held (`Draft`, never
+  promoted) or marked `Manual`, or the finding stays in the bug report and no case is written. Flipping
+  the expectation to match the broken build makes the case green today, unfalsifiable forever, and RED
+  on the day the bug is fixed — the worst of the three outcomes.
 
 - **A row without a defect hypothesis is not written.** The bar is
   `.claude/skills/qa-test-cases-generator/SKILL.md` §Step 3 — *"what real bug would this catch and why
@@ -283,22 +322,35 @@ that. Five rules make it that rather than a relabelled walkthrough:
   can attack the reduction ("do status and lock actually not interact?"), which is where real coverage
   arguments live. Name the dropped factor and what subsumes it — not just the arithmetic.
 
-Worked reference for the whole shape (condition space → explicit reduction rationale → cells with oracle
-provenance): `reports/ba/Organization roles/test-model-VCST-5281-2026-08-03.md`.
+Worked reference for **Parts 1–5** (condition space → explicit reduction rationale → cells with oracle
+provenance): `reports/ba/Organization roles/test-model-VCST-5281-2026-08-03.md`. It **predates Part 0 and
+carries no diagram** — do not read it as evidence that the chain is optional. A worked Part 0, with a real
+chain drawn, its variants × links matrix and its reverse edges, is
+`reports/ba/test-models/VCST-5346-2026-08-28.md`; the measured cost of not having drawn one is in
+`/qa-test-design` `test-design-techniques.md` §1a.
 
 **Gate (inline self-check) — every clause must be contradictable by a reader.** "Scenarios enumerated"
 was the old bar and it cannot be wrong; these can:
 
 1. Ticket **flow + type + path** set (flow = `feature-test` — a `verify-fix` / `hotfix-verify` route never
    reaches 1e); ACs decomposed to **atomic conditions**; **BL/ECL/domains** and **risk areas** present.
-2. `Condition space` states the factors, their value classes, the constraints, and **raw cell count N**.
-3. `Reduction` states `N → M` **and names the factors it dropped and what subsumes them**. An unstated
+2. `Value chain` names every link from trigger to what it unlocks, in the user's words, **and the
+   `flowchart` is in the file**. A chain that cannot be written is the finding — go back to `1c`/`1d`
+   rather than compensating with per-screen scenarios. A cross-layer or async chain also carries the
+   `sequenceDiagram`; a lifecycle or a reversible effect also carries the `stateDiagram-v2`.
+3. `Mechanism coverage matrix` is published with **no blank cells** — each variant × link cell holds a
+   scenario # or `GAP` / `WAIVED + reason` — and `Reverse edges` is resolved per forward effect
+   (covered by #, or ABSENT IN PRODUCT, which is reported as a finding).
+4. The scenario table's **first row is the `Technique:FLOW` journey**, traversing the whole chain on the
+   customer's own surface. Absent for a state-changing feature ⇒ the model is not done.
+5. `Condition space` states the factors, their value classes, the constraints, and **raw cell count N**.
+6. `Reduction` states `N → M` **and names the factors it dropped and what subsumes them**. An unstated
    reduction is the finding — a scenario count nobody can attack is not a coverage argument.
-4. **Every** scenario row carries all five: cell · defect hypothesis · archetype · technique · oracle.
+7. **Every** scenario row carries all five: cell · defect hypothesis · archetype · technique · oracle.
    No blanks, no "TBD", no hypothesis that merely restates the step ("check that X works").
-5. Every oracle is `{BL-…}`/`{SPEC}`/`{DOC}` — or, if `{OBSERVED}`/`{HYPOTHESIS}`, the row says what
+8. Every oracle is `{BL-…}`/`{SPEC}`/`{DOC}` — or, if `{OBSERVED}`/`{HYPOTHESIS}`, the row says what
    would make it a real oracle. An expected value read off the live system is not an oracle.
-6. `Archetype sweep` resolved: every archetype in scope for these domains is either covered by a row
+9. `Archetype sweep` resolved: every archetype in scope for these domains is either covered by a row
    or **WAIVED with a reason**. Silence is not a waiver.
 
 A missing atomic condition or `ba-system-analyzer` risk area is added before moving on. (No fresh-`qa-lead`

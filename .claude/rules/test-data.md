@@ -20,6 +20,80 @@ The pattern to follow:
 
 Net effect: a redesign surfaces as **one loud gate failure** instead of a wave of phantom test failures.
 
+## SECOND RULE — a fixture is designed from the CHAIN'S QUESTION, not from the screen
+
+The GOLDEN RULE above governs *where a value comes from*. This one governs *which values exist at
+all*, and it is the rule whose absence is expensive in a way no validator currently detects: a
+fixture can satisfy every `@td()`, every drift guard and every secret-hygiene check, and still make
+the feature's central question **undecidable**.
+
+**The test is falsifiability, per link.** For each link of the feature's value chain
+(`/qa-test-design` `test-design-techniques.md` §1a), ask: *if this link were implemented wrong, would
+THIS data make the case fail?* If both the right and the wrong implementation produce the same
+observation, the fixture is not a fixture — it is a coincidence, and the case built on it is a
+vacuous pass.
+
+- **Design the fixture from the question, then check the question is decidable.** "Is the goal
+  measured against the order's TOTAL or against its merchandise value?" is only answerable if the
+  seeded order has shipping, tax or a discount. An order of exactly $30.00 with none of them answers
+  nothing — both readings predict `$30.00`.
+- **Divergence is the property that makes a fixture discriminating.** Two quantities that must not be
+  confused have to be *different* in the data; two rankings that must not collapse have to *disagree*;
+  a variant that must behave differently from its sibling has to be seeded as a real pair. This is
+  already the reasoning behind `td:validate:variation-stock` (quantities must DIVERGE), the
+  `by-units`/`by-revenue` rankings in `td:validate:sales-rep-stats` (they must not agree), and the
+  `PerSku ALL` / `ANY` pair. Generalise it: **equal values on both sides of a distinction under test
+  are a data defect, not a neutral choice.**
+- **State the fixture's own limits where they exist.** If a link's question is not decidable from the
+  seeded state, say so at the fixture — in the spec module's rationale and in the case's
+  `Preconditions` — rather than letting a green case imply an answer it cannot give.
+- **Constrain live-discovery on every dimension the feature is sensitive to.** `live-discover` is the
+  right default for identity (`knowledge/execution/live-discovery.md`), but it selects on
+  availability, not on suitability. Discovering "any two buyable products" for a money-summing surface
+  will eventually hand you one priced in EUR and one in USD. Pin currency, price shape, stock and
+  catalog scope when the feature reads them; leave them free when it does not.
+- **Seed through the mechanism where the mechanism is what is under test.** An entity written straight
+  into storage bypasses the very handler the chain depends on. An API-shaped seed is correct for
+  *arranging* a precondition and wrong for *proving* the link that arranges it — the journey case
+  places a real order.
+
+**Worked example — Loyalty Missions (VCST-5320/5346).** The fixture set was large, carefully
+documented and correct against every existing guard: 2 042 lines of spec module, no committed GUIDs,
+overlay write-back per env, its own `td:validate:cfg`-style drift guard and unit tests. It was
+designed from the **screens** — fixtures that render a partial card, a completed card, a zero-target
+card, a zero-reward card. Two consequences followed directly:
+
+1. Its seeded orders were flat $30 with no shipping, tax or discount, so the central mechanism
+   question — *does an `OrderValueGoal` accrue `order.Total` or merchandise value?* — was **not
+   decidable from the data**. The exploratory report had to record it in as many words: *"the only
+   in-window orders were API-seeded at exactly $30 … `$30.00 spent` is consistent with both
+   readings."* The defect was ultimately found by reading source, not by any of 127 cases.
+2. Its featured-SKU targets were live-discovered with no currency constraint, so the modal was seeded
+   with a €455 row and a $25 row. That produced a mixed-currency subtotal finding which was filed and
+   then **rejected** — reviewer time spent on an artefact of the fixture rather than on the feature.
+
+A fixture set can be immaculate by every rule in this file and still test nothing. Design it from the
+chain.
+
+## Resolving a variable: through `process.env`, never off a layer or the curated export
+
+A role's identity and its secret routinely live in **different layers** — the loader is
+`.env.defaults` → `.env.${TEST_ENV}` → `.env.local`, and e.g. `LOYALTY_VIP_USER_EMAIL` sits in
+`.env.defaults` while `LOYALTY_VIP_USER_PASSWORD` sits in `.env.local`, with nothing in the
+environment-named file between them. So **grepping `.env.${TEST_ENV}` finds nothing and looks
+conclusive** — it is the file named after the environment, which is exactly why it reads as
+authoritative.
+
+The second half of the trap is worse: `config.js` exports a **curated** `env` object, not the whole
+environment. A key it does not carry comes back `undefined` — **indistinguishable from a variable
+that is genuinely unset**, which is the conclusion it will be mistaken for. Measured 2026-08-28: a
+working fixture account was reported as having empty credentials on exactly this basis, and the
+suite that authenticates as that role was very nearly filed as broken.
+
+**Resolve through `process.env` after importing `config.js`** (the import runs the layered loader);
+use the curated `env` export only for keys you have confirmed it carries. Never conclude a variable
+is unset from a single layer or from the curated object.
+
 ## Four data layers
 
 | Layer | Source | Use for |

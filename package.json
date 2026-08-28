@@ -202,7 +202,11 @@
     "carts:sweep": "node scripts/seed-data/carts/check-competing-carts.mjs --apply",
     "seed:loyalty-missions": "node scripts/seed-data/loyalty/seed-loyalty-missions.mjs",
     "seed:loyalty-missions:teardown": "node scripts/seed-data/loyalty/seed-loyalty-missions.mjs --teardown",
-    "td:validate:missions": "node scripts/seed-data/loyalty/validate-missions-data.mjs"
+    "td:validate:missions": "node scripts/seed-data/loyalty/validate-missions-data.mjs",
+    "seed:missions-e2e": "npm run seed:loyalty:zero-user && node scripts/seed-data/loyalty/seed-missions-e2e.mjs",
+    "seed:missions-e2e:only": "node scripts/seed-data/loyalty/seed-missions-e2e.mjs",
+    "seed:missions-e2e:teardown": "node scripts/seed-data/loyalty/seed-missions-e2e.mjs --teardown",
+    "td:validate:missions-e2e": "node scripts/seed-data/loyalty/validate-missions-e2e-data.mjs"
   },
   "repository": {
     "type": "git",

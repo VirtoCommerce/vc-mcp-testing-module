@@ -70,7 +70,7 @@ import {
   STORE_ID, DRY_RUN, TEARDOWN, ONLY, ROOT, BACK_URL, ADMIN, ADMIN_PASSWORD,
   log, verbose, assertSafeTarget, auth, api, idsParam,
   uploadAsset, assetUrlOk, buildStoreSeo,
-  writeEnvAliasOverride, verifyRemoved, discoverCatalogProducts,
+  writeEnvAliasOverride, verifyRemoved, discoverCatalogProducts, loadAliases,
 } from '../../lib/seed-common.mjs';
 import { roleByKey, resolveRole } from '../../lib/user-roles.mjs';
 import {
@@ -78,11 +78,14 @@ import {
   BANNERS, BANNER_FOLDER, BANNER_CONTENT_TYPE, bannerSourceRel, bannerAssetRel, bannerKeyFor,
   missionName, isSeededMissionName, needsGoalItems, resolveCurrencies, resolveLocales,
   buildMissionBody, buildGoalItems, reconcileGoalItems, localizedValues,
-  ZERO_STOCK_PRODUCT, TARGET_PRODUCTS, goalSlotsFor, localeIntentsUsed, localeFieldFor,
+  ZERO_STOCK_PRODUCT, TARGET_PRODUCTS, OWNED_PRODUCTS, goalSlotsFor, localeIntentsUsed, localeFieldFor,
   missionSignature, signaturesMatch, windowIsOpen, windowExpectsOpen, validateSpecShape,
   PROGRESS_ORDER, PROGRESS_ORDER_ALIAS, PROGRESS_USER_ROLE, progressOrderNumber,
   predictProgress, percentagesMatch, progressFixtures, DANGER_THRESHOLD_DAYS, WINDOWS,
   TARGET_GROUP, GROUP_AUDIENCE, isGroupTargeted, groupsInclude,
+  POINTS_ORDER, POINTS_ORDER_ALIAS, PROGRESS_ORDERS,
+  POINTS_PRODUCT, REWARD_SPEND, rewardBuysUnits, lineUnitPrice,
+  orderMoney, readingValues, readingsConsistentWith, READING_ORDER,
 } from './missions-specs.mjs';
 
 const argv = process.argv.slice(2);
@@ -371,19 +374,34 @@ function progressMatches(spec, row) {
     && Number(row.targetValue) === want.targetValue;
 }
 
-async function findProgressOrder() {
-  const number = progressOrderNumber();
+async function findProgressOrder(order = PROGRESS_ORDER) {
+  const number = progressOrderNumber(order);
   const r = await api('POST', '/api/order/customerOrders/search', { keyword: number, take: 5 }, { expectStatus: [200, 201] });
   return (r?.results || []).find((o) => o.number === number) || null;
 }
 
+/** Delete EVERY seed order. Returns how many were removed. */
 async function deleteProgressOrder() {
-  const found = await findProgressOrder();
-  if (!found) return false;
-  await api('DELETE', `/api/order/customerOrders?${idsParam([found.id])}`, null, { expectStatus: [200, 204] });
-  verbose(`deleted provisioning order ${found.number}`);
-  return true;
+  let removed = 0;
+  for (const order of PROGRESS_ORDERS) {
+    const found = await findProgressOrder(order);
+    if (!found) continue;
+    await api('DELETE', `/api/order/customerOrders?${idsParam([found.id])}`, null, { expectStatus: [200, 204] });
+    verbose(`deleted provisioning order ${found.number}`);
+    removed++;
+  }
+  return removed;
 }
+
+/** The money shape the platform ACTUALLY stored, read off an order entity. Never authored. */
+const observedMoney = (o) => ({
+  sub: Number(o?.subTotal ?? 0),
+  discount: Number(o?.discountTotal ?? 0),
+  shipping: Number(o?.shippingTotal ?? 0),
+  tax: Number(o?.taxTotal ?? 0),
+  total: Number(o?.total ?? 0),
+  currency: o?.currency || '',
+});
 
 /**
  * Create the provisioning order if it is not already there. Deliberately NOT a rebuild-on-drift: a
@@ -393,9 +411,9 @@ async function deleteProgressOrder() {
  * `catalogId` is mandatory on a line item — omitting it fails as a raw SQL NOT NULL violation
  * (HTTP 500, verified live), not as a readable validation error.
  */
-async function ensureProgressOrder(owner, products, currency) {
-  const number = progressOrderNumber();
-  const existing = await findProgressOrder();
+async function ensureProgressOrder(order, owner, products, currency) {
+  const number = progressOrderNumber(order);
+  const existing = await findProgressOrder(order);
   if (existing) {
     if (existing.customerId !== owner.userId) {
       throw new Error(
@@ -404,27 +422,100 @@ async function ensureProgressOrder(owner, products, currency) {
       );
     }
     verbose(`provisioning order ${number} exists → ${existing.id}`);
-    return { id: existing.id, created: false };
+    const back = await api('GET', `/api/order/customerOrders/${existing.id}`, null, { expectStatus: [200] });
+    return { id: existing.id, created: false, money: observedMoney(back) };
   }
   const body = {
     number,
     storeId: STORE_ID,
     currency,
-    status: PROGRESS_ORDER.status,
+    status: order.status,
     customerId: owner.userId,
     customerName: `AGENT-TEST Missions (${owner.email})`,
-    items: PROGRESS_ORDER.lines.map((l) => {
+    items: order.lines.map((l) => {
       const p = products?.[l.slot];
-      if (!p?.id) throw new Error(`progress order line ${l.slot} has no resolved product`);
-      return {
+      if (!p?.id) throw new Error(`order ${order.key} line ${l.slot} has no resolved product`);
+      const item = {
         sku: p.sku, productId: p.id, catalogId: p.catalogId, name: p.name,
-        quantity: l.quantity, price: PROGRESS_ORDER.unitPrice, productType: 'Physical', currency,
+        quantity: l.quantity, price: lineUnitPrice(l), productType: 'Physical', currency,
       };
+      // A PER-UNIT discount. Measured live (2026-08-28): `discountAmount` survives a CREATE — an
+      // order of A x2 @30 with discountAmount 5.25 plus B x1 @42.50 and 24.50 shipping stored
+      // sub=102.50, discountTotal=10.50, shippingTotal=24.50, TOTAL=116.50. That divergence between
+      // merchandise value and total is the whole reason this order exists in this shape.
+      if (Number(l.unitDiscount || 0) > 0) item.discountAmount = Number(l.unitDiscount);
+      return item;
     }),
   };
+  // Shipping is a SHIPMENT, not an order-level field: the platform folds `shipments[].price` back
+  // into order.Total and recomputes the order-level figure, so writing shippingTotal directly is
+  // silently discarded (the lesson seed-sales-rep.mjs records from the other direction).
+  if (Number(order.shippingPrice || 0) > 0) {
+    const p = Number(order.shippingPrice);
+    body.shipments = [{
+      shipmentMethodCode: 'FixedRate', shipmentMethodOption: 'Ground', currency,
+      price: p, priceWithTax: p, total: p, totalWithTax: p,
+      status: 'New', number: `${number}-S1`, items: [],
+    }];
+  }
+  if (Number(order.taxTotal || 0) > 0) body.taxTotal = Number(order.taxTotal);
+
   const created = await api('POST', '/api/order/customerOrders', body, { expectStatus: [200, 201] });
-  log(`  ✓ provisioning order ${number} → ${created?.id} (${owner.email}, ${PROGRESS_ORDER.lines.map((l) => `${l.slot}x${l.quantity}`).join(' + ')})`);
-  return { id: created?.id, created: true };
+  const back = await api('GET', `/api/order/customerOrders/${created?.id}`, null, { expectStatus: [200] });
+  const money = observedMoney(back);
+  log(`  ✓ order ${number} → ${created?.id} (${owner.email}, ${order.lines.map((l) => `${l.slot}x${l.quantity}`).join(' + ')})`);
+  log(`      observed: sub=${money.sub} discount=${money.discount} shipping=${money.shipping} tax=${money.tax} TOTAL=${money.total} ${money.currency}`);
+  return { id: created?.id, created: true, money };
+}
+
+/**
+ * The seed order's money shape must DIVERGE, or the OrderValue fixtures are decorative.
+ *
+ * This runs against what the PLATFORM STORED, immediately after the write, because the spec asking
+ * for a shipping charge is not evidence that the platform kept one. A collapse here is not a warning:
+ * every OrderValue target was derived from the predicted gaps, so if the observed gaps are different
+ * the targets no longer divide anything and the run would seed a set that cannot fail. Louder now is
+ * cheaper than a green suite that proves nothing.
+ */
+function assertMoneyDiverges(cashMoney, pointsMoney) {
+  const predicted = orderMoney();
+  const problems = [];
+  if (!(cashMoney.shipping > 0 || cashMoney.tax > 0)) {
+    problems.push(`the cash order stored NO shipping and NO tax (total ${cashMoney.total} = merchandise ${cashMoney.sub} - discount ${cashMoney.discount}) — merchandise value and order.Total are the same number, so no OrderValue case can distinguish them`);
+  }
+  if (!(cashMoney.discount > 0)) {
+    problems.push(`the cash order stored NO discount — gross and net merchandise are the same number, so "a discount reduces spend progress" cannot fail`);
+  }
+  if (!(pointsMoney.total > 0)) {
+    problems.push(`the points order stored a total of ${pointsMoney.total} — MSN_ORDERVALUE_POINTS's target was derived from a non-zero points contribution and now sits outside any real band`);
+  }
+  const observed = {
+    netMerchandise: cashMoney.sub - cashMoney.discount,
+    grossMerchandise: cashMoney.sub,
+    orderTotal: cashMoney.total,
+    totalPlusPoints: cashMoney.total + pointsMoney.total,
+  };
+  for (let i = 1; i < READING_ORDER.length; i++) {
+    const lo = READING_ORDER[i - 1]; const hi = READING_ORDER[i];
+    if (!(observed[hi] - observed[lo] > 0.01)) {
+      problems.push(`observed readings ${lo} (${observed[lo]}) and ${hi} (${observed[hi]}) collapsed onto one number`);
+    }
+  }
+  for (const key of READING_ORDER) {
+    const want = readingValues(predicted)[key];
+    if (Math.abs(want - observed[key]) > 0.01) {
+      problems.push(`observed ${key} is ${observed[key]} but the committed spec predicts ${want} — every OrderValue target was derived from the prediction, so each one may now sit outside the band it was chosen to divide`);
+    }
+  }
+  if (problems.length) {
+    throw new Error(
+      'the seed orders did not land with a DISCRIMINATING money shape:\n    - '
+      + problems.join('\n    - ')
+      + '\n  Fix the order spec (or the platform behaviour) before relying on any OrderValue fixture — '
+      + 'a set that seeds cleanly here is exactly how the flat $30 order passed for two sprints.',
+    );
+  }
+  return observed;
 }
 
 /**
@@ -627,19 +718,79 @@ async function resolveGroupAudience() {
  * stops churning. Their ids AND skus are per-env, so both go to the overlay — a SKU is a business key
  * for a fixture we author, but these are products we merely FOUND, so nothing about them is invariant.
  */
-async function resolveTargetProducts() {
+async function resolveTargetProducts(storeCurrency) {
+  // Live discovery is still used — but ONLY to find a REFERENCE product, never as a fixture. What is
+  // borrowed from it is the catalog, the category and a pricelist that a real, sold product on this
+  // env already sits in; those are per-env configuration and authoring them would be a committed
+  // guess (`.claude/rules/test-data.md` GOLDEN RULE). What is NOT borrowed is identity, price or
+  // currency — that is exactly the part discovery cannot constrain, and picking the first two
+  // discovered products is how a EUR 455 row landed beside a USD 25 one in the featured-SKU modal.
   const found = await discoverCatalogProducts(api, 12);
   const usable = found.filter((p) => p.id && p.sku).sort((a, b) => String(a.sku).localeCompare(String(b.sku)));
-  if (usable.length < PERSKU_PRODUCTS.length) {
+  if (!usable.length) {
     throw new Error(
-      `PerSku goals need ${PERSKU_PRODUCTS.length} distinct catalog products; live discovery returned ${usable.length}. `
+      'no catalog product could be discovered to borrow a catalog/category/pricelist from. '
       + 'Seed the catalog first (npm run seed:catalog).',
     );
   }
+  const reference = usable[0];
+  verbose(`reference product for catalog/category/pricelist: ${reference.sku} (${reference.id})`);
+
   const out = {};
-  PERSKU_PRODUCTS.forEach((p, i) => { out[p.slot] = usable[i]; });
-  out[ZERO_STOCK_PRODUCT.slot] = await ensureZeroStockProduct(out.A);
+  for (const spec of [...PERSKU_PRODUCTS, ZERO_STOCK_PRODUCT]) {
+    out[spec.slot] = await ensureFixtureProduct(spec, reference, storeCurrency);
+  }
+  out[POINTS_PRODUCT.slot] = await resolvePointsProduct();
   return out;
+}
+
+/**
+ * The points-priced target: FOUND through another fixture's alias, never created and never priced
+ * here. Its SKU lives in `test-data/aliases.json` under LOY_SKU_PTS_UNIT, which is the one place this
+ * repo declares it — naming it again in the missions spec would be a second copy that can drift.
+ *
+ * The RESOLVED price and currency are read back and checked against what the spec's arithmetic
+ * assumes, because every points target (MSN_ORDERVALUE_POINTS's threshold, the reward-spendability
+ * check) is derived from that unit price. A silent change there moves every one of them at once.
+ */
+async function resolvePointsProduct() {
+  const aliases = loadAliases();
+  const src = aliases?.[POINTS_PRODUCT.sourceAlias];
+  const sku = src?.sku || src?.code;
+  if (!sku) {
+    throw new Error(
+      `${POINTS_PRODUCT.aliasName} resolves through ${POINTS_PRODUCT.sourceAlias}, which declares no sku in test-data/aliases.json. `
+      + 'Without a points-priced product the currency-blindness fixtures (MSN_PERSKU_PTS, MSN_ORDERVALUE_POINTS) ask nothing.',
+    );
+  }
+  const r = await api('POST', '/api/catalog/listentries', { keyword: sku, take: 10 }, { expectStatus: [200, 201, 400, 404] });
+  const hit = (r?.listEntries || r?.results || []).find((p) => p.code === sku && p.type === 'product');
+  if (!hit) {
+    throw new Error(
+      `the points-priced product ${sku} (${POINTS_PRODUCT.sourceAlias}) does not exist on this env. `
+      + 'Seed it first: `npm run seed:loyalty-fixtures`. Without it MSN_PERSKU_PTS and MSN_ORDERVALUE_POINTS '
+      + 'would seed against nothing and their questions would silently go unasked.',
+    );
+  }
+  const priced = await api('POST', '/api/catalog/products/prices/search', { productIds: [hit.id], take: 20 }, { expectStatus: [200, 201] });
+  const prices = ((priced?.results || [])[0]?.prices || []);
+  const loyaltyCurrency = String(src.currency || '').toUpperCase();
+  const price = prices.find((p) => String(p.currency).toUpperCase() === loyaltyCurrency) || prices[0];
+  if (!price) {
+    throw new Error(`${sku} carries no price at all — a points target with no price cannot be bought and the fixture is inert`);
+  }
+  if (Number(price.list) !== Number(POINTS_PRODUCT.listPrice)) {
+    throw new Error(
+      `${sku} is priced ${price.list} ${price.currency} but missions-specs.mjs assumes ${POINTS_PRODUCT.listPrice}. `
+      + 'That number is the divisor for MSN_ORDERVALUE_POINTS\'s derived threshold and for the reward-spendability '
+      + 'check, so both are now wrong. Update POINTS_PRODUCT.listPrice (and re-check the derived targets) or restore the price.',
+    );
+  }
+  log(`  ✓ points target ${POINTS_PRODUCT.slot}: ${sku} — priced ${price.list} ${price.currency} (found via ${POINTS_PRODUCT.sourceAlias}, not created)`);
+  return {
+    id: hit.id, sku, name: src.name || POINTS_PRODUCT.productName,
+    catalogId: hit.catalogId, currency: price.currency, listPrice: Number(price.list),
+  };
 }
 
 /* ── MSNF-035: the created zero-stock target ──────────────────────────────────
@@ -658,9 +809,8 @@ async function resolveTargetProducts() {
  *    process can change without touching anything this seeder owns, so it is written every time
  *    rather than only at create, and read back.
  */
-async function ensureZeroStockProduct(neighbour) {
-  const spec = ZERO_STOCK_PRODUCT;
-  if (!neighbour?.id) throw new Error('the zero-stock product needs a discovered neighbour to inherit its catalog/category/pricelist from');
+async function ensureFixtureProduct(spec, neighbour, storeCurrency) {
+  if (!neighbour?.id) throw new Error(`${spec.aliasName} needs a discovered reference product to inherit its catalog/category/pricelist from`);
 
   // LOOK-UP ORDER MATTERS, and it is not a micro-optimisation. `/api/catalog/listentries` is
   // INDEX-backed, so a product that exists in the database but has not been indexed yet is invisible
@@ -669,7 +819,7 @@ async function ensureZeroStockProduct(neighbour) {
   // DATABASE-backed and authoritative, so it is asked FIRST and the index search is only the fallback
   // for an env whose overlay has been cleared.
   let product = null;
-  const knownId = zeroStockIdFromOverlay();
+  const knownId = productIdFromOverlay(spec.aliasName);
   if (knownId) {
     const byId = await api('GET', `/api/catalog/products/${knownId}`, null, { expectStatus: [200, 404] }).catch(() => null);
     if (byId?.id && byId.code === spec.sku) product = { id: byId.id, sku: spec.sku, name: spec.productName, catalogId: byId.catalogId };
@@ -697,7 +847,16 @@ async function ensureZeroStockProduct(neighbour) {
       vendor: 'QA',
       isActive: true,
       isBuyable: true,
-      trackInventory: true,
+      // Only the zero-stock fixture tracks inventory — the zero it holds IS that fixture. The
+      // buyable targets do NOT, because they are bought by the seed order on every run forever: a
+      // tracked target drains and starts blocking cases for a reason that has nothing to do with
+      // missions, which is the same slow-decay failure this module exists to prevent.
+      trackInventory: spec.trackInventory !== false,
+      // 1 and 1, always. `minQuantity`/`packSize` above 1 make the storefront stepper jump, so a case
+      // step reading "set the quantity to exactly 1" is unachievable — measured on the product this
+      // fixture used to discover into slot B (55557702 carries minQuantity 2).
+      minQuantity: Number(spec.minQuantity ?? 1),
+      packSize: Number(spec.packSize ?? 1),
       // A STORE-SCOPED SEO record, because the modal row links to the product's PDP and
       // `/product/<sku>` does NOT resolve on this storefront — it renders a client-side 404 behind
       // HTTP 200. Without a slug the out-of-stock row's own link is broken, and a case cannot tell a
@@ -706,21 +865,31 @@ async function ensureZeroStockProduct(neighbour) {
       seoInfos: [buildStoreSeo({ semanticUrl: spec.sku.toLowerCase(), pageTitle: spec.productName })],
     }, { expectStatus: [200, 201] });
     product = { id: created.id, sku: spec.sku, name: spec.productName, catalogId: neighbour.catalogId };
-    log(`  ✓ created zero-stock product ${spec.sku} (${product.id}) in the catalog of ${neighbour.sku}`);
+    log(`  ✓ created target ${spec.slot}: ${spec.sku} (${product.id}) in the catalog of ${neighbour.sku}`);
   } else {
-    verbose(`zero-stock product ${spec.sku} already exists (${product.id})`);
+    verbose(`target ${spec.slot} ${spec.sku} already exists (${product.id})`);
   }
 
   // Price: into the SAME pricelist the neighbour is priced in, so it is visible wherever that is.
   // `POST /api/catalog/products/prices/search` (Pricing module) returns
   // { results: [{ productId, product, prices: [{ pricelistId, currency, list, ... }] }] } — verified
   // live on vcst-qa. There is no `/api/pricing/prices/search`; it 404s.
-  const neighbourPrices = await api('POST', '/api/catalog/products/prices/search', { productIds: [neighbour.id], take: 5 }, { expectStatus: [200, 201] });
-  const ref = ((neighbourPrices?.results || [])[0]?.prices || [])[0];
+  // PICKED BY CURRENCY, never by index. `prices[0]` is what this seeder used to take, and it is the
+  // direct cause of the mixed-currency modal: the reference product 55557702 carries BOTH a USD 349
+  // and a EUR 455 price, so which one `[0]` returns is an ordering accident. The featured-SKU modal
+  // sums the rows it renders, so an accidental EUR row manufactures a mixed-currency subtotal — filed
+  // as a bug once, and rejected as our own data.
+  const neighbourPrices = await api('POST', '/api/catalog/products/prices/search', { productIds: [neighbour.id], take: 20 }, { expectStatus: [200, 201] });
+  const candidates = ((neighbourPrices?.results || [])[0]?.prices || []);
+  const wantCurrency = String(storeCurrency || '').toUpperCase();
+  const ref = candidates.find((p) => String(p.currency).toUpperCase() === wantCurrency);
   if (!ref?.pricelistId) {
     throw new Error(
-      `no pricelist could be derived from the neighbour product ${neighbour.sku} — the zero-stock fixture would render as an UNPRICED (broken) modal row, `
-      + 'which is a different observation from out-of-stock and would be filed as the wrong defect.',
+      `no ${wantCurrency} pricelist could be derived from the reference product ${neighbour.sku} `
+      + `(it carries ${candidates.length ? candidates.map((p) => p.currency).join('/') : 'no prices at all'}). `
+      + 'Pricing the fixture into a foreign-currency list would put a second currency into the featured-SKU '
+      + 'modal, which sums its rows — and pricing it into none would render it as a BROKEN row, which is a '
+      + 'different observation from out-of-stock and gets filed as the wrong defect.',
     );
   }
   await api('PUT', '/api/products/prices', [{
@@ -728,34 +897,40 @@ async function ensureZeroStockProduct(neighbour) {
     prices: [{ pricelistId: ref.pricelistId, productId: product.id, list: spec.listPrice, currency: ref.currency, minQuantity: 1 }],
   }], { expectStatus: [200, 204] });
 
-  // Inventory: ZERO, at the store's MAIN fulfilment centre (not ffcs[0] — the storefront reads the
-  // store's own centre). Re-asserted on every run; see decision 3 above.
-  const store = await api('GET', `/api/stores/${encodeURIComponent(STORE_ID)}`);
-  const ffcId = store?.mainFulfillmentCenterId || (store?.additionalFulfillmentCenterIds || [])[0];
-  if (!ffcId) throw new Error(`store ${STORE_ID} declares no fulfillment centre — the zero-stock level cannot be written anywhere the storefront reads`);
-  await api('PUT', '/api/inventory/plenty', [{
-    fulfillmentCenterId: ffcId, productId: product.id,
-    inStockQuantity: spec.inStockQuantity, reservedQuantity: 0, status: 'Enabled',
-  }], { expectStatus: [200, 204] });
+  // Inventory. Only the ZERO-STOCK fixture has an inventory story: for it the zero IS the fixture, so
+  // it is written at the store's MAIN fulfilment centre (not ffcs[0] — the storefront reads the
+  // store's own centre), re-asserted every run, and read back. The buyable targets are
+  // `trackInventory: false` and are deliberately given no stock record at all: a stock level is state
+  // another process can move, and a fixture bought on every run forever must not be able to decay
+  // into a case that fails for a reason unrelated to missions.
+  if (spec.trackInventory !== false) {
+    const store = await api('GET', `/api/stores/${encodeURIComponent(STORE_ID)}`);
+    const ffcId = store?.mainFulfillmentCenterId || (store?.additionalFulfillmentCenterIds || [])[0];
+    if (!ffcId) throw new Error(`store ${STORE_ID} declares no fulfillment centre — the zero-stock level cannot be written anywhere the storefront reads`);
+    await api('PUT', '/api/inventory/plenty', [{
+      fulfillmentCenterId: ffcId, productId: product.id,
+      inStockQuantity: spec.inStockQuantity, reservedQuantity: 0, status: 'Enabled',
+    }], { expectStatus: [200, 204] });
 
-  // Read it back. A silently non-zero stock level is exactly the way this fixture goes vacuous: the
-  // product still exists, still resolves, still appears in the modal — as an ordinary in-stock row.
-  const back = await api('POST', '/api/inventory/search', { productIds: [product.id], take: 10 }, { expectStatus: [200, 201] })
-    .catch(() => null);
-  const rows = back?.results || back?.items || [];
-  const here = rows.find((r) => r.fulfillmentCenterId === ffcId);
-  if (here && Number(here.inStockQuantity) !== spec.inStockQuantity) {
-    throw new Error(
-      `${spec.sku}: inStockQuantity read back as ${here.inStockQuantity}, not ${spec.inStockQuantity} — `
-      + 'the out-of-stock row this fixture exists to render would appear as an ordinary in-stock row.',
-    );
-  }
-  const stocked = rows.filter((r) => Number(r.inStockQuantity) > 0);
-  if (stocked.length) {
-    throw new Error(
-      `${spec.sku} carries stock at ${stocked.length} other fulfilment centre(s) (${stocked.map((r) => r.fulfillmentCenterId).join(', ')}) — `
-      + 'the storefront may aggregate, so the product would not read as out of stock.',
-    );
+    // Read it back. A silently non-zero stock level is exactly the way this fixture goes vacuous: the
+    // product still exists, still resolves, still appears in the modal — as an ordinary in-stock row.
+    const back = await api('POST', '/api/inventory/search', { productIds: [product.id], take: 10 }, { expectStatus: [200, 201] })
+      .catch(() => null);
+    const rows = back?.results || back?.items || [];
+    const here = rows.find((r) => r.fulfillmentCenterId === ffcId);
+    if (here && Number(here.inStockQuantity) !== spec.inStockQuantity) {
+      throw new Error(
+        `${spec.sku}: inStockQuantity read back as ${here.inStockQuantity}, not ${spec.inStockQuantity} — `
+        + 'the out-of-stock row this fixture exists to render would appear as an ordinary in-stock row.',
+      );
+    }
+    const stocked = rows.filter((r) => Number(r.inStockQuantity) > 0);
+    if (stocked.length) {
+      throw new Error(
+        `${spec.sku} carries stock at ${stocked.length} other fulfilment centre(s) (${stocked.map((r) => r.fulfillmentCenterId).join(', ')}) — `
+        + 'the storefront may aggregate, so the product would not read as out of stock.',
+      );
+    }
   }
 
   // INDEX, THEN PROVE IT. The storefront resolves modal products through the SEARCH INDEX, so a
@@ -768,7 +943,17 @@ async function ensureZeroStockProduct(neighbour) {
   // after 60 s of polling, while the incremental form had it indexed inside 10 s. A full
   // `rebuild: true` is deliberately never issued — on a shared QA env that is somebody else's outage.
   // Indexing runs AFTER the price and stock writes so the indexed document carries them.
+  // The job RESULT is captured, not discarded. Measured on vcst-qa 2026-08-28: the incremental job
+  // is accepted (HTTP 200, a jobId) and comes back `totalCount: 0, processedCount: 0` — it finds
+  // nothing to index even for a product whose `modifiedDate` was refreshed seconds earlier, and the
+  // `Product` index's own `lastIndexationDate` advances past that timestamp without picking it up.
+  // Without the counters the failure below reads as "indexing is slow"; with them it reads as
+  // "the incremental indexer processed zero documents", which is a different problem with a
+  // different owner. Both documentType spellings (`Product`, the name the index list uses, and
+  // `CatalogProduct`) were tried and behave identically.
+  let lastJob = null;
   const reindex = () => api('POST', '/api/search/indexes/index', [{ documentType: 'CatalogProduct', rebuild: false }], { expectStatus: [200, 201, 202, 204] })
+    .then((r) => { lastJob = r; return r; })
     .catch((e) => verbose(`reindex trigger: ${String(e.message).slice(0, 120)}`));
   const findIndexed = async () => {
     const r = await api('POST', '/api/catalog/listentries', { keyword: spec.sku, take: 5 }, { expectStatus: [200, 201, 400, 404] });
@@ -784,15 +969,24 @@ async function ensureZeroStockProduct(neighbour) {
     }
   }
   if (!indexed) {
+    const counters = lastJob
+      ? `last incremental job: totalCount=${lastJob.totalCount} processedCount=${lastJob.processedCount} errorCount=${lastJob.errorCount} jobId=${lastJob.jobId}`
+      : 'no incremental job result was captured';
     throw new Error(
-      `${spec.sku} exists (${product.id}) but is NOT in the CatalogProduct search index after ~2 min of incremental reindexing. `
-      + 'The storefront resolves mission-modal products through that index, so the out-of-stock row would simply not render — '
-      + 'the fixture would look seeded and test nothing. Fix the index (or run a CatalogProduct rebuild on a NON-shared env) and re-seed.',
+      `${spec.sku} exists (${product.id}) but is NOT in the product search index after ~2 min of incremental reindexing. `
+      + `${counters}. `
+      + 'A totalCount of 0 means the indexer found nothing to process — the product is not slow to index, it is not being '
+      + 'SEEN, which is an environment problem rather than a fixture one (re-verified on vcst-qa 2026-08-28: refreshing the '
+      + "product's modifiedDate and re-triggering did not change it, under either documentType spelling). "
+      + 'The storefront resolves mission-modal products through that index, so the modal row would simply not render — the '
+      + 'fixture would look seeded and test nothing. Either wait for the environment\'s own indexing to recover and re-run, '
+      + 'or run a full product rebuild on a NON-shared env; a rebuild on a shared QA env is somebody else\'s outage.',
     );
   }
 
-  log(`  ✓ zero-stock target Z: ${spec.sku} — ${spec.productName} (stock ${spec.inStockQuantity}, priced ${spec.listPrice} ${ref.currency}, indexed)`);
-  return product;
+  const stockLabel = spec.trackInventory === false ? 'untracked' : `stock ${spec.inStockQuantity}`;
+  log(`  ✓ target ${spec.slot}: ${spec.sku} — ${spec.productName} (${stockLabel}, priced ${spec.listPrice} ${ref.currency}, minQty ${spec.minQuantity ?? 1}, indexed)`);
+  return { ...product, currency: ref.currency, listPrice: Number(spec.listPrice) };
 }
 
 /**
@@ -801,11 +995,11 @@ async function ensureZeroStockProduct(neighbour) {
  * returns '' rather than throwing on a missing/unparsable overlay — an absent id is an ordinary
  * first-seed state, not an error.
  */
-function zeroStockIdFromOverlay() {
+function productIdFromOverlay(aliasName) {
   const env = process.env.TEST_ENV || 'vcst';
   try {
     const raw = readFileSync(join(ROOT, `test-data/aliases.${env}.json`), 'utf8');
-    return JSON.parse(raw)?.[ZERO_STOCK_PRODUCT.aliasName]?.productId || '';
+    return JSON.parse(raw)?.[aliasName]?.productId || '';
   } catch { return ''; }
 }
 
@@ -856,9 +1050,28 @@ async function seed() {
   // The progress order's line items point at the SAME discovered products the PerSku goals target, so
   // a run that provisions progress needs them even if no selected spec has SKU targets of its own.
   const wantsProducts = specs.some(needsGoalItems) || (!ONLY && progressFixtures().length > 0);
-  const products = wantsProducts && !DRY_RUN ? await resolveTargetProducts() : {};
+  const products = wantsProducts && !DRY_RUN ? await resolveTargetProducts(currencies['store-default']) : {};
   if (wantsProducts && !DRY_RUN) {
-    for (const p of PERSKU_PRODUCTS) log(`  PerSku target ${p.slot}: ${products[p.slot].sku} — ${products[p.slot].name} (qty ${p.quantity})`);
+    for (const p of PERSKU_PRODUCTS) log(`  PerSku target ${p.slot}: ${products[p.slot].sku} — ${products[p.slot].name} (qty ${p.quantity}, ${products[p.slot].currency})`);
+    // ONE currency across every row the featured-SKU modal renders. Asserted here, at seed time,
+    // rather than left to a guard: the modal sums its rows, so a second currency makes the subtotal
+    // it renders meaningless, and that was filed as a product bug once and rejected as our own data.
+    const cashCurrencies = new Set([...PERSKU_PRODUCTS, ZERO_STOCK_PRODUCT].map((p) => products[p.slot]?.currency).filter(Boolean));
+    if (cashCurrencies.size !== 1) {
+      throw new Error(
+        `the featured-SKU target products resolved to ${cashCurrencies.size} currencies (${[...cashCurrencies].join(', ')}) — `
+        + 'the modal sums the rows it renders, so this fixture would manufacture a mixed-currency subtotal.',
+      );
+    }
+    if (!cashCurrencies.has(currencies['store-default'])) {
+      throw new Error(`the target products resolved to ${[...cashCurrencies][0]} but the store default is ${currencies['store-default']} — the order lines and the modal rows would disagree`);
+    }
+    if (products[POINTS_PRODUCT.slot]?.currency === currencies['store-default']) {
+      throw new Error(
+        `${POINTS_PRODUCT.aliasName} resolved to the store default currency (${currencies['store-default']}) — `
+        + 'MSN_PERSKU_PTS and MSN_ORDERVALUE_POINTS both ask whether a NON-cash line counts, and cannot ask it in the cash currency.',
+      );
+    }
   }
 
   // The audience is checked BEFORE any mission is written, and it ABORTS rather than warns. A
@@ -1037,16 +1250,85 @@ async function seed() {
     log('  ⚠ progress verification skipped — --no-recreate left the live states as they were (see the KEPT report below).');
   } else if (wantsProgress) {
     const missionIdByAlias = Object.fromEntries(Object.entries(writeback).map(([k, v]) => [k, v.id]));
-    const order = await ensureProgressOrder(owner, products, currencies['store-default']);
+
+    // BOTH orders, cash first. The points order is not an optional extra: MSN_ORDERCOUNT's target is
+    // derived from the order COUNT, so a run that placed only one would leave it at 1 of 2 — which is
+    // indistinguishable from the currency-filter defect that fixture exists to detect.
+    const cashOrder = await ensureProgressOrder(PROGRESS_ORDER, owner, products, currencies['store-default']);
+    const pointsCurrency = products[POINTS_PRODUCT.slot]?.currency;
+    if (!pointsCurrency) throw new Error('the points-priced target resolved no currency — the all-points order cannot be composed');
+    const pointsOrder = await ensureProgressOrder(POINTS_ORDER, owner, products, pointsCurrency);
+
+    // The money shape is checked against the PLATFORM'S OWN stored totals before anything is asserted
+    // about progress. A collapse here invalidates every OrderValue target at once, and it is far
+    // cheaper to fail on it now than to hand a suite a set of fixtures that cannot fail.
+    const observed = assertMoneyDiverges(cashOrder.money, pointsOrder.money);
+    log(`  money readings (observed): ${READING_ORDER.map((k) => `${k}=${observed[k]}`).join(' · ')}`);
+
     // The write is asynchronous (Hangfire), so this polls rather than asserting straight away.
     await awaitProgress(progressFixtures(), owner.userId, missionIdByAlias);
     // …and then re-asks the question through the query the storefront itself reads. The REST search
     // proves rows exist; only this proves the customer can see them, and only this reports
     // daysRemaining, which is computed per request and never stored.
     await verifyViaCustomerQuery(owner.userId, locales);
+
+    // RECORD WHAT THE MONEY GOALS ACTUALLY MEASURED. This is the observation the whole redesign turns
+    // on: each OrderValue mission's `currentValue` is compared against the four candidate readings,
+    // and the reading it matches is the answer to "which figure does an OrderValueGoal read?". It is
+    // RECORDED rather than asserted, because the fixture's job is to make the question decidable —
+    // deciding it is the test case's job, and baking an expected answer in here would make the
+    // fixture assert itself.
+    const moneySpecs = MISSIONS.filter((m) => m.goal?.type === 'OrderValueGoal');
+    const moneyIds = moneySpecs.map((m) => missionIdByAlias[m.aliasName]).filter(Boolean);
+    const moneyRows = await liveProgressByMission(moneyIds, owner.userId);
+    const predicted = orderMoney();
+    for (const m of moneySpecs) {
+      const row = moneyRows.get(missionIdByAlias[m.aliasName]);
+      const accrued = row ? Number(row.currentValue) : null;
+      writeback[m.aliasName] = {
+        ...(writeback[m.aliasName] || {}),
+        accrued_value_at_seed: accrued == null ? '' : String(accrued),
+        progress_status_at_seed: row?.status || '',
+        progress_percent_at_seed: row ? String(row.percentage) : '',
+      };
+      if (m.goal.currency === 'store-default') {
+        const matches = readingsConsistentWith(accrued, predicted);
+        const verdict = matches.length === 1
+          ? `reads ${matches[0]}`
+          : (matches.length === 0 ? 'MATCHES NO READING — investigate' : `AMBIGUOUS (${matches.join(', ')}) — the fixture stopped discriminating`);
+        log(`      ${m.aliasName.padEnd(24)} target ${String(m.goal.value).padStart(7)} accrued ${String(accrued).padStart(8)} ${String(row?.status || 'no row').padEnd(11)} → ${verdict}`);
+      } else {
+        log(`      ${m.aliasName.padEnd(24)} target ${String(m.goal.value).padStart(7)} accrued ${String(accrued).padStart(8)} (${m.goal.currency} control — expected 0)`);
+      }
+    }
+
     writeback[PROGRESS_ORDER_ALIAS] = {
-      id: order.id || '', user_id: owner.userId, user_email: owner.email, store_id: STORE_ID,
+      id: cashOrder.id || '', user_id: owner.userId, user_email: owner.email, store_id: STORE_ID,
+      currency: cashOrder.money.currency,
+      observed_sub_total: String(cashOrder.money.sub),
+      observed_discount_total: String(cashOrder.money.discount),
+      observed_shipping_total: String(cashOrder.money.shipping),
+      observed_tax_total: String(cashOrder.money.tax),
+      observed_total: String(cashOrder.money.total),
     };
+    writeback[POINTS_ORDER_ALIAS] = {
+      id: pointsOrder.id || '', user_id: owner.userId, store_id: STORE_ID,
+      currency: pointsOrder.money.currency,
+      observed_line_value: String(pointsOrder.money.sub),
+      observed_total: String(pointsOrder.money.total),
+    };
+
+    // SPENDABILITY, derived from the reward and the price the points product actually carries — never
+    // from a committed number. `reward_buys_units` is what a case reads to size its next order.
+    const rewardMission = MISSION_BY_ALIAS[REWARD_SPEND.rewardAlias];
+    const unitPrice = Number(products[POINTS_PRODUCT.slot]?.listPrice);
+    writeback[REWARD_SPEND.aliasName] = {
+      reward: String(rewardMission?.reward ?? ''),
+      unit_price: String(unitPrice),
+      currency: pointsCurrency,
+      reward_buys_units: String(rewardBuysUnits(rewardMission?.reward, unitPrice)),
+    };
+    log(`  reward spendability: ${rewardMission?.reward} ${pointsCurrency} buys ${rewardBuysUnits(rewardMission?.reward, unitPrice)} unit(s) at ${unitPrice}/unit (minimum ${REWARD_SPEND.minSpendableUnits})`);
   }
 
   // The audience fixture records what was OBSERVED, never what was assumed: the two emails are per-env
@@ -1064,17 +1346,20 @@ async function seed() {
     };
   }
 
-  // The two discovered products get their own aliases so a case can name the SKU it must buy.
-  for (const p of PERSKU_PRODUCTS) {
+  // The CREATED targets write back only their server-assigned ids plus the RESOLVED currency: their
+  // sku and name are authored business keys committed in aliases.json, so re-writing those here would
+  // put an env-invariant value in the per-env overlay and let the two silently disagree. The currency
+  // is the opposite — it is what the pricelist actually gave us, and it is the field the drift guard
+  // reads to prove the featured-SKU modal is still single-currency.
+  for (const p of [...PERSKU_PRODUCTS, ZERO_STOCK_PRODUCT]) {
     const r = products[p.slot];
-    if (r) writeback[p.aliasName] = { productId: r.id, sku: r.sku, name: r.name, catalogId: r.catalogId || '' };
+    if (r) writeback[p.aliasName] = { productId: r.id, catalogId: r.catalogId || '', currency: r.currency || '' };
   }
-  // The CREATED zero-stock product writes back only its server-assigned ids: its sku and name are
-  // authored business keys committed in aliases.json, so re-writing them here would put an
-  // env-invariant value in the per-env overlay and let the two silently disagree.
+  // The FOUND points product carries its sku too: that key is owned by LOY_SKU_PTS_UNIT, so this
+  // seeder records what it resolved rather than re-declaring a business key it does not own.
   {
-    const r = products[ZERO_STOCK_PRODUCT.slot];
-    if (r) writeback[ZERO_STOCK_PRODUCT.aliasName] = { productId: r.id, catalogId: r.catalogId || '' };
+    const r = products[POINTS_PRODUCT.slot];
+    if (r) writeback[POINTS_PRODUCT.aliasName] = { productId: r.id, catalogId: r.catalogId || '', sku: r.sku, currency: r.currency || '' };
   }
 
   // The gate fixture records the OBSERVED state of both switches, so a case reads what is really
@@ -1099,26 +1384,32 @@ async function seed() {
 }
 
 /**
- * Remove the created zero-stock product and blank its overlay ids. Scoped by SKU — the discovered
- * slot-A/B products are somebody else's and are never deleted, which is the same reason the fixture
- * created its own product in the first place. Zero-residue is asserted, not assumed.
+ * Remove every product this seeder CREATED and blank its overlay ids. Scoped by SKU, and scoped to
+ * `OWNED_PRODUCTS` — the points-priced target is FOUND through another fixture's alias and belongs to
+ * the loyalty-fixture seeder, so deleting it would tear down somebody else's data. Zero-residue is
+ * asserted per product, not assumed.
  */
 async function deleteZeroStockProduct() {
-  const spec = ZERO_STOCK_PRODUCT;
-  const find = async () => {
-    const r = await api('POST', '/api/catalog/listentries', { keyword: spec.sku, take: 10 }, { expectStatus: [200, 201, 400, 404] });
-    return (r?.listEntries || r?.results || []).filter((p) => p.code === spec.sku && p.type === 'product');
-  };
-  const hits = await find();
-  if (!hits.length) { log(`ℹ no ${spec.sku} product to delete`); return; }
-  // MUST be `objectIds`: an empty ObjectIds on this endpoint wipes EVERY list entry (see the same
-  // warning in seed-standard-products.mjs), so the guard is the non-empty check above.
-  await api('POST', '/api/catalog/listentries/delete', { objectIds: hits.map((h) => h.id), objectType: 'CatalogProduct' }, { expectStatus: [200, 204, 404] })
-    .catch((e) => log(`⚠ ${spec.sku} delete: ${String(e.message).slice(0, 120)}`));
-  const residue = await verifyRemoved(find);
-  if (residue > 0) throw new Error(`teardown left ${residue} ${spec.sku} product(s) behind`);
-  if (!DRY_RUN) writeEnvAliasOverride({ [spec.aliasName]: { productId: '', catalogId: '' } });
-  log(`✓ deleted the zero-stock product ${spec.sku}`);
+  for (const spec of OWNED_PRODUCTS) {
+    const find = async () => {
+      const r = await api('POST', '/api/catalog/listentries', { keyword: spec.sku, take: 10 }, { expectStatus: [200, 201, 400, 404] });
+      return (r?.listEntries || r?.results || []).filter((p) => p.code === spec.sku && p.type === 'product');
+    };
+    const hits = await find();
+    if (!hits.length) { log(`ℹ no ${spec.sku} product to delete`); continue; }
+    // MUST be `objectIds`: an empty ObjectIds on this endpoint wipes EVERY list entry (see the same
+    // warning in seed-standard-products.mjs), so the guard is the non-empty check above.
+    await api('POST', '/api/catalog/listentries/delete', { objectIds: hits.map((h) => h.id), objectType: 'CatalogProduct' }, { expectStatus: [200, 204, 404] })
+      .catch((e) => log(`⚠ ${spec.sku} delete: ${String(e.message).slice(0, 120)}`));
+    const residue = await verifyRemoved(find);
+    if (residue > 0) throw new Error(`teardown left ${residue} ${spec.sku} product(s) behind`);
+    if (!DRY_RUN) writeEnvAliasOverride({ [spec.aliasName]: { productId: '', catalogId: '', currency: '' } });
+    log(`✓ deleted the created target ${spec.sku}`);
+  }
+  // The FOUND points target is blanked in the overlay but never deleted — a stale id is worse than
+  // none (it would point @td() at a product this env no longer has), while deleting a fixture another
+  // seeder owns would break every points case in the repo.
+  if (!DRY_RUN) writeEnvAliasOverride({ [POINTS_PRODUCT.aliasName]: { productId: '', catalogId: '', sku: '', currency: '' } });
 }
 
 async function teardown() {
@@ -1135,10 +1426,20 @@ async function teardown() {
   if (!ONLY) {
     const removed = await deleteProgressOrder();
     log(removed
-      ? `✓ deleted the provisioning order ${progressOrderNumber()}`
-      : `ℹ no provisioning order ${progressOrderNumber()} to delete`);
+      ? `✓ deleted ${removed} provisioning order(s) (${PROGRESS_ORDERS.map((o) => progressOrderNumber(o)).join(', ')})`
+      : `ℹ no provisioning order to delete (${PROGRESS_ORDERS.map((o) => progressOrderNumber(o)).join(', ')})`);
     log('ℹ LoyaltyMissionProgress rows are NOT deletable (search+get API only) — the rows this order produced remain, orphaned and unreachable once their mission is gone.');
-    if (!DRY_RUN) writeEnvAliasOverride({ [PROGRESS_ORDER_ALIAS]: { id: '', user_id: '', user_email: '', store_id: '' } });
+    if (!DRY_RUN) {
+      writeEnvAliasOverride({
+        [PROGRESS_ORDER_ALIAS]: {
+          id: '', user_id: '', user_email: '', store_id: '', currency: '',
+          observed_sub_total: '', observed_discount_total: '', observed_shipping_total: '',
+          observed_tax_total: '', observed_total: '',
+        },
+        [POINTS_ORDER_ALIAS]: { id: '', user_id: '', store_id: '', currency: '', observed_line_value: '', observed_total: '' },
+        [REWARD_SPEND.aliasName]: { reward: '', unit_price: '', currency: '', reward_buys_units: '' },
+      });
+    }
     // The audience ACCOUNTS are not ours to delete — they belong to the loyalty user seeder and other
     // suites sign in as them. What this seeder owns is the OBSERVATION, and a stale one is worse than
     // none: it would let a case claim a membership nobody re-checked. So the overlay entry is blanked

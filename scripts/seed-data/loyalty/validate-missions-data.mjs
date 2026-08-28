@@ -36,6 +36,7 @@ import {
   BANNERS, bannerKeyFor, bannerSourceRel,
   missionName, validateSpecShape,
   PROGRESS_ORDER, PROGRESS_ORDER_ALIAS, PROGRESS_USER_ROLE, progressOrderNumber,
+  POINTS_PRODUCT, POINTS_ORDER, POINTS_ORDER_ALIAS, REWARD_SPEND, PROGRESS_ORDERS, validateSeededMoney,
   goalItemQuantities, needsGoalItems, predictProgress, percentagesMatch, progressFixtures,
   localeIntentsUsed, localeFieldFor,
   WINDOWS, DANGER_THRESHOLD_DAYS,
@@ -52,6 +53,12 @@ const DEFAULT_WINDOW = 'active';
 const problems = [];
 const warnings = [];
 const notes = [];
+/**
+ * The alias namespace owned by the RUN-SCOPED e2e fixture set (missions-e2e-specs.mjs). See the [2]
+ * reverse-orphan scan below for why this guard deliberately does not claim it.
+ */
+const NAME_PREFIX_E2E = 'MSN_E2E';
+
 const fail = (m) => problems.push(m);
 const warn = (m) => warnings.push(m);
 
@@ -67,7 +74,13 @@ const RUNTIME_BY_ALIAS = {
   [STORE_SETTING.aliasName]: RUNTIME_FIELDS_BY_KIND.storeSetting,
   [PROGRESS_ORDER_ALIAS]: RUNTIME_FIELDS_BY_KIND.progressOrder,
   [GROUP_AUDIENCE.aliasName]: RUNTIME_FIELDS_BY_KIND.groupAudience,
-  ...Object.fromEntries(PERSKU_PRODUCTS.map((p) => [p.aliasName, RUNTIME_FIELDS_BY_KIND.perSkuProduct])),
+  // The PerSku targets are CREATED now, not discovered: their sku/name are authored business keys the
+  // seeder finds-or-creates by, so only the server-assigned ids plus the RESOLVED currency and storefront
+  // path are runtime. Giving them the discovered-product list would demand they blank their own SKU.
+  ...Object.fromEntries(PERSKU_PRODUCTS.map((p) => [p.aliasName, RUNTIME_FIELDS_BY_KIND.createdProduct])),
+  [POINTS_PRODUCT.aliasName]: RUNTIME_FIELDS_BY_KIND.foundProduct,
+  [POINTS_ORDER_ALIAS]: RUNTIME_FIELDS_BY_KIND.pointsOrder,
+  [REWARD_SPEND.aliasName]: RUNTIME_FIELDS_BY_KIND.rewardSpend,
   // The zero-stock product is CREATED by this seeder, so its sku/name are authored business keys and
   // only the server-assigned ids are runtime — see RUNTIME_FIELDS_BY_KIND.createdProduct.
   [ZERO_STOCK_PRODUCT.aliasName]: RUNTIME_FIELDS_BY_KIND.createdProduct,
@@ -98,6 +111,8 @@ const owned = [
   GROUP_AUDIENCE.aliasName,
   ...TARGET_PRODUCTS.map((p) => p.aliasName),
   ...MISSIONS.map((m) => m.aliasName),
+  POINTS_ORDER_ALIAS,
+  REWARD_SPEND.aliasName,
 ];
 for (const name of owned) {
   if (!aliases[name]) fail(`[2] alias ${name} is declared in the spec module but absent from test-data/aliases.json — @td(${name}.*) resolves to nothing`);
@@ -106,6 +121,12 @@ for (const name of owned) {
 // a plausible-looking committed value forever and no seeder will ever refresh it.
 for (const name of Object.keys(aliases)) {
   if (!/^MSN_/.test(name)) continue;
+  // The MSN_E2E_ namespace belongs to the run-scoped e2e set (missions-e2e-specs.mjs), which has its
+  // own spec module, its own seeder and its own guard (`npm run td:validate:missions-e2e`). Claiming
+  // it here would make this guard fail on fixtures it does not own and cannot tear down; importing
+  // that module to assert they exist would couple two deliberately independent sets. The reverse
+  // orphan check for those aliases is that guard's job.
+  if (name.startsWith(`${NAME_PREFIX_E2E}_`)) continue;
   if (!owned.includes(name)) fail(`[2] alias ${name} looks like a mission fixture but no spec owns it — nothing seeds or tears it down`);
 }
 
@@ -355,6 +376,20 @@ for (const f of readdirSync(join(ROOT, 'test-data'))) {
   const seeded = MISSIONS.filter((m) => o[m.aliasName]?.id);
   if (seeded.length) notes.push(`${env}: ${seeded.length}/${MISSIONS.length} mission id(s) present`);
   else if (env !== 'localhost') warn(`no mission ids in aliases.${env}.json — @td(MSN_*.id) resolves to "" there until \`TEST_ENV=${env} npm run seed:loyalty-missions\` runs`);
+
+  /* [8f] FALSIFIABILITY, CHECKED AGAINST WHAT ACTUALLY LANDED ────────────────
+   *
+   * Every other check in this file proves the COMMITTED spec is coherent. None of them can prove the
+   * platform agreed — a shipping charge silently dropped, a target product priced into a foreign
+   * pricelist, an accrual that matches no candidate reading at all. Those are the failures that leave
+   * a fixture looking perfectly seeded while the case built on it has stopped being able to fail, and
+   * they are exactly the class that let a flat $30 order pass for two sprints.
+   *
+   * Scoped to an env that HAS been seeded: an unseeded overlay is already reported above, and running
+   * the money rules against it would bury the one useful line under a dozen derived ones.
+   */
+  if (!seeded.length) continue;
+  for (const p of validateSeededMoney(o)) fail(`[8f] ${env}: ${p}`);
 }
 
 /* [9] ─────────────────────────────────────────────────────────────────────── */
