@@ -268,3 +268,35 @@ MSNA-022,A customer's loyalty balance/points-history admin view distinguishes Lo
 [GRID] after enabling Source Type / Object Type, a mission-sourced row shows Source Type = 'LoyaltyMission', Object Type = 'LoyaltyMissionProgress' {OBSERVED}
 [GRID] an order-sourced row shows Object Type = 'CustomerOrder' (its Source Type cell is blank) {OBSERVED}
 [GRID] each entry's Amount column is non-empty {OBSERVED}",[API] MSN-019 (075d) confirms the object.type field exists and is populated via GraphQL loyaltyPointsHistory — this case is the confirmed Admin-UI-level equivalent (Contacts > <contact> > Loyalty balance > Grid Menu opt-in columns),the 'Source Type' / 'Object Type' options are missing from the Grid Menu (columns no longer opt-in-able); a mission-sourced row's Source Type/Object Type do not read LoyaltyMission/LoyaltyMissionProgress; no row is attributable to a mission source at all,none,VCST-5319; C12 | Corrected: 2026-08-27 (live re-verify: real path is Contacts > <contact> > Loyalty balance widget > 'Loyalty operation log' blade > Grid Menu opt-in Source Type/Object Type columns; grounded {HYPOTHESIS} to {OBSERVED}; stays Draft),Draft
+MSNA-023,"Add — backend save-validation rejects End-before-Start and a negative reward, and does not reject their valid boundary neighbors (End=Start, reward=0)",Admin > Loyalty Missions > Details > Save validation,High,,,"[PRE:CLEAR_SESSION]
+[PRE:SIGNIN_AS:ADMIN_DEFAULT]
+1. No existing mission named AGENT-TEST-MSNA-023-* on @td(STORE_PRIMARY.id) (this case creates and abandons a Draft mission — Draft missions ARE editable/deletable per MSNA-012's established Published-only immutability, so no seed data is required).
+2. Dev comment on VCST-5319 (upd. 2026-08-20) marks ""backend save-validation"" complete — this case is the first coverage of it; MSNA-007 (no goal) and MSNA-011 (reward=0, already confirmed accepted) cover adjacent ground and are not re-tested here.",back_url={{BACK_URL}}; mission_name=AGENT-TEST-MSNA-023-{{TIMESTAMP}},"[NAV] {{BACK_URL}}/#!/workspace/loyalty-missions
+[WAIT] grid loaded
+[ACT] click 'Add' (new mission)
+[WAIT] details blade opens (Draft)
+[ACT] type {{mission_name}} into Name
+[ACT] select goal type OrderCountGoal, set target = 1
+--- End-before-Start (invalid) ---
+[ACT] set Start date = today
+[ACT] set End date = today minus 1 day
+[ACT] click Save
+[WAIT] server round-trip completes (toast or inline error, or Save remains disabled)
+--- correct to End=Start (valid boundary) ---
+[ACT] set End date = today (same as Start)
+[ACT] click Save
+[WAIT] save completes
+--- negative reward (invalid) ---
+[ACT] set reward amount = -1
+[ACT] click Save
+[WAIT] server round-trip completes (toast or inline error, or Save remains disabled)
+--- correct to reward = 0 (valid boundary, MSNA-011 precedent) ---
+[ACT] set reward amount = 0
+[ACT] click Save
+[WAIT] save completes, grid/blade reflects the saved mission","[FORM] End-before-Start attempt: the blade does NOT re-title away from its unsaved-Draft state and Save/Reset do NOT disable (the MSNA-004-confirmed signal for ""save did not go through"" — this blade has no toast) {SPEC} — a date-order invariant is normal for any goal window and should be enforced somewhere in the round-trip
+[FORM] after correcting End date = Start date, the blade re-titles and Save/Reset disable (the MSNA-004-confirmed signal for a successful save) {SPEC} — the boundary itself (End=Start, a zero-length window) is not rejected merely for being tight
+[FORM] reward = -1 attempt: same non-save signal (no re-title, Save/Reset stay enabled) {SPEC} — a negative reward has no product meaning (contrast MSNA-011's confirmed reward=0 boundary, which IS meaningful and IS accepted)
+[FORM] after correcting reward = 0, the blade re-titles and Save/Reset disable {SPEC}
+[GRID] the grid, reloaded, shows exactly one row for {{mission_name}} — not two (no duplicate created by a Save that server-rejected but the UI treated as sent) {OBSERVED}","[API] MSN-027 (075d, this same VCST-5319 batch) exercises the corresponding GraphQL-side accrual window once a mission is Published — this case only covers the Admin-authoring gate.","Save appears to succeed (blade re-titles, Save/Reset disable) with End < Start still set (no date-order validation exists at all — the dev-comment ""backend save-validation"" item is incomplete); same false-success signal with reward = -1 (same, for the reward field); the non-save signal persists even after BOTH corrections (over-strict validation — a REAL valid mission, per MSNA-011's own accepted reward=0 boundary, is being rejected); two rows appear for {{mission_name}} (a client-side-only rejection let a retry double-submit)","[NAV] {{BACK_URL}}/#!/workspace/loyalty-missions
+[ACT] select the row with Name = {{mission_name}}
+[ACT] click 'Delete' in the toolbar and confirm",VCST-5319; C5 (dev comment item 5) | Archetype:BOUNDARY | Technique:EP,Draft

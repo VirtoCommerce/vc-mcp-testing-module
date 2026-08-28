@@ -858,9 +858,9 @@
     "name": "AGENT-TEST-SR-CART-WEST"
   },
   "LOYALTY_ZERO_USER": {
-    "memberId": "4f509508-b4d9-4a3d-bfa0-e9e36680fbf7",
-    "securityAccountId": "05cc31a7-2a5f-4e1d-ba97-09491a357ccc",
-    "email": "AGENT-TEST-loyzero-20260828133612-a48f@test-agent.com"
+    "memberId": "efed0535-7f63-4c0e-996a-16c6b172fb52",
+    "securityAccountId": "8bba3ac6-87fb-4011-a38b-88323640328b",
+    "email": "AGENT-TEST-loyzero-20260828160626-6c75@test-agent.com"
   },
   "REV_VAR_MATRIX": {
     "id": "08c33cfc9f664426a52fac8882da2df0",
@@ -1039,54 +1039,66 @@
     "catalogId": "6032bd3c-77dc-4035-a94f-6f60ee5abb4e"
   },
   "MSN_E2E_RUN": {
-    "run_id": "20260828133615-14c7",
-    "seeded_at": "2026-08-28T13:36:15.703Z",
+    "run_id": "20260828160633-0602",
+    "seeded_at": "2026-08-28T16:06:33.237Z",
     "store_id": "B2B-store",
     "catalog_id": "3b0e9125-8c5b-41ce-9ff8-6a470e5aaf8f",
-    "category_id": "4f93d816-4d5d-4629-981b-9eef94781aff"
+    "category_id": "b08051d6-b070-4ab1-a237-51ee0c4dbcc1"
   },
   "MSN_E2E_REWARD_USER": {
-    "email": "AGENT-TEST-loyzero-20260828133612-a48f@test-agent.com",
-    "user_id": "05cc31a7-2a5f-4e1d-ba97-09491a357ccc",
-    "member_id": "4f509508-b4d9-4a3d-bfa0-e9e36680fbf7",
+    "email": "AGENT-TEST-loyzero-20260828160626-6c75@test-agent.com",
+    "user_id": "8bba3ac6-87fb-4011-a38b-88323640328b",
+    "member_id": "efed0535-7f63-4c0e-996a-16c6b172fb52",
     "balance_at_seed": "0"
   },
   "MSN_E2E_ORDERVALUE": {
-    "id": "4a99d8a3-96b9-4fed-bf4a-bd5f0c6c996a",
-    "name": "AGENT-TEST-MSN-E2E-20260828133615-14c7-ORDERVALUE",
-    "run_id": "20260828133615-14c7",
+    "id": "8608ad3b-232b-4568-80e3-13065d75cb48",
+    "name": "AGENT-TEST-MSN-E2E-20260828160633-0602-ORDERVALUE",
+    "run_id": "20260828160633-0602",
     "goal_currency": "USD",
     "progress_status_at_seed": "InProgress",
     "progress_percent_at_seed": "0"
   },
   "MSN_E2E_ORDERCOUNT": {
-    "id": "e7fb17d4-13db-4829-92ee-0ce4c430e855",
-    "name": "AGENT-TEST-MSN-E2E-20260828133615-14c7-ORDERCOUNT",
-    "run_id": "20260828133615-14c7",
+    "id": "1c679e0f-e117-4791-b691-0b667e70fbfb",
+    "name": "AGENT-TEST-MSN-E2E-20260828160633-0602-ORDERCOUNT",
+    "run_id": "20260828160633-0602",
     "goal_currency": "",
     "progress_status_at_seed": "InProgress",
-    "progress_percent_at_seed": "0"
+    "progress_percent_at_seed": "0",
+    "order_shipping_max": "unbounded",
+    "available_shipping": "BuyOnlinePickupInStore/Pickup=0; FixedRate/Ground=150; FixedRate/Air=250",
+    "measured_subtotal": "15",
+    "measured_discount": "0",
+    "measured_tax": "3",
+    "measured_shipping": "0",
+    "measured_total": "18",
+    "reading_values": "netMerchandise=15; grossMerchandise=15; orderTotal=18; totalPlusPoints=18",
+    "order1_co_missions": "AGENT-TEST-MSN-E2E-20260828160633-0602-ORDERVALUE-008=508; AGENT-TEST-MSN-LOCALIZED=250; AGENT-TEST-MSN-ZEROREWARD=0; AGENT-TEST-MSN-ZEROTARGET=200; AGENT-TEST-MSN-PUBLISHED-PRIVATE=100",
+    "order1_expected_delta": "1058",
+    "co_completing_missions": "AGENT-TEST-MSN-E2E-20260828160633-0602-ORDERVALUE-006=506; AGENT-TEST-MSN-ORDERCOUNT=300",
+    "reward_expected_total": "1307"
   },
   "MSN_E2E_PERSKU": {
-    "id": "85fe98b3-52a0-4886-b8e6-e50273014968",
-    "name": "AGENT-TEST-MSN-E2E-20260828133615-14c7-PERSKU",
-    "run_id": "20260828133615-14c7",
+    "id": "fd0a6603-1a16-4440-8005-fd0803874315",
+    "name": "AGENT-TEST-MSN-E2E-20260828160633-0602-PERSKU",
+    "run_id": "20260828160633-0602",
     "goal_currency": "",
     "progress_status_at_seed": "InProgress",
     "progress_percent_at_seed": "0"
   },
   "MSN_E2E_PERSKU_PTS": {
-    "id": "f2cb71e2-3d28-4c3f-8b2f-ea8b6734cbc8",
-    "name": "AGENT-TEST-MSN-E2E-20260828133615-14c7-PERSKU-PTS",
-    "run_id": "20260828133615-14c7",
+    "id": "ee0163d7-6d7b-40ad-a9e7-bc95390fa567",
+    "name": "AGENT-TEST-MSN-E2E-20260828160633-0602-PERSKU-PTS",
+    "run_id": "20260828160633-0602",
     "goal_currency": "",
     "progress_status_at_seed": "InProgress",
     "progress_percent_at_seed": "0"
   },
   "MSN_E2E_ORDERVALUE_003": {
-    "id": "824ff1fd-de5c-469c-b0a9-3dcf522e2fdb",
-    "name": "AGENT-TEST-MSN-E2E-20260828133615-14c7-ORDERVALUE-003",
-    "run_id": "20260828133615-14c7",
+    "id": "296f9852-7b50-4b6e-bf55-5589f0df29b3",
+    "name": "AGENT-TEST-MSN-E2E-20260828160633-0602-ORDERVALUE-003",
+    "run_id": "20260828160633-0602",
     "goal_currency": "USD",
     "goal_target": "49.5",
     "progress_status_at_seed": "InProgress",
@@ -1107,16 +1119,17 @@
     "reward_expected_total": ""
   },
   "MSN_E2E_USER_003": {
-    "email": "AGENT-TEST-msne2e-20260828133629-56dc@test-agent.com",
-    "user_id": "f9a631a0-0447-431d-8c68-0320521e4848",
-    "member_id": "cd461bd7-9699-4004-a6dd-481a1cb90afe",
-    "handle": "AGENT-TEST-msne2e-20260828133629-56dc",
-    "balance_at_seed": "0"
+    "email": "AGENT-TEST-msne2e-20260828160653-42f8@test-agent.com",
+    "user_id": "5c1c7e43-8027-4fad-a98d-bf797ec65f08",
+    "member_id": "dd25dbb8-9d5d-4677-9c37-d2811cc14360",
+    "handle": "AGENT-TEST-msne2e-20260828160653-42f8",
+    "balance_at_seed": "0",
+    "groups_at_seed": ""
   },
   "MSN_E2E_ORDERVALUE_005": {
-    "id": "636e21d5-04cd-43c8-a4a5-262c5afed912",
-    "name": "AGENT-TEST-MSN-E2E-20260828133615-14c7-ORDERVALUE-005",
-    "run_id": "20260828133615-14c7",
+    "id": "312f3b1f-a8b3-4fd0-aa5c-ee62d48cb1cc",
+    "name": "AGENT-TEST-MSN-E2E-20260828160633-0602-ORDERVALUE-005",
+    "run_id": "20260828160633-0602",
     "goal_currency": "USD",
     "goal_target": "54",
     "progress_status_at_seed": "InProgress",
@@ -1137,16 +1150,17 @@
     "reward_expected_total": ""
   },
   "MSN_E2E_USER_005": {
-    "email": "AGENT-TEST-msne2e-20260828133631-2c68@test-agent.com",
-    "user_id": "34e2b374-62e9-4a6e-95cd-4fdb9626911d",
-    "member_id": "45eb3ec6-9d23-475f-81a3-a5ed6f90cdb2",
-    "handle": "AGENT-TEST-msne2e-20260828133631-2c68",
-    "balance_at_seed": "0"
+    "email": "AGENT-TEST-msne2e-20260828160656-2360@test-agent.com",
+    "user_id": "f2658238-a0f1-4b84-8a2a-ab8c21d35ed9",
+    "member_id": "1100413a-af7a-4e83-95a1-4f4f22160f88",
+    "handle": "AGENT-TEST-msne2e-20260828160656-2360",
+    "balance_at_seed": "0",
+    "groups_at_seed": ""
   },
   "MSN_E2E_ORDERVALUE_006": {
-    "id": "3c61a5d1-dda9-465a-825f-c82af7ad3117",
-    "name": "AGENT-TEST-MSN-E2E-20260828133615-14c7-ORDERVALUE-006",
-    "run_id": "20260828133615-14c7",
+    "id": "742ec1ad-a8a1-4b8a-8492-e4f8a692e512",
+    "name": "AGENT-TEST-MSN-E2E-20260828160633-0602-ORDERVALUE-006",
+    "run_id": "20260828160633-0602",
     "goal_currency": "USD",
     "goal_target": "36",
     "progress_status_at_seed": "InProgress",
@@ -1167,16 +1181,17 @@
     "reward_expected_total": ""
   },
   "MSN_E2E_USER_006": {
-    "email": "AGENT-TEST-msne2e-20260828133634-4b3b@test-agent.com",
-    "user_id": "42ab3c70-f807-4139-89a7-b37ca29e071e",
-    "member_id": "28c2c347-74c1-4324-8164-fd3179a92f6b",
-    "handle": "AGENT-TEST-msne2e-20260828133634-4b3b",
-    "balance_at_seed": "0"
+    "email": "AGENT-TEST-msne2e-20260828160700-6320@test-agent.com",
+    "user_id": "01118c4f-c1e4-4e2c-9746-e662175fbb72",
+    "member_id": "688bf190-9663-4d39-b800-123c082ea2bc",
+    "handle": "AGENT-TEST-msne2e-20260828160700-6320",
+    "balance_at_seed": "0",
+    "groups_at_seed": ""
   },
   "MSN_E2E_ORDERVALUE_008": {
-    "id": "0b579ec8-f742-49d7-8312-6611b408b7f6",
-    "name": "AGENT-TEST-MSN-E2E-20260828133615-14c7-ORDERVALUE-008",
-    "run_id": "20260828133615-14c7",
+    "id": "21e035a9-9fa3-4771-b9b2-f67bad29ca2d",
+    "name": "AGENT-TEST-MSN-E2E-20260828160633-0602-ORDERVALUE-008",
+    "run_id": "20260828160633-0602",
     "goal_currency": "USD",
     "goal_target": "12",
     "progress_status_at_seed": "InProgress",
@@ -1197,38 +1212,93 @@
     "reward_expected_total": "1058"
   },
   "MSN_E2E_USER_008": {
-    "email": "AGENT-TEST-msne2e-20260828133637-7bbe@test-agent.com",
-    "user_id": "4d5b351c-a4af-40cc-925e-1c27fc95d6ff",
-    "member_id": "312f087a-8ab4-4056-8ed9-412ee4d044c9",
-    "handle": "AGENT-TEST-msne2e-20260828133637-7bbe",
-    "balance_at_seed": "0"
+    "email": "AGENT-TEST-msne2e-20260828160704-10ae@test-agent.com",
+    "user_id": "48a32849-897e-4e6d-9c1f-7933f6e3920d",
+    "member_id": "0fcb6048-58dd-4ebd-a9bf-206f0861a10a",
+    "handle": "AGENT-TEST-msne2e-20260828160704-10ae",
+    "balance_at_seed": "0",
+    "groups_at_seed": ""
   },
   "MSN_E2E_PRODUCT_UNIT": {
-    "productId": "12214317-ffb0-4454-b71d-1c9832d26acc",
+    "productId": "10069cdf-cb8d-4607-af04-67123e196d11",
     "catalogId": "3b0e9125-8c5b-41ce-9ff8-6a470e5aaf8f",
     "currency": "USD",
     "slug": "seed-loyalty-missions-e2e/agent-test-msn-e2e-unit",
     "url": "/seed-loyalty-missions-e2e/agent-test-msn-e2e-unit"
   },
   "MSN_E2E_PRODUCT_A": {
-    "productId": "a23995be-9a80-467d-abaa-027a4ae7bc23",
+    "productId": "c086f2a7-7a21-480c-95ab-604f8cc593bd",
     "catalogId": "3b0e9125-8c5b-41ce-9ff8-6a470e5aaf8f",
     "currency": "USD",
     "slug": "seed-loyalty-missions-e2e/agent-test-msn-e2e-persku-a",
     "url": "/seed-loyalty-missions-e2e/agent-test-msn-e2e-persku-a"
   },
   "MSN_E2E_PRODUCT_B": {
-    "productId": "3a0238a2-fcb7-4753-8972-c89664808dd9",
+    "productId": "f38a1489-0b5b-4816-9027-71dbc053b56d",
     "catalogId": "3b0e9125-8c5b-41ce-9ff8-6a470e5aaf8f",
     "currency": "USD",
     "slug": "seed-loyalty-missions-e2e/agent-test-msn-e2e-persku-b",
     "url": "/seed-loyalty-missions-e2e/agent-test-msn-e2e-persku-b"
   },
   "MSN_E2E_PRODUCT_PTS": {
-    "productId": "3cef4125-876a-4b7a-9d01-21488aae5b8c",
+    "productId": "a4e67040-6c94-4182-b2b2-88ea0c77c6a5",
     "catalogId": "3b0e9125-8c5b-41ce-9ff8-6a470e5aaf8f",
     "currency": "PTS",
     "slug": "seed-loyalty-missions-e2e/agent-test-msn-e2e-persku-pts",
     "url": "/seed-loyalty-missions-e2e/agent-test-msn-e2e-persku-pts"
+  },
+  "MSN_E2E_TGT_CONTROL": {
+    "id": "257cbca4-2727-43cd-86a0-e4baa471886d",
+    "name": "AGENT-TEST-MSN-E2E-20260828160633-0602-TGT-CONTROL",
+    "run_id": "20260828160633-0602",
+    "goal_currency": "USD",
+    "goal_target": "7200",
+    "progress_status_at_seed": "InProgress",
+    "progress_percent_at_seed": "0",
+    "observed_visibility": "MSN_E2E_USER_TGTMEMBER=visible; MSN_E2E_USER_TGTOUTSIDER=visible"
+  },
+  "MSN_E2E_TGT_GROUP": {
+    "id": "03cc8f97-2504-4204-b882-e517b75c0148",
+    "name": "AGENT-TEST-MSN-E2E-20260828160633-0602-TGT-GROUP",
+    "run_id": "20260828160633-0602",
+    "goal_currency": "USD",
+    "goal_target": "7200",
+    "progress_status_at_seed": "InProgress",
+    "progress_percent_at_seed": "0",
+    "observed_visibility": "MSN_E2E_USER_TGTMEMBER=visible; MSN_E2E_USER_TGTOUTSIDER=absent"
+  },
+  "MSN_E2E_TGT_PRIVATE": {
+    "id": "cb21bc5b-6a81-4649-9f10-b3fdb6bf585a",
+    "name": "AGENT-TEST-MSN-E2E-20260828160633-0602-TGT-PRIVATE",
+    "run_id": "20260828160633-0602",
+    "goal_currency": "USD",
+    "goal_target": "7200",
+    "progress_status_at_seed": "InProgress",
+    "progress_percent_at_seed": "0",
+    "observed_visibility": "MSN_E2E_USER_TGTMEMBER=visible; MSN_E2E_USER_TGTOUTSIDER=visible"
+  },
+  "MSN_E2E_USER_001": {
+    "email": "AGENT-TEST-msne2e-20260828160651-3768@test-agent.com",
+    "user_id": "ab32be96-b025-4c2b-9daf-82e026a31199",
+    "member_id": "c1a5d34f-e945-4396-bbf8-c9769ba4380e",
+    "handle": "AGENT-TEST-msne2e-20260828160651-3768",
+    "balance_at_seed": "0",
+    "groups_at_seed": ""
+  },
+  "MSN_E2E_USER_TGTMEMBER": {
+    "email": "AGENT-TEST-msne2e-20260828160706-6cec@test-agent.com",
+    "user_id": "710360bc-b9e7-44f5-b697-ed10310fecd0",
+    "member_id": "2cad64a2-52fb-4ae0-a8c3-709115656f91",
+    "handle": "AGENT-TEST-msne2e-20260828160706-6cec",
+    "balance_at_seed": "0",
+    "groups_at_seed": "VIP"
+  },
+  "MSN_E2E_USER_TGTOUTSIDER": {
+    "email": "AGENT-TEST-msne2e-20260828160711-fe19@test-agent.com",
+    "user_id": "d46952d7-41e4-4a2b-a52a-d3fefce2d412",
+    "member_id": "dcf87580-a632-47fb-8ae7-33611f9acbf6",
+    "handle": "AGENT-TEST-msne2e-20260828160711-fe19",
+    "balance_at_seed": "0",
+    "groups_at_seed": ""
   }
 }

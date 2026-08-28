@@ -28,6 +28,7 @@ import {
   MISSIONS, ALL_MISSIONS, PRODUCTS, REWARD_USER, RUNTIME_FIELDS_BY_KIND,
   UNIT_PRODUCT, MISSION_BY_ALIAS, DISCOUNT_ALIAS,
   CASE_MISSIONS, CASE_ACCOUNTS, CASE_ACCOUNT_PREFIX,
+  TARGETING_MISSIONS, TARGETING_CASE_ID, isTargetingMission, declaredAliases, boundAccounts,
   validateSpecShape, validateSeededState,
   unitsToComplete, unitsJustBelow, discountBand,
 } from './missions-e2e-specs.mjs';
@@ -55,14 +56,9 @@ const overlay = readJson(`test-data/aliases.${ENV}.json`) || {};
 for (const m of validateSpecShape()) fail(`[1] spec: ${m}`);
 
 /* [2] Every alias the specs declare exists in the committed base, and is `_inline`. */
-const declared = [
-  { aliasName: 'MSN_E2E_RUN', kind: 'run' },
-  ...MISSIONS.map((m) => ({ aliasName: m.aliasName, kind: 'mission' })),
-  ...CASE_MISSIONS.map((m) => ({ aliasName: m.aliasName, kind: 'caseMission' })),
-  ...PRODUCTS.map((p) => ({ aliasName: p.aliasName, kind: 'product' })),
-  { aliasName: REWARD_USER.aliasName, kind: 'rewardUser' },
-  ...CASE_ACCOUNTS.map((a) => ({ aliasName: a.aliasName, kind: 'caseUser' })),
-];
+// Read from the spec module rather than re-derived here: a second list is a second definition of
+// which fields are runtime, and the two would disagree the first time a kind was added.
+const declared = declaredAliases();
 for (const { aliasName } of declared) {
   const a = base[aliasName];
   if (!a) { fail(`[2] alias ${aliasName} is declared by the spec module but absent from test-data/aliases.json — every @td(${aliasName}.*) in 083d would fail to resolve`); continue; }
@@ -105,6 +101,35 @@ for (const m of MISSIONS) {
     : m.goal.type === 'OrderCountGoal' ? m.goal.count
       : (m.goal.all ? 'PerSkuAll' : 'PerSkuAny');
   expectMatch(m.aliasName, 'goal_target', target);
+  // The JOURNEY's authored half. order_units / journey_orders are what the case composes its two
+  // orders from; everything downstream of them is measured.
+  if (m.journeyOrders != null) {
+    expectMatch(m.aliasName, 'case_id', m.caseId);
+    expectMatch(m.aliasName, 'account_alias', boundAccounts(m)[0]);
+    expectMatch(m.aliasName, 'order_units', m.order.units);
+    expectMatch(m.aliasName, 'journey_orders', m.journeyOrders);
+  }
+}
+
+/* [3f] The TARGETING STAR's authored half. Its inputs are the whole fixture, so a base alias that
+ *      disagrees with the spec module describes a mission that is not the one being seeded — and the
+ *      case would interpret its reading against the wrong cell. `goal_target` is deliberately absent:
+ *      the unreachable ceiling is derived at seed time and checked against the overlay by [4]. */
+for (const m of TARGETING_MISSIONS) {
+  expectMatch(m.aliasName, 'case_id', m.caseId);
+  expectMatch(m.aliasName, 'targeting_role', m.targetingRole);
+  expectMatch(m.aliasName, 'visibility_policy', m.visibility);
+  expectMatch(m.aliasName, 'account_aliases', boundAccounts(m).join('; '));
+  expectMatch(m.aliasName, 'status', m.status);
+  expectMatch(m.aliasName, 'public', String(m.public));
+  expectMatch(m.aliasName, 'goal_type', m.goal.type);
+  expectMatch(m.aliasName, 'condition_type', m.condition.type);
+  expectMatch(m.aliasName, 'target_rule', m.targetRule);
+  expectMatch(m.aliasName, 'reward', m.reward);
+  const committedTarget = base[m.aliasName]?.goal_target;
+  if (String(committedTarget ?? '') !== '') {
+    fail(`[3f] ${m.aliasName}.goal_target = ${JSON.stringify(committedTarget)} in the COMMITTED base — the unreachable ceiling is DERIVED from the largest cart the set measures, because a transcribed one goes stale the moment a case orders more and fails SILENTLY, by the cell quietly becoming completable and granting on other cases' orders.`);
+  }
 }
 for (const p of PRODUCTS) {
   expectMatch(p.aliasName, 'sku', p.sku);
@@ -136,10 +161,17 @@ for (const m of CASE_MISSIONS) {
 }
 for (const a of CASE_ACCOUNTS) {
   expectMatch(a.aliasName, 'case_id', a.caseId);
-  expectMatch(a.aliasName, 'mission_alias', a.missionAlias);
+  expectMatch(a.aliasName, 'mission_alias', a.missionAliases.join('; '));
   // The password must be a VAR name, never a literal — same rule as every other seeded credential.
   const pv = base[a.aliasName]?.password_var;
   if (!pv) fail(`[3d] ${a.aliasName}.password_var is missing — a case has to know which {{VAR}} to type, and a literal password in a committed file is a secret-hygiene failure`);
+  // The targeting pair's AUDIENCE is authored (which side of the group each half is on); the OBSERVED
+  // membership is runtime and lives in the overlay. Committing the observed value would assert the
+  // very thing the pair exists to make falsifiable.
+  if (a.audienceRole) {
+    expectMatch(a.aliasName, 'audience_role', a.audienceRole);
+    expectMatch(a.aliasName, 'groups_intent', (a.groups || []).join('; '));
+  }
 }
 
 /* [3e] The four per-case rewards must stay DISTINCT from each other and from every other mission in
@@ -147,8 +179,13 @@ for (const a of CASE_ACCOUNTS) {
  *      or a points-history row unattributable — the divergence clause of the SECOND RULE. */
 const byReward = new Map();
 for (const m of ALL_MISSIONS) {
-  if (byReward.has(m.reward)) {
-    fail(`[3e] ${m.aliasName} and ${byReward.get(m.reward)} both reward ${m.reward} PTS — a grant from either is indistinguishable in a balance delta or a points-history row, so no case on them can attribute what it observed`);
+  const prior = byReward.get(m.reward);
+  // The targeting star's three cells MUST share a reward or they stop being a controlled comparison,
+  // and they can never grant (their target is unreachable by construction), so there is no delta for a
+  // reward to have to attribute. A collision with any mission that CAN grant is still a real defect.
+  if (prior && isTargetingMission(m) && isTargetingMission(MISSION_BY_ALIAS[prior])) continue;
+  if (prior) {
+    fail(`[3e] ${m.aliasName} and ${prior} both reward ${m.reward} PTS — a grant from either is indistinguishable in a balance delta or a points-history row, so no case on them can attribute what it observed`);
   } else byReward.set(m.reward, m.aliasName);
 }
 
@@ -206,7 +243,7 @@ for (const a of CASE_ACCOUNTS) {
 
 /* [9] Every case the suite declares is served by at least one fixture, and vice versa. */
 const covered = new Set(ALL_MISSIONS.flatMap((m) => m.cases || []));
-const suiteCases = ['MSN-E2E-001', 'MSN-E2E-002', 'MSN-E2E-003', 'MSN-E2E-004', 'MSN-E2E-005', 'MSN-E2E-006', 'MSN-E2E-007', 'MSN-E2E-008'];
+const suiteCases = ['MSN-E2E-001', 'MSN-E2E-002', 'MSN-E2E-003', 'MSN-E2E-004', 'MSN-E2E-005', 'MSN-E2E-006', 'MSN-E2E-007', 'MSN-E2E-008', TARGETING_CASE_ID];
 for (const c of suiteCases) if (!covered.has(c)) warn(`[9] ${c} is not claimed by any fixture in this set — it either binds to shared data or is still unserved`);
 for (const c of covered) if (!suiteCases.includes(c)) fail(`[9] a fixture claims case ${c}, which is not in suite 083d — the claim cannot be true`);
 
@@ -218,4 +255,10 @@ if (problems.length) {
   for (const p of problems) console.log(`  • ${p}`);
   process.exit(1);
 }
-console.log(`✅ clean — ${ALL_MISSIONS.length} missions (${CASE_MISSIONS.length} per-case), ${CASE_ACCOUNTS.length} per-case accounts, ${PRODUCTS.length} products, ${declared.length} aliases; every fixture was pre-completion at seed time, every per-case target sits in a measured band, the accounts are distinct and the reward is legible.`);
+console.log(
+  `✅ clean — ${ALL_MISSIONS.length} missions (${CASE_MISSIONS.length} measured per-case, ${TARGETING_MISSIONS.length} targeting), `
+  + `${CASE_ACCOUNTS.length} per-run accounts, ${PRODUCTS.length} products, ${declared.length} aliases; every fixture was `
+  + 'pre-completion at seed time, every per-case target sits in a measured band, the targeting star recorded a '
+  + 'reading for both of its accounts with its control visible to both, the accounts are distinct and the reward '
+  + 'is legible.',
+);

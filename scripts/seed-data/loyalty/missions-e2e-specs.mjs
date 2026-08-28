@@ -81,6 +81,7 @@ import {
   WINDOWS, windowDates, PROCESSED_PERIODICITY, BLOCK, blockOf,
   buildGoalNode, buildConditionNode, buildRewardNode,
   READING_ORDER, readingValues, readingsConsistentWith,
+  TARGETING, TARGET_GROUP, specDifferences, targetedGroups, groupsInclude,
 } from './missions-specs.mjs';
 
 /** Everything disposable this seeder creates carries this prefix. */
@@ -164,7 +165,30 @@ export const RUNTIME_FIELDS_BY_KIND = {
     'measured_total_undiscounted', 'reading_values', 'separates_above', 'separates_below',
     'separation_margin', 'co_completing_missions', 'reward_expected_total',
   ],
-  caseUser: ['email', 'user_id', 'member_id', 'handle', 'balance_at_seed'],
+  // The JOURNEY mission (MSN-E2E-001, OrderCountGoal 2). Its target is AUTHORED — a count is not a
+  // money quantity and nothing about it is composed by the platform — but its ORDERS are measured,
+  // because the case asserts on a balance delta at completion and that delta is not the mission's own
+  // reward on this environment. Two orders complete it, so the co-grant set is recorded PER ORDER:
+  // order 1 is where a fresh account's one-shot missions all fire, order 2 is the completing order
+  // whose delta the case actually attributes.
+  journeyMission: [
+    'id', 'name', 'run_id', 'goal_currency',
+    'progress_status_at_seed', 'progress_percent_at_seed',
+    'order_shipping_max', 'available_shipping',
+    'measured_subtotal', 'measured_discount', 'measured_tax', 'measured_shipping', 'measured_total',
+    'reading_values',
+    'order1_co_missions', 'order1_expected_delta',
+    'co_completing_missions', 'reward_expected_total',
+  ],
+  // A TARGETING mission records what each of its two declared accounts could SEE. The reading is
+  // recorded and never asserted: whether `public` hides a mission, and whether a group condition
+  // filters the customer-facing query, are the findings the fixture exists to make observable — a
+  // fixture that encoded the expected answer would prove it by construction.
+  targetingMission: [
+    'id', 'name', 'run_id', 'goal_currency', 'goal_target',
+    'progress_status_at_seed', 'progress_percent_at_seed', 'observed_visibility',
+  ],
+  caseUser: ['email', 'user_id', 'member_id', 'handle', 'balance_at_seed', 'groups_at_seed'],
 };
 
 /* ── Products ────────────────────────────────────────────────────────────────
@@ -292,18 +316,72 @@ export const MISSIONS = [
   {
     aliasName: 'MSN_E2E_ORDERCOUNT',
     key: 'ORDERCOUNT',
+    caseId: 'MSN-E2E-001',
+    /**
+     * ITS OWN ACCOUNT, for the same reason the four OrderValue cases have theirs, and with a sharper
+     * edge because 001 is the JOURNEY case.
+     *
+     * `ProcessOrderAsync` advances EVERY mission applicable to the order's user, so a journey run on
+     * a shared account watches its own card move while three sibling cards move underneath it, and
+     * the grant it asserts on at completion is a sum over whatever else happened to settle. 001 is
+     * the one case that asserts the WHOLE chain — order -> accrue -> complete -> grant -> visible —
+     * so every link of it has to be attributable, and none of them is on a shared identity.
+     */
+    accountAlias: 'MSN_E2E_USER_001',
     status: 'Published',
     public: true,
     window: 'active',
     condition: { type: 'AnyUserGroupCondition' },
     goal: { type: 'OrderCountGoal', count: 2 },
-    reward: 300,
+    /**
+     * 501, NOT 300, and the change is a finding rather than a preference.
+     *
+     * Measured on vcst-qa 2026-08-28: the journey's SECOND order also completes the shared 083c
+     * fixture AGENT-TEST-MSN-ORDERCOUNT — likewise an OrderCountGoal of 2, likewise Published,
+     * untargeted and visible to every per-run account — whose reward was also 300. Two 300-PTS grants
+     * settling on one order are indistinguishable in a balance delta AND in a points-history amount,
+     * so "the mission paid out" was unfalsifiable by amount while every fixture in the set still
+     * resolved. The set's own divergent-reward rule could not see it: it scans THIS set, and the
+     * collision was with a mission another suite owns. The live guard that now catches the class reads
+     * the co-grant set the seeder measures — see validateSeededState's co-grant reward check.
+     */
+    reward: 501,
+    /**
+     * AUTHORED intent for EACH of the two orders the journey places; the money is measured, exactly as
+     * for the per-case OrderValue set. The count target is NOT derived — a count is not a quantity the
+     * platform composes — but the ORDER is measured anyway, because 001 asserts that points LANDED and
+     * a fresh account's first order grants far more than this mission's own reward.
+     *
+     * Three units is deliberate on both sides: small enough that twice the order total stays under
+     * every other OrderValue target the run mints (so order 2 completes THIS mission and, measurably,
+     * nothing else), and distinct from MSN-E2E-008's four so the two journeys are never confused in a
+     * log.
+     */
+    order: { units: 3, coupon: null },
+    /** How many orders the case places. Equal to the goal count — an order is one increment. */
+    journeyOrders: 2,
     cases: ['MSN-E2E-001'],
     purpose:
       'Order-count goal, target 2. Two and not one: at count=1 "counts orders" and "fires on any '
       + 'order" are the same observation, so the first order would prove nothing about counting. Two '
       + 'also gives MSN-E2E-001 an intermediate state to assert — 1 of 2, InProgress, not Completed — '
       + 'between the two orders it places.',
+    decides:
+      'Does the whole chain hold — does placing an order advance an OrderCountGoal by exactly one, does '
+      + 'the SECOND order complete it, and do the reward points then land and show? Target 2 is what '
+      + 'makes the first three links separable: a target of 1 collapses "advanced" and "completed" into '
+      + 'one observation, so a mission that fires on any order at all would look identical to one that '
+      + 'counts. The intermediate reading (1 of 2, InProgress) is the observation that tells them apart.',
+    limits:
+      'It says nothing about WHAT counts as an order — a cancelled order, a zero-total order and an '
+      + 'order in another store are all outside it. And THE COMPLETION DELTA IS NOT THE REWARD: every '
+      + 'per-run account can SEE every Published, untargeted mission in the store, so its orders '
+      + 'complete the store\'s one-shot fixtures (order 1) and any OrderValue mission its cumulative '
+      + 'value clears (order 2), whatever account those missions were sized for. Accounts isolate '
+      + 'PROGRESS, not grants. So the case identifies the grant by its unique AMOUNT and by the '
+      + 'run-scoped mission NAME in the points history, and uses reward_expected_total — measured, not '
+      + 'assumed — as the corroborating figure for the balance. A case that asserts '
+      + '`BAL_1 - BAL_0 === reward` is asserting something this environment has never done.',
   },
   {
     aliasName: 'MSN_E2E_PERSKU',
@@ -410,6 +488,19 @@ export const TARGET_RULES = {
   discountedVsUndiscounted: 'discountedVsUndiscounted',
   /** Below EVERY candidate reading — the mission's question is not about the measured value. */
   everyReading: 'everyReading',
+  /**
+   * ABOVE every order this fixture set can compose, by two orders of magnitude. Used by the targeting
+   * missions, whose question is VISIBILITY and not accrual.
+   *
+   * It is isolation, not laziness. A targeting mission with a reachable target would be Published,
+   * neutral-conditioned and cheap to clear — i.e. it would grant on the FIRST order of every other
+   * per-case account in the run, inflating MSN-E2E-008's balance delta and the journey's completion
+   * delta with a reward that has nothing to do with either. Placed out of reach it stays permanently
+   * visible (visibility does not depend on progress) and permanently non-granting, so it perturbs no
+   * sibling case at all. The number itself is DERIVED from the largest cart the set declares — see
+   * unreachableTarget() — never authored.
+   */
+  unreachable: 'unreachable',
 };
 
 /**
@@ -556,29 +647,311 @@ export const CASE_MISSIONS = [
 
 export const CASE_MISSION_BY_ALIAS = Object.fromEntries(CASE_MISSIONS.map((m) => [m.aliasName, m]));
 
-/** Every mission this seeder mints — the authored-target set plus the measured per-case set. */
-export const ALL_MISSIONS = [...MISSIONS, ...CASE_MISSIONS];
+/* ── Targeting: two questions, and why they need FOUR fixtures ───────────────
+ *
+ * The scenario asks two things that look like one:
+ *   (a) is a mission scoped to a customer group withheld from a user OUTSIDE that group?
+ *   (b) does `public = false` withhold an UNTARGETED mission from a customer at all?
+ *
+ * Both are answered by an ABSENCE from `loyaltyMissionProgress`, and an absence is the least
+ * decidable observation there is: "correctly hidden", "the query returned nothing", "the mission was
+ * never minted" and "this account can see no mission at all" are the same reading. So the fixture is
+ * a STAR around one positive control, each arm differing from the control on exactly ONE input:
+ *
+ *   fixture                condition   public   the arm isolates
+ *   MSN_E2E_TGT_CONTROL    Any         true     nothing — it is the INSTRUMENT
+ *   MSN_E2E_TGT_GROUP      VIP         true     the CONDITION     (vs control)
+ *   MSN_E2E_TGT_PRIVATE    Any         false    the `public` FLAG  (vs control)
+ *
+ * read through two accounts that differ from each other on exactly one input:
+ *
+ *   MSN_E2E_USER_TGTMEMBER    groups ['VIP']   inside the audience
+ *   MSN_E2E_USER_TGTOUTSIDER  groups []        outside it
+ *
+ * WHAT MAKES EACH ANSWER OBSERVABLE — the SECOND RULE's requirement, not a formality:
+ *   - The CONTROL must come back for BOTH accounts. That is the only visibility the seed ASSERTS, and
+ *     it is what converts every other absence from "we saw nothing" into a reading.
+ *   - (a) is decided by the GROUP arm READ TWICE. Present for the member and absent for the outsider
+ *     means the condition filters the customer read; present for both means it does not; absent for
+ *     both means the mission is unreachable for a reason that is not targeting. Three distinct
+ *     readings, none of them the default.
+ *   - (b) is decided by PRIVATE vs CONTROL on the SAME account in the SAME response. Both present
+ *     means `public` is inert on the read path; PRIVATE absent while the control is present means it
+ *     gates it.
+ *
+ * NOTHING HERE DECLARES WHICH ANSWER IS EXPECTED. At the deployed build (VirtoCommerce.Loyalty
+ * 3.1006.0-pr-14-da8a = da8abc6) `LoyaltyMissionSearchCriteria.Public` exists and no caller in the
+ * module sets it, so the PREDICTED reading is "PRIVATE is visible" — and a fixture that encoded that
+ * prediction would confirm it by construction. Measured on vcst-qa 2026-08-28, the shared
+ * AGENT-TEST-MSN-PUBLISHED-PRIVATE did come back for a groupless per-run account while
+ * AGENT-TEST-MSN-GROUP-VIP did not: evidence that both arms can move, not an assertion about either.
+ *
+ * WHY RUN-SCOPED COPIES AND NOT THE SHARED 083c TRIPLE. MSN_GROUP_VIP / MSN_GROUP_VIP_PRIVATE /
+ * MSN_PUBLISHED_PRIVATE ask the same questions and are correct, but they belong to another suite:
+ * their ids move when 083c re-seeds, their audience is two long-lived shared accounts differing on
+ * org, balance and order history as well as on group, and MSN_PUBLISHED_PRIVATE has no CONTROLLED
+ * twin — the fourth cell of that matrix is "ten fixtures already are it", not one of which is
+ * identical to it but for `public`. Minting is cheap; borrowing another suite's fixtures is not.
+ */
+
+/**
+ * Fields a star ARM is allowed to differ from the CONTROL on. Written as "compare everything EXCEPT
+ * these" rather than "compare this list" on purpose — same rule, and the same reason, as
+ * missions-specs.mjs GROUP_PAIR_EXEMPT_FIELDS: a field added to the spec shape later is then compared
+ * automatically instead of silently escaping the control.
+ *
+ * `public` and `condition` are deliberately ABSENT from the exemption. They are the two variables
+ * the star isolates, so each arm's diff against the control must come out as exactly one of them.
+ */
+export const STAR_EXEMPT_FIELDS = ['aliasName', 'key', 'purpose', 'decides', 'limits', 'targetingRole', 'visibility'];
+
+/** The reward all three targeting cells carry. Identical BY DESIGN — see TARGETING_MISSIONS. */
+export const TARGETING_REWARD = 509;
+
+/** The audience the group arm targets. Imported, never re-declared — missions-specs.mjs owns it. */
+export const TARGETING_GROUP = TARGET_GROUP;
+
+/** The two accounts the star is read through. */
+export const TARGETING_MEMBER_ALIAS = 'MSN_E2E_USER_TGTMEMBER';
+export const TARGETING_OUTSIDER_ALIAS = 'MSN_E2E_USER_TGTOUTSIDER';
+
+/** The case the star serves. */
+export const TARGETING_CASE_ID = 'MSN-E2E-009';
+
+/**
+ * The star. All three share `goal`, `reward`, `window` and `status`; each differs from the control on
+ * exactly one field, asserted with `specDifferences` rather than by listing what to compare — a field
+ * added later is then compared automatically instead of quietly escaping the control.
+ *
+ * The SHARED REWARD is the one place this set deliberately breaks its own divergent-reward rule, and
+ * the exemption is narrow: these three can never grant (their target is out of reach by construction),
+ * so no balance delta and no points-history row ever has to attribute one of them. Distinct rewards
+ * would instead BREAK the control — two cells differing on `public` AND on reward isolate neither.
+ */
+export const TARGETING_MISSIONS = [
+  {
+    aliasName: 'MSN_E2E_TGT_CONTROL',
+    key: 'TGT-CONTROL',
+    caseId: TARGETING_CASE_ID,
+    accountAliases: [TARGETING_MEMBER_ALIAS, TARGETING_OUTSIDER_ALIAS],
+    targetingRole: 'control',
+    /** The ONE cell whose visibility the seed asserts — it is the instrument, not a measurement. */
+    visibility: 'required',
+    status: 'Published',
+    public: true,
+    window: 'active',
+    condition: { type: 'AnyUserGroupCondition' },
+    goal: { type: 'OrderValueGoal', value: null, currency: 'store-default' },
+    targetRule: TARGET_RULES.unreachable,
+    reward: TARGETING_REWARD,
+    cases: [TARGETING_CASE_ID],
+    decides:
+      'Nothing about the product, and that is its job. It answers "did this account\'s '
+      + 'loyaltyMissionProgress query work at all?", which is the precondition every other reading in '
+      + 'the star depends on. A Published, untargeted, public mission that does NOT come back means the '
+      + 'instrument is broken, so the seed fails instead of recording two absences as a finding.',
+    limits:
+      'It cannot distinguish a working audience gate from a working query — by construction it has no '
+      + 'audience gate. It never completes and never grants, so it says nothing about accrual either.',
+  },
+  {
+    aliasName: 'MSN_E2E_TGT_GROUP',
+    key: 'TGT-GROUP',
+    caseId: TARGETING_CASE_ID,
+    accountAliases: [TARGETING_MEMBER_ALIAS, TARGETING_OUTSIDER_ALIAS],
+    targetingRole: 'groupTargeted',
+    /** RECORDED, never asserted: whether a group condition filters the read IS the finding. */
+    visibility: 'observed',
+    status: 'Published',
+    public: true,
+    window: 'active',
+    condition: { type: TARGETING.groupCondition.id, groups: [TARGET_GROUP] },
+    goal: { type: 'OrderValueGoal', value: null, currency: 'store-default' },
+    targetRule: TARGET_RULES.unreachable,
+    reward: TARGETING_REWARD,
+    cases: [TARGETING_CASE_ID],
+    decides:
+      'Is a group-scoped mission withheld from a user outside the group? Read TWICE — as the member and '
+      + 'as the outsider — against a control both accounts can see. Present/absent means the condition '
+      + 'filters the customer-facing read; present/present means it does not; absent/absent means the '
+      + 'mission is unreachable for a reason that is not targeting. The two accounts are minted seconds '
+      + 'apart into the same org and differ ONLY in member.Groups, which is the only input '
+      + 'UserGroupIsCondition reads, so a difference between the two readings has one available cause.',
+    limits:
+      'It tests ONE group by whole-string, ordinal case-insensitive, UNTRIMMED match — what the server '
+      + 'does. It says nothing about multi-group conditions, about partial matches ("VIP Gold" is not '
+      + '"VIP"), and nothing about whether a non-member would ACCRUE: it can never complete, so accrual '
+      + 'is out of its reach by design.',
+  },
+  {
+    aliasName: 'MSN_E2E_TGT_PRIVATE',
+    key: 'TGT-PRIVATE',
+    caseId: TARGETING_CASE_ID,
+    accountAliases: [TARGETING_MEMBER_ALIAS, TARGETING_OUTSIDER_ALIAS],
+    targetingRole: 'notPublic',
+    /** RECORDED, never asserted — this cell's visibility is the whole question. */
+    visibility: 'observed',
+    status: 'Published',
+    public: false,
+    window: 'active',
+    condition: { type: 'AnyUserGroupCondition' },
+    goal: { type: 'OrderValueGoal', value: null, currency: 'store-default' },
+    targetRule: TARGET_RULES.unreachable,
+    reward: TARGETING_REWARD,
+    cases: [TARGETING_CASE_ID],
+    decides:
+      'Does `public = false` withhold an UNTARGETED mission from a customer? Read against '
+      + 'MSN_E2E_TGT_CONTROL in the SAME response for the SAME account, the two differing on `public` '
+      + 'and nothing else. Both present means `public` is inert on the read path; this one absent while '
+      + 'the control is present means it gates it. Either answer is a reading — which is the property '
+      + 'the shared MSN_PUBLISHED_PRIVATE lacks alone: with no controlled twin, an absence there is '
+      + 'equally consistent with an unreachable mission.',
+    limits:
+      'It says nothing about ADMIN visibility (a non-public mission must stay findable in the admin '
+      + 'search, or the leak check passes for the wrong reason), nothing about `public` ON TOP OF a '
+      + 'condition (that cell is deliberately left to the shared MSN_GROUP_VIP_PRIVATE), and nothing '
+      + 'about accrual. Read the name as "not advertised", NEVER as "audience-restricted": its '
+      + 'AnyUserGroupCondition means every customer IS its intended audience, and getting that backwards '
+      + 'cost a retracted P1 on 2026-08-27.',
+  },
+];
+
+export const TARGETING_MISSION_BY_ALIAS = Object.fromEntries(TARGETING_MISSIONS.map((m) => [m.aliasName, m]));
+
+/** Is this a targeting-star cell? Pure. */
+export const isTargetingMission = (spec) => TARGETING_MISSION_BY_ALIAS[spec?.aliasName] != null;
+
+/** Every mission this seeder mints — authored-target, measured per-case, and the targeting star. */
+export const ALL_MISSIONS = [...MISSIONS, ...CASE_MISSIONS, ...TARGETING_MISSIONS];
 
 export const MISSION_BY_ALIAS = Object.fromEntries(ALL_MISSIONS.map((m) => [m.aliasName, m]));
 
 /** Does this spec carry a measured, seed-time-derived target? Pure. */
 export const isCaseMission = (spec) => CASE_MISSION_BY_ALIAS[spec?.aliasName] != null;
 
-/** The per-case accounts, declared from the missions so the two can never disagree. */
-export const CASE_ACCOUNTS = CASE_MISSIONS.map((m) => ({
-  aliasName: m.accountAlias,
-  kind: 'caseUser',
-  caseId: m.caseId,
-  missionAlias: m.aliasName,
-  purpose:
-    `Per-run, zero-balance account for ${m.caseId}. Its own account is what isolates ${m.aliasName}: `
-    + 'one order advances every applicable mission for its user, so a shared account cannot be fixed '
-    + 'by minting more missions. Created WITH org membership because the org supplies the shipping '
-    + 'ADDRESSES checkout needs — a brand-new contact has none and the cart never reaches a decisive '
-    + 'place-order state.',
-}));
+/**
+ * The account alias(es) a mission owns. `accountAlias` is the one-mission-one-account form the
+ * per-case OrderValue split uses; `accountAliases` is the targeting star's form, where three cells
+ * are read through the SAME pair of accounts because the pair IS the comparison. Pure.
+ */
+export const boundAccounts = (spec) => (
+  spec?.accountAlias ? [spec.accountAlias]
+    : Array.isArray(spec?.accountAliases) ? [...spec.accountAliases]
+      : []
+);
+
+/** Every mission with dedicated per-run account(s) — the isolation axis, not the sizing axis. */
+export const ACCOUNT_BOUND_MISSIONS = ALL_MISSIONS.filter((m) => boundAccounts(m).length);
+
+/** Missions read through the SHARED per-run reward account (they declare no account of their own). */
+export const SHARED_ACCOUNT_MISSIONS = ALL_MISSIONS.filter((m) => !boundAccounts(m).length);
+
+/**
+ * The per-run accounts, DERIVED from the missions that declare them so the two can never disagree.
+ *
+ * `groups` is authored and is the only field that differs across the targeting pair; everything else
+ * about those two accounts — org, creation instant, password, sweep namespace — is identical, which
+ * is what makes a difference between their two readings attributable to membership.
+ */
+const ACCOUNT_PURPOSE = (caseId, missionAliases) =>
+  `Per-run, zero-balance account for ${caseId}. Its own account is what isolates ${missionAliases.join(' / ')}: `
+  + 'one order advances every applicable mission for its user, so a shared account cannot be fixed by '
+  + 'minting more missions. Created WITH org membership because the org supplies the shipping ADDRESSES '
+  + 'checkout needs — a brand-new contact has none and the cart never reaches a decisive place-order state.';
+
+export const CASE_ACCOUNTS = (() => {
+  const byAlias = new Map();
+  for (const m of ACCOUNT_BOUND_MISSIONS) {
+    for (const alias of boundAccounts(m)) {
+      if (!byAlias.has(alias)) {
+        byAlias.set(alias, { aliasName: alias, kind: 'caseUser', caseId: m.caseId, missionAliases: [], groups: [] });
+      }
+      byAlias.get(alias).missionAliases.push(m.aliasName);
+    }
+  }
+  // The audience half of the targeting pair is the one account in the set that carries a group.
+  const member = byAlias.get(TARGETING_MEMBER_ALIAS);
+  if (member) {
+    member.groups = [TARGET_GROUP];
+    member.audienceRole = 'member';
+    member.pairedWith = TARGETING_OUTSIDER_ALIAS;
+  }
+  const outsider = byAlias.get(TARGETING_OUTSIDER_ALIAS);
+  if (outsider) {
+    outsider.audienceRole = 'outsider';
+    outsider.pairedWith = TARGETING_MEMBER_ALIAS;
+  }
+  for (const a of byAlias.values()) {
+    a.purpose = a.audienceRole
+      ? `Per-run account for ${a.caseId}, the ${a.audienceRole} half of the targeting pair`
+        + `${a.groups.length ? ` (member.Groups = [${a.groups.join(', ')}])` : ' (member.Groups is empty)'}. `
+        + 'It exists as one of a PAIR minted seconds apart into the same org and differing in this one '
+        + 'field, because UserGroupIsCondition reads member.Groups and nothing else — so a difference '
+        + 'between the two accounts\' readings has exactly one available cause. Two long-lived shared '
+        + 'accounts would differ on org, balance, order history and every other group they carry, and '
+        + '"the member saw it, the outsider did not" would name none of them.'
+      : ACCOUNT_PURPOSE(a.caseId, a.missionAliases);
+  }
+  return [...byAlias.values()];
+})();
 
 export const CASE_ACCOUNT_BY_ALIAS = Object.fromEntries(CASE_ACCOUNTS.map((a) => [a.aliasName, a]));
+
+/** The targeting pair, in reading order (member first). */
+export const TARGETING_ACCOUNTS = [TARGETING_MEMBER_ALIAS, TARGETING_OUTSIDER_ALIAS]
+  .map((alias) => CASE_ACCOUNT_BY_ALIAS[alias])
+  .filter(Boolean);
+
+/**
+ * The alias registry this fixture set declares, with the KIND that decides which of its fields are
+ * runtime. Exported so the drift guard reads one list instead of re-deriving it and drifting from it.
+ */
+export const declaredAliases = () => [
+  { aliasName: 'MSN_E2E_RUN', kind: 'run' },
+  ...MISSIONS.map((m) => ({ aliasName: m.aliasName, kind: boundAccounts(m).length ? 'journeyMission' : 'mission' })),
+  ...CASE_MISSIONS.map((m) => ({ aliasName: m.aliasName, kind: 'caseMission' })),
+  ...TARGETING_MISSIONS.map((m) => ({ aliasName: m.aliasName, kind: 'targetingMission' })),
+  ...PRODUCTS.map((p) => ({ aliasName: p.aliasName, kind: 'product' })),
+  { aliasName: REWARD_USER.aliasName, kind: 'rewardUser' },
+  ...CASE_ACCOUNTS.map((a) => ({ aliasName: a.aliasName, kind: 'caseUser' })),
+];
+
+/** How a mission's own visibility to its accounts is treated at seed time. Pure. */
+export const visibilityPolicy = (spec) => String(spec?.visibility || 'required');
+
+/**
+ * Serialise / parse the per-account visibility reading recorded in the overlay. One field rather than
+ * one per account, because the account set is a property of the spec and a flat field per account
+ * would have to be re-declared in the committed base every time the pair changes.
+ */
+export const formatVisibility = (byAccountAlias) => Object.entries(byAccountAlias || {})
+  .map(([alias, seen]) => `${alias}=${seen ? 'visible' : 'absent'}`).join('; ');
+
+export function parseVisibility(text) {
+  const out = {};
+  for (const part of String(text || '').split(';')) {
+    const [alias, seen] = part.split('=').map((x) => String(x || '').trim());
+    if (alias) out[alias] = seen === 'visible';
+  }
+  return out;
+}
+
+/**
+ * How large a target has to be to be UNREACHABLE by anything this set can order.
+ *
+ * DERIVED from the largest cart the specs declare (and, at seed time, from the largest cart actually
+ * measured), never authored: a transcribed ceiling goes stale the moment a case orders more, and it
+ * fails silently — the targeting mission would start completing and start granting on other cases'
+ * orders. 100x is the headroom.
+ */
+export const UNREACHABLE_MULTIPLE = 100;
+
+export function unreachableTarget(measuredOrderTotals = []) {
+  const declaredMax = Math.max(0, ...ALL_MISSIONS.map((m) => Number(m.order?.units) || 0))
+    * Number(UNIT_PRODUCT.listPrice);
+  const measuredMax = Math.max(0, ...(measuredOrderTotals || []).map(Number).filter(Number.isFinite));
+  return Number((Math.max(declaredMax, measuredMax) * UNREACHABLE_MULTIPLE).toFixed(2));
+}
 
 const round2 = (n) => Number(Number(n).toFixed(2));
 const num = (v) => (v == null ? 0 : Number(v?.amount ?? v) || 0);
@@ -756,7 +1129,12 @@ export function attributionProblems(derivedByAlias, orderTotalByAlias, margin = 
       if (other.aliasName === owner.aliasName) continue;
       if (other.goal?.type !== 'OrderValueGoal') continue;
       const otherTarget = Number(derivedByAlias?.[other.aliasName]?.target ?? other.goal?.value);
-      if (!Number.isFinite(otherTarget)) continue;
+      // A target that is not a positive number is NOT ESTABLISHED — an unseeded targeting cell whose
+      // ceiling is derived at seed time reads as `Number(null) === 0`, and treating that as a real
+      // target would report every sibling order as reaching it. The missing target is already
+      // reported, loudly, by the check that owns it; manufacturing a second, wrong diagnosis here
+      // would send a reader to the order quantities instead of to the unseeded fixture.
+      if (!(otherTarget > 0)) continue;
       if (ownTotal + margin > otherTarget) {
         problems.push(
           `${owner.aliasName}: its order total ${ownTotal} reaches ${other.aliasName}'s target ${otherTarget}, so that `
@@ -933,13 +1311,18 @@ export function validateSpecShape() {
     // Every E2E mission must be REACHABLE by the customer: a Draft or non-public mission never
     // reaches loyaltyMissionProgress, so a loop case would assert against a card that is not there.
     if (m.status !== 'Published') push(`${m.aliasName}: status "${m.status}" — an E2E loop fixture must be Published or the storefront never sees it`);
-    if (m.public !== true) push(`${m.aliasName}: public=${m.public} — a non-public mission is filtered out of the customer-facing query, so the loop is unobservable`);
     if (WINDOWS[m.window]?.expectOpen !== true) push(`${m.aliasName}: window "${m.window}" is not expected to be open — a closed mission cannot accrue`);
-    // Targeting must be NEUTRAL. The reward account is a freshly minted ephemeral user with no group
-    // membership at all, so any UserGroupIsCondition would make the mission invisible to exactly the
-    // account MSN-E2E-004 needs — and invisibly so: the case would report "no such mission".
-    if ((m.condition?.type || 'AnyUserGroupCondition') !== 'AnyUserGroupCondition') {
-      push(`${m.aliasName}: condition "${m.condition?.type}" — the per-run reward account belongs to no group, so a targeted mission would be invisible to it`);
+    // `public` and the CONDITION are inputs to the targeting star, so they are only constrained on the
+    // LOOP missions. On a loop mission both are load-bearing in the same direction: a non-public or
+    // group-targeted mission is filtered out of the customer-facing query for an account that belongs
+    // to no group — which every per-run account does — and the case reports a missing mission as a
+    // product failure. On a targeting cell they are the variable under observation, and the tighter
+    // per-role rules live in the targeting block below.
+    if (!isTargetingMission(m)) {
+      if (m.public !== true) push(`${m.aliasName}: public=${m.public} — a non-public mission may be filtered out of the customer-facing query, so the loop is unobservable. Only the targeting star may vary this, and only against a control.`);
+      if ((m.condition?.type || 'AnyUserGroupCondition') !== 'AnyUserGroupCondition') {
+        push(`${m.aliasName}: condition "${m.condition?.type}" — every per-run account this set mints belongs to no group, so a targeted mission would be invisible to exactly the account that drives it`);
+      }
     }
     // A zero reward makes "the reward landed" unfalsifiable.
     if (!(Number(m.reward) > 0)) push(`${m.aliasName}: reward=${m.reward} — a loop case asserts that points LAND, which a zero reward cannot show`);
@@ -1037,10 +1420,17 @@ export function validateSpecShape() {
   const accountAliases = new Set();
   const rewards = new Map();
   for (const m of ALL_MISSIONS) {
-    // DIVERGENT REWARDS. Four missions sharing a reward are indistinguishable in a balance delta or a
-    // points-history row, so "the grant came from THIS mission" stops being falsifiable. This is the
-    // same divergence requirement as td:validate:variation-stock's "the quantities must differ".
-    if (rewards.has(m.reward)) push(`${m.aliasName} and ${rewards.get(m.reward)} both reward ${m.reward} PTS — a grant from either is indistinguishable in a balance delta or a points-history row, so no case on them can attribute what it observed`);
+    // DIVERGENT REWARDS. Two missions sharing a reward are indistinguishable in a balance delta or a
+    // points-history row, so "the grant came from THIS mission" stops being falsifiable. Same
+    // divergence requirement as td:validate:variation-stock's "the quantities must differ".
+    //
+    // THE STAR IS EXEMPT FROM ITSELF, AND ONLY FROM ITSELF. Its three cells MUST share a reward or
+    // they stop being a controlled comparison, and they can never grant (their target is out of reach
+    // by construction), so there is no delta for a reward to have to attribute. A collision between a
+    // star cell and any mission that CAN grant is still a real defect and is still reported.
+    const prior = rewards.get(m.reward);
+    if (prior && isTargetingMission(m) && isTargetingMission(MISSION_BY_ALIAS[prior])) continue;
+    if (prior) push(`${m.aliasName} and ${prior} both reward ${m.reward} PTS — a grant from either is indistinguishable in a balance delta or a points-history row, so no case on them can attribute what it observed`);
     else rewards.set(m.reward, m.aliasName);
   }
   for (const m of CASE_MISSIONS) {
@@ -1090,8 +1480,111 @@ export function validateSpecShape() {
   }
 
   for (const a of CASE_ACCOUNTS) {
-    if (!a.aliasName.startsWith('MSN_E2E_USER_')) push(`${a.aliasName}: a per-case account alias should be MSN_E2E_USER_<case>`);
-    if (!CASE_MISSION_BY_ALIAS[a.missionAlias]) push(`${a.aliasName}: missionAlias ${a.missionAlias} is not a per-case mission`);
+    if (!a.aliasName.startsWith('MSN_E2E_USER_')) push(`${a.aliasName}: a per-run account alias should be MSN_E2E_USER_<case>`);
+    if (!a.missionAliases?.length) push(`${a.aliasName}: binds to no mission — an account nothing reads through is dead weight nobody will notice`);
+    for (const alias of a.missionAliases || []) {
+      const m = MISSION_BY_ALIAS[alias];
+      if (!m) { push(`${a.aliasName}: binds to ${alias}, which is not a declared mission`); continue; }
+      if (!boundAccounts(m).includes(a.aliasName)) push(`${a.aliasName} claims ${alias} but ${alias} does not declare it — the account list and the mission list disagree, so one of them is describing a fixture that is not being seeded`);
+    }
+    // A padded group never matches: the server compares with EqualsIgnoreCase and does NOT trim, so
+    // " VIP" is silently outside the audience and the pair can only ever agree.
+    for (const g of a.groups || []) {
+      if (typeof g !== 'string' || !g.trim()) push(`${a.aliasName}: declares an empty group — UserGroupIsCondition is fail-closed on an empty groups[], so this targets nobody rather than everybody`);
+      else if (g !== g.trim()) push(`${a.aliasName}: group "${g}" is padded — the server's match is EqualsIgnoreCase and is NOT trimmed, so this account is silently outside its own audience`);
+    }
+  }
+
+  /* ── The targeting star ───────────────────────────────────────────────────
+   *
+   * Every rule here defends a cell that can be destroyed by an edit which still seeds cleanly. Give
+   * the private cell a group and it merges into the group arm; make the control non-public and the
+   * whole star loses its instrument and reports two absences as a finding; let an arm drift on a
+   * second field and neither reading attributes anything.
+   */
+  if (TARGETING_MISSIONS.length) {
+    const byRole = {};
+    for (const m of TARGETING_MISSIONS) {
+      if (byRole[m.targetingRole]) push(`two targeting cells claim the role "${m.targetingRole}" (${m.aliasName}, ${byRole[m.targetingRole].aliasName}) — the star is a control plus one arm per question, and a duplicate role means one question is asked twice and another not at all`);
+      byRole[m.targetingRole] = m;
+    }
+    const control = byRole.control;
+    const group = byRole.groupTargeted;
+    const priv = byRole.notPublic;
+    if (!control) push('the targeting star has no "control" cell — without a Published, untargeted, public mission that BOTH accounts can see, every absence in the star is equally consistent with a broken query, and neither targeting question is decidable');
+    if (!group) push('the targeting star has no "groupTargeted" cell — the group non-match question has nothing to read');
+    if (!priv) push('the targeting star has no "notPublic" cell — the public=false question has nothing to read');
+
+    if (control) {
+      if (control.public !== true) push(`${control.aliasName} is the control and must be public=true — a control that may itself be hidden cannot certify that the query works`);
+      if ((control.condition?.type || 'AnyUserGroupCondition') !== 'AnyUserGroupCondition') push(`${control.aliasName} is the control and must carry AnyUserGroupCondition — a targeted control cannot certify anything for an account outside its audience`);
+      if (visibilityPolicy(control) !== 'required') push(`${control.aliasName} must declare visibility:'required' — asserting the control is the one visibility claim this star is allowed to make, and it is what turns every other absence into a reading`);
+    }
+    if (group) {
+      if (visibilityPolicy(group) !== 'observed') push(`${group.aliasName} must declare visibility:'observed' — whether a group condition filters the customer read IS the finding, and a fixture that asserts it proves it by construction`);
+      const groups = targetedGroups(group);
+      if (!groups?.length) push(`${group.aliasName} is the group arm but targets no group — UserGroupIsCondition is fail-closed on an empty groups[], so it would be invisible to EVERYONE and the arm would read as a leak-free pass for the wrong reason`);
+      for (const g of groups || []) {
+        if (g !== String(g).trim()) push(`${group.aliasName}: group "${g}" is padded — the server does not trim, so the mission would target nobody`);
+      }
+      if (control) {
+        const diff = specDifferences(group, control, STAR_EXEMPT_FIELDS);
+        if (JSON.stringify(diff) !== JSON.stringify(['condition'])) {
+          push(`${group.aliasName} differs from the control ${control.aliasName} on [${(diff || []).join(', ')}] — it must differ on "condition" and nothing else, or a difference between the two readings names none of them`);
+        }
+      }
+    }
+    if (priv) {
+      if (priv.public !== false) push(`${priv.aliasName} is the public=false arm and must be public:false — at public:true it duplicates the control and asks nothing`);
+      if (visibilityPolicy(priv) !== 'observed') push(`${priv.aliasName} must declare visibility:'observed' — whether \`public\` hides a mission IS the finding`);
+      if ((priv.condition?.type || 'AnyUserGroupCondition') !== 'AnyUserGroupCondition') push(`${priv.aliasName} must carry AnyUserGroupCondition — with a group condition it stops isolating \`public\` and duplicates the shared MSN_GROUP_VIP_PRIVATE. Read its name as "not advertised", never as "audience-restricted"; getting that backwards cost a retracted P1 on 2026-08-27.`);
+      if (control) {
+        const diff = specDifferences(priv, control, STAR_EXEMPT_FIELDS);
+        if (JSON.stringify(diff) !== JSON.stringify(['public'])) {
+          push(`${priv.aliasName} differs from the control ${control.aliasName} on [${(diff || []).join(', ')}] — it must differ on "public" and nothing else, or an absence next to a present control names the second variable just as well`);
+        }
+      }
+    }
+    for (const m of TARGETING_MISSIONS) {
+      if (m.targetRule !== TARGET_RULES.unreachable) push(`${m.aliasName}: targetRule "${m.targetRule}" — a targeting cell must be UNREACHABLE, or it grants on the first order of every other per-case account in the run and inflates the deltas MSN-E2E-001 and MSN-E2E-008 assert on`);
+      if (m.goal?.value != null) push(`${m.aliasName}: goal.value is authored as ${m.goal.value} — the unreachable target is DERIVED from the largest cart the set declares (unreachableTarget()), because a transcribed ceiling goes stale the moment a case orders more and fails SILENTLY, by the mission quietly becoming completable`);
+      const bound = boundAccounts(m);
+      for (const alias of [TARGETING_MEMBER_ALIAS, TARGETING_OUTSIDER_ALIAS]) {
+        if (!bound.includes(alias)) push(`${m.aliasName} is not read through ${alias} — every cell of the star must be read through BOTH accounts or the pair is not a comparison`);
+      }
+    }
+    // The pair itself: same case, same kind, differing in GROUPS and nothing else the spec declares.
+    const member = CASE_ACCOUNT_BY_ALIAS[TARGETING_MEMBER_ALIAS];
+    const outsider = CASE_ACCOUNT_BY_ALIAS[TARGETING_OUTSIDER_ALIAS];
+    if (!member || !outsider) push('the targeting star needs BOTH a member and an outsider account — "the VIP user sees the VIP mission" is equally true of a mission with no targeting at all, which is precisely the observation that produced the retracted 2026-08-27 bug');
+    else {
+      if (!groupsInclude(member.groups, TARGETING_GROUP)) push(`${member.aliasName} does not carry the targeted group ${TARGETING_GROUP} — the audience half of the pair is outside its own audience, so both halves would read the same whatever the server does`);
+      if (groupsInclude(outsider.groups, TARGETING_GROUP)) push(`${outsider.aliasName} carries the targeted group ${TARGETING_GROUP} — the control half is INSIDE the audience, so the pair can only ever agree and the group question is unfalsifiable`);
+      if (member.caseId !== outsider.caseId) push('the targeting pair spans two cases — the pair is one comparison and must belong to one case');
+      const diff = specDifferences(member, outsider, ['aliasName', 'purpose', 'audienceRole', 'pairedWith', 'missionAliases']);
+      if (JSON.stringify(diff) !== JSON.stringify(['groups'])) {
+        push(`the targeting accounts differ on [${(diff || []).join(', ')}] — they must differ on "groups" and nothing else, because member.Groups is the only input UserGroupIsCondition reads and any second difference makes a divergent reading unattributable`);
+      }
+    }
+    // The unreachable target must be out of reach of the WHOLE journey, not just of one order.
+    const ceiling = unreachableTarget();
+    const biggestJourney = Math.max(0, ...ALL_MISSIONS.map((m) => (
+      (Number(m.order?.units) || 0) * Number(UNIT_PRODUCT.listPrice) * (Number(m.journeyOrders) || 1)
+    )));
+    if (!(ceiling > biggestJourney * 2)) {
+      push(`the unreachable target ${ceiling} is not comfortably above the largest journey this set can place (${biggestJourney}) — a targeting cell that becomes completable starts granting on other cases' orders`);
+    }
+  }
+
+  /* ── The journey mission ──────────────────────────────────────────────── */
+  for (const m of ALL_MISSIONS.filter((x) => x.journeyOrders != null)) {
+    if (m.goal?.type !== 'OrderCountGoal') push(`${m.aliasName}: journeyOrders is declared on a ${m.goal?.type} — an order is one increment only for a count goal`);
+    else if (Number(m.journeyOrders) !== Number(m.goal.count)) {
+      push(`${m.aliasName}: journeyOrders=${m.journeyOrders} but the goal counts ${m.goal.count} — the case would place the wrong number of orders and either never complete the mission or complete it before it can observe the intermediate state`);
+    }
+    if (Number(m.journeyOrders) < 2) push(`${m.aliasName}: journeyOrders=${m.journeyOrders} — with one order there is no intermediate state to observe, so "progress advanced" and "the mission completed" are the same reading`);
+    if (!(Number(m.order?.units) > 0)) push(`${m.aliasName}: declares journeyOrders but no order.units — the seeder has no cart to measure, so the completion delta the case asserts on would be a guess`);
+    if (!boundAccounts(m).length) push(`${m.aliasName}: a journey mission MUST own its account — it asserts the whole chain, so every link has to be attributable, and one order advances every mission applicable to its user`);
   }
   if (!CASE_ACCOUNT_PREFIX.startsWith(SEED_PREFIX)) push(`CASE_ACCOUNT_PREFIX "${CASE_ACCOUNT_PREFIX}" does not start with ${SEED_PREFIX} — teardown would not sweep the per-case accounts`);
   // The per-case accounts must NOT fall inside the ephemeral-user seeder's own sweep namespace, or
@@ -1235,22 +1728,177 @@ export function validateSeededState(overlay, { now = new Date(), maxAgeHours = n
       }
     }
 
-    // [e] PER-CASE ACCOUNT, and it must be genuinely its own. A shared account is the whole defect.
+    // [e] The per-case account is checked in the account pass below, which covers every per-run
+    //     account rather than only the four measured cases. Only its PRESENCE is case-specific here.
     if (!acct) {
       problems.push(`${spec.accountAlias}: absent from the overlay — ${spec.caseId} has no dedicated account, so its order would advance every sibling mission on whatever account it falls back to (run \`npm run seed:missions-e2e\`)`);
+    }
+  }
+
+  /* ── [e] EVERY per-run account, and each must be genuinely its own ────────
+   *
+   * A shared account IS the defect this whole split exists to remove: one order advances every
+   * mission applicable to its user, so two aliases resolving to one login means the two cases consume
+   * each other's progress however cleanly their missions are separated. Run over CASE_ACCOUNTS rather
+   * than over the measured case missions, because the journey account and the targeting pair are just
+   * as consumable and were previously unchecked.
+   */
+  for (const a of CASE_ACCOUNTS) {
+    const acct = o[a.aliasName];
+    if (!acct) {
+      problems.push(`${a.aliasName}: absent from the overlay — ${a.caseId} has no dedicated account (run \`npm run seed:missions-e2e\`)`);
+      continue;
+    }
+    if (!acct.email) problems.push(`${a.aliasName}.email is empty — ${a.caseId} cannot sign in`);
+    if (!acct.user_id) problems.push(`${a.aliasName}.user_id is empty — progress is keyed on the security-account id, so nothing can verify this account's own row`);
+    if (acct.email && !String(acct.email).startsWith(CASE_ACCOUNT_PREFIX)) {
+      problems.push(`${a.aliasName}.email "${acct.email}" is outside the ${CASE_ACCOUNT_PREFIX} sweep namespace — teardown would leak it, and it may not be a per-run account at all`);
+    }
+    if (acct.email && seenAccounts.has(acct.email)) {
+      problems.push(
+        `${a.aliasName} and ${seenAccounts.get(acct.email)} resolve to the SAME account (${acct.email}). `
+        + 'One order advances every mission applicable to its user, so these two cases would consume each '
+        + 'other\'s progress — which is exactly the contention the per-case split exists to remove.',
+      );
+    } else if (acct.email) seenAccounts.set(acct.email, a.aliasName);
+
+    // OBSERVED group membership, recorded by the seeder off the member entity rather than echoed
+    // from the request. An empty string is "the seeder did not look", which is not the same as "no
+    // groups" and must not be readable as one.
+    if (acct.groups_at_seed == null) {
+      problems.push(`${a.aliasName}: no groups_at_seed was recorded — member.Groups is the only input a UserGroupIsCondition reads, so an unrecorded reading means nothing verified which side of the audience this account is on`);
     } else {
-      if (!acct.email) problems.push(`${spec.accountAlias}.email is empty — ${spec.caseId} cannot sign in`);
-      if (!acct.user_id) problems.push(`${spec.accountAlias}.user_id is empty — progress is keyed on the security-account id, so nothing can verify this case's own row`);
-      if (acct.email && !String(acct.email).startsWith(CASE_ACCOUNT_PREFIX)) {
-        problems.push(`${spec.accountAlias}.email "${acct.email}" is outside the ${CASE_ACCOUNT_PREFIX} sweep namespace — teardown would leak it, and it may not be a per-run account at all`);
+      const observed = String(acct.groups_at_seed).split(';').map((g) => g.trim()).filter(Boolean);
+      const wanted = a.groups || [];
+      for (const g of wanted) {
+        if (!groupsInclude(observed, g)) {
+          problems.push(`${a.aliasName} was seeded to carry group "${g}" but the platform reported [${observed.join(', ') || 'none'}] — the audience half of the targeting pair is outside its own audience, so both halves read the same whatever the server does`);
+        }
       }
-      if (acct.email && seenAccounts.has(acct.email)) {
+      if (!wanted.length && groupsInclude(observed, TARGETING_GROUP)) {
+        problems.push(`${a.aliasName} is the outsider half of the targeting pair but the platform reports it in [${observed.join(', ')}] — it is INSIDE the audience, so the pair can only ever agree and the group question is unfalsifiable`);
+      }
+    }
+  }
+
+  /* ── [g] THE TARGETING STAR, against what the seed actually observed ──────
+   *
+   * The star records readings and asserts almost nothing, which is correct — whether `public` hides a
+   * mission and whether a group condition filters the customer read are the findings. What the guard
+   * MUST enforce is that the readings are decidable at all:
+   *   - a reading exists for BOTH accounts on every cell (an unrecorded reading is not an absence);
+   *   - the CONTROL came back for both accounts (the instrument works, so every other absence is a
+   *     reading rather than a broken query);
+   *   - the cells' targets are still out of reach (a completable star cell grants on other cases'
+   *     orders and corrupts the two deltas that ARE asserted on).
+   */
+  for (const spec of TARGETING_MISSIONS) {
+    // An alias absent from the overlay is reported once, by the pass above. Re-reporting it here as
+    // three more problems would bury the one line that says what to do about it.
+    if (!o[spec.aliasName]) continue;
+    const a = o[spec.aliasName];
+    const bound = boundAccounts(spec);
+    const reading = parseVisibility(a.observed_visibility);
+    if (a.observed_visibility === '' || a.observed_visibility == null) {
+      problems.push(`${spec.aliasName}: no observed_visibility was recorded — the seed never read the storefront's mission list as either account, so ${spec.caseId} would be asserting against a targeting question nobody has established is observable`);
+    } else {
+      for (const alias of bound) {
+        if (!(alias in reading)) problems.push(`${spec.aliasName}: observed_visibility carries no reading for ${alias} — a cell read through only one account is not a comparison`);
+      }
+    }
+    const target = Number(a.goal_target);
+    if (!(target > 0)) {
+      problems.push(`${spec.aliasName}.goal_target = ${a.goal_target} — a targeting cell needs an UNREACHABLE target, and a zero one auto-completes and starts granting on every account that sees it`);
+    } else if (target < unreachableTarget()) {
+      problems.push(`${spec.aliasName}.goal_target = ${target}, below the ${unreachableTarget()} derived from the largest cart this set declares — the cell has become completable, so it grants on the first order of every per-case account and inflates the deltas MSN-E2E-001 and MSN-E2E-008 assert on`);
+    }
+  }
+  const controlSpec = TARGETING_MISSIONS.find((m) => m.targetingRole === 'control');
+  if (controlSpec) {
+    const reading = parseVisibility(o[controlSpec.aliasName]?.observed_visibility);
+    for (const alias of boundAccounts(controlSpec)) {
+      if (reading[alias] === false) {
         problems.push(
-          `${spec.accountAlias} and ${seenAccounts.get(acct.email)} resolve to the SAME account (${acct.email}). `
-          + 'One order advances every mission applicable to its user, so these two cases would consume each '
-          + 'other\'s progress — which is exactly the contention the per-case split exists to remove.',
+          `${controlSpec.aliasName} — the targeting star's positive CONTROL — was NOT visible to ${alias} at seed time. `
+          + 'It is a Published, untargeted, public mission, so its absence means that account sees no missions at '
+          + 'all; every other absence in the star is then equally consistent with a broken query and neither '
+          + 'targeting question is decidable. This is a broken instrument, not a finding.',
         );
-      } else if (acct.email) seenAccounts.set(acct.email, spec.accountAlias);
+      }
+    }
+  }
+
+  /* ── [h] THE JOURNEY, against what the seed measured ─────────────────────
+   *
+   * MSN-E2E-001 asserts the whole chain and ends on a balance delta, so the number it may assert on
+   * is the delta of the COMPLETING order — not the mission's own reward. On this environment a fresh
+   * account's FIRST order fires every one-shot mission the store carries, so `BAL_1 - BAL_0` is not
+   * the reward and never was; the two orders are therefore recorded separately.
+   */
+  for (const spec of ALL_MISSIONS.filter((m) => m.journeyOrders != null)) {
+    const a = o[spec.aliasName] || {};
+    const MEASURED = ['measured_subtotal', 'measured_discount', 'measured_tax', 'measured_shipping', 'measured_total'];
+    const missing = MEASURED.filter((f) => a[f] === '' || a[f] == null);
+    if (missing.length) {
+      problems.push(`${spec.aliasName}: the seed recorded no measured cart (${missing.join(', ')}) — ${spec.caseId} composes both of its orders from those numbers, and an unmeasured cart makes the completion delta a guess`);
+    } else {
+      const money = {
+        grossMerchandise: Number(a.measured_subtotal),
+        discountTotal: Number(a.measured_discount),
+        netMerchandise: Number(a.measured_subtotal) - Number(a.measured_discount),
+        shippingTotal: Number(a.measured_shipping),
+        taxTotal: Number(a.measured_tax),
+        orderTotal: Number(a.measured_total),
+        pointsLineValue: 0,
+        totalPlusPoints: Number(a.measured_total),
+      };
+      const bad = moneyIncoherence(money);
+      if (bad) problems.push(`${spec.aliasName}: ${bad}`);
+    }
+    for (const f of ['order1_co_missions', 'order1_expected_delta', 'co_completing_missions', 'reward_expected_total']) {
+      if (a[f] === '' || a[f] == null) {
+        problems.push(`${spec.aliasName}.${f} is empty — the co-grant set is MEASURED per order because a fresh account's first order fires every one-shot mission the store carries. Without it ${spec.caseId} would assert that a ${spec.reward}-PTS grant equals a balance delta that is not ${spec.reward}.`);
+      }
+    }
+  }
+
+  /* ── [i] THE GRANT MUST BE IDENTIFIABLE BY AMOUNT, against the MEASURED co-grant set ───
+   *
+   * Accounts isolate PROGRESS; they do not isolate GRANTS. Every per-run account can see every
+   * Published, untargeted mission in the store, so its order completes whatever it clears — including
+   * missions another suite owns. A case that asserts a mission paid out therefore needs the grant to
+   * be identifiable, and the two things that identify it are the run-scoped mission NAME in the points
+   * history and the AMOUNT. The name is unique by construction; the amount is not, and nothing in this
+   * repo could see a collision with a fixture outside this set.
+   *
+   * Measured on vcst-qa 2026-08-28: the journey's completing order also completed the shared 083c
+   * AGENT-TEST-MSN-ORDERCOUNT — an OrderCountGoal of 2 whose reward was ALSO 300. Two identical grants
+   * on one order, and every fixture still resolved, still rendered and still reported green.
+   *
+   * The set's own divergent-reward rule cannot catch this: it scans the eleven missions this module
+   * declares. This one reads the co-grant set the SEEDER measured live, which is the only place the
+   * rest of the store appears.
+   */
+  for (const spec of ALL_MISSIONS) {
+    const a = o[spec.aliasName];
+    if (!a) continue;
+    for (const field of ['order1_co_missions', 'co_completing_missions']) {
+      const raw = a[field];
+      if (!raw || raw === 'none') continue;
+      for (const entry of String(raw).split(';')) {
+        const idx = entry.lastIndexOf('=');
+        if (idx < 0) continue;
+        const name = entry.slice(0, idx).trim();
+        const reward = Number(entry.slice(idx + 1));
+        if (!Number.isFinite(reward) || reward !== Number(spec.reward)) continue;
+        problems.push(
+          `${spec.aliasName} rewards ${spec.reward} PTS and so does ${name}, which the seed MEASURED as also `
+          + `granting on the same order (${field}). Two identical grants settling together are `
+          + `indistinguishable in a balance delta and in a points-history amount, so ${spec.caseId} cannot show `
+          + 'that THIS mission paid out. Give this mission a reward no co-granting mission carries — the '
+          + 'collision is usually with a fixture another suite owns, which the in-set divergence rule cannot see.',
+        );
+      }
     }
   }
 
@@ -1259,7 +1907,13 @@ export function validateSeededState(overlay, { now = new Date(), maxAgeHours = n
   if (Object.keys(orderTotalByAlias).length === CASE_MISSIONS.length) {
     for (const spec of ALL_MISSIONS) {
       if (derivedByAlias[spec.aliasName]) continue;
-      if (spec.goal?.type === 'OrderValueGoal') derivedByAlias[spec.aliasName] = { target: Number(spec.goal.value) };
+      if (spec.goal?.type !== 'OrderValueGoal') continue;
+      // A star cell's target is DERIVED at seed time (unreachable), so its authored `value` is null and
+      // `Number(null)` is 0 — which would make every sibling order look like it completes it and
+      // manufacture an attribution failure out of the one design property that guarantees there is
+      // none. Read the recorded target instead, and skip a cell the overlay has not recorded yet.
+      const recorded = isTargetingMission(spec) ? Number(o[spec.aliasName]?.goal_target) : Number(spec.goal.value);
+      if (Number.isFinite(recorded)) derivedByAlias[spec.aliasName] = { target: recorded };
     }
     for (const m of attributionProblems(derivedByAlias, orderTotalByAlias)) problems.push(m);
   }

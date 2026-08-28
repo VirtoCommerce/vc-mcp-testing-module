@@ -180,7 +180,7 @@ recommendations(storeId: String!, userId: String, cultureName: String, currencyC
 searchHistory(storeId: String!, maxCount: Int!)
 loyaltyPointsHistory(after: String, first: Int, keyword: String, sort: String, userId: String, operationType: String)
 loyaltyBalance(userId: String, orderId: String)
-loyaltyMissionProgress(after: String, first: Int, keyword: String, sort: String, storeId: String!, statuses: [String], completedStartDate: DateTime, completedEndDate: DateTime, cultureName: String, isStarted: Boolean, userId: String)
+loyaltyMissionProgress(after: String, first: Int, keyword: String, sort: String, storeId: String!, statuses: [String], completedStartDate: DateTime, completedEndDate: DateTime, cultureName: String, currencyCode: String, isStarted: Boolean, userId: String)
 customerSalesReps(after: String, first: Int, keyword: String, sort: String, storeId: String)
 salesRepCustomerFilterRules(storeId: String, cultureName: String)
 salesRepCustomer(organizationId: String!)

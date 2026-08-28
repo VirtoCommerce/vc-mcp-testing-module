@@ -53,6 +53,8 @@ import {
   SEED_PREFIX, PRODUCTS, UNIT_PRODUCT, RUNTIME_FIELDS_BY_KIND,
   MISSIONS, ALL_MISSIONS, MISSION_BY_ALIAS, REWARD_USER, DEFAULT_SWEEP_MAX_AGE_HOURS,
   CASE_MISSIONS, CASE_ACCOUNTS, CASE_ACCOUNT_PREFIX, isCaseMission,
+  TARGETING_MISSIONS, isTargetingMission, unreachableTarget, visibilityPolicy, formatVisibility,
+  boundAccounts, ACCOUNT_BOUND_MISSIONS, declaredAliases,
   measuredMoney, deriveCaseTarget, attributionProblems, shippingHeadroom, taxRateOf,
   newRunId, missionName, isE2EMissionName, runIdFromName, runIdAgeHours,
   buildE2EMissionBody, buildGoalItems, needsGoalItems, missionSlots,
@@ -586,11 +588,17 @@ async function ensureCaseAccounts({ maxAgeHours = MAX_AGE_HOURS, all = false } =
   for (const a of CASE_ACCOUNTS) {
     // withOrg is required: the org supplies the shipping ADDRESSES checkout needs, and a brand-new
     // contact has none — the cart never reaches a decisive place-order state without them.
+    //
+    // `groups` is what puts the audience half of the targeting pair INSIDE its own audience. Both
+    // halves are minted here, seconds apart, into the same org, with the same password, from the same
+    // sweep namespace — differing in this one field, which is the only input UserGroupIsCondition
+    // reads. That is what makes "the member saw it and the outsider did not" attributable to
+    // membership rather than to any of the dozen ways two long-lived shared accounts differ.
     const user = await createEphemeralAccount(api, {
-      prefix: CASE_ACCOUNT_PREFIX, storeId: STORE_ID, withOrg: true,
+      prefix: CASE_ACCOUNT_PREFIX, storeId: STORE_ID, withOrg: true, groups: a.groups || [],
       lastName: a.caseId.replace(/[^A-Za-z0-9]/g, ''), dryRun: DRY_RUN, log, verbose,
     });
-    accounts[a.aliasName] = { ...user, caseId: a.caseId, missionAlias: a.missionAlias };
+    accounts[a.aliasName] = { ...user, caseId: a.caseId, missionAliases: [...a.missionAliases] };
   }
   return accounts;
 }
@@ -604,8 +612,13 @@ async function ensureCaseAccounts({ maxAgeHours = MAX_AGE_HOURS, all = false } =
  */
 async function measureCaseCarts(accounts, currency, unitProductId) {
   const out = {};
-  for (const spec of CASE_MISSIONS) {
-    const acct = accounts[spec.accountAlias];
+  // Every mission that owns an account AND declares an order gets its cart measured. For the four
+  // sized cases that measurement PLACES the target; for the journey (MSN-E2E-001) the target is an
+  // authored count, but the cart still has to be measured because the case ends on a balance delta
+  // and that delta is not the mission's own reward on this environment.
+  const measured = ACCOUNT_BOUND_MISSIONS.filter((m) => m.order?.units > 0);
+  for (const spec of measured) {
+    const acct = accounts[boundAccounts(spec)[0]];
     const token = await storefrontToken(BACK_URL, STORE_ID, acct.email, password());
     if (!token) {
       throw new Error(
@@ -623,7 +636,9 @@ async function measureCaseCarts(accounts, currency, unitProductId) {
       const plain = await measureCart(token, acct.userId, currency, unitProductId, { units: spec.order.units, coupon: null });
       undiscounted = measuredMoney(plain);
     }
-    const derived = deriveCaseTarget(spec, { base: money, undiscounted });
+    // A count goal's target is not a money quantity, so only a spec that declares a targetRule has one
+    // to derive. The journey's cart is measured all the same — see the comment above the loop.
+    const derived = spec.targetRule ? deriveCaseTarget(spec, { base: money, undiscounted }) : null;
     out[spec.aliasName] = {
       money, undiscounted, derived, token,
       shipping: (base.availableShippingMethods || []).map((s) => ({ code: s.code, option: s.optionName, price: Number(s.price?.amount ?? 0) })),
@@ -632,7 +647,8 @@ async function measureCaseCarts(accounts, currency, unitProductId) {
     log(
       `  ✓ ${spec.caseId} cart ${spec.order.units}u${spec.order.coupon ? ` + ${spec.order.coupon}` : ''}: `
       + `sub ${money.grossMerchandise} disc ${money.discountTotal} tax ${money.taxTotal} ship ${money.shippingTotal} `
-      + `TOTAL ${money.orderTotal} → target ${derived.target} (between ${derived.below} and ${derived.above}, margin ${derived.margin})`,
+      + `TOTAL ${money.orderTotal}`
+      + (derived ? ` → target ${derived.target} (between ${derived.below} and ${derived.above}, margin ${derived.margin})` : ` (authored count target ${spec.goal.count}, ×${spec.journeyOrders} orders)`),
     );
   }
 
@@ -646,6 +662,12 @@ async function measureCaseCarts(accounts, currency, unitProductId) {
   for (const spec of MISSIONS) {
     if (spec.goal?.type === 'OrderValueGoal') derivedByAlias[spec.aliasName] = { target: Number(spec.goal.value) };
   }
+  // The star's cells are OrderValueGoal too, and their authored `value` is null because their ceiling
+  // is derived. Left unsupplied, `Number(null)` would read as a target of 0 and every sibling order
+  // would look like it completes them — manufacturing an attribution failure out of the one design
+  // property that guarantees there is none.
+  const ceiling = unreachableTarget(Object.values(orderTotalByAlias));
+  for (const spec of TARGETING_MISSIONS) derivedByAlias[spec.aliasName] = { target: ceiling };
   const attribution = attributionProblems(derivedByAlias, orderTotalByAlias);
   if (attribution.length) {
     throw new Error(
@@ -659,7 +681,8 @@ async function measureCaseCarts(accounts, currency, unitProductId) {
   const siblingTargets = CASE_MISSIONS
     .filter((s) => s.caseId !== 'MSN-E2E-008')
     .map((s) => out[s.aliasName].derived.target)
-    .concat(MISSIONS.filter((s) => s.goal?.type === 'OrderValueGoal').map((s) => Number(s.goal.value)));
+    .concat(MISSIONS.filter((s) => s.goal?.type === 'OrderValueGoal').map((s) => Number(s.goal.value)))
+    .concat(TARGETING_MISSIONS.map(() => ceiling));
   for (const spec of CASE_MISSIONS) {
     const o = out[spec.aliasName];
     const nearest = spec.caseId === 'MSN-E2E-008'
@@ -669,6 +692,45 @@ async function measureCaseCarts(accounts, currency, unitProductId) {
   }
   log(`  Store tax rate (derived from the probe carts): ${(taxRateOf(out[CASE_MISSIONS[0].aliasName].money) * 100).toFixed(1)}%`);
   return out;
+}
+
+/**
+ * The co-grant set for the JOURNEY, computed once per order rather than once.
+ *
+ * MSN-E2E-001 places two orders and asserts that the mission paid out when the SECOND one completed
+ * it. That delta is only attributable if the one-shot missions the store carries have already fired —
+ * and on a fresh account they all fire on order 1. So the two orders are modelled separately, with
+ * the cumulative order VALUE and the cumulative order COUNT both advanced between them, and the
+ * missions order 1 consumed are excluded from order 2 (a Completed mission stops granting entirely,
+ * which was proven on this environment by the MSN_ZEROTARGET control pair on 2026-08-28).
+ *
+ * Nothing here is assumed: the visible set, each card's type and target, and each reward all come off
+ * the live store.
+ */
+async function journeyCoGrants(userId, orderTotal, ownMissionId, rewardById, orders) {
+  const visible = await customerVisibleMissions(userId);
+  const perOrder = [];
+  const consumed = new Set();
+  for (let n = 1; n <= orders; n += 1) {
+    const cumulativeValue = orderTotal * n;
+    const co = [];
+    for (const [missionId, card] of visible) {
+      if (missionId === ownMissionId) continue;
+      if (consumed.has(missionId)) continue;
+      if (String(card.status) === 'Completed') continue;     // already consumed before this run's orders
+      const reward = rewardById.get(missionId);
+      if (reward == null) continue;
+      const target = Number(card.targetValue);
+      const type = String(card.missionType || '');
+      let completes = false;
+      if (/OrderCount/i.test(type)) completes = target <= n;
+      else if (/OrderValue/i.test(type)) completes = target <= cumulativeValue;
+      // PerSku goals need their own target products, which none of these carts contain.
+      if (completes) { co.push({ name: card.name, reward }); consumed.add(missionId); }
+    }
+    perOrder.push(co);
+  }
+  return perOrder;
 }
 
 /**
@@ -767,9 +829,17 @@ async function seed() {
     // A per-case mission's target is the MEASURED one. The spec deliberately carries `value: null` so
     // that a target can never be published without a measurement behind it.
     const derivedTarget = measurements[spec.aliasName]?.derived?.target;
+    // A star cell's ceiling is DERIVED from the largest cart this run measured, not authored — see
+    // TARGET_RULES.unreachable. Every cell gets the identical number: three cells differing on their
+    // target would stop being a controlled set.
+    const starCeiling = unreachableTarget(
+      Object.values(measurements).map((m) => m?.money?.orderTotal).filter((v) => Number.isFinite(v)),
+    );
     const effective = isCaseMission(spec)
       ? { ...spec, goal: { ...spec.goal, value: DRY_RUN ? 1 : derivedTarget } }
-      : spec;
+      : isTargetingMission(spec)
+        ? { ...spec, goal: { ...spec.goal, value: starCeiling } }
+        : spec;
     if (isCaseMission(spec) && !DRY_RUN && !(Number(derivedTarget) > 0)) {
       throw new Error(`${spec.aliasName}: no measured target — refusing to mint a per-case mission against a number nobody computed`);
     }
@@ -815,6 +885,10 @@ async function seed() {
   // account for all of them would re-introduce exactly the assumption this change removes.
   const observed = {};
   const coGrants = {};
+  /** Per-mission, per-account visibility as the CUSTOMER query reported it. Recorded, never asserted. */
+  const visibility = {};
+  /** The journey's co-grant set, one entry per order it places. */
+  const journeyGrants = {};
   if (!DRY_RUN) {
     // Reward amounts by mission id, for the co-grant computation below. Read from the admin API
     // rather than assumed, because the store carries missions this repo did not create.
@@ -827,23 +901,42 @@ async function seed() {
       if (amount != null) rewardById.set(m.id, Number(amount));
     }
 
+    // The visible set is read ONCE per account and reused across the missions bound to it. That is not
+    // only cheaper: the star's two arms and its control must be judged from the SAME response, or
+    // "present" and "absent" could belong to two different moments.
+    const visibleByAccount = new Map();
+    const seenFor = async (userId) => {
+      if (!visibleByAccount.has(userId)) visibleByAccount.set(userId, await customerVisibleMissions(userId));
+      return visibleByAccount.get(userId);
+    };
+
     for (const spec of ALL_MISSIONS) {
-      // Which identity is this mission's? A per-case mission has its own; the rest keep the per-run
-      // reward account, which is still the freshest identity available to them.
-      const acct = isCaseMission(spec)
-        ? { email: caseAccounts[spec.accountAlias].email, userId: caseAccounts[spec.accountAlias].userId }
-        : { email: reward.email, userId: reward.userId };
+      // Which identities is this mission read through? A mission that owns account(s) is read through
+      // EVERY one of them — for the targeting star that is the whole comparison. The rest keep the
+      // per-run reward account, which is still the freshest identity available to them.
+      const bound = boundAccounts(spec);
+      const accts = bound.length
+        ? bound.map((alias) => ({ alias, email: caseAccounts[alias].email, userId: caseAccounts[alias].userId }))
+        : [{ alias: REWARD_USER.aliasName, email: reward.email, userId: reward.userId }];
       const id = minted[spec.aliasName].id;
-      const admin = await progressByMission([id], acct.userId);
-      const seen = await customerVisibleMissions(acct.userId);
       const bad = [];
       const invisible = [];
-      const card = seen.get(id);
-      // REACHABILITY first. A mission the customer-facing query omits blocks every case that binds to
-      // it, and does so while every admin-side check stays green — so it is a hard failure of the
-      // seed, not a warning.
-      if (!card) { invisible.push(`${spec.aliasName} (${missionName(runId, spec.key)}) for ${acct.email}`); }
-      else {
+      const sightings = {};
+
+      for (const acct of accts) {
+        const admin = await progressByMission([id], acct.userId);
+        const seen = await seenFor(acct.userId);
+        const card = seen.get(id);
+        sightings[acct.alias] = Boolean(card);
+        // REACHABILITY. A mission the customer-facing query omits blocks every case bound to it while
+        // every admin-side check stays green — so for a LOOP mission it is a hard failure of the seed.
+        // For a targeting ARM it is the MEASUREMENT, and asserting it would prove the answer by
+        // construction; only the star's own CONTROL is asserted, because the control is the instrument
+        // that turns an arm's absence into a reading rather than into "we saw nothing".
+        if (!card) {
+          if (visibilityPolicy(spec) === 'required') invisible.push(`${spec.aliasName} (${missionName(runId, spec.key)}) for ${acct.email}`);
+          continue;
+        }
         // Prefer the STOREFRONT's own reading. The admin table has no row at all for a mission nobody
         // has ordered against, while the customer query reports that same state as `InProgress 0%
         // isStarted=false` — recording the latter means the overlay says what the suite will see.
@@ -855,6 +948,12 @@ async function seed() {
         if (admin.get(id)) bad.push(`${spec.aliasName} already has a progress row in the admin table — the mission is not new`);
         if (card.isStarted === true) bad.push(`${spec.aliasName} reports isStarted=true on a freshly minted mission`);
       }
+      visibility[spec.aliasName] = sightings;
+      // An arm invisible to EVERY account leaves no seed-time state to record, and an unrecorded state
+      // is reported by the guard as "the seeder never verified this fixture" — a different and much
+      // louder claim than "the customer cannot see it". Record what the customer query reported.
+      if (observed[spec.aliasName] == null) observed[spec.aliasName] = { status: 'NotStarted', percent: 0 };
+
       if (invisible.length) {
         throw new Error(
           `minted but INVISIBLE to the customer-facing query: ${invisible.join(', ')}.\n  `
@@ -875,11 +974,13 @@ async function seed() {
       // The account's balance is READ, never assumed to be zero. It should be zero on an account
       // created seconds ago, and that is exactly why a non-zero reading is worth surfacing rather
       // than papering over — the same discipline as recording the OBSERVED progress state above.
-      if (isCaseMission(spec)) {
+      for (const acct of accts) {
+        if (!bound.includes(acct.alias)) continue;
+        if (caseAccounts[acct.alias].balance != null) continue;   // read once; the star shares its pair
         const bal = await readBalance(acct.userId);
-        caseAccounts[spec.accountAlias].balance = bal;
+        caseAccounts[acct.alias].balance = bal;
         if (bal !== 0) {
-          log(`  ⚠ ${spec.accountAlias} (${acct.email}) reports ${bal} PTS on a freshly minted account — recorded as observed, not corrected`);
+          log(`  ⚠ ${acct.alias} (${acct.email}) reports ${bal} PTS on a freshly minted account — recorded as observed, not corrected`);
         }
       }
 
@@ -888,16 +989,41 @@ async function seed() {
       // more than this mission's own reward and `BAL_1 - BAL_0 = reward` is simply false.
       if (isCaseMission(spec) && spec.caseId === 'MSN-E2E-008') {
         const total = measurements[spec.aliasName].money.orderTotal;
-        const co = await coCompletingMissions(acct.userId, total, id, rewardById);
+        const co = await coCompletingMissions(accts[0].userId, total, id, rewardById);
         coGrants[spec.aliasName] = co;
         const sum = co.reduce((n, c) => n + Number(c.reward), 0) + Number(spec.reward);
         log(`  ℹ ${spec.caseId}: ${co.length} other mission(s) also grant on its order (${co.map((c) => `${c.name} +${c.reward}`).join(', ') || 'none'}) → expected total delta ${sum} PTS, of which ${spec.reward} is this mission's`);
       }
+
+      // THE JOURNEY, PER ORDER. Its own reward lands on the COMPLETING order, so the two orders carry
+      // different co-grant sets and only the second is the delta MSN-E2E-001 may assert on.
+      if (spec.journeyOrders != null) {
+        const total = measurements[spec.aliasName].money.orderTotal;
+        const perOrder = await journeyCoGrants(accts[0].userId, total, id, rewardById, Number(spec.journeyOrders));
+        journeyGrants[spec.aliasName] = perOrder;
+        const first = perOrder[0] || [];
+        const last = perOrder[perOrder.length - 1] || [];
+        const firstSum = first.reduce((n, c) => n + Number(c.reward), 0);
+        const lastSum = last.reduce((n, c) => n + Number(c.reward), 0) + Number(spec.reward);
+        log(
+          `  ℹ ${spec.caseId}: order 1 grants ${firstSum} PTS from ${first.length} other mission(s) `
+          + `(${first.map((c) => `${c.name} +${c.reward}`).join(', ') || 'none'}) and does NOT complete this one; `
+          + `order ${spec.journeyOrders} completes it → delta ${lastSum} PTS, of which ${spec.reward} is this mission's`,
+        );
+      }
     }
     const perCase = CASE_MISSIONS.map((s) => `${s.caseId} ${observed[s.aliasName].status} ${observed[s.aliasName].percent}%`).join(', ');
-    log(`  ✓ all ${ALL_MISSIONS.length} missions visible and pre-completion — per-case: ${perCase}`);
+    log(`  ✓ ${ALL_MISSIONS.length} missions pre-completion — per-case: ${perCase}`);
+    // The star's reading, printed rather than judged. This is the one place in the seed where an
+    // absence is data instead of an error, so it is worth seeing on every run.
+    for (const spec of TARGETING_MISSIONS) {
+      log(`  ◦ ${spec.aliasName.padEnd(21)} ${Object.entries(visibility[spec.aliasName] || {}).map(([a, v]) => `${a.replace('MSN_E2E_USER_', '')}=${v ? 'visible' : 'ABSENT'}`).join('  ')}`);
+    }
   } else {
-    for (const spec of ALL_MISSIONS) observed[spec.aliasName] = { status: 'NotStarted', percent: 0 };
+    for (const spec of ALL_MISSIONS) {
+      observed[spec.aliasName] = { status: 'NotStarted', percent: 0 };
+      visibility[spec.aliasName] = Object.fromEntries(boundAccounts(spec).map((a) => [a, true]));
+    }
   }
 
   // --- 7. write back ---------------------------------------------------------
@@ -916,6 +1042,9 @@ async function seed() {
       balance_at_seed: balance == null ? '' : String(balance),
     },
   };
+  const grantList = (co) => (co ? (co.map((c) => `${c.name}=${c.reward}`).join('; ') || 'none') : '');
+  const grantSum = (co, own = 0) => (co ? String(co.reduce((n, c) => n + Number(c.reward), 0) + Number(own)) : '');
+
   for (const spec of MISSIONS) {
     updates[spec.aliasName] = {
       id: minted[spec.aliasName].id,
@@ -924,6 +1053,46 @@ async function seed() {
       goal_currency: minted[spec.aliasName].goalCurrency || '',
       progress_status_at_seed: observed[spec.aliasName].status,
       progress_percent_at_seed: String(observed[spec.aliasName].percent),
+    };
+    // THE JOURNEY carries its measured cart and its PER-ORDER co-grant sets on top. Two orders, two
+    // different deltas: order 1 fires every one-shot mission a fresh account has not consumed, order 2
+    // completes this mission and is the only delta MSN-E2E-001 may attribute to it.
+    if (spec.journeyOrders != null) {
+      const m = measurements[spec.aliasName];
+      const perOrder = journeyGrants[spec.aliasName] || null;
+      const first = perOrder ? perOrder[0] : null;
+      const last = perOrder ? perOrder[perOrder.length - 1] : null;
+      Object.assign(updates[spec.aliasName], {
+        order_shipping_max: m ? (m.headroom == null ? 'unbounded' : String(m.headroom)) : '',
+        available_shipping: m ? m.shipping.map((x) => `${x.code}/${x.option}=${x.price}`).join('; ') : '',
+        measured_subtotal: m ? String(m.money.grossMerchandise) : '',
+        measured_discount: m ? String(m.money.discountTotal) : '',
+        measured_tax: m ? String(m.money.taxTotal) : '',
+        measured_shipping: m ? String(m.money.shippingTotal) : '',
+        measured_total: m ? String(m.money.orderTotal) : '',
+        reading_values: m ? Object.entries(m.readings).map(([k, v]) => `${k}=${v}`).join('; ') : '',
+        order1_co_missions: grantList(first),
+        order1_expected_delta: grantSum(first, 0),
+        co_completing_missions: grantList(last),
+        reward_expected_total: grantSum(last, spec.reward),
+      });
+    }
+  }
+
+  // THE TARGETING STAR. `observed_visibility` is the only field here that is a MEASUREMENT rather than
+  // an identity, and it is the whole point: it records, per account, whether the customer-facing query
+  // returned this cell. The seed asserts only the control's reading; the two arms' readings are what
+  // MSN-E2E-009 interprets.
+  for (const spec of TARGETING_MISSIONS) {
+    updates[spec.aliasName] = {
+      id: minted[spec.aliasName].id,
+      name: minted[spec.aliasName].name,
+      run_id: runId,
+      goal_currency: minted[spec.aliasName].goalCurrency || '',
+      goal_target: String(minted[spec.aliasName].target ?? ''),
+      progress_status_at_seed: observed[spec.aliasName].status,
+      progress_percent_at_seed: String(observed[spec.aliasName].percent),
+      observed_visibility: formatVisibility(visibility[spec.aliasName]),
     };
   }
 
@@ -961,9 +1130,18 @@ async function seed() {
       co_completing_missions: co ? (co.map((c) => `${c.name}=${c.reward}`).join('; ') || 'none') : '',
       reward_expected_total: co ? String(co.reduce((n, c) => n + Number(c.reward), 0) + Number(spec.reward)) : '',
     };
-    updates[spec.accountAlias] = {
+  }
+
+  // Every per-run account, not only the four sized cases: the journey account and the targeting pair
+  // are just as consumable. `groups_at_seed` is READ OFF THE MEMBER rather than echoed from the seed
+  // request — member.Groups is the only input UserGroupIsCondition reads, so an echoed value would
+  // assert the very membership the targeting pair exists to make falsifiable.
+  for (const a of CASE_ACCOUNTS) {
+    const acct = caseAccounts[a.aliasName];
+    updates[a.aliasName] = {
       email: acct.email, user_id: acct.userId, member_id: acct.memberId, handle: acct.handle,
       balance_at_seed: acct.balance == null ? '' : String(acct.balance),
+      groups_at_seed: (acct.observedGroups || []).join('; '),
     };
   }
 
@@ -1090,23 +1268,28 @@ async function teardown() {
   if (DRY_RUN) { log('  [DRY] would blank the MSN_E2E_* overlay entries'); return; }
   // The catalog/category pin survives a mission-only teardown: it is the thing that stops the next
   // seed minting a duplicate category, so it is cleared only when the products go with it.
-  const blanks = { MSN_E2E_RUN: { run_id: '', seeded_at: '', store_id: '' } };
-  if (!KEEP_PRODUCTS) Object.assign(blanks.MSN_E2E_RUN, { catalog_id: '', category_id: '' });
-  for (const spec of MISSIONS) {
-    blanks[spec.aliasName] = { id: '', name: '', run_id: '', goal_currency: '', progress_status_at_seed: '', progress_percent_at_seed: '' };
+  //
+  // EVERY runtime field of EVERY declared alias, derived from the declaration rather than from a
+  // hand-kept per-kind list. The list form had already gone stale once: it blanked `mission`,
+  // `caseMission` and `caseUser` and named no kind for the targeting star, so the star's ids and its
+  // recorded visibility would have survived a teardown — and the next `td:validate:missions-e2e` would
+  // have read one run's reading against another run's missions and called it clean. A second list of
+  // what to blank is how a new field comes to outlive the fixture it describes.
+  const blanks = {};
+  for (const { aliasName, kind } of declaredAliases()) {
+    const fields = RUNTIME_FIELDS_BY_KIND[kind];
+    if (!fields) throw new Error(`teardown cannot blank ${aliasName}: kind "${kind}" declares no runtime fields`);
+    blanks[aliasName] = Object.fromEntries(fields.map((f) => [f, '']));
   }
-  // Every runtime field the spec module declares, blanked from the declaration itself rather than
-  // re-listed here — a hand-kept second list is how a new field comes to survive a teardown and leave
-  // the next run resolving one stale measurement among fresh ones.
-  for (const spec of CASE_MISSIONS) {
-    blanks[spec.aliasName] = Object.fromEntries(RUNTIME_FIELDS_BY_KIND.caseMission.map((f) => [f, '']));
-  }
-  for (const a of CASE_ACCOUNTS) {
-    blanks[a.aliasName] = Object.fromEntries(RUNTIME_FIELDS_BY_KIND.caseUser.map((f) => [f, '']));
-  }
-  blanks[REWARD_USER.aliasName] = { email: '', user_id: '', member_id: '', balance_at_seed: '' };
-  if (!KEEP_PRODUCTS) {
-    for (const p of PRODUCTS) blanks[p.aliasName] = { productId: '', catalogId: '', currency: '', slug: '', url: '' };
+  // Two deliberate exceptions, both about what a mission-only teardown must NOT destroy.
+  //
+  // The catalog/category PIN survives `--keep-products`: it is the only thing that stops the next seed
+  // minting a duplicate category (ensureCategoryPath resolves through an index that does not carry
+  // categories on this env), and the products it points at are still there.
+  if (KEEP_PRODUCTS) {
+    delete blanks.MSN_E2E_RUN.catalog_id;
+    delete blanks.MSN_E2E_RUN.category_id;
+    for (const prod of PRODUCTS) delete blanks[prod.aliasName];
   }
   writeEnvAliasOverride(blanks);
   log(`  ✓ aliases.${process.env.TEST_ENV || 'vcst'}.json: MSN_E2E_* entries blanked`);

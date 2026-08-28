@@ -23,6 +23,10 @@ import {
   ALL_MISSIONS, TARGET_RULES, MIN_TARGET_SEPARATION, COMPLETE_ALL_FRACTION, isCaseMission,
   measuredMoney, moneyIncoherence, deriveCaseTarget, attributionProblems,
   shippingHeadroom, taxRateOf, minReading, readingsFor,
+  TARGETING_MISSIONS, TARGETING_MISSION_BY_ALIAS, TARGETING_GROUP, TARGETING_CASE_ID,
+  TARGETING_MEMBER_ALIAS, TARGETING_OUTSIDER_ALIAS, isTargetingMission,
+  boundAccounts, ACCOUNT_BOUND_MISSIONS, declaredAliases,
+  unreachableTarget, visibilityPolicy, formatVisibility, parseVisibility,
 } from '../seed-data/loyalty/missions-e2e-specs.mjs';
 
 /* ── Run identity ───────────────────────────────────────────────────────────── */
@@ -65,7 +69,7 @@ test('every fixture carries the teardown prefix', () => {
   for (const p of PRODUCTS) assert.ok(p.sku.startsWith(SEED_PREFIX), `${p.aliasName} sku`);
 });
 
-test('every mission is reachable by the customer — Published, public, open window, untargeted', () => {
+test('every LOOP mission is reachable by the customer — Published, public, open window, untargeted', () => {
   for (const m of MISSIONS) {
     assert.equal(m.status, 'Published', m.aliasName);
     assert.equal(m.public, true, m.aliasName);
@@ -83,7 +87,7 @@ test('a group-targeted mission is rejected — the per-run reward account belong
   spec.condition = { type: 'UserGroupIsCondition', groups: ['VIP'] };
   try {
     const problems = validateSpecShape();
-    assert.ok(problems.some((p) => /invisible to it/.test(p)), problems.join('\n'));
+    assert.ok(problems.some((p) => /invisible to exactly the account that drives it/.test(p)), problems.join('\n'));
   } finally { spec.condition = original; }
 });
 
@@ -302,10 +306,38 @@ const cleanOverlay = () => {
       reward_expected_total: spec.caseId === 'MSN-E2E-008' ? String(spec.reward) : '',
     };
   }
+  // The JOURNEY (MSN-E2E-001): an authored count target, a MEASURED cart, and a co-grant set recorded
+  // per order because the two orders produce different deltas.
+  const journey = ALL_MISSIONS.find((m) => m.journeyOrders != null);
+  if (journey) {
+    const money = cart(15, 0, 3, 18);
+    Object.assign(o[journey.aliasName], {
+      order_shipping_max: 'unbounded',
+      available_shipping: 'BuyOnlinePickupInStore/Pickup=0',
+      measured_subtotal: String(money.grossMerchandise),
+      measured_discount: String(money.discountTotal),
+      measured_tax: String(money.taxTotal),
+      measured_shipping: String(money.shippingTotal),
+      measured_total: String(money.orderTotal),
+      reading_values: '',
+      order1_co_missions: 'AGENT-TEST-MSN-ZEROTARGET=200',
+      order1_expected_delta: '200',
+      co_completing_missions: 'AGENT-TEST-MSN-LOCALIZED=250',
+      reward_expected_total: String(250 + Number(journey.reward)),
+    });
+  }
+  // The targeting star: an unreachable target and a reading for each of its two accounts.
+  for (const m of TARGETING_MISSIONS) {
+    Object.assign(o[m.aliasName], {
+      goal_target: String(unreachableTarget()),
+      observed_visibility: formatVisibility(Object.fromEntries(boundAccounts(m).map((x) => [x, true]))),
+    });
+  }
   for (const a of CASE_ACCOUNTS) {
     o[a.aliasName] = {
-      email: `${CASE_ACCOUNT_PREFIX}20260828115400-${a.caseId.slice(-3)}@test-agent.com`,
-      user_id: `u-${a.caseId}`, member_id: `m-${a.caseId}`, handle: 'h', balance_at_seed: '0',
+      email: `${CASE_ACCOUNT_PREFIX}20260828115400-${a.aliasName.slice(-6)}@test-agent.com`,
+      user_id: `u-${a.aliasName}`, member_id: `m-${a.aliasName}`, handle: 'h', balance_at_seed: '0',
+      groups_at_seed: (a.groups || []).join('; '),
     };
   }
   return o;
@@ -476,14 +508,61 @@ const readingValuesOf = (money) => ({
   totalPlusPoints: money.totalPlusPoints,
 });
 
-test('the split is four missions and four DISTINCT accounts, one per contended case', () => {
+test('the measured split is four missions on four DISTINCT accounts, one per contended case', () => {
   assert.equal(CASE_MISSIONS.length, 4);
-  assert.equal(CASE_ACCOUNTS.length, 4);
   assert.deepEqual(CASE_MISSIONS.map((m) => m.caseId).sort(), ['MSN-E2E-003', 'MSN-E2E-005', 'MSN-E2E-006', 'MSN-E2E-008']);
   // The account is the axis that isolates: one order advances EVERY mission applicable to its user,
   // so two cases on one login contend however many missions they own.
   assert.equal(new Set(CASE_MISSIONS.map((m) => m.accountAlias)).size, 4);
   for (const m of CASE_MISSIONS) assert.ok(CASE_ACCOUNT_BY_ALIAS[m.accountAlias], m.aliasName);
+});
+
+test('EVERY account-bound mission has its own account, and no two share one', () => {
+  // The set is no longer just the four measured cases: the journey (MSN-E2E-001) asserts the whole
+  // chain and the targeting star reads through a pair, so both had to leave the shared reward account.
+  const owners = new Map();
+  for (const m of ACCOUNT_BOUND_MISSIONS) {
+    for (const alias of boundAccounts(m)) {
+      assert.ok(CASE_ACCOUNT_BY_ALIAS[alias], `${m.aliasName} -> ${alias}`);
+      if (!owners.has(alias)) owners.set(alias, []);
+      owners.get(alias).push(m.aliasName);
+    }
+  }
+  // Only the targeting pair may carry more than one mission, because for it the pair IS the comparison.
+  for (const [alias, missions] of owners) {
+    if (missions.length > 1) {
+      assert.ok([TARGETING_MEMBER_ALIAS, TARGETING_OUTSIDER_ALIAS].includes(alias), `${alias} carries ${missions.join(', ')}`);
+    }
+  }
+  assert.equal(CASE_ACCOUNTS.length, owners.size);
+});
+
+test('the journey owns an account and places enough orders to show an intermediate state', () => {
+  const journey = ALL_MISSIONS.find((m) => m.journeyOrders != null);
+  assert.ok(journey, 'no journey mission declared');
+  assert.equal(journey.goal.type, 'OrderCountGoal');
+  assert.equal(Number(journey.journeyOrders), Number(journey.goal.count));
+  assert.ok(Number(journey.journeyOrders) >= 2, 'one order collapses "advanced" and "completed"');
+  assert.ok(boundAccounts(journey).length === 1, 'the journey must not share an account');
+  assert.ok(Number(journey.order.units) > 0, 'its cart must be measurable');
+});
+
+test('a journey on the shared reward account is rejected — its chain stops being attributable', () => {
+  const journey = ALL_MISSIONS.find((m) => m.journeyOrders != null);
+  const original = journey.accountAlias;
+  delete journey.accountAlias;
+  try {
+    assert.ok(validateSpecShape().some((p) => /a journey mission MUST own its account/.test(p)));
+  } finally { journey.accountAlias = original; }
+});
+
+test('a journey whose order count no longer matches its goal is rejected', () => {
+  const journey = ALL_MISSIONS.find((m) => m.journeyOrders != null);
+  const original = journey.journeyOrders;
+  journey.journeyOrders = 3;
+  try {
+    assert.ok(validateSpecShape().some((p) => /journeyOrders=3 but the goal counts 2/.test(p)));
+  } finally { journey.journeyOrders = original; }
 });
 
 test('MSN_E2E_ORDERVALUE is now MSN-E2E-004 only — the case that was never contended', () => {
@@ -499,12 +578,28 @@ test('the per-case accounts do NOT share a sweep namespace with the ephemeral-us
   assert.equal(CASE_ACCOUNT_PREFIX.startsWith('AGENT-TEST-loyzero-'), false);
 });
 
-test('every mission reward is distinct — a shared reward makes a grant unattributable', () => {
+test('every GRANTING mission reward is distinct — a shared reward makes a grant unattributable', () => {
   const seen = new Set();
   for (const m of ALL_MISSIONS) {
+    // The targeting star deliberately shares one reward: its three cells must be identical but for the
+    // single input each isolates, and they can never grant, so no delta has to attribute them.
+    if (isTargetingMission(m)) continue;
     assert.equal(seen.has(m.reward), false, `${m.aliasName} reuses reward ${m.reward}`);
     seen.add(m.reward);
   }
+  // ...and the star's shared reward must still not collide with a mission that CAN grant.
+  const starReward = TARGETING_MISSIONS[0].reward;
+  assert.equal(seen.has(starReward), false, 'a star cell shares a reward with a mission that can grant');
+  assert.equal(new Set(TARGETING_MISSIONS.map((m) => m.reward)).size, 1, 'the star cells must share one reward');
+});
+
+test('a star cell colliding with a GRANTING mission is still rejected', () => {
+  const cell = TARGETING_MISSIONS[0];
+  const original = cell.reward;
+  cell.reward = MISSION_BY_ALIAS.MSN_E2E_PERSKU.reward;
+  try {
+    assert.ok(validateSpecShape().some((p) => /indistinguishable in a balance delta/.test(p)), 'the exemption must be from the star ITSELF, never from the rest of the set');
+  } finally { cell.reward = original; }
 });
 
 test('a colliding reward is rejected — the divergence clause of the SECOND RULE', () => {
@@ -766,4 +861,273 @@ test('the observed spent amount identifies the reading on 005 cart — the three
   assert.deepEqual(readingsFor(48, m), ['orderTotal', 'totalPlusPoints']);
   // Nothing the platform could report matches every reading — the fixture is not vacuous.
   assert.equal(readingsFor(999, m).length, 0);
+});
+
+/* ── The targeting star ──────────────────────────────────────────────────────
+ *
+ * Written against the ways the star can go VACUOUS, which is the only way it can go wrong quietly:
+ * every one of these perturbations still seeds, still resolves, still renders a card, and leaves a
+ * scenario that reports the same thing whatever the server does.
+ */
+
+test('the star is a control plus one arm per question, each arm differing on exactly one input', () => {
+  assert.equal(TARGETING_MISSIONS.length, 3);
+  assert.deepEqual(TARGETING_MISSIONS.map((m) => m.targetingRole).sort(), ['control', 'groupTargeted', 'notPublic']);
+  const control = TARGETING_MISSION_BY_ALIAS.MSN_E2E_TGT_CONTROL;
+  const group = TARGETING_MISSION_BY_ALIAS.MSN_E2E_TGT_GROUP;
+  const priv = TARGETING_MISSION_BY_ALIAS.MSN_E2E_TGT_PRIVATE;
+  // The control is the instrument: untargeted, public, and the ONE cell whose visibility is asserted.
+  assert.equal(control.public, true);
+  assert.equal(control.condition.type, 'AnyUserGroupCondition');
+  assert.equal(visibilityPolicy(control), 'required');
+  // The arms are measurements, never assertions — a fixture that asserted its answer would prove it.
+  assert.equal(visibilityPolicy(group), 'observed');
+  assert.equal(visibilityPolicy(priv), 'observed');
+  assert.equal(group.condition.type, 'UserGroupIsCondition');
+  assert.deepEqual(group.condition.groups, [TARGETING_GROUP]);
+  assert.equal(priv.public, false);
+  assert.equal(priv.condition.type, 'AnyUserGroupCondition');
+  // Every cell is read through BOTH accounts — a cell read through one is not a comparison.
+  for (const m of TARGETING_MISSIONS) {
+    assert.deepEqual(boundAccounts(m).sort(), [TARGETING_MEMBER_ALIAS, TARGETING_OUTSIDER_ALIAS].sort(), m.aliasName);
+  }
+});
+
+test('an arm that drifts onto a SECOND variable is rejected', () => {
+  // The whole value of the star is that a differing reading names one input. Two differences and it
+  // names neither — which is precisely how the 2026-08-27 targeting bug came to be filed and retracted.
+  const priv = TARGETING_MISSION_BY_ALIAS.MSN_E2E_TGT_PRIVATE;
+  const original = priv.window;
+  priv.window = 'openEnded';
+  try {
+    assert.ok(validateSpecShape().some((p) => /must differ on "public" and nothing else/.test(p)), 'a second differing field must be rejected');
+  } finally { priv.window = original; }
+});
+
+test('the control losing its neutrality or its public flag is rejected — the instrument must not be gated', () => {
+  const control = TARGETING_MISSION_BY_ALIAS.MSN_E2E_TGT_CONTROL;
+  const originalPublic = control.public;
+  control.public = false;
+  try {
+    const problems = validateSpecShape();
+    assert.ok(problems.some((p) => /the control and must be public=true/.test(p)), problems.join('\n'));
+  } finally { control.public = originalPublic; }
+
+  const originalCondition = control.condition;
+  control.condition = { type: 'UserGroupIsCondition', groups: [TARGETING_GROUP] };
+  try {
+    const problems = validateSpecShape();
+    assert.ok(problems.some((p) => /must carry AnyUserGroupCondition/.test(p)), problems.join('\n'));
+  } finally { control.condition = originalCondition; }
+});
+
+test('a star arm that ASSERTS its own visibility is rejected — it would prove the answer by construction', () => {
+  const group = TARGETING_MISSION_BY_ALIAS.MSN_E2E_TGT_GROUP;
+  const original = group.visibility;
+  group.visibility = 'required';
+  try {
+    assert.ok(validateSpecShape().some((p) => /IS the finding/.test(p)));
+  } finally { group.visibility = original; }
+});
+
+test('a REACHABLE star target is rejected — it would grant on every other case\'s first order', () => {
+  const cell = TARGETING_MISSION_BY_ALIAS.MSN_E2E_TGT_PRIVATE;
+  const original = cell.targetRule;
+  cell.targetRule = TARGET_RULES.everyReading;
+  try {
+    assert.ok(validateSpecShape().some((p) => /must be UNREACHABLE/.test(p)));
+  } finally { cell.targetRule = original; }
+});
+
+test('the unreachable ceiling is DERIVED from the largest cart the set can order, never authored', () => {
+  const declaredMax = Math.max(...ALL_MISSIONS.map((m) => Number(m.order?.units) || 0)) * UNIT_PRODUCT.listPrice;
+  assert.equal(unreachableTarget(), declaredMax * 100);
+  // A cart measured larger than anything declared raises the ceiling with it, instead of leaving a
+  // stale constant behind that the fixture would silently grow past.
+  assert.ok(unreachableTarget([999]) > unreachableTarget());
+  // And it stays clear of the largest whole JOURNEY, not merely of one order.
+  const biggestJourney = Math.max(...ALL_MISSIONS.map((m) => (Number(m.order?.units) || 0) * UNIT_PRODUCT.listPrice * (Number(m.journeyOrders) || 1)));
+  assert.ok(unreachableTarget() > biggestJourney * 2);
+});
+
+test('the targeting PAIR differs in group membership and in nothing else', () => {
+  const member = CASE_ACCOUNT_BY_ALIAS[TARGETING_MEMBER_ALIAS];
+  const outsider = CASE_ACCOUNT_BY_ALIAS[TARGETING_OUTSIDER_ALIAS];
+  assert.deepEqual(member.groups, [TARGETING_GROUP]);
+  assert.deepEqual(outsider.groups, []);
+  assert.equal(member.caseId, outsider.caseId);
+  assert.equal(member.caseId, TARGETING_CASE_ID);
+  // Same missions, so the two readings come out of the same three cells.
+  assert.deepEqual(member.missionAliases.sort(), outsider.missionAliases.sort());
+});
+
+test('an outsider who has joined the audience is rejected — the pair could only ever agree', () => {
+  const outsider = CASE_ACCOUNT_BY_ALIAS[TARGETING_OUTSIDER_ALIAS];
+  const original = outsider.groups;
+  outsider.groups = [TARGETING_GROUP];
+  try {
+    assert.ok(validateSpecShape().some((p) => /INSIDE the audience/.test(p)));
+  } finally { outsider.groups = original; }
+});
+
+test('a member outside its own audience is rejected — the same failure from the other side', () => {
+  const member = CASE_ACCOUNT_BY_ALIAS[TARGETING_MEMBER_ALIAS];
+  const original = member.groups;
+  member.groups = [];
+  try {
+    assert.ok(validateSpecShape().some((p) => /outside its own audience/.test(p)));
+  } finally { member.groups = original; }
+});
+
+test('a PADDED group is rejected — the server does not trim, so it would target nobody', () => {
+  const member = CASE_ACCOUNT_BY_ALIAS[TARGETING_MEMBER_ALIAS];
+  const original = member.groups;
+  member.groups = [` ${TARGETING_GROUP}`];
+  try {
+    assert.ok(validateSpecShape().some((p) => /is padded/.test(p)));
+  } finally { member.groups = original; }
+});
+
+/* ── The star's OVERLAY reading ─────────────────────────────────────────────── */
+
+test('a star cell with no recorded reading fails — an unrecorded absence is not an absence', () => {
+  const o = cleanOverlay();
+  o.MSN_E2E_TGT_GROUP.observed_visibility = '';
+  const problems = validateSeededState(o, {});
+  assert.ok(problems.some((m) => /no observed_visibility was recorded/.test(m)), problems.join('\n'));
+});
+
+test('a cell read through only ONE account fails — one reading is not a comparison', () => {
+  const o = cleanOverlay();
+  o.MSN_E2E_TGT_GROUP.observed_visibility = formatVisibility({ [TARGETING_MEMBER_ALIAS]: true });
+  const problems = validateSeededState(o, {});
+  assert.ok(problems.some((m) => /carries no reading for MSN_E2E_USER_TGTOUTSIDER/.test(m)), problems.join('\n'));
+});
+
+test('THE INSTRUMENT CHECK — a control invisible to an account fails, and is not read as a finding', () => {
+  const o = cleanOverlay();
+  o.MSN_E2E_TGT_CONTROL.observed_visibility = formatVisibility({
+    [TARGETING_MEMBER_ALIAS]: true, [TARGETING_OUTSIDER_ALIAS]: false,
+  });
+  const problems = validateSeededState(o, {});
+  assert.ok(problems.some((m) => /broken instrument, not a finding/.test(m)), problems.join('\n'));
+});
+
+test('an ARM invisible to the outsider is CLEAN — that reading is the whole point', () => {
+  // The one thing the guard must NOT do is treat the finding as a defect. A group-targeted mission the
+  // outsider cannot see is the answer scenario 5 exists to obtain, and it was the live reading on
+  // vcst-qa 2026-08-28.
+  const o = cleanOverlay();
+  o.MSN_E2E_TGT_GROUP.observed_visibility = formatVisibility({
+    [TARGETING_MEMBER_ALIAS]: true, [TARGETING_OUTSIDER_ALIAS]: false,
+  });
+  assert.deepEqual(validateSeededState(o, { now: new Date('2026-08-28T12:00:00Z') }), []);
+});
+
+test('the OPPOSITE arm reading is equally clean — either answer must be observable', () => {
+  const o = cleanOverlay();
+  o.MSN_E2E_TGT_PRIVATE.observed_visibility = formatVisibility({
+    [TARGETING_MEMBER_ALIAS]: false, [TARGETING_OUTSIDER_ALIAS]: false,
+  });
+  assert.deepEqual(validateSeededState(o, { now: new Date('2026-08-28T12:00:00Z') }), []);
+});
+
+test('a star cell whose target has dropped into reach fails', () => {
+  const o = cleanOverlay();
+  o.MSN_E2E_TGT_PRIVATE.goal_target = '30';
+  const problems = validateSeededState(o, {});
+  assert.ok(problems.some((m) => /has become completable/.test(m)), problems.join('\n'));
+});
+
+test('a visibility reading round-trips through its recorded form', () => {
+  const reading = { [TARGETING_MEMBER_ALIAS]: true, [TARGETING_OUTSIDER_ALIAS]: false };
+  assert.deepEqual(parseVisibility(formatVisibility(reading)), reading);
+  assert.deepEqual(parseVisibility(''), {});
+});
+
+/* ── The journey's OVERLAY reading ──────────────────────────────────────────── */
+
+test('a journey with no measured cart fails — its completion delta would be a guess', () => {
+  const o = cleanOverlay();
+  const journey = ALL_MISSIONS.find((m) => m.journeyOrders != null);
+  o[journey.aliasName].measured_total = '';
+  const problems = validateSeededState(o, {});
+  assert.ok(problems.some((m) => /recorded no measured cart/.test(m)), problems.join('\n'));
+});
+
+test('a journey with no per-order co-grant set fails — the delta is not the reward on this env', () => {
+  const o = cleanOverlay();
+  const journey = ALL_MISSIONS.find((m) => m.journeyOrders != null);
+  o[journey.aliasName].order1_co_missions = '';
+  o[journey.aliasName].co_completing_missions = '';
+  const problems = validateSeededState(o, {});
+  assert.ok(problems.some((m) => /order1_co_missions is empty/.test(m)), problems.join('\n'));
+  assert.ok(problems.some((m) => /co_completing_missions is empty/.test(m)));
+});
+
+test('THE COLLISION THAT WAS MEASURED — a co-granting mission with the SAME reward fails', () => {
+  // vcst-qa 2026-08-28: the journey's completing order also completed the shared 083c
+  // AGENT-TEST-MSN-ORDERCOUNT, an OrderCountGoal of 2 that ALSO rewarded 300. Two identical grants on
+  // one order are indistinguishable in a balance delta and in a points-history amount. The in-set
+  // divergence rule cannot see it, because the colliding mission belongs to another suite.
+  const o = cleanOverlay();
+  const journey = ALL_MISSIONS.find((m) => m.journeyOrders != null);
+  o[journey.aliasName].co_completing_missions = `AGENT-TEST-MSN-ORDERCOUNT=${journey.reward}`;
+  const problems = validateSeededState(o, {});
+  assert.ok(problems.some((m) => /Two identical grants settling together/.test(m)), problems.join('\n'));
+});
+
+test('a co-granting mission with a DIFFERENT reward is clean — the grant stays identifiable', () => {
+  const o = cleanOverlay();
+  const journey = ALL_MISSIONS.find((m) => m.journeyOrders != null);
+  o[journey.aliasName].co_completing_missions = `AGENT-TEST-MSN-ORDERCOUNT=${Number(journey.reward) + 1}`;
+  o[journey.aliasName].reward_expected_total = String(Number(journey.reward) * 2 + 1);
+  assert.deepEqual(validateSeededState(o, { now: new Date('2026-08-28T12:00:00Z') }), []);
+});
+
+/* ── Accounts ───────────────────────────────────────────────────────────────── */
+
+test('an unrecorded groups_at_seed fails — nothing verified which side of the audience an account is on', () => {
+  const o = cleanOverlay();
+  delete o[TARGETING_MEMBER_ALIAS].groups_at_seed;
+  const problems = validateSeededState(o, {});
+  assert.ok(problems.some((m) => /no groups_at_seed was recorded/.test(m)), problems.join('\n'));
+});
+
+test('a member the platform reports with no group fails, and an outsider it reports IN the group fails', () => {
+  const a = cleanOverlay();
+  a[TARGETING_MEMBER_ALIAS].groups_at_seed = '';
+  assert.ok(validateSeededState(a, {}).some((m) => /outside its own audience/.test(m)));
+
+  const b = cleanOverlay();
+  b[TARGETING_OUTSIDER_ALIAS].groups_at_seed = TARGETING_GROUP;
+  assert.ok(validateSeededState(b, {}).some((m) => /INSIDE the audience/.test(m)));
+});
+
+test('group membership is matched the way the SERVER matches it — case-insensitively', () => {
+  const o = cleanOverlay();
+  o[TARGETING_MEMBER_ALIAS].groups_at_seed = TARGETING_GROUP.toLowerCase();
+  assert.deepEqual(validateSeededState(o, { now: new Date('2026-08-28T12:00:00Z') }), []);
+});
+
+test('the journey and targeting accounts are covered by the distinctness check, not only the four', () => {
+  const o = cleanOverlay();
+  o[TARGETING_MEMBER_ALIAS].email = o[TARGETING_OUTSIDER_ALIAS].email;
+  const problems = validateSeededState(o, {});
+  assert.ok(problems.some((m) => /resolve to the SAME account/.test(m)), problems.join('\n'));
+});
+
+test('every declared alias has a kind, and the runtime fields of each kind are declared', () => {
+  for (const { aliasName, kind } of declaredAliases()) {
+    assert.ok(RUNTIME_FIELDS_BY_KIND[kind], `${aliasName}: kind "${kind}" has no runtime field list`);
+  }
+  // A run-scoped mission NAME is runtime on every mission kind — committing one would pin the suite to
+  // a single historical run forever.
+  for (const kind of ['mission', 'caseMission', 'journeyMission', 'targetingMission']) {
+    assert.ok(RUNTIME_FIELDS_BY_KIND[kind].includes('name'), kind);
+  }
+  // The star's reading and the pair's observed membership are runtime, never committed: a committed
+  // value would assert the very thing the fixtures exist to make falsifiable.
+  assert.ok(RUNTIME_FIELDS_BY_KIND.targetingMission.includes('observed_visibility'));
+  assert.ok(RUNTIME_FIELDS_BY_KIND.caseUser.includes('groups_at_seed'));
 });

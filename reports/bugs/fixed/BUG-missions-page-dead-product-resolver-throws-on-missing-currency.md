@@ -4,6 +4,7 @@
 **Tracker:** VCST-5842 (Subtask of VCST-5319; Relates VCST-5841)
 **Found by:** manual · `/qa-monitoring --since=24H` App Insights signal → live storefront repro · — none (not case-attributable)
 **Archetype:** `NULL-GUARD`
+**Status:** FIXED
 
 **Env:** vcst-qa @ Platform `3.1061.0`, Theme `2.57.0-pr-2396-5924`, `VirtoCommerce.MarketingModule.Data @ 3.1006.0`, store `B2B-store`, session currency USD, chrome/1920px, signed in as `@td(MULTI_ORG_USER.email)`.
 

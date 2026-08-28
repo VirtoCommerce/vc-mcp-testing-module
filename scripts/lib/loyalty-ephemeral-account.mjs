@@ -75,10 +75,22 @@ export function handleAgeHours(handle, now = new Date()) {
  * none, and without an address the cart never reaches a decisive place-order state (proven 2026-08-05
  * for suite 083b). Every caller that places an order must pass `withOrg: true`.
  *
- * Returns `{ handle, email, memberId, userId }`.
+ * `groups` puts the CONTACT into one or more customer groups, which is the ONLY input a
+ * `UserGroupIsCondition` reads: `LoyaltyLogicService.GetUserGroups(userId)` resolves the security
+ * account to its member and returns `member.Groups`. It exists so a targeting question can be asked
+ * with a CONTROLLED pair — two accounts minted seconds apart, in the same org, differing in this
+ * field alone. Two long-lived shared accounts would differ on org, order history, balance and every
+ * other group they carry, so "the member saw it and the outsider did not" would name none of them.
+ *
+ * The groups the platform ACTUALLY stored are read back and returned as `observedGroups` rather than
+ * echoed from the input: the server's match is `EqualsIgnoreCase` and is NOT trimmed, so an input
+ * that was silently normalised, padded or dropped must be visible to the caller instead of asserted
+ * by it.
+ *
+ * Returns `{ handle, email, memberId, userId, observedGroups }`.
  */
 export async function createEphemeralAccount(api, {
-  prefix, storeId, withOrg = true, orgName = 'TechFlow',
+  prefix, storeId, withOrg = true, orgName = 'TechFlow', groups = [],
   firstName = 'Agent', lastName = 'LoyZero', dryRun = false, log = () => {}, verbose = () => {},
 } = {}) {
   if (!prefix) throw new Error('createEphemeralAccount needs a sweep prefix');
@@ -88,8 +100,8 @@ export async function createEphemeralAccount(api, {
   if (!pw) throw new Error(`No password available — set ${PASSWORD_VAR} in .env.local`);
 
   if (dryRun) {
-    log(`  [DRY] would create contact + account ${email}${withOrg ? ` in org ${orgName}` : ''}`);
-    return { handle, email, memberId: 'dry-member', userId: 'dry-user', dry: true };
+    log(`  [DRY] would create contact + account ${email}${withOrg ? ` in org ${orgName}` : ''}${groups.length ? ` in group(s) ${groups.join(',')}` : ''}`);
+    return { handle, email, memberId: 'dry-member', userId: 'dry-user', observedGroups: [...groups], dry: true };
   }
 
   let organizations = [];
@@ -107,10 +119,10 @@ export async function createEphemeralAccount(api, {
 
   const contact = await api('POST', '/api/members', {
     memberType: 'Contact', name: handle, fullName: handle, firstName, lastName,
-    emails: [email], groups: [], organizations,
+    emails: [email], groups: [...groups], organizations,
     addresses: [], dynamicProperties: [], status: 'Approved',
   }, { expectStatus: [200, 201] });
-  verbose(`contact ${contact.id} (organizations: ${organizations.length ? organizations.join(',') : 'none'})`);
+  verbose(`contact ${contact.id} (organizations: ${organizations.length ? organizations.join(',') : 'none'}, groups: ${(contact.groups || []).join(',') || 'none'})`);
 
   // The account is created SECOND, so any failure here would strand the contact above. Clean it up on
   // the way out rather than leaking it (the first probe runs leaked two contacts exactly this way).
@@ -139,8 +151,21 @@ export async function createEphemeralAccount(api, {
     { newPassword: pw, forcePasswordChangeOnNextSignIn: false }, { expectStatus: [200] });
   verbose('status=Approved, emailConfirmed=true, password applied');
 
-  log(`  ✓ ephemeral zero-balance user ${email} (member ${contact.id}, account ${userId})`);
-  return { handle, email, memberId: contact.id, userId };
+  // Read the member BACK rather than trusting the create response: the groups a condition is
+  // evaluated against are whatever the store holds now, and that is the only reading worth recording.
+  const member = await api('GET', `/api/members/${encodeURIComponent(contact.id)}`, null, { expectStatus: [200, 404] });
+  const observedGroups = Array.isArray(member?.groups) ? [...member.groups] : [];
+  if (groups.length && !observedGroups.length) {
+    throw new Error(
+      `contact ${contact.id} was created with groups [${groups.join(', ')}] but the platform reports none. `
+      + 'A group-targeted mission reads member.Groups and nothing else, so an audience account with no groups is '
+      + 'silently OUTSIDE its own audience — the fixture would then agree with its own control whatever the '
+      + 'server does, which is the one outcome a targeting control pair must not be able to produce.',
+    );
+  }
+
+  log(`  ✓ ephemeral zero-balance user ${email} (member ${contact.id}, account ${userId}${observedGroups.length ? `, groups ${observedGroups.join(',')}` : ''})`);
+  return { handle, email, memberId: contact.id, userId, observedGroups };
 }
 
 /**
