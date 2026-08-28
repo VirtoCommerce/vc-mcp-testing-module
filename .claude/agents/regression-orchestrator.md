@@ -108,6 +108,27 @@ The three lanes do **not** share slots.
 1. Read the suite CSV from the manifest's `file` path.
 2. Resolve every `@td(ALIAS.field)` token against `test-data/aliases.json` + the referenced data CSVs.
 3. Write the resolved CSV to `reports/regression/{RUN_ID}/suite-{ID}-resolved.csv`.
+3a. **`--cases <tier>` only — narrow the resolved CSV to those cases, before lanes sees it:**
+
+   ```bash
+   npm run suites:filter -- reports/regression/{RUN_ID}/suite-{ID}-resolved.csv \
+     --priority <tier> [--also-ids <ids>] --out reports/regression/{RUN_ID}/suite-{ID}-resolved.csv
+   ```
+
+   This hop is where a change-scoped run gets its scope. Filtering HERE — after `@td()` resolution,
+   before `suites:lanes` — means lanes, the machine lane, the merge, the results envelope, triage and
+   promotion are all untouched: they see a smaller suite, not a new mechanism. Exit 2 means a legacy
+   11-column header; **do not filter it and do not guess** — `parseSuite` maps positionally, so
+   `Priority` is not `Priority` there. Report the suite as unfilterable and run it whole, or drop it
+   from the selection; never let it through as if the filter had applied.
+
+   **`--also-ids` is how a case that is not in the tier still runs** — `/qa-test` passes its own newly
+   authored `Draft` case IDs, which are in scope by construction whatever their priority.
+
+   **Every exclusion is reported, never silent** (Step 6). The filter prints the kept/dropped counts,
+   names any row whose `Priority` it could not read, and says so when a suite contributes **zero**
+   cases — 11 of 128 suites hold no Critical case at all, and a suite that disappears without a line
+   is indistinguishable from a suite that passed.
 4. **Split the suite's cases between the machine lane and the agent — one command:**
 
    ```bash
@@ -271,6 +292,14 @@ Write `reports/regression/regression-YYYY-MM-DD.md`:
 | Total Suites / Passed / Failed | ... |
 | Total Cases / Passed / Failed / Blocked / Skipped | ... |
 | Overall Pass Rate | X% |
+| Case filter (`--cases` runs only) | `<tier>` — N of M cases in scope; K excluded |
+
+## Scope Exclusions   ← `--cases` runs only; omit the section entirely on a full run
+Report what did NOT run, because a scoped run's silence is otherwise unreadable:
+- suites that contributed **zero** cases, by ID (11 of 128 hold no Critical case at all)
+- any case whose `Priority` the filter could not read, by ID — it did not run and it is not a pass
+- any suite refused as legacy 11-column, and what you did about it
+- `--also-ids` entries that matched no case in their suite
 
 ## Suite Results
 | Suite | Name | Browser | Tests | Pass | Fail | Rate | Attempts |
