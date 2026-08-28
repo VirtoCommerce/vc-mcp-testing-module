@@ -146,6 +146,24 @@ tree. Several sessions hold uncommitted work here at any time, and a tree-wide g
 unrecoverable for all of them. A `git stash` that "failed silently" is the signal to stop and
 report, never to escalate to a broader command.
 
+**A commit is not exempt just because it is not destructive: `git add -A` in a shared tree commits
+OTHER sessions' uncommitted work.** The risk is the opposite of the git prohibition above — nothing
+is lost, but someone else's unfinished work is **published under your commit message**, attributed to
+your change, and pushed where others will build on it. So a tree-wide commit needs the same *ping
+first* discipline as a destructive operation: say what you are about to sweep up, and let the other
+authors say whether their half is in a committable state.
+
+Measured 2026-08-28: one session's user authorised `commit all`, and the commit carried a second
+session's fixture work, suite fix, aliases and bug reports — without that session's user being asked.
+It landed cleanly only because that half happened to be gate-green at that minute; a patched assertion
+had landed moments earlier and the same command could as easily have caught the file mid-edit. Treat
+the good outcome as luck, not as evidence the practice is safe.
+
+**And once it is pushed, it stays.** Do not offer to rewrite history to fix attribution on a shared
+branch: a force-push breaks the branch for every session that has pulled it, which is a real loss
+traded for a cosmetic one. Attribution lives in the reports, the code comments and the audit trail —
+which is where anyone actually looks.
+
 **SECOND: a suite CSV has exactly one author for the duration of a change.** Not one author per file
 forever — one author per *change*: whoever is restructuring, culling or re-pointing a suite owns
 every row in it until they hand it back. A second writer on the same CSV is forbidden even when the
