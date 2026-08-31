@@ -1,0 +1,23 @@
+{
+  "name": "vc-secrets",
+  "description": "Runs a declared process with its secrets resolved at launch — an MCP server, or a task that is not one. The config entry stores a call to this launcher instead of a credential: the value comes from the OS credential store (Windows Credential Manager / macOS Keychain / gpg) or Azure Key Vault per launch and is injected into the process tree rooted at that declared process, never into unrelated siblings, so no plaintext token sits in .mcp.json, in ~/.claude.json, in a settings env block or in a .env file. Declarations live in three homes — committed per repo, gitignored per repo, and per user — and every env value must say which it is: secret:<name> for a reference or literal:<value> for a constant, so a pasted credential is refused rather than mistaken for a constant. A project declaration that names a user-scope secret must additionally be authorized, by shape, in the user's own file. There is deliberately no verb that runs a command chosen by the caller, and none that prints a secret. Ships no MCP servers of its own: each server is declared by whoever needs it.",
+  "version": "0.1.0",
+  "displayName": "Virto Commerce Secrets Launcher",
+  "author": {
+    "name": "Virto Commerce",
+    "email": "support@virtocommerce.com"
+  },
+  "homepage": "https://github.com/VirtoCommerce/vc-mcp-testing-module",
+  "repository": "https://github.com/VirtoCommerce/vc-mcp-testing-module",
+  "license": "TBD-internal",
+  "keywords": [
+    "mcp",
+    "secrets",
+    "credentials",
+    "keychain",
+    "key-vault",
+    "security",
+    "launcher"
+  ],
+  "defaultEnabled": false
+}

@@ -16,6 +16,11 @@
       "name": "vc-perf",
       "source": "./plugins/vc-perf",
       "description": "Three-layer performance loop — BenchmarkDotNet A/B (L1), k6 load harness (L2), dotnet-trace allocation/CPU/DB attribution (L3), machine-readable perf-verdict, optimization PRs. Depends on vc-fix (reuses its onboarding, routing, and backend dev/review agents). Advisory only."
+    },
+    {
+      "name": "vc-secrets",
+      "source": "./plugins/vc-secrets",
+      "description": "Secrets launcher — runs a declared process with its secrets resolved at launch, an MCP server or a task that is not one. The config entry stores a call to the launcher instead of a credential; the value comes from the OS credential store or Azure Key Vault per launch and reaches the process tree rooted at that declared process, never unrelated siblings. Every env value declares its kind — secret:<name> or literal:<value> — so a pasted credential is refused, and a project may receive a user-scope secret only for a shape the owner authorized in their own file. Declarations live in three homes (committed per repo, gitignored per repo, per user), with keystore keys namespaced per project so a project's credentials and your personal ones never share a key. Ships no MCP servers of its own. Standalone — no dependency on vc-fix."
     }
   ]
 }
