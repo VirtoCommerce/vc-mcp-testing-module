@@ -30,7 +30,12 @@ import {
   absenceIsProven, EXACT_LOOKUP_CRITERIA, productTeardownVerdict,
   PRODUCT_INDEX_DOCUMENT_TYPE, SILENTLY_INERT_INDEX_DOCUMENT_TYPES,
   buildReindexRequest, indexDocumentTypeProblem,
+  CREDENTIAL_ALIASES, credentialProblems, ACCOUNT_PASSWORD_VAR, passwordTokenFor, FUNDED_ACCOUNTS, PTS_SPEND_ALIAS, PTS_SPEND_UNITS, ptsLineCost, balanceCoversPtsLine,
 } from '../seed-data/loyalty/missions-e2e-specs.mjs';
+import {
+  rankEligiblePrograms, isEligibleProgram, pointsPerUnit, qtyForTarget, pollBalanceChange,
+  EARN_LINE_ITEM_LIMIT,
+} from '../seed-data/loyalty/loyalty-earn.mjs';
 
 /* ── Run identity ───────────────────────────────────────────────────────────── */
 
@@ -342,6 +347,21 @@ const cleanOverlay = () => {
       user_id: `u-${a.aliasName}`, member_id: `m-${a.aliasName}`, handle: 'h', balance_at_seed: '0',
       groups_at_seed: (a.groups || []).join('; '),
     };
+    // A FUNDED account is the one account whose clean state is NOT a zero balance: it has to be able
+    // to pay for the points line its case buys. `isStarted` is still false, because the funding order
+    // is placed before the run's missions exist.
+    if (a.funding) {
+      Object.assign(o[a.aliasName], {
+        balance_at_seed: String(a.funding.minPoints() + 30000),
+        pts_line_cost: String(a.funding.minPoints()),
+        funding_program: 'AGENT-TEST PP Single-SKU Laptop (pri 80, factor 500 × 60)',
+        funding_order: 'CO260901-00005',
+        funding_points_per_unit: '30000',
+        pts_progress_status_at_seed: 'InProgress',
+        pts_is_started_at_seed: 'false',
+        pts_current_quantity_at_seed: '0',
+      });
+    }
   }
   return o;
 };
@@ -1216,4 +1236,229 @@ test('DEFECT 2: a mis-addressed reindex is detected before the two-minute wait, 
   // "we could not tell" and "it is fine" are different answers.
   assert.match(indexDocumentTypeProblem([], PRODUCT_INDEX_DOCUMENT_TYPE), /no registered document types/);
   assert.match(indexDocumentTypeProblem(null, PRODUCT_INDEX_DOCUMENT_TYPE), /no registered document types/);
+});
+
+/* ── The credential contract: `[AUTH role=<alias>]` must be able to produce a token ────────────
+ *
+ * The blocker these cover was invisible to every other check in this file. The aliases resolved as
+ * DATA — email, member id, mission binding, all correct — and could not resolve as a ROLE, so six of
+ * the nine 075d cases died at step 1 of an unattended run before issuing a single request. The rule
+ * is modelled on what graphql-auth.ts `resolveRole()` actually does, not on a field checklist.
+ */
+
+test('every account alias in the set is covered by the credential contract', () => {
+  const covered = new Set(CREDENTIAL_ALIASES());
+  for (const a of CASE_ACCOUNTS) assert.ok(covered.has(a.aliasName), `${a.aliasName} is not credential-checked`);
+  assert.ok(covered.has(REWARD_USER.aliasName), 'the reward account signs in too');
+});
+
+test('a well-formed account alias passes the credential contract', () => {
+  const ok = {
+    _inline: true,
+    case_id: 'MSN-E2E-001',
+    password_var: ACCOUNT_PASSWORD_VAR,
+    password: passwordTokenFor(ACCOUNT_PASSWORD_VAR),
+    email: '',
+    fields: { email: 'email', password: 'password' },
+  };
+  assert.deepEqual(credentialProblems('X', ok), []);
+});
+
+test('THE BLOCKER: password_var alone does not resolve — resolveRole() reads @td(ALIAS.password)', () => {
+  // Exactly the committed shape that shipped: a correct browser-lane credential and nothing the
+  // runner can read. It looks complete, and it throws before the first request.
+  const asShipped = {
+    _inline: true,
+    case_id: 'MSN-E2E-001',
+    password_var: 'DEFAULT_TEST_PASSWORD',
+    email: '',
+    fields: { email: 'email' },
+  };
+  const problems = credentialProblems('MSN_E2E_USER_001', asShipped);
+  assert.ok(problems.some((p) => /no `password`/.test(p)), problems.join(' | '));
+  assert.ok(problems.some((p) => /fails at step 1/.test(p)), 'the message must say WHERE it fails');
+});
+
+test('a literal password is refused, and so is one that contradicts its own var name', () => {
+  const base = { _inline: true, email: '', password_var: 'DEFAULT_TEST_PASSWORD', fields: { email: 'email', password: 'password' } };
+  assert.ok(credentialProblems('X', { ...base, password: 'Password1!' }).some((p) => /committed secret/.test(p)));
+  assert.ok(credentialProblems('X', { ...base, password: '{{SOME_OTHER_VAR}}' }).some((p) => /does not match its own password_var/.test(p)));
+  // A browser case still needs the bare NAME, so dropping password_var is a failure of its own.
+  assert.ok(credentialProblems('X', { _inline: true, email: '', password: '{{DEFAULT_TEST_PASSWORD}}', fields: { email: 'email', password: 'password' } })
+    .some((p) => /no `password_var`/.test(p)));
+});
+
+test('half an email_env/password_env pair silently changes which resolver branch runs', () => {
+  const half = {
+    _inline: true, email: '', email_env: 'SOME_EMAIL',
+    password_var: ACCOUNT_PASSWORD_VAR, password: passwordTokenFor(),
+    fields: { email: 'email', password: 'password' },
+  };
+  assert.ok(credentialProblems('X', half).some((p) => /both or neither/.test(p)));
+});
+
+test('an alias with no `email` key resolves to "unknown field", not to the per-env overlay', () => {
+  const noEmail = { _inline: true, password_var: ACCOUNT_PASSWORD_VAR, password: passwordTokenFor(), fields: { password: 'password' } };
+  assert.ok(credentialProblems('X', noEmail).some((p) => /no `email` key/.test(p)));
+});
+
+/* ── The funded (points-spend) account ────────────────────────────────────────────────────────
+ *
+ * The second blocker: the case bound an account with a ZERO balance and the fixture's own note
+ * claimed that zero "makes a subsequent points-spend cart possible at all". It is the one balance
+ * that makes it impossible.
+ */
+
+test('the points line has a real cost, DERIVED from the product rather than transcribed', () => {
+  assert.equal(ptsLineCost(), Number(PTS_PRODUCT.listPrice) * PTS_SPEND_UNITS);
+  assert.ok(ptsLineCost() > 0, 'a free line costs no balance and asks nothing about the loyalty currency');
+  // Move the price and the cost moves with it — that is the whole reason it is a function.
+  assert.equal(ptsLineCost({ listPrice: 7 }, 3), 21);
+});
+
+test('balanceCoversPtsLine is the spend-side rule, and zero fails it', () => {
+  assert.equal(balanceCoversPtsLine(0, 1), false, 'the zero balance the case actually shipped with');
+  assert.equal(balanceCoversPtsLine(1, 1), true, 'exactly enough is enough');
+  assert.equal(balanceCoversPtsLine(33372, 1), true);
+  assert.equal(balanceCoversPtsLine('', 1), false, 'an unrecorded balance is not a passing one');
+  assert.equal(balanceCoversPtsLine(null, 1), false);
+});
+
+test('the funded account is a SECOND account — the two properties cannot share one identity', () => {
+  const funded = FUNDED_ACCOUNTS();
+  assert.equal(funded.length, 1);
+  const [a] = funded;
+  assert.equal(a.aliasName, PTS_SPEND_ALIAS);
+  assert.notEqual(a.aliasName, REWARD_USER.aliasName,
+    'legibility needs balance < reward and a spend needs balance >= cost; a balance can only be raised');
+  assert.deepEqual(a.missionAliases, ['MSN_E2E_PERSKU_PTS']);
+  assert.equal(a.minPoints, ptsLineCost());
+  assert.equal(a.kind, 'fundedCaseUser');
+  assert.deepEqual(a.groups, [], 'groups change which ProductPoints program wins, so the funded amount would vary');
+});
+
+test('the funded account declares runtime fields of its own, and none may be committed', () => {
+  const declared = declaredAliases().find((d) => d.aliasName === PTS_SPEND_ALIAS);
+  assert.equal(declared.kind, 'fundedCaseUser');
+  const fields = RUNTIME_FIELDS_BY_KIND.fundedCaseUser;
+  for (const f of ['balance_at_seed', 'pts_line_cost', 'funding_order', 'pts_is_started_at_seed', 'pts_current_quantity_at_seed']) {
+    assert.ok(fields.includes(f), `${f} is per-run and must be blanked by teardown`);
+  }
+});
+
+test('owning an account no longer misclassifies a mission as the JOURNEY', () => {
+  // The kind is keyed on journeyOrders. Keyed on "owns an account" — as it was — the PerSku-PTS
+  // mission would have inherited the journey's dozen measured runtime fields and demanded
+  // measurements it never makes.
+  const byAlias = Object.fromEntries(declaredAliases().map((d) => [d.aliasName, d.kind]));
+  assert.equal(byAlias.MSN_E2E_PERSKU_PTS, 'mission');
+  assert.equal(byAlias.MSN_E2E_ORDERCOUNT, 'journeyMission');
+});
+
+test('VACUITY: a funded account that cannot pay for its own line is caught', () => {
+  const o = cleanOverlay();
+  assert.deepEqual(validateSeededState(o), [], 'baseline must be clean');
+  o[PTS_SPEND_ALIAS].balance_at_seed = '0';
+  const problems = validateSeededState(o);
+  assert.ok(problems.some((p) => /must buy a line costing/.test(p)), problems.join(' | '));
+  assert.ok(problems.some((p) => /LOYALTY_INSUFFICIENT_BALANCE/.test(p)),
+    'the message must name the failure the case would actually hit');
+});
+
+test('VACUITY: an unrecorded balance is not read as a passing zero', () => {
+  const o = cleanOverlay();
+  o[PTS_SPEND_ALIAS].balance_at_seed = '';
+  assert.ok(validateSeededState(o).some((p) => /no balance_at_seed was recorded/.test(p)));
+});
+
+test('VACUITY: a spent settle signal is caught — isStarted flips on ANY order by the user', () => {
+  // Measured on vcst-qa 2026-09-01: a funding order for an unrelated CASH sku flipped isStarted to
+  // true on the PerSku-PTS mission while currentQuantity stayed 0. So an account funded after its
+  // missions were minted arrives with the case's only discriminator already spent.
+  const o = cleanOverlay();
+  o[PTS_SPEND_ALIAS].pts_is_started_at_seed = 'true';
+  const problems = validateSeededState(o);
+  assert.ok(problems.some((p) => /settle signal is spent/.test(p)), problems.join(' | '));
+  assert.ok(problems.some((p) => /BEFORE the run/.test(p)),
+    'the message must name the ordering that produces the state');
+});
+
+test('VACUITY: a target already part-bought at seed time cannot show a zero contribution', () => {
+  const o = cleanOverlay();
+  o[PTS_SPEND_ALIAS].pts_current_quantity_at_seed = '1';
+  assert.ok(validateSeededState(o).some((p) => /already read currentQuantity 1/.test(p)));
+});
+
+test('VACUITY: an unrecorded baseline is reported, because the case reads a DELTA against it', () => {
+  for (const f of ['pts_progress_status_at_seed', 'pts_is_started_at_seed', 'pts_current_quantity_at_seed']) {
+    const o = cleanOverlay();
+    o[PTS_SPEND_ALIAS][f] = '';
+    assert.ok(validateSeededState(o).some((p) => p.includes(f)), `${f} unrecorded must be reported`);
+  }
+});
+
+test('a recorded pts_line_cost that stopped following its source is caught', () => {
+  const o = cleanOverlay();
+  o[PTS_SPEND_ALIAS].pts_line_cost = String(ptsLineCost() + 5);
+  assert.ok(validateSeededState(o).some((p) => /stopped following its source/.test(p)));
+});
+
+test('MSN_E2E_REWARD_USER keeps its zero-balance legibility — the split changed nothing for it', () => {
+  const reward = Number(MISSION_BY_ALIAS[REWARD_USER.rewardAlias].reward);
+  assert.equal(REWARD_USER.sourceAlias, 'LOYALTY_ZERO_USER');
+  assert.ok(balanceIsLegible(0, reward));
+  // And a balance large enough to SPEND would not be legible — which is the whole argument.
+  assert.equal(balanceIsLegible(30000, reward), false);
+});
+
+/* ── The earn path (loyalty-earn.mjs): the decision rules, with no network ─────────────────── */
+
+const prog = (over = {}) => ({
+  programType: 'ProductPoints', isActive: true, priority: 0,
+  dynamicExpression: { children: [{ id: 'AnyUserGroupCondition' }] }, ...over,
+});
+
+test('only eligible ProductPoints programs rank, and priority decides', () => {
+  const all = [
+    prog({ name: 'low', priority: 1 }),
+    prog({ name: 'high', priority: 9 }),
+    prog({ name: 'inactive', priority: 99, isActive: false }),
+    prog({ name: 'wrong-type', priority: 99, programType: 'OrderPoints' }),
+    prog({ name: 'expired', priority: 99, endDate: '2020-01-01T00:00:00Z' }),
+    prog({ name: 'future', priority: 99, startDate: '2999-01-01T00:00:00Z' }),
+  ];
+  assert.deepEqual(rankEligiblePrograms(all, []).map((p) => p.name), ['high', 'low']);
+});
+
+test('a group gate is read off SELECTED children only', () => {
+  const gated = prog({ name: 'vip', dynamicExpression: { children: [{ id: 'UserGroupIsCondition', groups: ['VIP'] }] } });
+  assert.equal(isEligibleProgram(gated, []), false, 'a group-less account is outside a group-gated program');
+  assert.equal(isEligibleProgram(gated, ['VIP']), true);
+  // `availableChildren` is the palette the UI offers, not the conditions in force. Reading it would
+  // make every program look universally eligible.
+  const palette = prog({ dynamicExpression: { children: [{ id: 'UserGroupIsCondition', groups: ['VIP'] }], availableChildren: [{ id: 'AnyUserGroupCondition' }] } });
+  assert.equal(isEligibleProgram(palette, []), false);
+});
+
+test('points are factor x unit PRICE x qty — not factor x qty', () => {
+  assert.equal(pointsPerUnit(500, 60), 30000);
+  assert.equal(pointsPerUnit(1, 5), 5);
+});
+
+test('qtyForTarget never orders zero units, and respects stock and the line limit', () => {
+  assert.equal(qtyForTarget({ remaining: 1, perUnit: 30000 }), 1, 'asking for less than one unit still buys one');
+  assert.equal(qtyForTarget({ remaining: 0, perUnit: 30000 }), 1);
+  assert.equal(qtyForTarget({ remaining: 100, perUnit: 10 }), 10);
+  assert.equal(qtyForTarget({ remaining: 100, perUnit: 10, available: 4 }), 4, 'stock caps the order');
+  assert.equal(qtyForTarget({ remaining: 1e12, perUnit: 1 }), EARN_LINE_ITEM_LIMIT);
+  assert.equal(qtyForTarget({ remaining: 5, perUnit: 0 }), 0, 'a zero-earning SKU cannot converge and must not loop');
+});
+
+test('pollBalanceChange returns the last reading rather than inventing a change', async () => {
+  const noSleep = async () => {};
+  let calls = 0;
+  const moved = await pollBalanceChange({ readBalance: async () => (++calls >= 2 ? 77 : 0), userId: 'u', from: 0, sleep: noSleep });
+  assert.equal(moved, 77);
+  const stuck = await pollBalanceChange({ readBalance: async () => 0, userId: 'u', from: 0, sleep: noSleep, attempts: 3 });
+  assert.equal(stuck, 0, 'earn settles async; a balance that never moved is reported as it is');
 });

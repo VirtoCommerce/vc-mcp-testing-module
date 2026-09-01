@@ -189,6 +189,16 @@ export const RUNTIME_FIELDS_BY_KIND = {
     'progress_status_at_seed', 'progress_percent_at_seed', 'observed_visibility',
   ],
   caseUser: ['email', 'user_id', 'member_id', 'handle', 'balance_at_seed', 'groups_at_seed'],
+  // A FUNDED per-run account. Everything a plain caseUser records, plus the funding provenance and
+  // the PerSku baseline its own case reads a delta against. `pts_*_at_seed` is recorded rather than
+  // assumed for the reason the whole vacuity guard exists: the previous fixture read `currentQuantity
+  // 0 / InProgress` off untouched seed state and could not tell that from "processed and correctly
+  // excluded", which is the entire distinction MSN-029 is supposed to make.
+  fundedCaseUser: [
+    'email', 'user_id', 'member_id', 'handle', 'balance_at_seed', 'groups_at_seed',
+    'pts_line_cost', 'funding_program', 'funding_order', 'funding_points_per_unit',
+    'pts_progress_status_at_seed', 'pts_is_started_at_seed', 'pts_current_quantity_at_seed',
+  ],
 };
 
 /* ── Products ────────────────────────────────────────────────────────────────
@@ -281,6 +291,73 @@ export const PTS_PRODUCT = {
 export const PRODUCTS = [UNIT_PRODUCT, ...PERSKU_PRODUCTS, PTS_PRODUCT];
 export const PRODUCT_BY_SLOT = Object.fromEntries(PRODUCTS.map((p) => [p.slot, p]));
 export const PRODUCT_BY_ALIAS = Object.fromEntries(PRODUCTS.map((p) => [p.aliasName, p]));
+
+/* ── The PTS-SPEND account: why it is a SECOND account and not a funded first ─
+ *
+ * The PerSku-PTS case (075d MSN-029 / 083d MSN-E2E-007) has to BUY the loyalty-currency target. A
+ * points line is refused at place-order unless the balance covers it — measured on vcst-qa
+ * 2026-09-01: `createOrderFromCart` returned `errors[]: "The cart has validation errors"` over the
+ * cart's own `validationErrors: LOYALTY_INSUFFICIENT_BALANCE`.
+ *
+ * It used to borrow MSN_E2E_REWARD_USER, whose alias note claimed a `balance_at_seed` of 0 "makes a
+ * subsequent points-spend cart possible at all". That is exactly inverted: a zero balance is the one
+ * balance that makes the spend IMPOSSIBLE. The case then read `currentQuantity 0 / InProgress`
+ * straight off untouched seed state and `isStarted` never moved across seven polls, so it decided
+ * nothing in either direction.
+ *
+ * THE TWO REQUIREMENTS CANNOT LIVE ON ONE ACCOUNT ON THIS ENVIRONMENT, and that is the argument for
+ * the split rather than a preference:
+ *   - MSN-E2E-004 needs `balance < reward` (`balanceIsLegible`) — the grant has to dominate the
+ *     balance or "the points I spent came FROM the mission" is unrecoverable arithmetic.
+ *   - a spend needs `balance >= the line's cost`.
+ *   - and a balance can only be RAISED BY EARNING (the loyalty op-log is read-only — confirmed live
+ *     against vcst-qa's own swagger 2026-09-01: `VirtoCommerce.Loyalty` exposes exactly
+ *     `POST /api/loyalty-program-operation-log/search` and
+ *     `GET /api/loyalty-program-operation-log/balance/{userId}`, no write of any kind).
+ *   - the smallest earn this store can produce is NOT small: the winning ProductPoints program for a
+ *     group-less account resolves to a factor-500 program on a $60 SKU, i.e. 30,000 PTS for one unit
+ *     (points = factor x unit price x qty, so qty 1 is the floor). Against a 150- or 500-PTS reward
+ *     no funded account is ever legible.
+ * One account therefore cannot hold both properties. Two can, and each keeps its own.
+ *
+ * The funded account carries NO legibility requirement of its own, and that is a limit worth stating:
+ * MSN-029's oracle is the PerSku target's own quantity, not a balance delta, so nothing it asserts
+ * reads the balance. An earn->spend assertion on THIS account would not be readable; that assertion
+ * belongs to MSN_E2E_REWARD_USER, which is why that account is left at zero.
+ */
+export const PTS_SPEND_ALIAS = 'MSN_E2E_USER_PTSSPEND';
+
+/** Units of the PTS-priced target the case buys. One: `all=false`, so a single line is the goal. */
+export const PTS_SPEND_UNITS = 1;
+
+/**
+ * What the points line costs, DERIVED from the product's own list price. A transcribed cost goes
+ * stale the moment the fixture price moves, and it goes stale SILENTLY — by the guard passing an
+ * account that can no longer pay.
+ */
+export const ptsLineCost = (product = PTS_PRODUCT, units = PTS_SPEND_UNITS) =>
+  Number(product.listPrice) * Number(units);
+
+/** Can this balance actually pay for the line the case must buy? The spend-side vacuity rule. */
+export const balanceCoversPtsLine = (balance, cost = ptsLineCost()) =>
+  Number.isFinite(Number(balance)) && Number(balance) >= Number(cost);
+
+/** The funding declaration the seeder acts on and the guard checks against. */
+export const PTS_SPEND_FUNDING = {
+  /** Minimum the account must hold at seed time. Derived from the line, never authored. */
+  minPoints: () => ptsLineCost(),
+  /**
+   * Earning is the ONLY mechanism (there is no balance-write API), and an earn order advances every
+   * mission applicable to its user. So it is placed BEFORE this run's missions are minted, and what
+   * the account's PerSku row reads afterwards is RECORDED rather than assumed — the case asserts a
+   * delta against that baseline instead of against a 0 it never verified.
+   */
+  mechanism: 'earn',
+  purpose:
+    'Funds the PerSku-PTS case so it can actually place the mixed cash+PTS order its question needs. '
+    + 'Its own account because a spendable balance and MSN-E2E-004\'s legibility are mutually '
+    + 'exclusive on one identity (see the block above).',
+};
 
 /* ── Catalog visibility: existence vs indexedness ────────────────────────────
  *
@@ -546,6 +623,11 @@ export const MISSIONS = [
     reward: 150,
     slots: ['P'],
     cases: ['MSN-E2E-007'],
+    caseId: 'MSN-E2E-007',
+    // Its OWN account, and a FUNDED one. The case has to buy the PTS-priced target, and a
+    // points-currency line is refused at place-order unless the balance covers it — see the PTS-SPEND block.
+    accountAlias: PTS_SPEND_ALIAS,
+    accountFunding: PTS_SPEND_FUNDING,
     purpose:
       'The currency-filter subject. ONE target, the PTS-priced product, `all=false` so a single '
       + 'points-currency line is the whole goal and the observation is not diluted by a second row '
@@ -1002,6 +1084,12 @@ export const CASE_ACCOUNTS = (() => {
         byAlias.set(alias, { aliasName: alias, kind: 'caseUser', caseId: m.caseId, missionAliases: [], groups: [] });
       }
       byAlias.get(alias).missionAliases.push(m.aliasName);
+      // Funding is declared on the MISSION that needs a spendable account, so the account and the
+      // reason it is funded can never drift apart into two independently-editable declarations.
+      if (m.accountFunding) {
+        byAlias.get(alias).kind = 'fundedCaseUser';
+        byAlias.get(alias).funding = m.accountFunding;
+      }
     }
   }
   // The audience half of the targeting pair is the one account in the set that carries a group.
@@ -1017,7 +1105,12 @@ export const CASE_ACCOUNTS = (() => {
     outsider.pairedWith = TARGETING_MEMBER_ALIAS;
   }
   for (const a of byAlias.values()) {
-    a.purpose = a.audienceRole
+    a.purpose = a.funding
+      ? `Per-run, FUNDED account for ${a.caseId}. ${a.funding.purpose} `
+        + `It must hold at least ${a.funding.minPoints()} points at seed time — the cost of the line `
+        + `${a.missionAliases.join(' / ')} makes it buy — or the order is refused with `
+        + 'LOYALTY_INSUFFICIENT_BALANCE and the case reads untouched seed state as a result.'
+      : a.audienceRole
       ? `Per-run account for ${a.caseId}, the ${a.audienceRole} half of the targeting pair`
         + `${a.groups.length ? ` (member.Groups = [${a.groups.join(', ')}])` : ' (member.Groups is empty)'}. `
         + 'It exists as one of a PAIR minted seconds apart into the same org and differing in this one '
@@ -1043,13 +1136,27 @@ export const TARGETING_ACCOUNTS = [TARGETING_MEMBER_ALIAS, TARGETING_OUTSIDER_AL
  */
 export const declaredAliases = () => [
   { aliasName: 'MSN_E2E_RUN', kind: 'run' },
-  ...MISSIONS.map((m) => ({ aliasName: m.aliasName, kind: boundAccounts(m).length ? 'journeyMission' : 'mission' })),
+  // Keyed on `journeyOrders`, NOT on "does it own an account". Owning an account is now also true of
+  // the PerSku-PTS mission, which records none of the journey's measured per-order fields; keying the
+  // kind off the wrong property would demand a dozen measurements that mission never makes.
+  ...MISSIONS.map((m) => ({ aliasName: m.aliasName, kind: m.journeyOrders != null ? 'journeyMission' : 'mission' })),
   ...CASE_MISSIONS.map((m) => ({ aliasName: m.aliasName, kind: 'caseMission' })),
   ...TARGETING_MISSIONS.map((m) => ({ aliasName: m.aliasName, kind: 'targetingMission' })),
   ...PRODUCTS.map((p) => ({ aliasName: p.aliasName, kind: 'product' })),
   { aliasName: REWARD_USER.aliasName, kind: 'rewardUser' },
-  ...CASE_ACCOUNTS.map((a) => ({ aliasName: a.aliasName, kind: 'caseUser' })),
+  ...CASE_ACCOUNTS.map((a) => ({ aliasName: a.aliasName, kind: a.kind })),
 ];
+
+/** Every alias in this set that `[AUTH role=...]` may be pointed at — the credential-contract scope. */
+export const CREDENTIAL_ALIASES = () => [
+  ...CASE_ACCOUNTS.map((a) => a.aliasName),
+  REWARD_USER.aliasName,
+];
+
+/** The per-run accounts that must hold a spendable balance, with the cost each one must cover. */
+export const FUNDED_ACCOUNTS = () => CASE_ACCOUNTS
+  .filter((a) => a.funding)
+  .map((a) => ({ ...a, minPoints: a.funding.minPoints() }));
 
 /** How a mission's own visibility to its accounts is treated at seed time. Pure. */
 export const visibilityPolicy = (spec) => String(spec?.visibility || 'required');
@@ -1330,6 +1437,78 @@ export function discountBand(spec = MISSION_BY_ALIAS.MSN_E2E_ORDERVALUE, product
   const preDiscount = unitsToComplete(spec, product) * Number(product.listPrice);
   const postDiscount = Number((preDiscount * (1 - rate)).toFixed(2));
   return { target, preDiscount, postDiscount, shippingHeadroom: Number((target - postDiscount).toFixed(2)) };
+}
+
+/* ── The credential contract: what makes `[AUTH role=<alias>]` RESOLVE ───────
+ *
+ * Every account this set mints is signed into two different ways, and until 2026-09-01 the fixtures
+ * only served one of them:
+ *
+ *   browser lane   — a Playwright case types the env-var NAME so `--secrets` substitutes and REDACTS
+ *                    the value (`.claude/rules/mcp-browsers.md`). It needs the bare name, which is
+ *                    what `password_var` carries.
+ *   runner lane    — `[AUTH role=<alias>]` calls graphql-auth.ts `resolveRole()`, which for an
+ *                    `_inline` alias with no `email_env`/`password_env` resolves `@td(<alias>.email)`
+ *                    and `@td(<alias>.password)` and then expands any `{{VAR}}` through the env.
+ *                    `password_var` is not a field it knows, so it fell through to the last-resort
+ *                    `<ALIAS>_EMAIL` / `<ALIAS>_PASSWORD` env pattern and THREW.
+ *
+ * Measured: six of nine 075d cases (MSN-027/028/029/030/032/033) could not get past step 1 unattended;
+ * the one run that reported results had bridged the gap by hand with an uncommitted wrapper.
+ *
+ * So the alias carries BOTH, and they are NOT two sources of truth: `password` is DERIVED from
+ * `password_var` by `passwordTokenFor`, and `credentialProblems` fails the pair the moment they
+ * disagree. The var name stays the single authored fact; a literal password in a committed file is a
+ * secret-hygiene failure (`td:reconcile`), and this repo is public.
+ */
+
+/** The one password var every per-run account in this set is created with. */
+export const ACCOUNT_PASSWORD_VAR = 'DEFAULT_TEST_PASSWORD';
+
+/** The committed `password` field is the var name in `{{VAR}}` form — derived, never transcribed. */
+export const passwordTokenFor = (varName = ACCOUNT_PASSWORD_VAR) => `{{${varName}}}`;
+
+/** A committed credential value must be a `{{VAR}}` token, never a secret. */
+export const isPasswordToken = (v) => /^\{\{\w+\}\}$/.test(String(v ?? ''));
+
+/**
+ * Does this committed alias satisfy the contract `resolveRole()` actually implements? Pure — it takes
+ * the parsed alias object, so the drift guard and the unit tests judge the same rule the runner does.
+ *
+ * It deliberately models the RESOLVER, not a field checklist: the failure it exists to catch is an
+ * alias that looks fully populated and still cannot produce a token.
+ */
+export function credentialProblems(aliasName, alias) {
+  const out = [];
+  const a = alias || {};
+  if (a._inline !== true) {
+    out.push(`${aliasName}: not _inline — resolveRole()'s inline/direct-field branch is the only one this set uses`);
+    return out;
+  }
+  // The email_env/password_env branch wins first in resolveRole(); if an alias declares one half of
+  // it the resolver takes that branch and the {{VAR}} password below is never consulted.
+  if ((a.email_env && !a.password_env) || (!a.email_env && a.password_env)) {
+    out.push(`${aliasName}: declares only one of email_env/password_env — resolveRole() needs both or neither, and half of it silently changes which branch resolves`);
+  }
+  if (!('email' in a)) {
+    out.push(`${aliasName}: no \`email\` key — @td(${aliasName}.email) throws "unknown field" rather than resolving to the per-env overlay value`);
+  }
+  const pv = a.password_var;
+  if (!pv) {
+    out.push(`${aliasName}: no \`password_var\` — a browser case has to type the env-var NAME so Playwright --secrets can redact it, and a literal password in a committed file is a secret-hygiene failure`);
+  }
+  const pw = a.password;
+  if (pw == null || pw === '') {
+    out.push(`${aliasName}: no \`password\` — resolveRole() resolves @td(${aliasName}.password), finds nothing, falls through to the ${aliasName}_EMAIL/${aliasName}_PASSWORD env pattern and THROWS, so every [AUTH role=${aliasName}] case fails at step 1 before issuing a request`);
+  } else if (!isPasswordToken(pw)) {
+    out.push(`${aliasName}.password = ${JSON.stringify(pw)} is not a {{VAR}} token — a committed secret (this repo is public; td:reconcile secret hygiene fails it)`);
+  } else if (pv && pw !== passwordTokenFor(pv)) {
+    out.push(`${aliasName}.password ${pw} does not match its own password_var ${pv} — the browser lane and the runner lane would sign in with different credentials`);
+  }
+  if (a.fields && !('password' in a.fields)) {
+    out.push(`${aliasName}.fields declares no \`password\` mapping — the alias registry stops documenting the field the runner resolves`);
+  }
+  return out;
 }
 
 /* ── The reward account ─────────────────────────────────────────────────────
@@ -1726,6 +1905,48 @@ export function validateSpecShape() {
   // `npm run seed:loyalty:zero-user:teardown` would delete them mid-run.
   if (CASE_ACCOUNT_PREFIX.startsWith('AGENT-TEST-loyzero-')) push(`CASE_ACCOUNT_PREFIX collides with seed-loyalty-ephemeral-user.mjs's sweep namespace — that seeder's teardown would delete the per-case accounts underneath a running suite`);
 
+  // --- the funded (points-spend) account ---------------------------------------
+  //
+  // A funded account is the one account in the set whose USEFULNESS is a number. Everything below
+  // asks whether that number can still be satisfied and still means something.
+  const funded = FUNDED_ACCOUNTS();
+  for (const a of funded) {
+    if (!(Number(a.minPoints) > 0)) {
+      push(`${a.aliasName}: its funding floor derives to ${a.minPoints} — a floor of zero is satisfied by the zero-balance account that could not place the order in the first place, so the guard would pass the exact fixture it exists to reject`);
+    }
+    for (const alias of a.missionAliases) {
+      const m = MISSION_BY_ALIAS[alias];
+      if (!m) { push(`${a.aliasName} is funded for ${alias}, which is not a declared mission`); continue; }
+      if (m.goal?.type !== 'PerSkuGoal') {
+        push(`${a.aliasName} funds ${alias}, whose goal is ${m.goal?.type} — funding exists so a case can BUY a loyalty-currency line, and only the PerSku target is priced in one`);
+      }
+    }
+    if (a.groups?.length) {
+      push(`${a.aliasName} carries groups [${a.groups.join(', ')}] — customer-group membership changes which ProductPoints program wins, so the funded amount would depend on a variable this account has no reason to carry`);
+    }
+  }
+  // The PTS product must be the one the funded account buys, and it must cost SOMETHING. A zero-priced
+  // points target makes the spend free, which removes the balance from the question entirely — the
+  // case would pass on a zero-balance account and prove nothing about currency at all.
+  if (!(Number(PTS_PRODUCT.listPrice) > 0)) {
+    push(`${PTS_PRODUCT.aliasName}.listPrice = ${PTS_PRODUCT.listPrice} — a free points line costs no balance, so the mixed cart is not a points SPEND and MSN-E2E-007 asks nothing about the loyalty currency`);
+  }
+  if (PTS_PRODUCT.currencyIntent !== 'loyalty') {
+    push(`${PTS_PRODUCT.aliasName}.currencyIntent = "${PTS_PRODUCT.currencyIntent}" — the funded account exists to buy a LOYALTY-currency line; in any other currency no balance is consumed and the question collapses`);
+  }
+  // The two account properties that cannot coexist must be held by two different accounts. This is
+  // the rule that would have caught MSN-029 borrowing the zero-balance reward account.
+  for (const a of funded) {
+    if (a.aliasName === REWARD_USER.aliasName) {
+      push(
+        `${a.aliasName} is both the legibility account and a funded spend account. `
+        + 'Those are mutually exclusive: legibility needs balance < reward, a spend needs balance >= the '
+        + "line's cost, and a balance can only be raised by earning (the loyalty op-log is read-only). "
+        + 'Split them.',
+      );
+    }
+  }
+
   return problems;
 }
 
@@ -2092,6 +2313,66 @@ export function validateSeededState(overlay, { now = new Date(), maxAgeHours = n
         + 'MSN-E2E-004 asserts the points it spends were EARNED FROM THE MISSION, and a grant that does not at '
         + 'least double the balance cannot demonstrate that. The balance climbs on every completion and there is '
         + 'no write API to lower it, so the fix is a fresh ephemeral account: `npm run seed:loyalty:zero-user`.',
+      );
+    }
+  }
+
+  /* ── [j] SPENDABILITY. The mirror image of legibility, and the second way this set could resolve
+   *      perfectly and test nothing.
+   *
+   * A funded account that cannot pay for the line its case must buy fails at `createOrderFromCart`
+   * with LOYALTY_INSUFFICIENT_BALANCE. The case then never places an order, so the mission's own
+   * seed-time reading — `InProgress`, `currentQuantity 0`, `isStarted false` — is still sitting there
+   * when it polls, and it reports that untouched state as though it were the outcome. Measured
+   * exactly so on 2026-09-01: seven polls, nothing moved, and the case concluded neither that the
+   * points line was counted nor that it was excluded.
+   */
+  for (const a of FUNDED_ACCOUNTS()) {
+    const acct = o[a.aliasName];
+    if (!acct) continue;   // absence is reported once by the account pass above
+    const cost = Number(a.minPoints);
+    const bal = acct.balance_at_seed;
+    if (bal === '' || bal == null) {
+      problems.push(`${a.aliasName}: no balance_at_seed was recorded — this is the one account whose usefulness IS its balance, and an unrecorded balance means the seed never established it could pay for the line ${a.caseId} must buy`);
+    } else if (!balanceCoversPtsLine(bal, cost)) {
+      problems.push(
+        `${a.aliasName} held ${bal} points at seed time but ${a.caseId} must buy a line costing ${cost}. `
+        + 'The order is refused with LOYALTY_INSUFFICIENT_BALANCE, so the case never places it and reads '
+        + 'the mission\'s untouched seed-time state as its result — a fixture that resolves, renders and '
+        + 'reports while deciding nothing. Points can only be raised by EARNING (the loyalty operation '
+        + 'log is read-only): re-run `npm run seed:missions-e2e`, which funds this account.',
+      );
+    }
+    if (acct.pts_line_cost !== '' && acct.pts_line_cost != null && Number(acct.pts_line_cost) !== cost) {
+      problems.push(`${a.aliasName}.pts_line_cost = ${acct.pts_line_cost} but the fixture derives ${cost} from ${PTS_PRODUCT.aliasName}'s own list price — the recorded cost has stopped following its source, so the balance was checked against the wrong number`);
+    }
+    // THE BASELINE. The case reads a DELTA against what the seed observed, so an unrecorded baseline
+    // is what let the previous fixture mistake seed state for an outcome.
+    for (const f of ['pts_progress_status_at_seed', 'pts_is_started_at_seed', 'pts_current_quantity_at_seed']) {
+      if (acct[f] === '' || acct[f] == null) {
+        problems.push(`${a.aliasName}.${f} is empty — ${a.caseId} distinguishes "not yet processed" from "processed and correctly excluded", and without the seed-time baseline both readings are the same number`);
+      }
+    }
+    // A target already part-bought at seed time cannot show a contribution of zero.
+    const q = Number(acct.pts_current_quantity_at_seed);
+    if (Number.isFinite(q) && q > 0) {
+      problems.push(`${a.aliasName}: the PerSku target already read currentQuantity ${q} at seed time — ${a.caseId} asks whether a points line contributes 0, and a target that is already above 0 cannot show that`);
+    }
+    // isStarted MUST still be false. It is the case's settle signal — the one reading that separates
+    // "the order has not been processed yet" from "it was processed and the points line was correctly
+    // excluded", because BOTH of those show currentQuantity 0. And it is not specific to the target:
+    // measured on vcst-qa 2026-09-01, a funding order for an unrelated cash SKU flipped isStarted to
+    // true on this mission while leaving currentQuantity at 0. So an account funded AFTER its missions
+    // were minted arrives with the signal already spent, and the case can no longer tell the two
+    // states apart in either direction.
+    if (String(acct.pts_is_started_at_seed) === 'true') {
+      problems.push(
+        `${a.aliasName}: the PerSku mission already read isStarted=true at seed time, so ${a.caseId}'s settle `
+        + 'signal is spent before the case starts — with currentQuantity 0 on both sides, "not yet processed" '
+        + 'and "processed and correctly excluded" become the same reading. Any order by this user flips '
+        + 'isStarted, target SKU or not, so the funding order must be placed BEFORE the run\'s missions are '
+        + 'minted: re-run the full `npm run seed:missions-e2e` rather than `--fund-accounts`, which funds '
+        + 'against an already-minted run and can only produce this state.',
       );
     }
   }

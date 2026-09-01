@@ -19,6 +19,15 @@
  *   [7] the PTS target settles in a currency the denomination product does not (MSN-E2E-007 asks something)
  *   [8] pack size 1 on every target                           (a stepper can reach exactly 1)
  *
+ * Two more were added on 2026-09-01, both of the same "resolves but tests nothing" shape:
+ *
+ *   [3g] every account alias can PRODUCE A TOKEN     (a role graphql-auth cannot resolve blocks the
+ *                                                     case at step 1, before any request is issued)
+ *   [j]  a funded account can PAY FOR ITS OWN LINE   (surfaced through [4]; an account that cannot
+ *                                                     cover the points line its case must buy never
+ *                                                     places the order, so the case reads untouched
+ *                                                     seed state and calls it a result)
+ *
  * Exit 0 clean, 1 on any problem. Warnings never fail.
  */
 import { readFileSync, existsSync } from 'node:fs';
@@ -28,6 +37,7 @@ import {
   MISSIONS, ALL_MISSIONS, PRODUCTS, REWARD_USER, RUNTIME_FIELDS_BY_KIND,
   UNIT_PRODUCT, MISSION_BY_ALIAS, DISCOUNT_ALIAS,
   CASE_MISSIONS, CASE_ACCOUNTS, CASE_ACCOUNT_PREFIX,
+  CREDENTIAL_ALIASES, credentialProblems, FUNDED_ACCOUNTS, ptsLineCost,
   TARGETING_MISSIONS, TARGETING_CASE_ID, isTargetingMission, declaredAliases, boundAccounts,
   validateSpecShape, validateSeededState,
   unitsToComplete, unitsJustBelow, discountBand,
@@ -163,9 +173,6 @@ for (const m of CASE_MISSIONS) {
 for (const a of CASE_ACCOUNTS) {
   expectMatch(a.aliasName, 'case_id', a.caseId);
   expectMatch(a.aliasName, 'mission_alias', a.missionAliases.join('; '));
-  // The password must be a VAR name, never a literal — same rule as every other seeded credential.
-  const pv = base[a.aliasName]?.password_var;
-  if (!pv) fail(`[3d] ${a.aliasName}.password_var is missing — a case has to know which {{VAR}} to type, and a literal password in a committed file is a secret-hygiene failure`);
   // The targeting pair's AUDIENCE is authored (which side of the group each half is on); the OBSERVED
   // membership is runtime and lives in the overlay. Committing the observed value would assert the
   // very thing the pair exists to make falsifiable.
@@ -173,6 +180,22 @@ for (const a of CASE_ACCOUNTS) {
     expectMatch(a.aliasName, 'audience_role', a.audienceRole);
     expectMatch(a.aliasName, 'groups_intent', (a.groups || []).join('; '));
   }
+}
+
+/* [3g] EVERY account alias must be able to PRODUCE A TOKEN — the first of the two vacuity shapes.
+ *
+ * An alias that resolves as data and cannot resolve as a ROLE is a fixture that tests nothing, and it
+ * fails in the least visible place: step 1 of an unattended run, before a single request is issued.
+ * Measured 2026-09-01: MSN_E2E_USER_* carried `password_var` (an env-var NAME, correct for the browser
+ * lane's Playwright --secrets redaction) but no field graphql-auth.ts `resolveRole()` reads, so it fell
+ * through to the last-resort `<ALIAS>_EMAIL`/`<ALIAS>_PASSWORD` env pattern and threw. Six of the nine
+ * 075d cases could not run unattended; the one execution that reported results had bridged it by hand
+ * with an uncommitted wrapper.
+ *
+ * The rule lives in the spec module (`credentialProblems`) so this guard and the unit tests judge the
+ * same contract the runner implements, rather than a similar-looking checklist. */
+for (const aliasName of CREDENTIAL_ALIASES()) {
+  for (const m of credentialProblems(aliasName, base[aliasName])) fail(`[3g] ${m}`);
 }
 
 /* [3e] The four per-case rewards must stay DISTINCT from each other and from every other mission in
@@ -302,6 +325,7 @@ console.log(
   `✅ clean — ${ALL_MISSIONS.length} missions (${CASE_MISSIONS.length} measured per-case, ${TARGETING_MISSIONS.length} targeting), `
   + `${CASE_ACCOUNTS.length} per-run accounts, ${PRODUCTS.length} products, ${declared.length} aliases; every fixture was `
   + 'pre-completion at seed time, every per-case target sits in a measured band, the targeting star recorded a '
-  + 'reading for both of its accounts with its control visible to both, the accounts are distinct and the reward '
-  + 'is legible.',
+  + 'reading for both of its accounts with its control visible to both, the accounts are distinct, every role '
+  + `resolves to a token, the reward is legible and the ${FUNDED_ACCOUNTS().length} funded account(s) can pay for `
+  + `the ${ptsLineCost()}-point line their case must buy.`,
 );

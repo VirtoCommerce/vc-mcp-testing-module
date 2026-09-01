@@ -1,23 +1,102 @@
 {
-  "runId": "REG-2026-08-28-1154",
-  "status": "completed",
-  "startedAt": "2026-08-28T09:54:52.531Z",
-  "finishedAt": "2026-08-28T10:14:00.528Z",
-  "selection": "083d",
+  "runId": "REG-2026-09-01-1750",
+  "status": "in_progress",
+  "startedAt": "2026-09-01T15:50:49.619Z",
+  "finishedAt": null,
+  "selection": "loyalty + P0 floor --cases critical --also-ids MSN-027..034,MSNA-023",
   "environment": "vcst-qa",
+  "seedGeneration": "20260901153647-7b25",
   "suites": [
+    {
+      "id": "075",
+      "name": "Loyalty",
+      "file": "regression/suites/Backend/loyalty/075-loyalty.csv",
+      "status": "pending",
+      "testCount": 29
+    },
+    {
+      "id": "075b",
+      "name": "Loyalty Mixed Cart Order",
+      "file": "regression/suites/Backend/loyalty/075b-loyalty-mixed-cart-order.csv",
+      "status": "pending",
+      "testCount": 13
+    },
+    {
+      "id": "075c",
+      "name": "Loyalty Product Points Earning",
+      "file": "regression/suites/Backend/loyalty/075c-loyalty-product-points-earning.csv",
+      "status": "pending",
+      "testCount": 10
+    },
+    {
+      "id": "075d",
+      "name": "Loyalty Missions",
+      "file": "regression/suites/Backend/loyalty/075d-loyalty-missions.csv",
+      "status": "pending",
+      "testCount": 34
+    },
+    {
+      "id": "075e",
+      "name": "Loyalty Missions Admin",
+      "file": "regression/suites/Backend/loyalty/075e-loyalty-missions-admin.csv",
+      "status": "pending",
+      "testCount": 23
+    },
+    {
+      "id": "083",
+      "name": "Loyalty Catalog Browsing",
+      "file": "regression/suites/Frontend/loyalty/083-loyalty-catalog.csv",
+      "status": "pending",
+      "testCount": 26
+    },
+    {
+      "id": "083b",
+      "name": "Loyalty Mixed Cart Order",
+      "file": "regression/suites/Frontend/loyalty/083b-loyalty-mixed-cart-order.csv",
+      "status": "pending",
+      "testCount": 8
+    },
+    {
+      "id": "083c",
+      "name": "Loyalty Missions Storefront",
+      "file": "regression/suites/Frontend/loyalty/083c-loyalty-missions-storefront.csv",
+      "status": "pending",
+      "testCount": 68
+    },
     {
       "id": "083d",
       "name": "Loyalty Missions E2E",
       "file": "regression/suites/Frontend/loyalty/083d-loyalty-missions-e2e.csv",
-      "status": "done",
-      "browser": "playwright-chrome",
-      "testCount": 8,
-      "startedAt": "2026-08-28T09:55:49.508Z",
-      "finishedAt": "2026-08-28T10:14:00.528Z",
-      "passed": 2,
-      "failed": 0,
-      "blocked": 6
+      "status": "pending",
+      "testCount": 8
+    },
+    {
+      "id": "042",
+      "name": "Smoke Tests",
+      "file": "regression/suites/Frontend/smoke/042-smoke-tests.csv",
+      "status": "pending",
+      "testCount": 34
+    },
+    {
+      "id": "044",
+      "name": "Security Tests",
+      "file": "regression/suites/Frontend/cross-cutting/044-security-tests.csv",
+      "status": "pending",
+      "testCount": 34
+    },
+    {
+      "id": "049",
+      "name": "Platform API",
+      "file": "regression/suites/Backend/api/049-platform-api.csv",
+      "status": "pending",
+      "testCount": 48
+    },
+    {
+      "id": "039",
+      "name": "Payment CyberSource",
+      "file": "regression/suites/Frontend/payment/039-payment-cybersource.csv",
+      "status": "pending",
+      "testCount": 18
     }
   ]
 }

@@ -94,6 +94,38 @@ suite that authenticates as that role was very nearly filed as broken.
 use the curated `env` export only for keys you have confirmed it carries. Never conclude a variable
 is unset from a single layer or from the curated object.
 
+## DISPOSABLE FIXTURES — an observation must outlive the fixture it was made on
+
+Per-run fixtures are the right design: a terminal state (a completed mission, a consumed coupon,
+a shipped order) stops accruing, so a case that must observe an ADVANCE needs its own freshly-minted
+entity or it passes once and never again. But the same property has a second consequence that is
+easy to miss, because **nothing about it fails**.
+
+**A re-seed between the measurement and the audit destroys the evidence silently.** Nothing errors,
+every guard stays green, the validator still reports a healthy fixture set — and the observation
+simply stops being checkable, because the entity it was made on no longer exists. This is not a
+value that misleads (the family of hazards in `qa-test-cases-generator` §Rules); it is a **fact that
+quietly ceases to exist**, which is why no check catches it.
+
+Measured 2026-09-01: three `P0-revenue` oracle candidates were reported grounded on live
+observations — real order numbers, coherent balances — taken on fixture generation
+`…134918-9421`. By the time they were audited the overlay named `…153647-7b25`, and every account
+read clean: zero balance, zero ledger rows, missions at `InProgress 0%`. The report the observations
+came from *said* the fixture had been re-seeded; the sentence was relayed along with the numbers and
+read past. The contradiction was caught only by re-reading the state and finding the seed-time
+baselines (`balance_at_seed 30850`, `progress_status_at_seed InProgress`) matched the *pre*-order
+figures.
+
+Two rules follow:
+
+- **An observation on a disposable fixture must be captured with enough identifying detail to be
+  re-derived — the run handle, the account and entity ids, the order numbers — or captured again by
+  whoever will cite it.** A number without its generation is not evidence, it is a memory.
+- **Do not re-seed between producing an observation and its being consumed.** Leave the fixture
+  consumed so the post-state can be read directly; whoever needs fresh fixtures re-seeds *after*,
+  in that order. A run that writes durable artifacts (a `REG-*` run id with per-case results and
+  traces) is the strongest form, because the evidence is then tied to the generation by construction.
+
 ## Four data layers
 
 | Layer | Source | Use for |

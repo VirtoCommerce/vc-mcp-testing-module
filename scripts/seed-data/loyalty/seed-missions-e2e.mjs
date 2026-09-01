@@ -62,11 +62,28 @@ import {
   unitsToComplete, unitsJustBelow, discountBand,
   absenceIsProven, productTeardownVerdict,
   PRODUCT_INDEX_DOCUMENT_TYPE, buildReindexRequest, indexDocumentTypeProblem,
+  FUNDED_ACCOUNTS, PTS_PRODUCT, balanceCoversPtsLine,
 } from './missions-e2e-specs.mjs';
+import {
+  resolveWinningEarning, placeEarnOrder, pollBalanceChange, qtyForTarget, pointsPerUnit,
+} from './loyalty-earn.mjs';
 
 const argv = process.argv.slice(2);
 const SWEEP_ALL = argv.includes('--all');
 const KEEP_PRODUCTS = argv.includes('--keep-products');
+/**
+ * `--fund-accounts`: provision ONLY the funded (points-spend) account(s) against the run that is
+ * ALREADY seeded, and touch nothing else.
+ *
+ * It exists because the alternative is a full re-seed, which mints a new run handle and discards
+ * every measured target of the live one. A running suite is worth more than a tidy code path.
+ *
+ * The one thing it CANNOT reproduce is the full seed's ordering: the funding order is placed after
+ * this run's missions exist, so `ProcessOrderAsync` may leave a progress row on them. That is why the
+ * baseline is measured and written rather than assumed — and why the guard fails if the PerSku target
+ * comes back already above zero.
+ */
+const FUND_ONLY = argv.includes('--fund-accounts');
 const MAX_AGE_HOURS = argv.includes('--max-age-hours')
   ? Number(argv[argv.indexOf('--max-age-hours') + 1])
   : DEFAULT_SWEEP_MAX_AGE_HOURS;
@@ -661,6 +678,87 @@ async function ensureCaseAccounts({ maxAgeHours = MAX_AGE_HOURS, all = false } =
   return accounts;
 }
 
+/* ── Funding a points-SPEND account ──────────────────────────────────────────
+ *
+ * One account in this set has to BUY the loyalty-currency target, and a points line is refused at
+ * place-order unless the balance covers it (LOYALTY_INSUFFICIENT_BALANCE, measured on vcst-qa
+ * 2026-09-01). A balance can only be RAISED, by earning on a real order — the loyalty operation log
+ * is read-only, confirmed against this platform's own swagger — so funding places one.
+ *
+ * ORDER MATTERS: this runs BEFORE the run's missions are minted. `ProcessOrderAsync` advances every
+ * mission applicable to an order's user, so an earn order placed after minting would put a progress
+ * row on the very mission the case is about to watch. Minting afterwards means there is nothing for
+ * the funding order to touch.
+ *
+ * The AMOUNT is not ours to choose (points = program factor x unit price x qty, qty 1 is the floor)
+ * and on this store it is large. That is recorded, not fought: nothing this account asserts reads its
+ * balance — see the PTS-SPEND block in missions-e2e-specs.mjs for why legibility lives on a second account.
+ */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function fundAccounts(accounts, { currency, culture = 'en-US' } = {}) {
+  if (!currency) throw new Error('fundAccounts needs the store default currency — the earn product is priced in it');
+  const funded = FUNDED_ACCOUNTS();
+  if (!funded.length) return;
+  for (const a of funded) {
+    const acct = accounts[a.aliasName];
+    if (!acct) throw new Error(`${a.aliasName} is declared as a funded account but was never minted`);
+    if (DRY_RUN) { log(`  [DRY] would fund ${a.aliasName} to at least ${a.minPoints} point(s)`); continue; }
+
+    const before = await readBalance(acct.userId);
+    if (balanceCoversPtsLine(before, a.minPoints)) {
+      acct.balance = before;
+      acct.funding = { program: '(already funded)', order: '', perUnit: '' };
+      log(`  ✓ ${a.aliasName} already holds ${before} point(s) ≥ ${a.minPoints} — no earn order placed`);
+      continue;
+    }
+
+    const token = await storefrontToken(BACK_URL, STORE_ID, acct.email, password());
+    if (!token) throw new Error(`could not obtain a storefront token for ${acct.email} — cannot fund ${a.aliasName}`);
+    // `cultureName` + `currencyCode` are NOT optional in practice. Omitting them made every
+    // `product(...)` read come back `INVALID_OPERATION`, which this function can only interpret as
+    // "not buyable" — so the seeder reported "no eligible ProductPoints program" while all seven were
+    // eligible and the SKU was in stock (measured 2026-09-01). Same ambient-context rule as every
+    // other xAPI call in this repo: pass the context, never rely on a default.
+    const earnInfo = async (productId) => {
+      const d = await customerGql(token, `query { product(id: "${productId}" storeId: "${STORE_ID}" cultureName: "${culture}" currencyCode: "${currency}") { code availabilityData { isBuyable isAvailable availableQuantity } price { actual { amount } } } }`).catch(() => null);
+      const p = d?.product;
+      const unitPrice = Number(p?.price?.actual?.amount || 0);
+      if (!p?.availabilityData?.isBuyable || !p?.availabilityData?.isAvailable || !(unitPrice > 0)) return null;
+      return { sku: p.code, productId, unitPrice, availableQuantity: Number(p.availabilityData.availableQuantity ?? 0) };
+    };
+    const earn = await resolveWinningEarning({
+      api, earnInfo, userGroups: acct.observedGroups || [],
+      onFallback: (top, used) => log(`  ⚠ top ProductPoints program "${top.name}" has no buyable factor SKU — earning through "${used.name}" (pri ${used.priority})`),
+    });
+    if (!earn) {
+      throw new Error(
+        `no eligible ProductPoints program resolves for ${acct.email}, so ${a.aliasName} cannot be funded and `
+        + `${a.caseId} would place no order at all. Points have no write API — earning on a real order is the `
+        + 'only mechanism (see loyalty-earn.mjs).',
+      );
+    }
+    const perUnit = pointsPerUnit(earn.factor, earn.unitPrice);
+    if (!(perUnit > 0)) throw new Error(`the winning earn SKU ${earn.sku} yields ${perUnit} points/unit — funding cannot converge`);
+    const qty = qtyForTarget({ remaining: a.minPoints - before, perUnit, available: earn.availableQuantity });
+    const order = await placeEarnOrder({
+      gql: (query) => customerGql(token, query), storeId: STORE_ID, userId: acct.userId,
+      productId: earn.productId, qty, currency, culture,
+    });
+    const after = await pollBalanceChange({ readBalance, userId: acct.userId, from: before, sleep });
+    acct.balance = after;
+    acct.funding = { program: `${earn.programName} (pri ${earn.priority}, factor ${earn.factor} × ${earn.unitPrice})`, order, perUnit };
+    if (!balanceCoversPtsLine(after, a.minPoints)) {
+      throw new Error(
+        `${a.aliasName} still holds ${after} point(s) after earn order ${order} (${earn.sku} ×${qty}, ${perUnit}/unit) — `
+        + `it needs ${a.minPoints} to buy the ${PTS_PRODUCT.sku} line ${a.caseId} is about. Refusing to publish a `
+        + 'fixture whose case would be refused at place-order and would then read untouched seed state as its result.',
+      );
+    }
+    log(`  ✓ ${a.aliasName} funded ${before} → ${after} point(s) via ${earn.sku} ×${qty} (order ${order}; ${perUnit}/unit, floor ${a.minPoints})`);
+  }
+}
+
 /**
  * Measure every per-case cart and derive every per-case target.
  *
@@ -874,6 +972,11 @@ async function seed() {
   // could resolve different prices, a different tax and a different coupon eligibility.
   const caseAccounts = await ensureCaseAccounts({ all: SWEEP_ALL });
 
+  // --- 3b-bis. FUND the points-spend account, BEFORE anything is minted ------
+  // An earn order advances every mission applicable to its user, so it has to happen while this run
+  // has no missions for it to touch. See fundAccounts().
+  await fundAccounts(caseAccounts, { currency: currencies['store-default'] });
+
   // --- 3c. measure the per-case carts and DERIVE their targets ---------------
   let measurements = {};
   if (!DRY_RUN) {
@@ -1005,6 +1108,19 @@ async function seed() {
         // handle did not isolate this run.
         if (admin.get(id)) bad.push(`${spec.aliasName} already has a progress row in the admin table — the mission is not new`);
         if (card.isStarted === true) bad.push(`${spec.aliasName} reports isStarted=true on a freshly minted mission`);
+        // THE PER-SKU BASELINE, for a funded account. Its case tells "not yet processed" from
+        // "processed and correctly excluded", and both readings are currentQuantity 0 — so the seed
+        // records what it OBSERVED here and the case asserts a delta against that, instead of
+        // comparing a poll to a zero nobody verified. This is the reading the previous fixture
+        // mistook for an outcome across seven polls.
+        if (caseAccounts[acct.alias]?.funding) {
+          const row = (card.items || []).find((it) => it.productId === bySlot[PTS_PRODUCT.slot]?.id) || (card.items || [])[0] || {};
+          caseAccounts[acct.alias].ptsBaseline = {
+            status: String(card.status),
+            isStarted: card.isStarted === true,
+            currentQuantity: Number(row.currentQuantity ?? 0),
+          };
+        }
       }
       visibility[spec.aliasName] = sightings;
       // An arm invisible to EVERY account leaves no seed-time state to record, and an unrecorded state
@@ -1201,6 +1317,21 @@ async function seed() {
       balance_at_seed: acct.balance == null ? '' : String(acct.balance),
       groups_at_seed: (acct.observedGroups || []).join('; '),
     };
+    // A FUNDED account records the two things its case cannot re-derive: whether it can pay for the
+    // line at all, and what the target read BEFORE the case's own order. The provenance fields say
+    // where the points came from, because "it has a balance" and "we know why" are different claims.
+    if (a.funding) {
+      const base = acct.ptsBaseline || {};
+      Object.assign(updates[a.aliasName], {
+        pts_line_cost: String(a.funding.minPoints()),
+        funding_program: acct.funding?.program || '',
+        funding_order: acct.funding?.order || '',
+        funding_points_per_unit: acct.funding?.perUnit == null ? '' : String(acct.funding.perUnit),
+        pts_progress_status_at_seed: base.status || '',
+        pts_is_started_at_seed: base.isStarted == null ? '' : String(base.isStarted),
+        pts_current_quantity_at_seed: base.currentQuantity == null ? '' : String(base.currentQuantity),
+      });
+    }
   }
 
   for (const p of resolvedProducts) {
@@ -1387,9 +1518,83 @@ async function teardown() {
   log(`  ✓ aliases.${process.env.TEST_ENV || 'vcst'}.json: MSN_E2E_* entries blanked`);
 }
 
+/* ── `--fund-accounts`: provision only the funded account(s), in place ───────── */
+
+async function fundOnly() {
+  const funded = FUNDED_ACCOUNTS();
+  if (!funded.length) { log('No funded accounts are declared — nothing to do.'); return; }
+  const o = overlay();
+  const runId = String(o.MSN_E2E_RUN?.run_id || '');
+  if (!runId) throw new Error('this env has never been seeded (MSN_E2E_RUN.run_id is empty) — run the full `npm run seed:missions-e2e` instead');
+  log(`Funding against the seeded run ${runId} (missions are NOT re-minted).`);
+
+  const accounts = {};
+  for (const a of funded) {
+    const existing = o[a.aliasName] || {};
+    if (existing.email && existing.user_id) {
+      accounts[a.aliasName] = { email: existing.email, userId: existing.user_id, memberId: existing.member_id, handle: existing.handle, observedGroups: [] };
+      log(`  ↻ ${a.aliasName} already minted: ${existing.email}`);
+      continue;
+    }
+    // Deliberately NOT via ensureCaseAccounts: that sweeps the whole namespace, which would delete
+    // the other per-run accounts of the live run out from under a suite that is using them.
+    const user = await createEphemeralAccount(api, {
+      prefix: CASE_ACCOUNT_PREFIX, storeId: STORE_ID, withOrg: true, groups: a.groups || [],
+      lastName: a.caseId.replace(/[^A-Za-z0-9]/g, ''), dryRun: DRY_RUN, log, verbose,
+    });
+    accounts[a.aliasName] = { ...user, observedGroups: a.groups || [] };
+  }
+
+  // The earn product is priced in the store default currency, and that is READ off the store rather
+  // than assumed to be USD — the same rule the full seed follows.
+  const store = await api('GET', `/api/stores/${encodeURIComponent(STORE_ID)}`);
+  await fundAccounts(accounts, { currency: resolveIntents(store)['store-default'] });
+  if (DRY_RUN) { log('[DRY] no funding order placed, no overlay written.'); return; }
+
+  const updates = {};
+  for (const a of funded) {
+    const acct = accounts[a.aliasName];
+    // The baseline, read from the storefront's own query against THIS run's mission.
+    const baseline = {};
+    for (const alias of a.missionAliases) {
+      const missionId = o[alias]?.id;
+      if (!missionId) throw new Error(`${alias} has no id in the overlay — the seeded run does not carry the mission ${a.caseId} needs`);
+      const card = (await customerVisibleMissions(acct.userId)).get(missionId);
+      if (!card) {
+        throw new Error(
+          `${alias} (${o[alias]?.name}) is not visible to ${acct.email} through the customer-facing query, so `
+          + `${a.caseId} would find no card at all. That is a broken instrument, not a reading.`,
+        );
+      }
+      const ptsProductId = o[PTS_PRODUCT.aliasName]?.productId;
+      const row = (card.items || []).find((it) => it.productId === ptsProductId) || (card.items || [])[0] || {};
+      baseline.status = String(card.status);
+      baseline.isStarted = card.isStarted === true;
+      baseline.currentQuantity = Number(row.currentQuantity ?? 0);
+    }
+    log(`  ◦ ${a.aliasName} baseline on ${a.missionAliases.join('/')}: ${baseline.status}, isStarted=${baseline.isStarted}, currentQuantity=${baseline.currentQuantity}`);
+    updates[a.aliasName] = {
+      email: acct.email, user_id: acct.userId, member_id: acct.memberId, handle: acct.handle,
+      balance_at_seed: acct.balance == null ? '' : String(acct.balance),
+      groups_at_seed: (acct.observedGroups || []).join('; '),
+      pts_line_cost: String(a.funding.minPoints()),
+      funding_program: acct.funding?.program || '',
+      funding_order: acct.funding?.order || '',
+      funding_points_per_unit: acct.funding?.perUnit == null ? '' : String(acct.funding.perUnit),
+      pts_progress_status_at_seed: baseline.status || '',
+      pts_is_started_at_seed: baseline.isStarted == null ? '' : String(baseline.isStarted),
+      pts_current_quantity_at_seed: baseline.currentQuantity == null ? '' : String(baseline.currentQuantity),
+    };
+  }
+  writeEnvAliasOverride(updates);
+  log(`  ✓ aliases.${process.env.TEST_ENV || 'vcst'}.json: ${Object.keys(updates).join(', ')}`);
+}
+
 (async () => {
-  console.log(`🎯 Seed Loyalty Missions E2E (083d)${DRY_RUN ? ' [DRY RUN]' : ''}${TEARDOWN ? ' [TEARDOWN]' : ''}`);
+  console.log(`🎯 Seed Loyalty Missions E2E (083d)${DRY_RUN ? ' [DRY RUN]' : ''}${TEARDOWN ? ' [TEARDOWN]' : ''}${FUND_ONLY ? ' [FUND ACCOUNTS ONLY]' : ''}`);
   assertSafeTarget();
   await auth();
-  if (TEARDOWN) await teardown(); else await seed();
+  if (TEARDOWN) await teardown();
+  else if (FUND_ONLY) await fundOnly();
+  else await seed();
 })().catch((e) => { console.error('FAILED:', e.message); if (VERBOSE) console.error(e.stack); process.exit(1); });
