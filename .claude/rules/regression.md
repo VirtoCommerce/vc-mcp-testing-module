@@ -159,6 +159,16 @@ It landed cleanly only because that half happened to be gate-green at that minut
 had landed moments earlier and the same command could as easily have caught the file mid-edit. Treat
 the good outcome as luck, not as evidence the practice is safe.
 
+**Calibrate what this rule is about, or it becomes "never run `git add -A`" and gets ignored.** The
+failure is **publishing another session's unfinished WORK** — half-written source, a suite mid-edit, a
+fixture that has not been verified — under your commit message and your name. It is **not** every file
+you did not personally author. Sweeping up an already-tracked transient artifact — a run-status file, a
+generated report — is untidiness, not the failure: it was in git before you touched it and the next
+commit records its final state. Measured 2026-09-01: `reports/regression/test-run-status.json` was
+committed mid-run and read as a repeat of this mistake, until checking showed it has been tracked for
+100+ commits and matches no ignore rule, so every commit touching that path has always recorded
+whatever state it was in. Keep the distinction sharp; a rule that flags everything flags nothing.
+
 **And once it is pushed, it stays.** Do not offer to rewrite history to fix attribution on a shared
 branch: a force-push breaks the branch for every session that has pulled it, which is a real loss
 traded for a cosmetic one. Attribution lives in the reports, the code comments and the audit trail —
