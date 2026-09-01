@@ -261,8 +261,8 @@ Store @td(MSN_STORE_SETTINGS.store_id) has @td(MSN_STORE_SETTINGS.setting_name)=
 [NEG] the card does NOT show a 'Completed' chip at any DOM_i where its own percent is below 100 {OBSERVED}
 [REL] the sequence DOM_1..DOM_n is monotonically non-decreasing across the polls {OBSERVED}
 [REL] at every paired read, DOM_i = API_i within rounding -- the storefront card is never observed to lag a same-moment direct read of the same mission {HYPOTHESIS}
-[INV] the final poll within the 30s budget reads DOM = 100 with a 'Completed' chip present; if it does not, report BLOCKED -- settlement did not converge within budget, not a silent pass {OBSERVED}",[CONSOLE] no unhandled JS errors on any of the polled page loads
-[NETWORK] no 4xx/5xx on any of the polled missions-page data fetches or the paired API reads,"An error toast, blank card, or JS exception appears on the immediate post-order read, percent regresses between two polls, DOM_i and API_i disagree at any paired read (a stale-cache defect, distinct from a slow-settlement one), the card never reaches 100/Completed within the 30s budget",Cancel the created order via admin if the store does not auto-clear it; remove any leftover cart items; sign out,"VCST-5320; ECL-14.7; DOM-vs-API staleness probe per vc-bug-catalog.md STALE archetype; documents observed behavior only, no declared SLA; per-case fixture measured live 2026-08-28; Archetype:STALE Technique:ST",Draft
+[INV] the final poll within the 30s budget reads DOM = 100 with a 'Completed' chip present; if it does not, report BLOCKED -- settlement did not converge within budget, not a silent pass {OBSERVED}","[CONSOLE] no unhandled JS errors on any of the polled page loads
+[NETWORK] no 4xx/5xx on any of the polled missions-page data fetches or the paired API reads","An error toast, blank card, or JS exception appears on the immediate post-order read, percent regresses between two polls, DOM_i and API_i disagree at any paired read (a stale-cache defect, distinct from a slow-settlement one), the card never reaches 100/Completed within the 30s budget",Cancel the created order via admin if the store does not auto-clear it; remove any leftover cart items; sign out,"VCST-5320; ECL-14.7; DOM-vs-API staleness probe per vc-bug-catalog.md STALE archetype; documents observed behavior only, no declared SLA; per-case fixture measured live 2026-08-28; Archetype:STALE Technique:ST",Draft
 MSN-E2E-007,"A PTS-priced (loyalty-currency) line item DOES count toward a PerSkuGoal quantity target -- the accrual path applies no currency filter, unlike the sibling product-points earning path (BL-LOY-009)",Loyalty > Missions > E2E Journey,Medium,,"ECL-14.4, ECL-13.3","[PRE:CLEAR_SESSION]
 [PRE:SIGNIN_AS:LOYALTY_VIP_USER]
 [PRE:RESET_CART]
@@ -294,9 +294,9 @@ Store @td(MSN_STORE_SETTINGS.store_id) has @td(MSN_STORE_SETTINGS.setting_name)=
 [NAV] {{FRONT_URL}}/account/missions
 [WAIT] the mission card grid has rendered again; if the card still reads PERCENT_0, reload up to 6 times at ~5s intervals (30s budget) before recording -- a read that has not moved cannot be told apart from one that never will without giving settlement time
 [ACT] locate the card for @td(MSN_E2E_PERSKU_PTS.name)
-[ACT] record its percent as PERCENT_AFTER",[REL] PERCENT_AFTER is greater than PERCENT_0 -- the points-currency line moved the quantity target {DOC}
+[ACT] record its percent as PERCENT_AFTER","[REL] PERCENT_AFTER is greater than PERCENT_0 -- the points-currency line moved the quantity target {DOC}
 [MATH] PERCENT_AFTER = 100 -- the single target's whole quantity was satisfied by the PTS-priced line alone {DOC}
-[DOM] a 'Completed' chip is present on the card {SPEC},"[API] loyaltyMissionProgress(storeId, userId).items[?missionId=@td(MSN_E2E_PERSKU_PTS.id)].items[0].currentQuantity = @td(MSN_E2E_PRODUCT_PTS.quantity) per the shape confirmed in 075d MSN-014
+[DOM] a 'Completed' chip is present on the card {SPEC}","[API] loyaltyMissionProgress(storeId, userId).items[?missionId=@td(MSN_E2E_PERSKU_PTS.id)].items[0].currentQuantity = @td(MSN_E2E_PRODUCT_PTS.quantity) per the shape confirmed in 075d MSN-014
 [API] loyaltyPointsHistory(userId) shows no Earned row of the ProductPoints kind for this order's cash line's own SKU value counted toward THIS mission -- confirms the observation is attributable to the PTS line, not to an unrelated earn event
 [ADMIN] the order appears in the Admin Orders grid with both line items, the PTS line priced in @td(LOYALTY_SETTINGS.currency_code)
 [CONSOLE] no unhandled JS errors
