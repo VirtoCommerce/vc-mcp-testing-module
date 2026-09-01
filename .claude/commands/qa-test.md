@@ -853,8 +853,39 @@ The verdict follows directly from 5a's triage output + 5b's reconciliation and p
 judgment is introduced here.
 
 **5d. File bugs (with confirmation).** File the confirmed, non-duplicate real bugs from 5a, each carrying a
-`## Fix Routing` hint. **Ask before filing.** Relationship to the ticket is set by 5a's provenance
-(mechanics: `.claude/knowledge/execution/tracker-ops.md` §5b):
+`## Fix Routing` hint. **Ask before filing.**
+
+**Severity floor — file `Critical` / `High` / `Medium` only. A `Low` finding is recorded, never filed.**
+
+| Severity | = | Tracker item at 5d |
+|---|---|---|
+| `Critical` | P0 | **File** |
+| `High` | P1 | **File** |
+| `Medium` | P2 | **File** |
+| `Low` | P3 | **Do not file** — record it (below) |
+
+This applies to **both** filing shapes the table below produces: an IN-SCOPE `Low` gets no Sub-task, and
+an OUT-OF-SCOPE incidental `Low` gets no standalone ticket. Severity is 5a item 5's call
+(`.claude/skills/qa-defect/`), already ratified by the 5b gate — 5d applies the floor, it does not
+re-grade to reach it. Nudging a P2 down to P3 to avoid filing, or a P3 up to P2 to force it, is the one
+move this rule must not cause.
+
+**A `Low` is dropped from the TRACKER, never from the RUN.** Silence is the failure mode this whole
+pipeline is built against, so a below-floor finding lands in three places instead of one:
+
+1. Its **`reports/bugs/open/` draft stays** (5a's `/qa-triage-results --fix` pass already wrote it, or
+   write it here). That is the durable record, and it is what a human promotes from later if the finding
+   recurs or someone disagrees with the grade.
+2. **5e's tracker comment names it** — count plus one line each, under `Not filed (below severity floor)`,
+   with the draft path. A reviewer who wants it filed can say so; a reviewer who never sees it cannot.
+3. On the **FAST path** the Artifact-B checklist row carries it too, since the checklist is that run's
+   only durable record.
+
+Escalate above the floor only on an explicit human instruction in this run ("file the Low ones too") —
+never on the agent's own judgement, and never in bulk.
+
+Relationship to the ticket is set by 5a's provenance (mechanics:
+`.claude/knowledge/execution/tracker-ops.md` §5b):
 
 | Provenance | Relationship |
 |---|---|
@@ -866,10 +897,13 @@ A bug already drafted by 5a's `/qa-triage-results --fix` pass is filed here the 
 the basis, don't re-investigate. A test-defect still routes to `/qa-review-tests <suite> --fix`, never
 filed to the tracker.
 
-**Gate (Filing sound — inline self-check):** every IN-SCOPE bug is a Sub-task of the ticket, every
-PRE-EXISTING match is linked (not re-filed), no real bug was downgraded to a test-defect — the 5b gate
-already ratified the underlying provenance/severity calls, so this is a mechanical filing check, not a
-second verifier dispatch. Fix and re-file before moving to 5e.
+**Gate (Filing sound — inline self-check):** every IN-SCOPE bug **at or above the floor** is a Sub-task of
+the ticket, every PRE-EXISTING match is linked (not re-filed), **every below-floor `Low` has a
+`reports/bugs/open/` draft and a line in the 5e comment** (a `Low` that exists in neither place was
+dropped, which is the one outcome the floor must not produce), no real bug was downgraded to a
+test-defect, and **no severity moved between 5a and here** — the 5b gate already ratified the
+provenance/severity calls, so this is a mechanical filing check, not a second verifier dispatch. Fix and
+re-file before moving to 5e.
 
 **5e. Report.** In order:
 
@@ -902,9 +936,13 @@ second verifier dispatch. Fix and re-file before moving to 5e.
    Regression triage: [N] confirmed bugs, [M] test-case fixes applied, [K] dismissed.
    App Insights (test window): [N] correlated — [confirmed/needs-review/none].
    Business rules verified: [BL-* list]. Bugs: [list, with relationship — sub-task/linked/standalone — or None].
+   Not filed (below severity floor): [N] Low — [one line each + reports/bugs/open/<file>.md], or None.
    Release gate: [GO/CONDITIONAL GO/NO-GO recommendation]. Decision: [verdict].
    Evidence: reports/tickets/{SPRINT}/<ticket-key>/screenshots/
    ```
+   The `Not filed` line is **mandatory and says `None` when there are none** — an omitted line is
+   indistinguishable from a run that found no Low issues, which is exactly the ambiguity the floor would
+   otherwise introduce.
 3. **Persist `summary.json`.** Per `.claude/rules/reports.md` §1, `summary.json` + evidence screenshots are
    **plus the `testing-checklist.md` written at Step 3** — the artifacts this command persists (new test
    cases live in `regression/suites/`, category 2 — not a
@@ -999,3 +1037,8 @@ ships. Record the outcome in `summary.json.iterations` (`rounds`, `max_rounds`, 
 - If an agent fails with an internal error, fall back to working directly rather than retrying the same delegation. If Atlassian MCP is unavailable, skip JIRA transitions and ask the user for ticket details.
 - **What persists** (`.claude/rules/reports.md` §1): `summary.json`, **`testing-checklist.md`** (Artifact B — on FAST it is the run's only durable record of what was checked) and evidence screenshots, all under `reports/tickets/{SPRINT}/<ticket-key>/`; the FULL-path Test Model to `reports/ba/test-models/<TICKET>-<date>.md` (category 3); new test cases to `regression/suites/` (category 2). Steps 1d/4 still never write `ac-analysis.md` / `test-execution-report.md` — the AC table lives in working context and every other finding is delivered once, in the Step 5 chat report.
 - App Insights correlation (5a) reuses `/qa-monitoring`'s query + dedup + triage machinery scoped to the window (no separate live-repro); resolve resources from `APPINSIGHTS_*`, skip gracefully when unconfigured; a correlated error gets no separate `BUG-AI-*` draft (5f's `/qa-bug` owns it).
+- **Severity floor on filing (5d): `Critical` / `High` / `Medium` only.** A `Low`/P3 finding keeps its
+  `reports/bugs/open/` draft, is named in the 5e comment and in `summary.json.bugs_not_filed`, and gets no
+  tracker item — for either shape (no Sub-task, no standalone ticket). It is dropped from the tracker,
+  never from the run, and never re-graded to move it across the line. It is also outside `--iterate`:
+  `/qa-fix` needs a filed ticket, so 5k only ever fixes what 5d filed.
