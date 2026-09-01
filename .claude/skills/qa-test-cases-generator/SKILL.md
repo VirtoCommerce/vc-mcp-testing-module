@@ -203,9 +203,48 @@ matrix and the suite stay traceable. The combination matrix it returns is your i
 `Test_Data` column. Skip only for cases that touch no seeded entities (pure UI/copy/validation).
 This composes with — does not replace — the no-hardcode rule enforced in Step 5.
 
+### Step 3.9: Scaffold the rows — do not hand-type the boilerplate
+
+**The three KEEP questions in step 6 above are now machine-checked, one step earlier.** Write the surviving
+candidates out as an **authoring plan JSON** (one per target suite) and run:
+
+```bash
+npm run tc:alloc    -- --prefix <PREFIX> --block <layer>=<n> [--block ...]   # once, before any fan-out
+npm run tc:scaffold -- --plan <plan>.json --id-block <PREFIX-NNN..PREFIX-NNN> --out <staged>.csv
+```
+
+`scripts/test-cases/scaffold-rows.ts` **rejects a planned row that cannot name** its `observable` (the
+value it reads), its `defect` (the failure a CUSTOMER would see — null-hypothesis phrasings like *"could
+fail to render"* are refused by name), and its `plausible` (one of the three grounds step 6 lists: a
+`VC-*` catalog entry, a filed bug, or `mechanism: <what in this code makes it likely>`). A row that
+cannot justify itself never becomes a CSV row, so it is never authored, reviewed, executed or maintained
+— which is the cull step 6 asks for, moved to where it is cheap.
+
+What it emits:
+
+- A **staged CSV** (canonical header, in the scratchpad — never `regression/suites/`) with ten columns
+  already derived from `(layer, priority, archetype, technique, ticket)`: ID, Section, Priority,
+  Business_Rule, Edge_Case_Refs, Test_Data, Cross_Layer_Checks, Failure_Signals, Cleanup, References,
+  Automation_Status=`Draft`. Only **Preconditions / Steps / Assertions** are left blank — Step 4 below
+  authors exactly those, and `npm run suites:review -- <staged>.csv` names each unfilled one.
+- A **`.design.md` sidecar** — the per-row KEEP answers, i.e. the record of *why each case exists*.
+
+**Sweeps expand mechanically**, with their bug hypothesis already written by the document that owns them
+(read at run time, never transcribed): `state-stress` (qa-design §State-Stress Pass) · `uip`
+(modern-web-attack-surface §`UIP-*`) · `toggle` and `date-range` (§3.5 above). Declare them in the plan's
+`sweeps[]` with the surface being swept; waiving an item needs a reason, because a silent omission is
+what makes a sweep unreportable. This is the cheapest coverage in the pipeline and it is where the corpus
+is measurably thinnest (8 · 5 · 11 · 5 · 5 `UIP-*` cases across 1,961 Frontend cases).
+
+`--id-block` comes from `tc:alloc`, which scans the corpus **once**; the scaffolder refuses to spill past
+the block it was given. That is what makes concurrent per-surface batches safe — see `/qa-test` Step 3b.
+
 ### Step 4: Write Each Test Case
 
-For every test case, populate all 15 columns following the template:
+Fill `Preconditions` / `Steps` / `Assertions` on the scaffolded rows. The remaining columns are already
+populated by Step 3.9 — do not retype them; if one is wrong, fix the plan and re-scaffold, so the plan
+stays the source of truth. When scaffolding is skipped (a one-off single row), populate all 15 columns
+following the template:
 
 ```
 ID, Title, Section, Priority, Business_Rule, Edge_Case_Refs, Preconditions, Test_Data, Steps, Assertions, Cross_Layer_Checks, Failure_Signals, Cleanup, References, Automation_Status

@@ -128,6 +128,8 @@
     "suites:lint": "npx tsx scripts/test-cases/sync-test-suites.ts --check",
     "suites:append": "npx tsx scripts/test-cases/append-test-cases-to-suite.ts",
     "suites:review": "npx tsx scripts/test-cases/lint-test-cases.ts",
+    "tc:alloc": "npx tsx scripts/test-cases/alloc-case-ids.ts",
+    "tc:scaffold": "npx tsx scripts/test-cases/scaffold-rows.ts",
     "suites:gates": "npx tsx scripts/test-cases/check-smoke-gates.ts",
     "suites:lanes": "npx tsx scripts/regression/plan-lanes.ts",
     "suites:lanes:all": "npx tsx scripts/regression/plan-lanes.ts --all",

@@ -232,7 +232,6 @@ storefront suite placed **zero** orders and 54 of its cases never left one page;
 got 11% of the cases; the last link — spending what the feature grants — got one, written on the final
 day; and the model itself was never written at all (`reports/ba/test-models/` was empty).
 
-**Write it to
 **Write it to `reports/ba/test-models/<TICKET>-<date>.md`** — a durable artifact, not a terminal
 dump. Three reasons it has to be a file: a model nobody can re-open cannot be *argued with*, which
 is the whole point of having one; the parameter model for a surface (cart, checkout, org roles) does
@@ -354,9 +353,41 @@ was the old bar and it cannot be wrong; these can:
    or **WAIVED with a reason**. Silence is not a waiver.
 
 A missing atomic condition or `ba-system-analyzer` risk area is added before moving on. (No fresh-`qa-lead`
-dispatch here — this is the doer's own completeness check. The deterministic gate is one step downstream,
-at Step 3's appender: the model is a file now, but nothing lints it yet, and the appender is the one door
-into `regression/suites/` that a script already guards.)
+dispatch here — this is the doer's own completeness check.)
+
+##### 1e-plan — emit the scenario matrix as an authoring plan (the deterministic half)
+
+The model is prose and nothing lints it. But the **rows** of its scenario table are structured, and the
+decision each row encodes is exactly what Step 3 needs. So end 1e by writing the matrix out as one
+**authoring plan JSON per target suite** (scratchpad, not `reports/`) and running the gate over it:
+
+```bash
+npm run tc:scaffold -- --plan <scratchpad>/plan-<layer>.json --check
+```
+
+`scripts/test-cases/scaffold-rows.ts` refuses any row that cannot answer the three KEEP questions
+(`/qa-test-cases-generator` §3 step 6d), which until now were asked of prose no script could read:
+
+| Plan field | The question | Rejected when |
+|---|---|---|
+| `observable` | what value does this case READ? | missing or under 15 chars |
+| `defect` | what would a CUSTOMER see if it were wrong? | missing, under 25 chars, or a **null-hypothesis** phrasing (`could fail to render`, `might not work`, …) |
+| `plausible` | why is that defect plausible **here**? | not one of the three grounds §6d names — a `VC-*` catalog entry, a filed bug (`VCST-*` / `reports/bugs/…`), or `mechanism: <what in this code makes it likely>` |
+
+**This is the cull, moved to where it is cheap.** §6d culls a candidate list that has already been
+written, so it saves review time and nothing else. Here a row that cannot justify itself never becomes a
+CSV row — never authored, never reviewed, never executed, never maintained. On the Loyalty Missions
+numbers above that is the difference between writing 127 cases and writing the ones that matter, and it
+is a larger saving than any amount of parallelism in Step 3.
+
+The plan also carries the **sweeps** (`state-stress` · `uip` · `toggle` · `date-range`). Each expands
+mechanically from the markdown that owns it — read at run time, never transcribed — with the defect
+hypothesis already written by that document, so a swept row satisfies the gate by construction and costs
+no judgment. Waiving a swept item requires a reason; a silent omission is not available, which is the
+`Archetype sweep` / `UIP sweep` discipline made deterministic.
+
+The gate is Step 3's appender's twin, one step earlier: the appender rejects a **row** with no
+`Archetype:`/`Technique:` stamp, this rejects a **decision** with no defect behind it.
 
 ---
 
@@ -476,9 +507,65 @@ scenarios + user-flow diagram + `1d` AC conditions (story + gap-ACs) + `E2E-*` s
   **rejects a row without them** — this is the deterministic gate for the whole change, and it exists here
   because nothing lints the Test Model yet and the appender is the one door into `regression/suites/` a script already guards. No new CSV column: these join the `Synced:` / `Audited:` /
   `Promoted:` stamps `References` already carries.
+- **Scaffold before authoring — never hand-type the boilerplate.** `npm run tc:scaffold -- --plan
+  <plan>.json --id-block <block> --out <scratchpad>/staged-<layer>.csv` turns the 1e-plan into a staged
+  CSV with **ten of the fifteen columns already derived** (ID, Section, Priority, Business_Rule,
+  Edge_Case_Refs, Test_Data, Cross_Layer_Checks, Failure_Signals, Cleanup, References, Automation_Status)
+  and only `Preconditions` / `Steps` / `Assertions` left blank — the genuinely authored half. It emits a
+  `.design.md` sidecar carrying each row's three KEEP answers, which is the audit trail for why the row
+  exists. That removes the whole class of appender rejections (a missing `Archetype:`/`Technique:` stamp,
+  fewer than two failure signals, empty References on a Critical/High row) before the appender ever sees
+  the rows, and the staged file lints in place: `npm run suites:review -- <staged.csv>` names each unfilled
+  `Steps`/`Assertions`/`Preconditions` as `S-006`/`C-001`/`C-003`, so "author the rest" is a checklist the
+  linter hands you rather than a thing to remember.
 - **Append into the target `regression/suites/<layer>/<module>/*.csv` as `Automation_Status = Draft`**, using the deterministic appender (never a hand-rolled append):
   `npx tsx scripts/test-cases/append-test-cases-to-suite.ts <target-suite.csv> --rows <new-rows.csv> --check-global-ids --dry-run` (drop `--dry-run` on a clean pass). Existing-suite sync/review edits happen in place. `--check-global-ids` rejects an ID already used anywhere under `regression/suites/`.
 - **`Draft` is required, not a placeholder.** These cases are grounded and promotable only after Step 4 executes them live; 5g (last, non-blocking) does the `Draft → Automated` flip (a deliberate `{HYPOTHESIS}` — a genuinely unknown expected value phrased as a question — is legal **only** at `Draft`). The runner does not skip `Draft`, so Step 4's scoped regression *will* run them (that is the point).
+
+**Step 3b — Author Artifact A in parallel, ONE BATCH PER EXECUTION SURFACE (FULL path only).**
+
+Authoring is the serial bottleneck of Step 3, and the partition that makes it safe to split already
+exists: Artifact A above requires the targets to be **split by execution surface, named up front**. A
+surface is a CSV file, a lane, an agent and a browser — so **batch ≙ target suite CSV**, and the batches
+are file-disjoint by construction. That is what keeps the one-author-per-CSV rule
+(`.claude/rules/regression.md`) literally true while four agents write at once.
+
+Fan out when the plan names **≥2 target suites**; below that the dispatch overhead exceeds the saving.
+Cap at 3–4 concurrent (no browser is involved, so the 3-lane rule does not bind — context and rate limits
+do). Do **not** copy `/qa-coverage-generation`'s domain batching: a manifest domain is not a file, which
+is why that command needs a Step-5 "suite-write conflicts → merge IDs sequentially" repair pass. Partition
+on the surface and the conflict cannot occur.
+
+*Before* dispatch, the orchestrator does four things — each one closes a failure that fan-out would
+otherwise introduce:
+
+| # | Do | Because |
+|---|---|---|
+| 1 | `npm run tc:alloc -- --prefix <PREFIX> --block <layer>=<n> …` and hand each batch **only its own** `--id-block` | `--check-global-ids` reads the corpus at APPEND time, so two batches both pass and then both write. A cross-suite duplicate ID silently overwrites the other suite's per-case results and failure evidence at run time (`suites:lint` catches it later; the wrong regression report gets read first). `tc:scaffold` refuses to spill past its block. |
+| 2 | Author the **`[JOURNEY]` / `Technique:FLOW` case itself**, before fan-out, and put it in every batch brief as the baseline they refine | It traverses the whole chain by definition. Per-layer batches each writing their own produce N partial journeys and no owner of the chain — the exact failure the 71-case storefront suite that placed zero orders represents. |
+| 3 | Resolve **every blank cell** of the 1e variants × links matrix and assign each cell to exactly one batch | Cell ownership is what makes duplication structurally impossible. With it there is no cross-batch dedup pass to run; without it two batches both claim a cell, or both skip it. |
+| 4 | Compile a per-layer **authoring pack** into the brief — the extracted `BL-*`/`ECL-*` rule text, the batch's matrix rows, the journey case, the layer's selectors/schema fragments | Step 2 already loaded the oracles once. Four agents re-reading `business-logic.md` + ECL + `critical-ui-scope` + `vc-bug-catalog` + `graphql-schema.md` is 4× the dominant token cost for zero extra information — that alone can make the fan-out cost more than it saves. |
+
+**Batch contract** (each batch is one `test-management-specialist`):
+
+1. Scaffold its own plan (`tc:scaffold --plan … --id-block …`) into a **staged CSV in the scratchpad**.
+2. Author `Preconditions` / `Steps` / `Assertions` on those rows, using its pack.
+3. Self-lint to green **before returning**: `npm run suites:review -- <staged.csv> --fail-on=High`, plus
+   `npm run graphql:lint-labels -- <staged.csv>` on the GraphQL batch.
+4. Return the staged CSV path + its `.design.md` sidecar. **It never touches `regression/suites/`.**
+
+The orchestrator then appends **serially**, one `suites:append … --check-global-ids` per batch, and runs
+`suites:sync` **once** at the end. Two reasons that half stays serial: `suites:sync` writes the shared
+manifest, and `suites:lint`/`sync` hard-fail on a parse error *anywhere* in the corpus — a suite left
+transiently unparsable blocks every concurrent author in the tree, so N parallel writers into
+`regression/suites/` multiplies a 15-minute outage by N. Staging costs nothing and removes the whole
+class.
+
+Because each batch self-lints, the Step-3 gate below becomes confirmation rather than a fix loop.
+
+**Note the ordering constraint:** Step 3a (seeding) is serial and upstream of all of this — fan-out buys
+nothing if the fixtures do not resolve yet. Start `test-data-engineer` first and let the API/GraphQL batch
+(usually the one needing least new data) run against existing `@td()` while 3a finishes for the UI batches.
 
 **Artifact B — Testing checklist (always; written to
 `reports/tickets/{SPRINT}/<ticket-key>/testing-checklist.md`).** Map **each atomic condition** to a case
