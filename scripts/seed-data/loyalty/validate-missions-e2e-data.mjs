@@ -31,6 +31,7 @@ import {
   TARGETING_MISSIONS, TARGETING_CASE_ID, isTargetingMission, declaredAliases, boundAccounts,
   validateSpecShape, validateSeededState,
   unitsToComplete, unitsJustBelow, discountBand,
+  PRODUCT_INDEX_DOCUMENT_TYPE, SILENTLY_INERT_INDEX_DOCUMENT_TYPES,
 } from './missions-e2e-specs.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -246,6 +247,48 @@ const covered = new Set(ALL_MISSIONS.flatMap((m) => m.cases || []));
 const suiteCases = ['MSN-E2E-001', 'MSN-E2E-002', 'MSN-E2E-003', 'MSN-E2E-004', 'MSN-E2E-005', 'MSN-E2E-006', 'MSN-E2E-007', 'MSN-E2E-008', TARGETING_CASE_ID];
 for (const c of suiteCases) if (!covered.has(c)) warn(`[9] ${c} is not claimed by any fixture in this set — it either binds to shared data or is still unserved`);
 for (const c of covered) if (!suiteCases.includes(c)) fail(`[9] a fixture claims case ${c}, which is not in suite 083d — the claim cannot be true`);
+
+/* [10] The seeder still asks the DATABASE whether a product exists, and still addresses the reindex
+ * to a document type this platform registers.
+ *
+ * Both defects that destroyed this fixture set on 2026-09-01 were SILENT — teardown printed "zero
+ * residue" over a product it had not deleted, and the index guard printed "not in the index" about a
+ * product that was in the index. Neither is visible in any fixture, alias or overlay, so no amount of
+ * data checking above would catch a reintroduction. What IS checkable is the two calls themselves:
+ *
+ *   - `keyword:` as a product-existence lookup. `POST /api/catalog/listentries` pages CATEGORIES AND
+ *     PRODUCTS through one window, categories first, so a fuzzy keyword whose category hits exceed
+ *     `take` returns zero products for a product that exists (measured: 21 category hits, `take: 10`,
+ *     zero rows, `AGENT-TEST-MSN-E2E-PERSKU-A` sitting in the database the whole time). Exact `code:`
+ *     is unpaged and database-backed.
+ *   - `'CatalogProduct'` as a reindex documentType. Not registered on this platform; the request is
+ *     accepted with a real jobId and indexes nothing.
+ *
+ * A source scan is a blunt instrument, and it is used here deliberately: these are call-shape
+ * regressions with no data footprint, so the shape is the only thing left to guard.
+ */
+{
+  const seederRel = 'scripts/seed-data/loyalty/seed-missions-e2e.mjs';
+  const seederPath = join(ROOT, seederRel);
+  if (!existsSync(seederPath)) fail(`[10] ${seederRel} is missing — the fixture set has no seeder`);
+  else {
+    const src = readFileSync(seederPath, 'utf8');
+    // Strip block/line comments so the explanatory prose above (which names both bad patterns) is
+    // not itself the thing that trips the guard.
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+    for (const inert of SILENTLY_INERT_INDEX_DOCUMENT_TYPES) {
+      if (new RegExp(`documentType\\s*:\\s*['"\`]${inert}['"\`]`).test(code)) {
+        fail(`[10] ${seederRel} triggers a reindex with documentType "${inert}", which this platform accepts and silently ignores — use "${PRODUCT_INDEX_DOCUMENT_TYPE}"`);
+      }
+    }
+    if (/listentries['"`]\s*,\s*\{[^}]*\bkeyword\s*:/.test(code)) {
+      fail(`[10] ${seederRel} looks a product up through listentries with a fuzzy \`keyword:\` — that response is paged behind the category hits and cannot prove absence; use the exact \`code:\` criterion (see absenceIsProven)`);
+    }
+    if (!/documentIds\s*:/.test(code) && !/buildReindexRequest\s*\(/.test(code)) {
+      fail(`[10] ${seederRel} has no targeted reindex trigger — this environment's time-based incremental job is disabled (ECL-14.7), so an untargeted reindex can be abandoned rather than merely delayed`);
+    }
+  }
+}
 
 /* ── Report ─────────────────────────────────────────────────────────────────── */
 console.log('');

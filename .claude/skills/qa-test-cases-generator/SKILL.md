@@ -408,6 +408,15 @@ Generated test cases route to the correct executing agent by layer:
 - **Bug hypothesis first** — every case must answer: "what real bug does this catch?" If you cannot answer, do not generate the case. Coverage numbers are vanity metrics.
 - **Chain link, or it does not ship** — every case either **crosses** a link of the feature's value chain or **guards** one the `[JOURNEY]` case already crosses; a case that does neither is decoration and is culled (Step 3 §6d). A link is crossed only by an observation on the *far side* of it: reading a value from the API and reading the same value off the page are two observations of one link, never coverage of the join between them.
 - **One `[JOURNEY]` case per state-changing feature, authored first** (Step 3 §1), `Technique:FLOW`. It is the case that answers "does this feature work at all?" — the one everybody assumes someone else wrote.
+- **A verification that shares its implementation with the thing it verifies cannot detect that
+  implementation's failure — and it fails CLEAN.** This is the strongest form of false pass we have
+  measured, because the check passes *because* the action failed the same way. Worked example
+  (2026-09-01): a teardown reported `deleted 3 fixture product(s) ✓ zero residue verified` while a
+  fourth product survived — the residue check called the same lookup helper the delete had used, and
+  that helper's window had truncated identically both times. Not a narrower set: **the same blind spot
+  asked twice.** So a verification step must reach the state by a *different path* than the action did
+  — a different endpoint, a different index, a different reader — or it is a restatement of the
+  action's own belief about itself.
 - **A clean negative is the most dangerous result in the suite — prove the mechanism fired.** An
   assertion of the form "X did not happen" passes identically when X correctly did not happen and when
   nothing ran at all, or when the field you read cannot express X in the first place. Three instances

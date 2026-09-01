@@ -27,6 +27,9 @@ import {
   TARGETING_MEMBER_ALIAS, TARGETING_OUTSIDER_ALIAS, isTargetingMission,
   boundAccounts, ACCOUNT_BOUND_MISSIONS, declaredAliases,
   unreachableTarget, visibilityPolicy, formatVisibility, parseVisibility,
+  absenceIsProven, EXACT_LOOKUP_CRITERIA, productTeardownVerdict,
+  PRODUCT_INDEX_DOCUMENT_TYPE, SILENTLY_INERT_INDEX_DOCUMENT_TYPES,
+  buildReindexRequest, indexDocumentTypeProblem,
 } from '../seed-data/loyalty/missions-e2e-specs.mjs';
 
 /* ── Run identity ───────────────────────────────────────────────────────────── */
@@ -1130,4 +1133,87 @@ test('every declared alias has a kind, and the runtime fields of each kind are d
   // value would assert the very thing the fixtures exist to make falsifiable.
   assert.ok(RUNTIME_FIELDS_BY_KIND.targetingMission.includes('observed_visibility'));
   assert.ok(RUNTIME_FIELDS_BY_KIND.caseUser.includes('groups_at_seed'));
+});
+
+/* ── Catalog visibility: the two defects that ate the fixture set, 2026-09-01 ──
+ *
+ * Both were SILENT. Teardown printed "zero residue" over a product it had not deleted, and the index
+ * guard printed "not in the index" about a product that was in the index. So these tests assert on
+ * the shape of the *wrongness* — a check that cannot fail, and a trigger that cannot work — rather
+ * than on the happy path, which was green throughout.
+ */
+
+test('DEFECT 1: a truncated fuzzy page is never proof a product is absent', () => {
+  // The measured response, verbatim: keyword `AGENT-TEST-MSN-E2E-PERSKU-A`, take 10 → totalCount 21,
+  // ZERO entries returned, because listentries pages categories and products through one window and
+  // 21 category hits consumed all of it. Reading that as "absent" is what sent find-or-create into a
+  // duplicate-key 500 and let teardown skip the product entirely.
+  assert.equal(absenceIsProven({ criterion: 'keyword', totalCount: 21, returned: 0 }), false);
+  assert.equal(absenceIsProven({ criterion: 'keyword', totalCount: 21, returned: 1 }), false);
+  // A fuzzy page that returned everything it counted HAS answered the question.
+  assert.equal(absenceIsProven({ criterion: 'keyword', totalCount: 0, returned: 0 }), true);
+  assert.equal(absenceIsProven({ criterion: 'keyword', totalCount: 7, returned: 7 }), true);
+  // An exact criterion is unpaged, so it always answers — that is the whole reason to prefer it.
+  for (const criterion of EXACT_LOOKUP_CRITERIA) {
+    assert.equal(absenceIsProven({ criterion, totalCount: 21, returned: 0 }), true, criterion);
+  }
+});
+
+test('DEFECT 1: a teardown that leaves a created product FAILS its own verification', () => {
+  // The exact incident: 4 products created, 3 deleted, PERSKU-A left in the database.
+  const survivor = PRODUCTS.find((p) => /PERSKU-A$/.test(p.sku));
+  assert.ok(survivor, 'the PerSku-A fixture must exist for this regression to mean anything');
+  const verdict = productTeardownVerdict({
+    specs: PRODUCTS,
+    stillPresentByCode: { [survivor.sku]: '9b305fef-9126-439f-b491-0535385c6bb8' },
+    criterion: 'code',
+  });
+  assert.equal(verdict.ok, false, 'a surviving created product must not read as zero residue');
+  assert.deepEqual(verdict.residue, [survivor.sku]);
+  // It must check EVERY product the create path produces — not just the ones a lookup happened to
+  // find. The old check derived its input from the same blind lookup the delete loop used, so the
+  // one product that mattered was outside the set being verified.
+  assert.deepEqual(verdict.checked.sort(), PRODUCTS.map((p) => p.sku).sort());
+});
+
+test('DEFECT 1: residue verified with the blind lookup is not a pass', () => {
+  // Even with nothing found, a verdict reached through a fuzzy/paged lookup is refused outright.
+  // This is the false clean, encoded: the old check asked the delete loop's own question again and
+  // unsurprisingly got the same answer.
+  const verdict = productTeardownVerdict({ specs: PRODUCTS, stillPresentByCode: {}, criterion: 'keyword' });
+  assert.equal(verdict.ok, false);
+  assert.match(verdict.reason, /only code\/byCodes can prove a product is gone/);
+  // …while the same empty result via an exact lookup IS a pass.
+  assert.equal(productTeardownVerdict({ specs: PRODUCTS, stillPresentByCode: {}, criterion: 'code' }).ok, true);
+});
+
+test('DEFECT 2: the reindex trigger addresses a document type the platform registers', () => {
+  const ids = ['a1', 'b2'];
+  assert.deepEqual(buildReindexRequest(ids), [{ documentType: 'Product', documentIds: ids }]);
+  // `CatalogProduct` is accepted by the platform (HTTP 200 + a jobId) and indexes nothing. A wrong
+  // spelling that returns success is undetectable at run time, so it is refused at build time.
+  assert.ok(SILENTLY_INERT_INDEX_DOCUMENT_TYPES.includes('CatalogProduct'));
+  assert.throws(() => buildReindexRequest(ids, 'CatalogProduct'), /indexes nothing/);
+  // A "trigger" with no documents is not a trigger. This is the no-op the guard could not see.
+  assert.throws(() => buildReindexRequest([]), /not a trigger/);
+  assert.throws(() => buildReindexRequest([null, undefined]), /not a trigger/);
+  // Targeted by id, never a bare incremental — this environment's time-based incremental job is
+  // disabled by default, so a changed-since sweep can be abandoned rather than merely delayed.
+  assert.ok(buildReindexRequest(ids)[0].documentIds.length, 'the request must name its documents');
+});
+
+test('DEFECT 2: a mis-addressed reindex is detected before the two-minute wait, not after', () => {
+  // The live `GET /api/search/indexes` payload, measured on vcst-qa 2026-09-01. Note what is absent.
+  const registered = ['Product', 'Category', 'ContentFile', 'Member', 'PickupLocation', 'Pages', 'CustomerOrder']
+    .map((documentType) => ({ documentType }));
+  assert.equal(indexDocumentTypeProblem(registered, PRODUCT_INDEX_DOCUMENT_TYPE), null);
+  const problem = indexDocumentTypeProblem(registered, 'CatalogProduct');
+  assert.match(problem, /not registered on this platform/);
+  assert.match(problem, /Product/, 'the message must name what IS registered, or it cannot be acted on');
+  // Plain strings are accepted too, so a caller need not care which shape the endpoint returns.
+  assert.equal(indexDocumentTypeProblem(['Product'], PRODUCT_INDEX_DOCUMENT_TYPE), null);
+  // An empty/unreadable registry is inconclusive — never a silent pass. Same rule as absenceIsProven:
+  // "we could not tell" and "it is fine" are different answers.
+  assert.match(indexDocumentTypeProblem([], PRODUCT_INDEX_DOCUMENT_TYPE), /no registered document types/);
+  assert.match(indexDocumentTypeProblem(null, PRODUCT_INDEX_DOCUMENT_TYPE), /no registered document types/);
 });

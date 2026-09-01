@@ -938,21 +938,28 @@ async function ensureFixtureProduct(spec, neighbour, storeCurrency) {
   // fixture would be created, aliased, guarded, and testing nothing. That is the exact vacuity this
   // whole module is written against, so the index is asserted rather than hoped for.
   //
-  // `rebuild: false` (INCREMENTAL — index what changed) and NOT `ids: [...]`. Both were measured on
-  // vcst-qa on 2026-08-28: the scoped `ids` form returned 2xx and the product was still unfindable
-  // after 60 s of polling, while the incremental form had it indexed inside 10 s. A full
-  // `rebuild: true` is deliberately never issued — on a shared QA env that is somebody else's outage.
-  // Indexing runs AFTER the price and stock writes so the indexed document carries them.
-  // The job RESULT is captured, not discarded. Measured on vcst-qa 2026-08-28: the incremental job
-  // is accepted (HTTP 200, a jobId) and comes back `totalCount: 0, processedCount: 0` — it finds
-  // nothing to index even for a product whose `modifiedDate` was refreshed seconds earlier, and the
-  // `Product` index's own `lastIndexationDate` advances past that timestamp without picking it up.
-  // Without the counters the failure below reads as "indexing is slow"; with them it reads as
-  // "the incremental indexer processed zero documents", which is a different problem with a
-  // different owner. Both documentType spellings (`Product`, the name the index list uses, and
-  // `CatalogProduct`) were tried and behave identically.
+  // TARGETED by document id (`documentIds`), document type `Product`. Both halves are corrections of
+  // a measurement recorded here on 2026-08-28 that was wrong in two ways, re-measured on vcst-qa
+  // 2026-09-01:
+  //
+  //   - The scoped form was written `ids: [...]`. The schema field is `documentIds` (IndexingOptions:
+  //     documentType, documentIds, deleteExistingIndex, startDate, endDate, batchSize), so `ids` was
+  //     silently dropped and what actually ran was a bare incremental — which is why "scoped" and
+  //     "incremental" looked indistinguishable.
+  //   - `CatalogProduct` is NOT a registered document type on this platform. `GET /api/search/indexes`
+  //     registers `Product`, `Category`, `ContentFile`, `Member`, `PickupLocation`, `Pages`,
+  //     `CustomerOrder`. A `CatalogProduct` request is accepted (HTTP 200 + a real jobId) and indexes
+  //     nothing, which is what produced the `totalCount: 0, processedCount: 0` counters below and the
+  //     conclusion that "the incremental indexer processed zero documents". It processed zero
+  //     documents because it was addressed to an indexer that does not exist.
+  //
+  // Re-measured directly: a freshly created product triggered with `CatalogProduct` was still
+  // unindexed after 120 s; the same product triggered with `{ documentType: 'Product', documentIds:
+  // [id] }` was indexed in under 6 s. A full `rebuild: true` is still deliberately never issued — on
+  // a shared QA env that is somebody else's outage. Indexing runs AFTER the price and stock writes so
+  // the indexed document carries them. The job result is still captured for the failure message.
   let lastJob = null;
-  const reindex = () => api('POST', '/api/search/indexes/index', [{ documentType: 'CatalogProduct', rebuild: false }], { expectStatus: [200, 201, 202, 204] })
+  const reindex = () => api('POST', '/api/search/indexes/index', [{ documentType: 'Product', documentIds: [product.id] }], { expectStatus: [200, 201, 202, 204] })
     .then((r) => { lastJob = r; return r; })
     .catch((e) => verbose(`reindex trigger: ${String(e.message).slice(0, 120)}`));
   const findIndexed = async () => {

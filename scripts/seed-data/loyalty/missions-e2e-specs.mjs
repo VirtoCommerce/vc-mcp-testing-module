@@ -282,6 +282,141 @@ export const PRODUCTS = [UNIT_PRODUCT, ...PERSKU_PRODUCTS, PTS_PRODUCT];
 export const PRODUCT_BY_SLOT = Object.fromEntries(PRODUCTS.map((p) => [p.slot, p]));
 export const PRODUCT_BY_ALIAS = Object.fromEntries(PRODUCTS.map((p) => [p.aliasName, p]));
 
+/* ── Catalog visibility: existence vs indexedness ────────────────────────────
+ *
+ * These two questions LOOK like one and are not, and conflating them cost this fixture set three
+ * consecutive failed seeds (measured on vcst-qa, 2026-09-01):
+ *
+ *   "does this product EXIST?"     — a DATABASE question. Teardown, residue verification and
+ *                                    find-or-create all ask this one. A wrong answer here creates
+ *                                    an undeletable orphan and then a duplicate-key HTTP 500.
+ *   "is this product INDEXED?"     — a SEARCH question. The storefront resolves mission-modal
+ *                                    products through the index, so an unindexed fixture renders
+ *                                    nothing and tests nothing.
+ *
+ * The functions below are the decision rules for both, kept here (side-effect-free) so the seeder,
+ * the drift guard and the unit tests share ONE answer rather than three similar-looking ones.
+ */
+
+/**
+ * How a catalog lookup was scoped. Only an EXACT criterion can prove absence — see `absenceIsProven`.
+ *   'code'    — `POST /api/catalog/listentries { code }`, exact + unpaged + DATABASE-backed
+ *               (measured: returns a product created milliseconds earlier, long before it is indexed).
+ *   'byCodes' — `POST /api/catalog/{catalogId}/products-by-codes`, exact + unpaged + database-backed.
+ *   'keyword' — `POST /api/catalog/listentries { keyword }`, FUZZY + paged. Never proof of absence.
+ */
+export const EXACT_LOOKUP_CRITERIA = ['code', 'byCodes'];
+
+/**
+ * Is a catalog-lookup response strong enough to conclude the entity is ABSENT?
+ *
+ * THIS IS THE BUG THAT ATE THE FIXTURE SET, written down as a rule. `findProductByCode` searched
+ * `listentries` with `{ keyword: <sku>, take: 10 }` and read "no product in the page" as "no such
+ * product". But that endpoint pages CATEGORIES AND PRODUCTS THROUGH ONE WINDOW, categories first:
+ * the product segment only begins after the category total is consumed. Measured on vcst-qa for
+ * `AGENT-TEST-MSN-E2E-PERSKU-A`: totalCount 21, and `take` 1/5/10 all return ZERO entries while
+ * `take` 15+ returns the product. Its sibling `…-UNIT` matches only 8, stays inside the window, and
+ * was found and deleted every time — which is why the survivor was deterministically PERSKU-A.
+ *
+ * It is also SELF-AMPLIFYING: every failed run leaves another `AGENT-TEST-MSN-E2E-*` category
+ * behind, each of which is itself a keyword hit, so the category segment grows and pushes more
+ * products out of the window on the next teardown.
+ *
+ * So: a fuzzy, paged response that returned fewer rows than it counted proves nothing at all. It is
+ * neither presence nor absence — it is an unanswered question, and the caller must escalate to an
+ * exact lookup rather than defaulting to "absent" (which silently means "create it again").
+ */
+export function absenceIsProven({ criterion, totalCount = 0, returned = 0 } = {}) {
+  if (EXACT_LOOKUP_CRITERIA.includes(criterion)) return true;
+  return Number(totalCount || 0) <= Number(returned || 0);
+}
+
+/**
+ * The document type the platform's search-indexation module REGISTERS for products.
+ *
+ * `'CatalogProduct'` — the spelling this seeder, `seed-loyalty-missions.mjs` and
+ * `seed-catalog-edge-fixtures.mjs` all used — is NOT a registered indexer. The platform accepts the
+ * request anyway (HTTP 200 + a real jobId) and indexes NOTHING. Measured on vcst-qa 2026-09-01:
+ * `GET /api/search/indexes` registers `Product`, `Category`, `ContentFile`, `Member`,
+ * `PickupLocation`, `Pages`, `CustomerOrder` — no `CatalogProduct`. A freshly created product
+ * triggered with `CatalogProduct` was still unindexed after 120 s; the same product triggered with
+ * `Product` + its own `documentIds` was indexed in under 6 s.
+ *
+ * That is why the seeder's index guard fired: not because this environment cannot index, but
+ * because the trigger addressed a document type that does not exist here.
+ */
+export const PRODUCT_INDEX_DOCUMENT_TYPE = 'Product';
+
+/**
+ * Spellings that are ACCEPTED by the platform and then do nothing. Listed so the mistake is
+ * detectable by name instead of by a two-minute timeout — a silent success is the worst failure
+ * shape available, and this one shipped in three seeders.
+ */
+export const SILENTLY_INERT_INDEX_DOCUMENT_TYPES = ['CatalogProduct'];
+
+/**
+ * The reindex request body. TARGETED by document id, never a bare incremental sweep: an incremental
+ * run depends on the platform's own changed-since bookkeeping, and on this environment the
+ * time-based incremental job is disabled by default (ECL-14.7 — reindex here can be abandoned
+ * rather than merely delayed). Naming the ids removes that dependency entirely.
+ */
+export function buildReindexRequest(productIds, documentType = PRODUCT_INDEX_DOCUMENT_TYPE) {
+  const ids = [...new Set((productIds || []).filter(Boolean))];
+  if (!ids.length) throw new Error('buildReindexRequest: no product ids — a reindex of nothing is not a trigger');
+  if (SILENTLY_INERT_INDEX_DOCUMENT_TYPES.includes(documentType)) {
+    throw new Error(
+      `buildReindexRequest: documentType "${documentType}" is accepted by the platform and indexes nothing. `
+      + `Use "${PRODUCT_INDEX_DOCUMENT_TYPE}".`,
+    );
+  }
+  return [{ documentType, documentIds: ids }];
+}
+
+/**
+ * Is the document type we are about to trigger one the platform actually registers?
+ *
+ * `registered` is the `GET /api/search/indexes` payload (or its documentType strings). Returns null
+ * when the type is registered, else the reason — checked BEFORE the wait, so a mis-addressed
+ * trigger fails in a second with the real cause instead of in two minutes with the wrong one.
+ */
+export function indexDocumentTypeProblem(registered, documentType = PRODUCT_INDEX_DOCUMENT_TYPE) {
+  const types = (registered || []).map((r) => (typeof r === 'string' ? r : r?.documentType)).filter(Boolean);
+  if (!types.length) return 'GET /api/search/indexes returned no registered document types — cannot confirm the reindex trigger is addressable';
+  if (types.includes(documentType)) return null;
+  return `document type "${documentType}" is not registered on this platform (registered: ${types.join(', ')})`;
+}
+
+/**
+ * The teardown verdict, as a pure reduction over "what we created" × "what a DB lookup still sees".
+ *
+ * The point of extracting it: the old residue check re-ran the SAME index-window-blind lookup the
+ * delete loop had just used, so it could not fail on anything the delete loop had missed. It was
+ * not a narrower check — it was the identical blind spot asked twice, and it reported "zero
+ * residue" while `PERSKU-A` sat in the database waiting to 500 the next seed.
+ *
+ * `stillPresentByCode` MUST come from an exact database lookup (`EXACT_LOOKUP_CRITERIA`). A code
+ * this seeder creates that is still present is residue, full stop — `ok:false`, and the caller
+ * fails loudly.
+ */
+export function productTeardownVerdict({ specs = PRODUCTS, stillPresentByCode = {}, criterion } = {}) {
+  if (!EXACT_LOOKUP_CRITERIA.includes(criterion)) {
+    return {
+      ok: false,
+      checked: specs.map((s) => s.sku),
+      residue: [],
+      reason: `residue was verified with a "${criterion}" lookup; only ${EXACT_LOOKUP_CRITERIA.join('/')} can prove a product is gone`,
+    };
+  }
+  const checked = specs.map((s) => s.sku);
+  const residue = checked.filter((sku) => Boolean(stillPresentByCode[sku]));
+  return {
+    ok: residue.length === 0,
+    checked,
+    residue,
+    reason: residue.length ? `${residue.length} product(s) this seeder creates still exist after teardown: ${residue.join(', ')}` : null,
+  };
+}
+
 /* ── Missions ────────────────────────────────────────────────────────────── */
 
 /**

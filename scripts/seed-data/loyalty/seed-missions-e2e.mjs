@@ -60,6 +60,8 @@ import {
   buildE2EMissionBody, buildGoalItems, needsGoalItems, missionSlots,
   isPreCompletion, balanceIsLegible, validateSpecShape,
   unitsToComplete, unitsJustBelow, discountBand,
+  absenceIsProven, productTeardownVerdict,
+  PRODUCT_INDEX_DOCUMENT_TYPE, buildReindexRequest, indexDocumentTypeProblem,
 } from './missions-e2e-specs.mjs';
 
 const argv = process.argv.slice(2);
@@ -205,13 +207,47 @@ async function ensurePricelist(currency) {
 
 /* ── Products ────────────────────────────────────────────────────────────────── */
 
+/**
+ * Does this product EXIST? A DATABASE question, answered with an EXACT criterion.
+ *
+ * `{ code }` — not `{ keyword }`. The keyword form pages categories and products through one window
+ * (categories first), so `take: 10` returned ZERO products for `…PERSKU-A` while the product sat in
+ * the database: 21 category hits consumed the whole window. `{ code }` is exact, unpaged, and
+ * database-backed — measured returning a product created milliseconds earlier, long before any
+ * index saw it. See `absenceIsProven` in the spec module for the full measurement.
+ *
+ * Still deliberately catalog-BLIND: these codes are `AGENT-TEST-MSN-E2E-` prefixed and globally
+ * unique, and the duplicate-key index the create path collides on (`IX_Code_CatalogId`) is per
+ * catalog — so finding the row wherever it lives is strictly safer than scoping the search to the
+ * catalog we happen to think we are writing to.
+ */
 async function findProductByCode(code) {
-  // Deliberately catalog-BLIND: these codes are AGENT-TEST-MSN-E2E- prefixed and therefore globally
-  // unique, and a catalog-scoped lookup was measured to miss products the unscoped one finds — which
-  // sends a find-or-create straight into a duplicate-key HTTP 500.
-  const r = await api('POST', '/api/catalog/listentries', { keyword: code, take: 10 }, { expectStatus: [200, 201, 400, 404] });
-  const hit = (r?.listEntries || r?.results || []).find((p) => p.code === code && p.type === 'product');
-  return hit ? { id: hit.id, code, name: hit.name, catalogId: hit.catalogId } : null;
+  const r = await api('POST', '/api/catalog/listentries', { code, take: 50 }, { expectStatus: [200, 201, 400, 404] });
+  const entries = (r?.listEntries || r?.results || []);
+  const hit = entries.find((p) => p.code === code && String(p.type).toLowerCase() === 'product');
+  if (hit) return { id: hit.id, code, name: hit.name, catalogId: hit.catalogId };
+  // Absence is a CONCLUSION, not a default. An exact criterion earns it; anything that returned
+  // fewer rows than it counted has not answered the question and must not be read as "create it".
+  if (!absenceIsProven({ criterion: 'code', totalCount: r?.totalCount, returned: entries.length })) {
+    throw new Error(
+      `catalog lookup for ${code} was inconclusive (totalCount=${r?.totalCount}, returned=${entries.length}) — `
+      + 'refusing to treat a truncated response as proof the product does not exist',
+    );
+  }
+  return null;
+}
+
+/**
+ * Is this product INDEXED? A SEARCH question, and a different one — answered by the indexed product
+ * search, addressed by id so no keyword window can truncate it.
+ *
+ * Kept separate from `findProductByCode` on purpose: now that existence is database-backed, reusing
+ * it here would make the index guard pass on every product that merely exists, quietly deleting the
+ * one check that stands between "fixtures created" and "fixtures the storefront can actually see".
+ */
+async function isIndexed(productId) {
+  const r = await api('POST', '/api/catalog/search/products', { objectIds: [productId], take: 5 }, { expectStatus: [200, 201, 400] }).catch(() => null);
+  return (r?.items || r?.results || []).some((p) => p.id === productId);
 }
 
 /**
@@ -295,30 +331,52 @@ async function ensureProduct(spec, location, pricelistByCurrency, currencies) {
  */
 async function ensureIndexed(products) {
   if (DRY_RUN) return;
-  const codes = products.map((p) => p.sku);
-  const findAll = async () => {
+  const byId = new Map(products.map((p) => [p.id, p.sku]));
+  const findMissing = async () => {
     const missing = [];
-    for (const code of codes) if (!(await findProductByCode(code))) missing.push(code);
+    for (const [id, sku] of byId) if (!(await isIndexed(id))) missing.push({ id, sku });
     return missing;
   };
-  let missing = await findAll();
+  let missing = await findMissing();
   if (!missing.length) { verbose('all fixture products already indexed'); return; }
-  const reindex = () => api('POST', '/api/search/indexes/index', [{ documentType: 'CatalogProduct', rebuild: false }], { expectStatus: [200, 201, 202, 204] })
-    .catch((e) => verbose(`reindex trigger: ${String(e.message).slice(0, 120)}`));
+
+  // Confirm the trigger is even ADDRESSABLE before spending two minutes waiting on it. This is the
+  // check that would have saved the three failed runs: the seeder was triggering `CatalogProduct`,
+  // which this platform does not register, so every trigger returned 200 + a jobId and indexed
+  // nothing — and the guard then blamed the environment for a spelling mistake.
+  const registered = await api('GET', '/api/search/indexes', null, { expectStatus: [200] }).catch(() => null);
+  const problem = indexDocumentTypeProblem(registered, PRODUCT_INDEX_DOCUMENT_TYPE);
+  if (problem) throw new Error(`cannot reindex fixture products: ${problem}`);
+
+  // A trigger whose failure is swallowed is indistinguishable from no trigger at all — which is
+  // exactly how the wrong document type survived. Any rejection is fatal here, not a verbose note.
+  const reindex = async () => {
+    const body = buildReindexRequest([...byId.keys()], PRODUCT_INDEX_DOCUMENT_TYPE);
+    const res = await api('POST', '/api/search/indexes/index', body, { expectStatus: [200, 201, 202, 204] });
+    verbose(`reindex job ${res?.jobId ?? '(no id)'} for ${byId.size} ${PRODUCT_INDEX_DOCUMENT_TYPE} document(s)`);
+    return res;
+  };
+  log(`  ↻ reindexing ${missing.length} fixture product(s) (${PRODUCT_INDEX_DOCUMENT_TYPE}, by id)`);
   await reindex();
+
+  // Bounded and loud, never a forever loop: on this environment the time-based incremental job is
+  // disabled by default and a reindex can be ABANDONED rather than merely delayed (ECL-14.7), so a
+  // wait with no ceiling would hang a seed indefinitely. A targeted trigger was measured landing in
+  // under 6 s, so ~2 min is generous rather than tight.
   for (let i = 0; i < 12 && missing.length; i++) {
     await new Promise((r) => setTimeout(r, 10000));
-    missing = await findAll();
+    missing = await findMissing();
     if (missing.length && i === 5) await reindex();
   }
   if (missing.length) {
     throw new Error(
-      `${missing.join(', ')} exist but are NOT in the CatalogProduct search index after ~2 min. The storefront `
-      + 'resolves mission-modal products through that index, so those rows would simply not render and the '
-      + 'fixture would look seeded while testing nothing.',
+      `${missing.map((m) => m.sku).join(', ')} exist but are NOT in the ${PRODUCT_INDEX_DOCUMENT_TYPE} search index `
+      + 'after ~2 min, despite an accepted targeted reindex of their own document ids. The storefront resolves '
+      + 'mission-modal products through that index, so those rows would simply not render and the fixture would '
+      + 'look seeded while testing nothing. This is an ENVIRONMENT finding, not a fixture one — report it.',
     );
   }
-  log(`  ✓ all ${codes.length} fixture products indexed`);
+  log(`  ✓ all ${byId.size} fixture products indexed`);
 }
 
 /* ── Missions ────────────────────────────────────────────────────────────────── */
@@ -1169,9 +1227,11 @@ async function seed() {
 
 async function deleteProducts() {
   let removed = 0;
+  let seenCatalogId = null;
   for (const spec of PRODUCTS) {
     const p = await findProductByCode(spec.sku);
     if (!p?.id) { verbose(`${spec.sku} not present`); continue; }
+    seenCatalogId = seenCatalogId || p.catalogId || null;
     if (!String(p.code).startsWith(SEED_PREFIX)) { log(`  ⚠ skip ${p.code}: lacks the ${SEED_PREFIX} guard prefix`); continue; }
     if (DRY_RUN) { log(`  [DRY] would delete product ${spec.sku}`); continue; }
     await api('POST', '/api/catalog/listentries/delete', { objectIds: [p.id], objectType: 'CatalogProduct' }, { expectStatus: [200, 204, 404] })
@@ -1179,12 +1239,29 @@ async function deleteProducts() {
     removed += 1;
   }
   if (removed) log(`  ✗ deleted ${removed} fixture product(s)`);
-  const residual = await verifyRemoved(async () => {
+  if (DRY_RUN) return seenCatalogId;
+
+  // Residue is verified over the set the CREATE path produces — every `PRODUCTS` sku — and never
+  // over "whatever the delete loop happened to find". Those were the same list before, which is
+  // precisely why the old check could not fail: it re-asked the delete loop's own blind lookup and
+  // agreed with it. A product this seeder creates that is still in the database is residue, and
+  // that is a hard failure, not a warning — the next seed dies on it with a duplicate-key 500.
+  const stillPresentByCode = {};
+  await verifyRemoved(async () => {
     const left = [];
-    for (const spec of PRODUCTS) { const p = await findProductByCode(spec.sku); if (p?.id) left.push(p.id); }
+    for (const spec of PRODUCTS) {
+      const p = await findProductByCode(spec.sku);
+      if (p?.id) { stillPresentByCode[spec.sku] = p.id; left.push(p.id); }
+    }
     return left;
   });
-  log(residual === 0 ? '  ✓ product teardown verified — zero residue' : `  ⚠ product teardown incomplete — ${residual} still present`);
+  const verdict = productTeardownVerdict({ specs: PRODUCTS, stillPresentByCode, criterion: 'code' });
+  if (verdict.ok) { log(`  ✓ product teardown verified — zero residue (${verdict.checked.length} checked)`); return seenCatalogId; }
+  for (const sku of verdict.residue) log(`  ✗ RESIDUE ${sku} → ${stillPresentByCode[sku]}`);
+  throw new Error(
+    `product teardown left residue: ${verdict.reason}. Delete these by id before re-seeding — `
+    + 'a surviving product makes the next seed fail with "Cannot insert duplicate key row ... IX_Code_CatalogId".',
+  );
 }
 
 /**
@@ -1199,16 +1276,21 @@ async function deleteProducts() {
  * bug in another seeder. Deleting it is what makes teardown -> seed idempotent rather than
  * accumulating.
  */
-async function deleteCatalogScaffolding() {
+async function deleteCatalogScaffolding(catalogIdHint = null) {
   for (const currency of ['USD', 'PTS', ...new Set(PRODUCTS.map((p) => p.currencyIntent))]) {
     const name = PRICELIST_NAME(currency);
-    const search = await api('GET', `/api/pricing/pricelists?keyword=${encodeURIComponent(name)}`, null, { expectStatus: [200, 404] }).catch(() => null);
-    const pl = (search?.results || []).find((p) => p?.name === name);
-    if (!pl?.id) continue;
-    if (DRY_RUN) { log(`  [DRY] would delete pricelist ${name}`); continue; }
-    await api('DELETE', `/api/pricing/pricelists?${idsParam([pl.id])}`, null, { expectStatus: [200, 204, 404] })
+    const search = await api('GET', `/api/pricing/pricelists?keyword=${encodeURIComponent(name)}&take=100`, null, { expectStatus: [200, 404] }).catch(() => null);
+    // EVERY pricelist carrying this exact name, not the first one. The name is deterministic, so a
+    // run that died after creating its pricelists leaves another same-named generation behind — and
+    // a `.find()` sweep reclaims exactly one per teardown while the failed runs add one each. Three
+    // generations of `AGENT-TEST-MSN-E2E-USD`/`-PTS` had accumulated by 2026-09-01 for that reason.
+    const pls = (search?.results || []).filter((p) => p?.name === name && p?.id);
+    if (!pls.length) continue;
+    if (DRY_RUN) { log(`  [DRY] would delete ${pls.length} pricelist(s) named ${name}`); continue; }
+    if (pls.length > 1) log(`  ⚠ ${pls.length} pricelists share the name ${name} (orphans from runs that died mid-seed) — removing all`);
+    await api('DELETE', `/api/pricing/pricelists?${idsParam(pls.map((p) => p.id))}`, null, { expectStatus: [200, 204, 404] })
       .catch((e) => log(`  ⚠ pricelist ${name}: ${String(e.message).slice(0, 120)}`));
-    log(`  ✗ deleted pricelist ${name}`);
+    log(`  ✗ deleted ${pls.length} pricelist(s) named ${name}`);
   }
 
   // Categories are swept BY CODE, not just by the pin. The pin only ever names the category of the
@@ -1216,7 +1298,14 @@ async function deleteCatalogScaffolding() {
   // that neither the pin nor the keyword-backed lookup can see, so deleting only the pinned one made
   // the residue permanent and monotonically growing (three had accumulated by 2026-08-28).
   const pin = overlay().MSN_E2E_RUN || {};
-  const catalogId = pin.catalog_id;
+  // The pin is blanked by a previous teardown, so on the run that has to clean up after a failed
+  // seed it is exactly the thing that is missing — and a blank pin used to make the category sweep a
+  // silent no-op, leaving orphan categories behind. Each of those is itself a keyword hit, which is
+  // what grew the search window that hid `PERSKU-A` from teardown in the first place. Fall back to
+  // the catalog a surviving fixture product actually lives in: derived from live data, never pinned.
+  const catalogId = pin.catalog_id || catalogIdHint;
+  if (!catalogId) { verbose('no catalog id (no pin, no fixture product seen this teardown) — category sweep skipped'); return; }
+  if (!pin.catalog_id) verbose(`catalog id derived from a swept fixture product: ${catalogId}`);
   const targets = new Map();
   for (const c of await listFixtureCategories(catalogId)) targets.set(c.id, c.code);
   if (pin.category_id && !targets.has(pin.category_id)) {
@@ -1260,7 +1349,10 @@ async function teardown() {
   });
   log(residual === 0 ? '  ✓ mission teardown verified — zero residue' : `  ⚠ mission teardown incomplete — ${residual} still present`);
 
-  if (!KEEP_PRODUCTS) { await deleteProducts(); await deleteCatalogScaffolding(); }
+  if (!KEEP_PRODUCTS) {
+    const seenCatalogId = await deleteProducts();
+    await deleteCatalogScaffolding(seenCatalogId);
+  }
 
   // Blank the overlay. A dead identity left behind is worse than an empty one: `@td(MSN_E2E_*.id)`
   // would keep resolving to a mission that no longer exists, and the case reads the miss as a product
