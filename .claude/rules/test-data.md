@@ -126,6 +126,43 @@ Two rules follow:
   in that order. A run that writes durable artifacts (a `REG-*` run id with per-case results and
   traces) is the strongest form, because the evidence is then tied to the generation by construction.
 
+### The scope of "isolated" is per SUITE, not per seed — say which one you mean
+
+A fixture created fresh **every seed** is still shared by **every suite that runs after that seed**.
+Those are different guarantees, and the word *isolated* on its own will be read as the stronger one.
+
+Measured 2026-09-01: `075d` (loyalty missions, backend) lost 5 of 34 cases
+(`MSN-019/026/027/029/033`) to fixtures another suite had already eaten. The overlay recorded
+`MSN_E2E_USER_001` at `balance_at_seed 0` and `MSN_E2E_ORDERCOUNT` at `progress_status_at_seed
+InProgress`, seeded 18:48. A live probe at 20:44 read **balance 7561**, that mission
+`Completed / currentValue 2 / completedDate 19:04:40Z`, and **18 of 35** missions already complete.
+19:04 falls inside suite **083d**'s window (18:53–19:32) — a different suite, in a different run,
+placing real orders on the same accounts. `MSN-027`'s own preconditions call that account "a per-run
+isolated account", and it is: isolated from its siblings *inside 075d*. Nothing made it isolated from
+`083d`, and nobody reading the sentence asked which scope was meant.
+
+`MSN-026` is the terminal form: it reads the **shared** `LOYALTY_VIP_USER`, whose `MSN_PERSKU_ALL`
+mission carries `completedDate 2026-08-28`. Mission progress is monotonic with no reset path, so that
+case is a permanent false red on that account — not a stale one, an unfixable one.
+
+Four rules:
+
+- **Qualify the word.** A fixture comment says *per seed*, *per run*, or *per suite* — never bare
+  "isolated". The unqualified form is what let this ship.
+- **Two suites consuming one disposable fixture set must be serialised with a re-seed between them**
+  (`seed → 075d → seed → 083d`), or each given its own accounts. Order-of-execution is not a plan.
+- **Verify the recorded baseline against live in pre-flight.** The `*_at_seed` fields are already
+  written into `aliases.<env>.json` and **nothing reads them back**. The sibling gate already exists
+  in shape — `td:reconcile` check **[11]** probes overlay *GUID* liveness ("does the entity still
+  exist?"); the missing one is *state* liveness ("is it still in the state we recorded?"). One
+  pre-flight line replaces N false reds.
+- **This collision is invisible to every existing guard.** `td:validate` passes, the overlay is
+  well-formed, the GUIDs all resolve — the entity exists, it is merely in the wrong state. Only
+  comparing recorded state to live catches it, which is why nothing did.
+
+When triaging a suite failure, check fixture generation and consumption timestamps **before**
+reaching for a product explanation; here that ordering settled 5 of 11 failures in a single query.
+
 ## Four data layers
 
 | Layer | Source | Use for |

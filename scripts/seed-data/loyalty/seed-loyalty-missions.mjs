@@ -809,6 +809,63 @@ async function resolvePointsProduct() {
  *    process can change without touching anything this seeder owns, so it is written every time
  *    rather than only at create, and read back.
  */
+/**
+ * EXISTENCE, by exact code — never by `keyword`.
+ *
+ * `POST /api/catalog/listentries { keyword, take: N }` cannot be relied on for a hyphenated
+ * `AGENT-TEST-MSN-` SKU. Measured on vcst-qa 2026-09-01 against a product the indexer had already
+ * reported as `"Indexation completed successfully" totalCount=1 processedCount=1 errorCount=0`:
+ *
+ *   keyword, take=5  → totalCount=31, listEntries=[]     ← what both callers below used to ask
+ *   keyword, take=20 → totalCount=31, listEntries=[]
+ *   keyword, take=50 → totalCount=31, listEntries=[<the product>]
+ *   code,    take=50 → totalCount=1,  listEntries=[<the product>]     ← exact, and not a window
+ *
+ * `listentries` browses the catalog TREE: `totalCount` counts categories as well as products, and the
+ * tokenised SKU matches dozens of category rows that fill the first pages. Both callers were
+ * therefore paging-dependent, and they failed in OPPOSITE, equally bad directions — the readiness gate
+ * failed CLOSED and blamed the environment for a product that was live in under 6 s, while this
+ * lookup failed OPEN, concluded the product did not exist, and re-created it into a duplicate-key
+ * HTTP 500 (`IX_Code_CatalogId`) that no re-run could clear. Raising `take` is not the fix: it is a
+ * magic number that re-breaks silently as the catalog grows. `catalogId` scoping is worse still — the
+ * same measurement returned totalCount=0 for a product that demonstrably IS in that catalog.
+ *
+ * This is the pattern `seed-missions-e2e.mjs` `findProductByCode` already uses, including its rule
+ * that ABSENCE IS A CONCLUSION, not a default: a response that returned fewer rows than it counted
+ * has not answered the question and must never be read as "create it". (That seeder expresses the
+ * rule as the exported `absenceIsProven` predicate; it is restated inline here rather than imported,
+ * because reaching into the E2E spec module from the non-E2E seeder would couple two independent
+ * fixture sets. The honest fix is to promote `absenceIsProven` to `scripts/lib/seed-common.mjs` so
+ * both seeders share ONE implementation — noted rather than done, to keep this change single-purpose.)
+ */
+async function findProductByCode(code) {
+  const r = await api('POST', '/api/catalog/listentries', { code, take: 50 }, { expectStatus: [200, 201, 400, 404] });
+  const entries = (r?.listEntries || r?.results || []);
+  const hit = entries.find((p) => p.code === code && String(p.type).toLowerCase() === 'product');
+  if (hit) return { id: hit.id, code, name: hit.name, catalogId: hit.catalogId };
+  if (Number(r?.totalCount || 0) > entries.length) {
+    throw new Error(
+      `catalog lookup for ${code} was inconclusive (totalCount=${r?.totalCount}, returned=${entries.length}) — `
+      + 'refusing to treat a truncated response as proof the product does not exist',
+    );
+  }
+  return null;
+}
+
+/**
+ * INDEXED? A different question, so a different probe — and deliberately NOT `findProductByCode`.
+ *
+ * Existence above is answered by an exact-code criterion; reusing it here would make the index guard
+ * pass for every product that merely EXISTS, quietly deleting the one check standing between
+ * "fixtures created" and "fixtures the storefront can actually see". Addressed by id, so no keyword
+ * window can truncate it — same shape as `seed-missions-e2e.mjs` `isIndexed`. Fail-CLOSED: an error
+ * counts as "not indexed".
+ */
+async function isIndexed(productId) {
+  const r = await api('POST', '/api/catalog/search/products', { objectIds: [productId], take: 5 }, { expectStatus: [200, 201, 400] }).catch(() => null);
+  return (r?.items || r?.results || []).some((p) => p.id === productId);
+}
+
 async function ensureFixtureProduct(spec, neighbour, storeCurrency) {
   if (!neighbour?.id) throw new Error(`${spec.aliasName} needs a discovered reference product to inherit its catalog/category/pricelist from`);
 
@@ -829,11 +886,9 @@ async function ensureFixtureProduct(spec, neighbour, storeCurrency) {
     // because a generic fixture SKU like WH-001 can collide with a real product on the env; this SKU
     // is `AGENT-TEST-MSN-` prefixed and therefore globally unique, and scoping it was measured to
     // return nothing on vcst-qa for a product the unscoped query finds — which sent the seeder
-    // straight into a duplicate-key HTTP 500.
-    const found = await api('POST', '/api/catalog/listentries', {
-      keyword: spec.sku, take: 10,
-    }, { expectStatus: [200, 201, 400, 404] });
-    const hit = (found?.listEntries || found?.results || []).find((p) => p.code === spec.sku && p.type === 'product');
+    // straight into a duplicate-key HTTP 500. See findProductByCode for why this is no longer a
+    // `listentries` KEYWORD search.
+    const hit = await findProductByCode(spec.sku);
     if (hit) product = { id: hit.id, sku: spec.sku, name: spec.productName, catalogId: hit.catalogId || neighbour.catalogId };
   }
   if (!product) {
@@ -962,10 +1017,10 @@ async function ensureFixtureProduct(spec, neighbour, storeCurrency) {
   const reindex = () => api('POST', '/api/search/indexes/index', [{ documentType: 'Product', documentIds: [product.id] }], { expectStatus: [200, 201, 202, 204] })
     .then((r) => { lastJob = r; return r; })
     .catch((e) => verbose(`reindex trigger: ${String(e.message).slice(0, 120)}`));
-  const findIndexed = async () => {
-    const r = await api('POST', '/api/catalog/listentries', { keyword: spec.sku, take: 5 }, { expectStatus: [200, 201, 400, 404] });
-    return (r?.listEntries || r?.results || []).some((p) => p.code === spec.sku && p.type === 'product');
-  };
+  // The readiness probe is addressed BY ID (see isIndexed), not by a `listentries` keyword window —
+  // that window was paging-dependent and failed CLOSED on a healthy environment, blaming the env for
+  // a product that was searchable in under 6 s. Still fail-closed; the timeout below is unchanged.
+  const findIndexed = () => isIndexed(product.id);
   let indexed = await findIndexed();
   if (!indexed) {
     await reindex();
@@ -976,18 +1031,24 @@ async function ensureFixtureProduct(spec, neighbour, storeCurrency) {
     }
   }
   if (!indexed) {
+    // The queued-job record is NOT the job result. `POST /api/search/indexes/index` returns
+    // immediately with `isNew: true, finished: null, totalCount: 0` — the counters are the initial
+    // record, not the outcome, and reading them as final is what produced the previous version of
+    // this message ("a totalCount of 0 means the indexer found nothing to process"). The real
+    // outcome lands on the push-notification feed, so that is where to look, and the jobId is
+    // reported for exactly that purpose.
     const counters = lastJob
-      ? `last incremental job: totalCount=${lastJob.totalCount} processedCount=${lastJob.processedCount} errorCount=${lastJob.errorCount} jobId=${lastJob.jobId}`
-      : 'no incremental job result was captured';
+      ? `last reindex job QUEUED (not a result): jobId=${lastJob.jobId} — read its outcome from `
+        + 'POST /api/platform/pushnotifications (IndexProgressPushNotification)'
+      : 'no reindex job was successfully queued';
     throw new Error(
-      `${spec.sku} exists (${product.id}) but is NOT in the product search index after ~2 min of incremental reindexing. `
-      + `${counters}. `
-      + 'A totalCount of 0 means the indexer found nothing to process — the product is not slow to index, it is not being '
-      + 'SEEN, which is an environment problem rather than a fixture one (re-verified on vcst-qa 2026-08-28: refreshing the '
-      + "product's modifiedDate and re-triggering did not change it, under either documentType spelling). "
+      `${spec.sku} exists (${product.id}) but did not become searchable through the storefront's own `
+      + `index-backed products() query within ~2 min. ${counters}. `
       + 'The storefront resolves mission-modal products through that index, so the modal row would simply not render — the '
-      + 'fixture would look seeded and test nothing. Either wait for the environment\'s own indexing to recover and re-run, '
-      + 'or run a full product rebuild on a NON-shared env; a rebuild on a shared QA env is somebody else\'s outage.',
+      + 'fixture would look seeded and test nothing. Check the push-notification feed first: an '
+      + '"Indexation completed successfully" with totalCount=1 means the document IS indexed and the '
+      + 'problem is this probe, not the environment. Otherwise wait for the environment\'s own indexing '
+      + 'to recover and re-run; a full product rebuild on a shared QA env is somebody else\'s outage.',
     );
   }
 
