@@ -168,53 +168,63 @@ step**: its AC table is a field of the Test Model, the single hand-off to `test-
    §5a, mapped to a canonical type through the profile's `workItemTypes` map. For a PR / bare feature, infer
    from diff size + surface.
 2. **Normalize the status to a role** — `fix-ready` / `hotfix-ready` / `not-fixed` / `testable`, resolved
-   **live** (`defect-lifecycle-workflow.md` §2 + `tracker-ops.md` §Live transition discovery). Never
-   hardcode a status name.
-3. **Look up the FLOW** (`ticket-routing.md` §4), then the **EFFORT** (§5) when the flow is `feature-test`.
-   Record **flow + type + path** — all three are `summary.json` fields, and the path gates 1c/1d, 3 and 5.
-   Fail-safe defaults (§6): unresolvable → `feature-test` FULL.
+   live (`defect-lifecycle-workflow.md` §2 + `tracker-ops.md` §Live transition discovery). Never hardcode a
+   status name.
+3. **Look up the FLOW** in `ticket-routing.md` §4, then the **EFFORT** (FAST/FULL) in §5 when the flow is
+   `feature-test`. Record **flow + type + path** — all three are `summary.json` fields (5g); the path gates
+   Steps 1c/1d, 3 and 5. Fail-safe defaults (§6): unresolvable → `feature-test` FULL; when in doubt → FULL.
 
-#### Flow = `verify-fix` — run `/qa-verify-fix` inline
+Then branch on the resolved FLOW:
 
-Run that pipeline inline in this same session (this command already runs its orchestration inline and never
-delegates to another orchestrator). The single source of truth is
-[`qa-verify-fix.md`](qa-verify-fix.md) — **execute its Steps 0–7 as written; do not duplicate or paraphrase
-them here.** For orientation only: pre-flight → fetch + understand the bug → transition to in-testing →
-confirm the fix is deployed → **RED→GREEN two-phase reproduction (3×)** → verification checklist → decide +
-transition → evidence page + `verification-summary.json`.
+- **`feature-test`** (Story / Task / Technical task / Epic, and a `not-fixed` Bug) → continue to `1b` and
+  run the five-step pipeline at the resolved FAST/FULL effort. (A `not-fixed` Bug runs FAST to
+  reproduce/characterize the defect live and attach fresh evidence — there is no fix to *verify* yet;
+  state the next step is `/qa-fix <ticket-key>`.) This is the rest of this document.
+- **`verify-fix`** (a `fix-ready` Bug) → **run `/qa-verify-fix` inline (see below)**; do not run Steps 2–5.
+- **`hotfix-verify`** (a `hotfix-ready` Bug) → **STOP** with a one-line pointer: `Run /qa-hotfix-check
+  <ticket-key>` (hotfix delivery/verification is that command's job). File nothing; transition nothing.
+- **`Sub-task`** → resolve the parent work item and re-enter this classification as the **parent's**
+  type × status; route on that.
 
-The feature-test authoring / AC-reconcile / promotion machinery (Steps 2, 3, 5b, 5g) does **not** run: a
-fix-ready Bug needs its fix verified, not new cases authored. The run ends at the verify-fix verdict.
+##### Flow = `verify-fix` — run `/qa-verify-fix` inline
 
-**Fail-safe (`ticket-routing.md` §6):** a `fix-ready` Bug with no STR **and** no linked fix PR has nothing to
-prove RED→GREEN against → fall back to `feature-test` FAST and note the missing repro basis, rather than
-forcing an empty verification.
+When the FLOW resolves to `verify-fix`, `/qa-test` **runs the `/qa-verify-fix` pipeline inline** in this
+same session (it already runs its orchestration inline and never delegates to another orchestrator — same
+model). The single source of truth for that pipeline is
+[`.claude/commands/qa-verify-fix.md`](qa-verify-fix.md) — **execute its Steps 0–7 as written; do not
+duplicate or paraphrase them here.** In short: pre-flight → fetch + understand the bug → transition to
+in-testing → confirm the fix is deployed → **RED→GREEN two-phase reproduction (3×)** → verification
+checklist → decide + transition (VERIFIED / REOPEN / …) → evidence page + `verification-summary.json`.
+The feature-test authoring/AC-reconcile/promotion machinery (Steps 2, 3, 5b, 5g) is **not** run — a fix-ready
+Bug needs its fix verified, not new cases authored. The run ends at the verify-fix verdict.
 
-### 1b — Pre-flight, sprint resolution & duplicate check
+**Fail-safe (per `ticket-routing.md` §6):** if a `fix-ready` Bug has no STR **and** no linked fix PR,
+`verify-fix` has nothing to prove RED→GREEN against → fall back to the `feature-test` FAST path and note
+the missing repro basis, rather than forcing an empty verification.
 
-Per [`.claude/templates/agent-dispatch.md`](../templates/agent-dispatch.md):
+#### 1b — Pre-flight, sprint resolution & duplicate check
 
-1. **Environment health** — `/qa-env-check endpoints`. Unhealthy → warn the user.
-2. **Build & version** — GitHub MCP `get_file_contents` on `backend/packages.json` + `theme/artifact.json`
-   from `VirtoCommerce/vc-deploy-dev` (branch `vcst-qa`, or the one matching `TEST_ENV`). Record platform +
-   theme + ticket-relevant module versions. **PR testing:** confirm the PR's artifact version appears there;
-   if not deployed → offer `/qa-deploy-pr <ticket-key>` (**ask first**) or ask whether to wait.
-3. **Resolve the current sprint** — `reports/tickets/Sprint-current` if present, else the latest
-   `SprintXX-XX` folder; create if missing. This is `{SPRINT}` for output paths. Resolve **before** the
-   duplicate check.
-4. **Duplicate check — across ALL sprints.** Glob `reports/tickets/*/*/summary.json` (per
-   `feedback_duplicate_check_across_all_sprints`) for the same ticket with a `date` in the last 2 hours.
-   Found → warn the user and show the previous verdict.
+Per `.claude/templates/agent-dispatch.md`:
 
-### 1c — Gather ticket context (FULL only)
+1. **Environment health** — `/qa-env-check endpoints`. If unhealthy, warn user.
+2. **Build & version** — GitHub MCP `get_file_contents` on `backend/packages.json` + `theme/artifact.json` from `VirtoCommerce/vc-deploy-dev` (branch `vcst-qa`, or the branch matching `TEST_ENV`). Record platform + theme + ticket-relevant module versions — this is the **`declared`** (git) state. Then probe `GET {{BACK_URL}}/api/platform/modules` for the **`deployed`** state, which is the ground truth and routinely differs (deploy in flight, failed, or partially applied). A failed probe records `deployed: UNKNOWN` — **never** fall back to `declared`. **PR testing:** confirm the PR's artifact version appears in `packages.json`/`artifact.json`; if not deployed → offer `/qa-deploy-pr <ticket-key>` (**ask first**) or warn and ask whether to wait.
+2a. **Recent-release check** — read `.claude/knowledge/domain/release-ledger.md` §1 + the newest §2 month(s) for the ticket's component(s), and record the Δ vs `deployed` in `summary.json` as `releasedThrough`. Full precedence rule: `agent-dispatch.md § Build Verification`. Three consequences, and they are the reason this step exists rather than being a header field:
+   - **A ⚠ BREAKING change in the component under test forces FULL**, whatever `1a` scored. `ticket-routing.md` says *when in doubt → FULL*; a contract that moved last month is doubt with a date on it, and a FAST run would author no cases and write no Test Model against it.
+   - **It feeds `1d`'s AC↔implementation check a third leg.** That check is otherwise static — ACs vs *this* PR's diff — and a breaking change elsewhere in the same component is invisible to that diff while being the likeliest cause of a DRIFT nobody owns.
+   - **Released ≠ deployed.** A capability the ledger records that the probe does not carry is `NOT_DEPLOYED` → BLOCKED-on-deploy, never a FAIL and never a filed bug. And the ledger carries **no behaviour**, so it can never ground an assertion as `{DOC}`; that stays `{OBSERVED}`.
+3. **Resolve current sprint** — use `reports/tickets/Sprint-current` if present, else the latest `SprintXX-XX` folder; create if missing. This is `{SPRINT}` for output paths (`reports/tickets/{SPRINT}/`). Resolve **before** the duplicate check.
+4. **Duplicate check — across ALL sprints.** Glob `reports/tickets/*/*/summary.json` (per `feedback_duplicate_check_across_all_sprints`) for the same ticket with a `date` in the last 2 hours. If found, warn user and show the previous verdict.
 
-Dispatch `ba-system-analyzer` (read-only; no tracker/GitHub writes) with the ticket ID(s)/feature/PR + the
-raw `1a` fields + PR diff + the `1a` comment/attachment signals + the `1a` Epic context. **Dispatch `1c` and
-`1d` concurrently in a single message** — both consume only the `1a` fetch and are independent. It returns:
+#### 1c — Gather ticket context (FULL path only)
 
-- **Affected surface** — module(s)/repo(s), storefront vs Admin SPA vs API/GraphQL layer, concrete code
-  sites (grounded, not guessed).
-- **Related flows & integration boundaries** — adjacent features / cross-domain seams.
+Dispatch `ba-system-analyzer` (read-only, no JIRA/GitHub writes) with the ticket ID(s)/feature/PR + the
+raw ticket fields + PR diff **+ the `1a` comment/attachment signals** (a repro in a comment or a log/HAR
+attachment often points straight at the affected code site) **+ the `1a` Epic context** (so it maps the
+seams between this story and its Done siblings, not just the story's own code). **On the full path, dispatch
+`1c` and `1d` concurrently in a single message** — both consume only the `1a` fetch and are independent. It
+returns:
+- **Affected surface** — module(s)/repo(s), storefront vs Admin SPA vs API/GraphQL layer, concrete code sites (grounded, not guessed).
+- **Related flows & integration boundaries** — adjacent features / cross-domain seams (cart ↔ checkout, org ↔ membership, …).
 - **Known pain points / historical failures** — cross-referenced to `vc-bug-catalog.md` (`VC-*`) + prior bugs.
 - **Docs grounding** — VirtoOZ/VC-doc references for how the feature is *supposed* to behave.
 
