@@ -32,6 +32,20 @@ a judgment call a gate does not settle, or when you are about to change how a st
 /qa-test --epic VCST-100                 # Test a parent Epic's child stories in series
 ```
 
+**Argument normalization — there is no argv parser, so state what you resolved.** This command is a prompt,
+not a script: an ambiguous spelling is resolved by *reading*, so resolve it explicitly and say so in one
+line before Step 1, rather than acting on a guess.
+
+| Written | Read as | Note |
+|---|---|---|
+| `--iterate` | `--iterate --max-rounds 2` | 2 is the default |
+| `--iterate N` / `--iterate=N` | `--iterate --max-rounds N` | the obvious intent; accept it, don't refuse |
+| `--max-rounds N` with no `--iterate` | **`--iterate --max-rounds N`** | a round cap is meaningless without the loop |
+| a second bare token that is not a ticket key, `PR #N`, or a flag | **STOP and ask** | never silently fold it into the target or a flag value |
+
+`--iterate` and `--epic` **compose** (the loop tries to fix a failing child story before the chain
+continues). Neither flag changes the FAST/FULL routing — that comes only from ticket type × status at `1a`.
+
 ---
 
 ## Routing — two axes, decided at 1a
@@ -82,6 +96,12 @@ self-check).
 against — dropping it makes a FAST verdict ungrounded rather than merely cheap) · the ticket comments and
 attachments · `5b` (it produces the verdict) · the committed `testing-checklist.md`, which is the run's
 **only** durable record.
+
+**`--iterate` is valid on FAST, and this is where it earns most.** 5k needs a filed bug and a
+change-scoped regression, and FAST produces both — it just has no authored cases to re-run, so round N+1
+re-runs the **failed checklist items** plus the regression. FAST is the bug-fix / tweak path, so it is the
+likelier place to want a fix-and-retest loop at all. What stays off on FAST inside the loop: the verifier
+re-ratification in 5k step 3, exactly as at every other FAST gate.
 
 **Gate (FAST, inline):** the checklist covers every atomic condition; `npm run td:validate` is green. No
 `suites:review` — nothing was authored.

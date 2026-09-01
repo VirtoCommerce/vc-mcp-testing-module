@@ -40,6 +40,18 @@ against Done siblings — just not the serial multi-story chain.
 With `--iterate` (default `--max-rounds 2`), a FAIL doesn't stop at the pointer: `/qa-test` drives the
 fix-and-retest cycle itself, up to the cap, then hands to a human. **The initial run is round 1.**
 
+**It does not choose the path, and it runs on both.** FAST/FULL is decided at `1a` from ticket type ×
+status; `--iterate` only changes the Step-5 close-out. On **FAST** the loop is fully coherent — FAST files
+bugs at 5d and runs a change-scoped regression, which is everything 5k needs — and since FAST *is* the
+bug-fix / tweak path, it is the likelier place to want the loop. The only FAST differences inside the loop:
+round N+1 re-runs the **failed checklist items** (there are no authored cases), and step 3's verifier
+re-ratification does not fire, exactly as at every other FAST gate.
+
+**Spelling.** `--iterate 2` and `--iterate=2` are read as `--iterate --max-rounds 2`; a bare
+`--max-rounds N` implies `--iterate` (a round cap means nothing without the loop). There is no argv parser,
+so state the resolution in one line before Step 1 rather than acting on a guess — full table in the
+command's §Usage.
+
 Per round, once the 5c verdict is in:
 
 1. **PASS / PASS WITH NOTES** → exit the loop → Feature Release Gate (5e) → GO/NO-GO recommendation →
