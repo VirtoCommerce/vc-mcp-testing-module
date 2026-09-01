@@ -1,8 +1,8 @@
 {
   "runId": "REG-2026-09-01-1750",
-  "status": "in_progress",
+  "status": "stalled",
   "startedAt": "2026-09-01T15:50:49.619Z",
-  "finishedAt": null,
+  "finishedAt": "2026-09-01T17:27:14.139Z",
   "selection": "loyalty + P0 floor --cases critical --also-ids MSN-027..034,MSNA-023",
   "environment": "vcst-qa",
   "seedGeneration": "20260901153647-7b25",
@@ -11,43 +11,54 @@
       "id": "075",
       "name": "Loyalty",
       "file": "regression/suites/Backend/loyalty/075-loyalty.csv",
-      "status": "pending",
-      "testCount": 29
+      "status": "done",
+      "testCount": 29,
+      "browser": "playwright-edge",
+      "lane": "browser"
     },
     {
       "id": "075b",
       "name": "Loyalty Mixed Cart Order",
       "file": "regression/suites/Backend/loyalty/075b-loyalty-mixed-cart-order.csv",
-      "status": "pending",
-      "testCount": 13
+      "status": "running",
+      "testCount": 13,
+      "lane": "browser",
+      "browser": "playwright-chrome"
     },
     {
       "id": "075c",
       "name": "Loyalty Product Points Earning",
       "file": "regression/suites/Backend/loyalty/075c-loyalty-product-points-earning.csv",
-      "status": "pending",
-      "testCount": 10
+      "status": "done",
+      "testCount": 10,
+      "lane": "fastpath"
     },
     {
       "id": "075d",
       "name": "Loyalty Missions",
       "file": "regression/suites/Backend/loyalty/075d-loyalty-missions.csv",
-      "status": "pending",
-      "testCount": 34
+      "status": "done",
+      "testCount": 34,
+      "browser": "playwright-firefox",
+      "lane": "split"
     },
     {
       "id": "075e",
       "name": "Loyalty Missions Admin",
       "file": "regression/suites/Backend/loyalty/075e-loyalty-missions-admin.csv",
-      "status": "pending",
-      "testCount": 23
+      "status": "done",
+      "testCount": 23,
+      "browser": "playwright-chrome",
+      "lane": "browser"
     },
     {
       "id": "083",
       "name": "Loyalty Catalog Browsing",
       "file": "regression/suites/Frontend/loyalty/083-loyalty-catalog.csv",
-      "status": "pending",
-      "testCount": 26
+      "status": "done",
+      "testCount": 26,
+      "browser": "playwright-chrome",
+      "lane": "browser"
     },
     {
       "id": "083b",
@@ -60,8 +71,10 @@
       "id": "083c",
       "name": "Loyalty Missions Storefront",
       "file": "regression/suites/Frontend/loyalty/083c-loyalty-missions-storefront.csv",
-      "status": "pending",
-      "testCount": 68
+      "status": "running",
+      "testCount": 68,
+      "browser": "playwright-edge",
+      "lane": "browser"
     },
     {
       "id": "083d",
@@ -74,29 +87,38 @@
       "id": "042",
       "name": "Smoke Tests",
       "file": "regression/suites/Frontend/smoke/042-smoke-tests.csv",
-      "status": "pending",
-      "testCount": 34
+      "status": "done",
+      "testCount": 34,
+      "browser": "playwright-chrome",
+      "lane": "browser"
     },
     {
       "id": "044",
       "name": "Security Tests",
       "file": "regression/suites/Frontend/cross-cutting/044-security-tests.csv",
-      "status": "pending",
-      "testCount": 34
+      "status": "done",
+      "testCount": 34,
+      "browser": "playwright-chrome",
+      "lane": "browser"
     },
     {
       "id": "049",
       "name": "Platform API",
       "file": "regression/suites/Backend/api/049-platform-api.csv",
-      "status": "pending",
-      "testCount": 48
+      "status": "done",
+      "testCount": 48,
+      "browser": "playwright-firefox",
+      "lane": "browser"
     },
     {
       "id": "039",
       "name": "Payment CyberSource",
       "file": "regression/suites/Frontend/payment/039-payment-cybersource.csv",
-      "status": "pending",
-      "testCount": 18
+      "status": "done",
+      "testCount": 18,
+      "lane": "manual"
     }
-  ]
+  ],
+  "stalledAt": "2026-09-01T17:27:14.139Z",
+  "stalledReason": "no progress for 45 min (REG-2026-09-01-1750:in_progress:9:119:111)"
 }
