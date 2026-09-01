@@ -2435,9 +2435,9 @@
       "customerApplicability": "reference",
       "clickDriven": true,
       "lanes": {
-        "machine": 9,
+        "machine": 8,
         "browser": 4,
-        "manual": 0
+        "manual": 1
       }
     },
     {
@@ -2493,9 +2493,10 @@
       "envRiskGate": "staging",
       "customerApplicability": "reference",
       "lanes": {
-        "machine": 30,
+        "machine": 29,
         "browser": 0,
-        "manual": 4
+        "manual": 4,
+        "deprecated": 1
       }
     },
     {
