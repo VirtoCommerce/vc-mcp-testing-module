@@ -408,6 +408,16 @@ Generated test cases route to the correct executing agent by layer:
 - **Bug hypothesis first** — every case must answer: "what real bug does this catch?" If you cannot answer, do not generate the case. Coverage numbers are vanity metrics.
 - **Chain link, or it does not ship** — every case either **crosses** a link of the feature's value chain or **guards** one the `[JOURNEY]` case already crosses; a case that does neither is decoration and is culled (Step 3 §6d). A link is crossed only by an observation on the *far side* of it: reading a value from the API and reading the same value off the page are two observations of one link, never coverage of the join between them.
 - **One `[JOURNEY]` case per state-changing feature, authored first** (Step 3 §1), `Technique:FLOW`. It is the case that answers "does this feature work at all?" — the one everybody assumes someone else wrote.
+- **A filtered read must be PROVED to filter.** Run the query once WITHOUT the filter and confirm the
+  results differ before any conclusion rests on the filtered figure. An ignored parameter does not error
+  — it returns a plausible number for a wider population, and a comparison between two such numbers is a
+  comparison of the whole dataset with itself. Measured 2026-09-01 on
+  `POST /api/loyalty-program-operation-log/search`: `{userIds:[uid]}` (plural) and an **unfiltered**
+  query return byte-identical results, `totalCount 990` across 4 distinct users, while `{userId: uid}`
+  (singular) returns `19` for one — so a per-user claim was being made from a global count. This is the
+  same "check the instrument against a known-good control" move that catches a wrong auth context,
+  applied to a query parameter; see also `.claude/knowledge/api/graphql-schema.md` on optional arguments
+  that are accepted and answer for a context you never chose.
 - **A verification that reports on a RECORDED SNAPSHOT is not checking the thing it names.** Same
   family as the one below, one step removed: the check does not share the action's implementation, it
   shares the action's *memory*. Measured 2026-09-01: `td:validate:missions-e2e` reported the fixture
