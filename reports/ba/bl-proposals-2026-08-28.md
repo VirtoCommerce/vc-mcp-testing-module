@@ -14,6 +14,26 @@ Ids are **not** assigned here — an id is a citation contract and is allocated 
 | 4 | A `Published` mission with `public=false` stays out of the customer-facing progress query | `P2-ux` | low · none → **low** | HELD (value) | Business `low` **never** promotes — demand cannot buy a cosmetic rule into a file whose purpose is judging PASS/FAIL. Independently, the product intent is unresolved: the open bug records three plausible readings (visibility gate / publishing hint / vestigial), so no direction can be asserted yet. Needs a product decision before it is an invariant at all. |
 | 5 | A mission grants its reward at most once per period, and a given order contributes to a given mission at most once | `P0-revenue` | high · none → **high** | UNGROUNDED | **This is the positive oracle — the one candidate the implementation SATISFIES.** Source is decisive (`:270-273` Completed short-circuit; `:311` + `:488-497` dedup on `(missionId, orderId, userId)`; atomic save `:322-324`). **Half the live axis is now in hand.** Measured 2026-08-28 on the VIP fixture (read-only): repeated `Earned` reads return an identical entry set (63 = 63, same ids) with zero duplicate row ids within a read — that is the at-most-once-on-re-read half. What is still missing is the **accrual** half: a second qualifying order must not double-count. **Unblocks with** a run that places two qualifying orders against one `OrderCountGoal` (`MSN-E2E-001` does exactly this). *Correction to an earlier draft of this row: the credentials do NOT resolve empty — that was a reading error. `LOYALTY_VIP_USER_EMAIL` lives in `.env.defaults` and `_PASSWORD` in `.env.local`, and both resolve through `process.env`; they read as empty only off `config.js`'s curated `env` export, which omits the keys. See `.claude/rules/test-data.md` §Resolving a variable.* |
 
+## RESOLUTION 2026-09-01 — three of five applied
+
+Live axes were obtained on seed generation `20260901153647-7b25` and re-derived independently before
+those fixtures were re-seeded (`reports/regression/REG-2026-09-01-1750/post-state-independent-audit.json`,
+carrying `missionId`/`userId` per row so the reading is re-checkable).
+
+| # | Outcome |
+|---|---|
+| 1 · currency exclusion | **APPLIED as `BL-LOY-017`.** `MSN_E2E_PERSKU_PTS` `Completed`, item `currentQuantity 1/1` — the PTS-priced line was counted toward the quantity target. |
+| 2 · reversal | **STILL UNGROUNDED.** Its live evidence was hand-executed on the *previous* generation (`…134918-9421`) and `MSN-032` is `Manual`/EX-200 — it returns SKIPPED, so the run did not re-capture it. Unblocks with one cancellation of a settled disposable fixture order, captured with its ids. |
+| 3 · order-status gate | **STILL HELD (value).** Business `medium`, product demand `none`. Unchanged by the new evidence. |
+| 4 · `public=false` | **STILL HELD (value).** Business `low` never promotes; product intent unresolved. |
+| 5 · dedup / at-most-once | **APPLIED as `BL-LOY-018`**, the positive oracle. Accrual axis: `MSN_E2E_ORDERCOUNT` `Completed` at `currentValue 2/2` after two qualifying orders. Re-read axis: identical 63-entry `Earned` set, zero duplicate ids. |
+| — · accrual basis (not in the original five) | **APPLIED as `BL-LOY-016`.** `MSN_E2E_ORDERVALUE_003`: merchandise 45.00, shipping 150.00, tax 39.00, total 234.00, goal target **49.5** placed between the readings — `Completed` at `currentValue` **234**. The goal measures the order total, not merchandise value. |
+
+**Not admitted as evidence, deliberately:** `MSN-027`, `MSN-029` and `MSN-033` failed on the machine
+lane while passing under hand execution on the same build, all on settle-dependent reads, and
+`MSN-033`'s expected value was stale. A verdict that disagrees with itself between lanes is a triage
+item, not an oracle axis.
+
 ## Why the live axis matters here rather than being waived
 
 `bl-audit-criteria.md` §1a lets the **Docs** axis be marked `N/A` for a project-specific extension — and Loyalty Missions qualifies (no VirtoOZ surface, checked and absent). It explicitly does **not** let `N/A` cover a missing Source or Live axis: *"When in doubt, UNGROUNDED, not N/A."* Four of these five have complete source evidence and would read as confirmable to a reader who skipped that clause. They are held anyway, because an invariant asserted from source alone would be a claim about what the code says, not about what the system does — and the whole point of the three axes is that those differ.

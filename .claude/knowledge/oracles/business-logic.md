@@ -1308,6 +1308,48 @@ Transport-layer invariants for the xAPI GraphQL endpoint at `{BACK_URL}/graphql`
 - **Scope note:** Deliberately phrased for any settle-many-per-event subsystem, not for missions alone — the same failure shape applies to any handler that fans one event out across independent entities and writes to a shared ledger.
 - **Promoted:** 2026-08-28 (via `/qa-review-oracles bl`, VCST-5320/5346 source reconstruction).
 
+
+### BL-LOY-016: A mission goal measures MERCHANDISE value, not the order total `[P0-revenue]`
+- **Rule:** An `OrderValueGoal`'s progress MUST accrue the order's merchandise value — what the customer spent on goods — and MUST NOT include shipping, tax or any other non-merchandise component. A spend target is a promise about purchasing, so a customer whose goods total falls short of the target must not be credited as having reached it because delivery was expensive, and a merchant setting a $50 target must not be funding rewards out of $150 of freight.
+- **Verify:** Place ONE order whose merchandise value falls BELOW the goal's target while its order total rises ABOVE it — a target placed strictly between the two readings is what makes the case decidable (`.claude/rules/test-data.md` §SECOND RULE). Read `loyaltyMissionProgress` for that user: `currentValue` must equal the merchandise value and the mission must remain `InProgress`.
+- **Violation signal:** `currentValue` equals the order's grand total; a mission completes on an order whose goods never reached the target; the same cart completes or not depending on the shipping method chosen.
+- **Agents:** qa-backend-expert
+- **Docs:** N/A — project-specific extension: Loyalty Missions ships in `vc-module-loyalty` PR #14 with no VirtoOZ user- or developer-guide surface (checked 2026-08-28, absent).
+- **Source:** `LoyaltyMissionLogicService.ApplyContribution` — `case OrderValueGoal: return order.Total;` (`:410` at `1be73b4`, `:417` on the deployed `da8abc6`). No `SubTotal` / `DiscountTotal` / `ShippingTotal` / `TaxTotal` appears anywhere in the mission path.
+- **Live:** measured 2026-09-01 on `MSN_E2E_ORDERVALUE_003` — merchandise **45.00**, shipping **150.00**, tax **39.00**, order total **234.00**, goal target **49.5** (placed deliberately between the two readings). Result: `Completed`, `currentValue` **234**, 100%. Merchandise alone (45) would not have reached 49.5. Reproduced on a second mission and a second account (`ORDERVALUE_008`, same 234 figure at capture time).
+- **Status:** VIOLATED. The implementation accrues `order.Total`, so shipping and tax inflate spend progress and a discount deflates it.
+- **Note:** the earlier framing of this finding said only "shipping + tax count"; the live measurement shows **both** components and a 5.2× gap between the two readings on one order, which is why the invariant is stated as merchandise-vs-total rather than as a list of components to exclude.
+- Evidence artifact: `reports/regression/REG-2026-09-01-1750/post-state-independent-audit.json` — live state re-derived independently against seed generation `20260901153647-7b25` before those fixtures were re-seeded, carrying `missionId` / `userId` per row so the reading is re-checkable rather than merely reported.
+- **Promoted:** 2026-09-01 (via `/qa-review-oracles bl`).
+
+---
+
+### BL-LOY-017: Mission accrual counts cash-currency spend only — loyalty-currency lines contribute nothing `[P0-revenue]`
+- **Rule:** A mission goal MUST ignore line items priced in the loyalty currency. A points-priced line is a REDEMPTION, not a purchase: counting it lets a customer convert previously-earned points into fresh mission progress and a fresh reward, which is a self-feeding loop. This is the mission-path analogue of **BL-LOY-009**, which already states it for the loyalty-program earn path.
+- **Verify:** Place one order mixing a loyalty-currency line with a cash line, where the points-priced line alone would satisfy the goal. `currentValue` (or the `PerSkuGoal` item's `currentQuantity`) must not move on account of the points line.
+- **Violation signal:** a `PerSkuGoal` target quantity satisfied by a PTS-priced line; an `OrderValueGoal` advancing on an order whose cash component is below the target; a mission completing on a cart the customer paid for with points.
+- **Agents:** qa-backend-expert
+- **Docs:** N/A — project-specific extension, as BL-LOY-016.
+- **Source:** `ApplyContribution` — `case PerSkuGoal:` iterates `order.Items` and does `item.CurrentQuantity += lineItem.Quantity` with **no currency predicate** (`:413-423`, increment `:420` at `1be73b4`; `:420-431` on `da8abc6`). `OrderCountGoal` has no `CurrencyCode` field at all and is never currency-checked — the gate at `:294` matches only `goal is OrderValueGoal`, and even that self-disables when `CurrencyCode` is empty (`:296-297`). The sibling `LoyaltyProgramHandler` does filter: `!x.Currency.EqualsIgnoreCase(loyaltyCurrency)` (`:197-199`).
+- **Live:** measured 2026-09-01 on `MSN_E2E_PERSKU_PTS` — a PTS-priced line for the target SKU, order `CO260901-00007`. Result: `Completed`, item `currentQuantity 1 / targetQuantity 1`, 100%. The points-currency line was counted toward the quantity target.
+- **Status:** VIOLATED on the mission path, while SATISFIED on the program path in the same module — the divergence between two accrual paths shipped in one PR is the root risk, not any single symptom.
+- Evidence artifact: `reports/regression/REG-2026-09-01-1750/post-state-independent-audit.json` — live state re-derived independently against seed generation `20260901153647-7b25` before those fixtures were re-seeded, carrying `missionId` / `userId` per row so the reading is re-checkable rather than merely reported.
+- **Promoted:** 2026-09-01 (via `/qa-review-oracles bl`).
+
+---
+
+### BL-LOY-018: A mission grants at most once, and an order contributes at most once `[P0-revenue]`
+- **Rule:** A mission MUST grant its reward at most once per progress period, and a given order MUST contribute to a given mission at most once — no matter how many times the accrual runs, the progress is re-read, or the order event is redelivered.
+- **Verify:** Place TWO qualifying orders against a target-2 `OrderCountGoal`: `currentValue` must reach exactly 2 (not 4) and the mission must complete once. Then re-read `loyaltyPointsHistory` repeatedly: the entry set must be identical across reads, with no duplicate row ids.
+- **Violation signal:** `currentValue` advancing by more than the order's own contribution; two ledger rows for one mission completion; a re-read producing a larger entry set.
+- **Agents:** qa-backend-expert
+- **Docs:** N/A — project-specific extension, as BL-LOY-016.
+- **Source:** `ApplyMissionInternalAsync` short-circuits on a `Completed` status (`:270-273`), dedups on `(missionId, orderId, userId)` via `LoyaltyMissionTransaction` (`:311`, `:488-497`), and saves progress + transaction atomically under a per-(mission,user) distributed lock (`:322-324`).
+- **Live:** two axes, both measured 2026-09-01. **Accrual:** `MSN_E2E_ORDERCOUNT` after two qualifying orders reads `Completed`, `currentValue` **2 / 2**, 100% — two orders, two increments, one completion. **Re-read:** on the VIP fixture, repeated `Earned` reads returned an identical 63-entry set with zero duplicate row ids.
+- **Status:** **SATISFIED.** Recorded deliberately as a positive oracle: an oracle file containing only things the product gets wrong is one nobody trusts, and a satisfied invariant is what lets a case assert a guarantee rather than probe for a defect.
+- Evidence artifact: `reports/regression/REG-2026-09-01-1750/post-state-independent-audit.json` — live state re-derived independently against seed generation `20260901153647-7b25` before those fixtures were re-seeded, carrying `missionId` / `userId` per row so the reading is re-checkable rather than merely reported.
+- **Promoted:** 2026-09-01 (via `/qa-review-oracles bl`).
+
 ---
 
 ## Domain 18: Payment Processors (BL-PAY)
