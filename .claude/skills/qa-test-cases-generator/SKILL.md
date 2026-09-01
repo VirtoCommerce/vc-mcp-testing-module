@@ -408,6 +408,14 @@ Generated test cases route to the correct executing agent by layer:
 - **Bug hypothesis first** — every case must answer: "what real bug does this catch?" If you cannot answer, do not generate the case. Coverage numbers are vanity metrics.
 - **Chain link, or it does not ship** — every case either **crosses** a link of the feature's value chain or **guards** one the `[JOURNEY]` case already crosses; a case that does neither is decoration and is culled (Step 3 §6d). A link is crossed only by an observation on the *far side* of it: reading a value from the API and reading the same value off the page are two observations of one link, never coverage of the join between them.
 - **One `[JOURNEY]` case per state-changing feature, authored first** (Step 3 §1), `Technique:FLOW`. It is the case that answers "does this feature work at all?" — the one everybody assumes someone else wrote.
+- **A verification that reports on a RECORDED SNAPSHOT is not checking the thing it names.** Same
+  family as the one below, one step removed: the check does not share the action's implementation, it
+  shares the action's *memory*. Measured 2026-09-01: `td:validate:missions-e2e` reported the fixture
+  set **clean** while three of its five fixtures were consumed — two terminal `Completed`, one
+  half-spent — because it validates the seed-time baselines recorded in the overlay rather than the
+  current state of the entities. It therefore certifies a fixture set that cannot run, and it does so
+  with a green exit code. A guard over live state must READ live state; a guard over a recorded
+  baseline is a guard over the record, and must say so in its own output.
 - **A verification that shares its implementation with the thing it verifies cannot detect that
   implementation's failure — and it fails CLEAN.** This is the strongest form of false pass we have
   measured, because the check passes *because* the action failed the same way. Worked example
