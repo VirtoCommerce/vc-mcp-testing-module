@@ -277,20 +277,20 @@ MSNA-023,"Add — backend save-validation rejects End-before-Start and a negativ
 [WAIT] details blade opens (Draft)
 [ACT] type {{mission_name}} into Name
 [ACT] select goal type OrderCountGoal, set target = 1
---- End-before-Start (invalid) ---
+--- End-before-Start: invalid ---
 [ACT] set Start date = today
 [ACT] set End date = today minus 1 day
 [ACT] click Save
 [WAIT] server round-trip completes (toast or inline error, or Save remains disabled)
---- correct to End=Start (valid boundary) ---
+--- correct End to Start: valid boundary ---
 [ACT] set End date = today (same as Start)
 [ACT] click Save
 [WAIT] save completes
---- negative reward (invalid) ---
+--- negative reward: invalid ---
 [ACT] set reward amount = -1
 [ACT] click Save
 [WAIT] server round-trip completes (toast or inline error, or Save remains disabled)
---- correct to reward = 0 (valid boundary, MSNA-011 precedent) ---
+--- correct reward to 0: valid boundary, MSNA-011 precedent ---
 [ACT] set reward amount = 0
 [ACT] click Save
 [WAIT] save completes, grid/blade reflects the saved mission","[FORM] End-before-Start attempt: the blade does NOT re-title away from its unsaved-Draft state and Save/Reset do NOT disable (the MSNA-004-confirmed signal for ""save did not go through"" — this blade has no toast) {SPEC} — a date-order invariant is normal for any goal window and should be enforced somewhere in the round-trip

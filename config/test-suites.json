@@ -3,7 +3,7 @@
   "_meta": {
     "version": "3.0",
     "description": "Regression test suite manifest for parallel orchestration with module-aligned directories under Frontend/Backend layers",
-    "generated": "2026-08-28",
+    "generated": "2026-09-01",
     "totalSuites": 132,
     "csvFormat": "Enriched Agent-Native CSV (ID, Title, Section, Priority, Business_Rule, Edge_Case_Refs, Preconditions, Test_Data, Steps, Assertions, Cross_Layer_Checks, Failure_Signals, Cleanup, References, Automation_Status)",
     "domains": [
@@ -2477,7 +2477,7 @@
       "layer": "backend",
       "concern": "api",
       "priority": "P1",
-      "testCount": 26,
+      "testCount": 34,
       "estimatedMinutes": 12,
       "agent": "qa-backend-expert",
       "tags": [
@@ -2493,8 +2493,8 @@
       "envRiskGate": "staging",
       "customerApplicability": "reference",
       "lanes": {
-        "machine": 23,
-        "browser": 0,
+        "machine": 30,
+        "browser": 1,
         "manual": 3
       }
     },
@@ -2506,7 +2506,7 @@
       "layer": "backend",
       "concern": "admin",
       "priority": "P1",
-      "testCount": 22,
+      "testCount": 23,
       "estimatedMinutes": 20,
       "agent": "qa-backend-expert",
       "tags": [
