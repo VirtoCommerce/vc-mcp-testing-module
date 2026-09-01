@@ -1,5 +1,5 @@
 {
-  "generatedIso": "2026-09-01T16:12:50.540Z",
+  "generatedIso": "2026-09-01T18:33:38.865Z",
   "rev": 1,
   "monthsFull": 6,
   "source": {
@@ -630,6 +630,7 @@
       "headingsVersioned": 16,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Highlights",
         "Sales Rep Hub enhancements",
@@ -840,6 +841,7 @@
       "headingsVersioned": 10,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Native MCP for UCP first release",
         "Sales Rep Hub module first release",
@@ -1055,6 +1057,7 @@
       "headingsVersioned": 10,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Stable 15 bundle",
         "Virto Commerce release strategy",
@@ -1456,6 +1459,7 @@
       "headingsVersioned": 21,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Key updates",
         "Start local",
@@ -1756,6 +1760,7 @@
       "headingsVersioned": 15,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Modernized settings UI menu. Platform 1011.0",
         "OpenSearch module first release",
@@ -1939,6 +1944,7 @@
       "headingsVersioned": 9,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Stable 14 release on .NET10",
         "Commerce Operations Foundation MCP Server (onX)",
@@ -2125,6 +2131,7 @@
       "headingsVersioned": 10,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Webinar \"All Things AI: From “Help!” to “Order Placed”",
         "Storybook updates",
@@ -2257,6 +2264,7 @@
       "headingsVersioned": 7,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Marketplace and VC-Shell. AI assistant integrated into the Vendor Portal",
         "AI capabilities reminder",
@@ -2402,6 +2410,7 @@
       "headingsVersioned": 6,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Stable release 12 launch",
         "Environments comparison module first release",
@@ -2423,6 +2432,7 @@
       "headingsVersioned": 0,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [],
       "inWindow": true
     },
@@ -2642,6 +2652,7 @@
       "headingsVersioned": 12,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Virto Commerce advances upward and rightward in the 2025 Gartner Magic Quadrant",
         "xFrontend module first release",
@@ -2902,6 +2913,7 @@
       "headingsVersioned": 14,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Webinar: Composable Commerce and Clean Data",
         "Storybook accessibility and UI improvements",
@@ -3136,6 +3148,7 @@
       "headingsVersioned": 12,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Loyalty module",
         "Enhanced Intent Search module",
@@ -3312,6 +3325,7 @@
       "headingsVersioned": 8,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "News module first release",
         "Shopify Taxonomy module first release",
@@ -3569,6 +3583,7 @@
       "headingsVersioned": 15,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Geo-replicated solution load test performed",
         "Marketplace",
@@ -3788,6 +3803,7 @@
       "headingsVersioned": 13,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "SEO module first release",
         "Elasticsearch modules updates",
@@ -3973,6 +3989,7 @@
       "headingsVersioned": 10,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Virto Commerce stable release 11",
         "Key features",
@@ -4147,6 +4164,7 @@
       "headingsVersioned": 9,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Marketplace",
         "Virto Commerce webinars",
@@ -4277,6 +4295,7 @@
       "headingsVersioned": 7,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Virto Commerce website",
         "Algolia Search Upgrade to .NET 8",
@@ -4378,6 +4397,7 @@
       "headingsVersioned": 5,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Back in Stock",
         "CyberSource Payment Provider",
@@ -4489,6 +4509,7 @@
       "headingsVersioned": 5,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Marketplace and VC Shell"
       ],
@@ -4588,6 +4609,7 @@
       "headingsVersioned": 5,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Platform",
         "Marketplace",
@@ -4610,6 +4632,7 @@
       "headingsVersioned": 0,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [],
       "inWindow": true
     },
@@ -4817,6 +4840,7 @@
       "headingsVersioned": 12,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Platform stable bundle 10",
         "Marketplace",
@@ -5004,6 +5028,7 @@
       "headingsVersioned": 11,
       "headingsUnparsed": 0,
       "unparsed": [],
+      "rejectedUrls": [],
       "sectionsWithoutVersion": [
         "Documentation",
         "Builder.io",
