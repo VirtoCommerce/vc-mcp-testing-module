@@ -43,9 +43,14 @@ The hole those three leave, on the same ticket: PR #2444 renames the hub widget 
 orders"* across 13 locales, and the existing suites assert the **old** label **62 times** (093: 43,
 091: 19). Every one is stale the moment it merges, and no gate in the pipeline can see it.
 
-**The corpus-wide backdrop is the same shape.** Only **71 of ~4,409** rows carry an `Audited:` stamp
-(1.6%), and **0 of the 202** rows in the four suites the two FULL `/qa-test` runs touched
-(`083c` 0/77, `083d` 0/8, `075d` 0/34, `075e` 0/23). `/qa-review-tests --triangulate` — the mechanism
+**The corpus-wide backdrop is the same shape.** Measured **2026-09-02 at 133 suites / 4,438 rows**:
+only **71** rows carry an `Audited:` stamp (1.6%), and **0 of the 202** rows in the four suites the two
+FULL `/qa-test` runs touched (`083c` 0/77, `083d` 0/8, `075d` 0/34, `075e` 0/23). **This file is the one
+place that share is written down** — `CLAUDE.md`, `.claude/rules/regression.md` and
+`.claude/rules/skills-commands.md` cite it rather than restating it, because the denominator moves with
+every append (it moved during the change that added this section) and a transcribed count goes stale in
+four files at once, silently. Re-derive it rather than trusting the figure above if it matters:
+`Audited:` occurrences over total rows across `regression/suites/**/*.csv`. `/qa-review-tests --triangulate` — the mechanism
 that answers *is this assertion still true* — is invoked from `/qa-test` at **no** step, either path.
 Its scheduled twin `ci/run-suite-audit.ts` covers one suite per weekday on a ≈25-week cycle, which is
 the right cadence for rot and the wrong one for a change landing today.

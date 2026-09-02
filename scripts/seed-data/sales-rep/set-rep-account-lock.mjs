@@ -48,6 +48,7 @@
  *   TEST_ENV=vcst node scripts/seed-data/sales-rep/set-rep-account-lock.mjs --verify [--rep SR_REP_LOCKABLE]
  */
 import { assertSafeTarget, auth, api, log, loadCsv, DRY_RUN } from '../../lib/seed-common.mjs';
+import { setLockoutVerified, __setApi } from '../../lib/user-provision.mjs';
 import { repFixtureStatus } from './sales-rep-layout-specs.mjs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
@@ -73,14 +74,21 @@ const REP_KEY = val('--rep', LOCKABLE_REP_KEYS[0]);
 const MODE = has('--lock') ? 'lock' : has('--unlock') ? 'unlock' : has('--verify') ? 'verify' : null;
 
 /** The committed rep row, or a loud failure. Identity is a business key, never a literal here. */
-function repRow(key) {
+export function repRow(key) {
   const row = loadCsv('test-data/sales-rep/sales-reps.csv').find((r) => r.rep_key === key);
   if (!row) throw new Error(`rep_key "${key}" is not in test-data/sales-rep/sales-reps.csv`);
   return row;
 }
 
-/** Refuse anything not explicitly declared lockable, with the reason spelled out. */
-function assertLockable(key, row) {
+/**
+ * Refuse anything not explicitly declared lockable, with the reason spelled out.
+ *
+ * EXPORTED so `scripts/unit/sales-rep-account-lock.test.mjs` can assert the REFUSAL itself, not
+ * merely the contents of `LOCKABLE_REP_KEYS`. Testing the list without testing the gate that reads
+ * it left this — the one function standing between `sr:lock` and locking a shared fixture — with
+ * zero coverage: weakening it to `|| key.startsWith('SR_')` kept every test green.
+ */
+export function assertLockable(key, row) {
   if (LOCKABLE_REP_KEYS.includes(key)) return;
   throw new Error(
     `REFUSING to change the account lock of "${key}". Only ${LOCKABLE_REP_KEYS.join(', ')} may be toggled.\n`
@@ -99,6 +107,29 @@ export function isLockedNow(user, now = Date.now()) {
   return end > now;
 }
 
+/**
+ * A lock is TWO fields, so "is it in the desired state?" is not one boolean.
+ *
+ * `status` is written by the PUT (which persists it but silently discards `lockoutEnd`), and
+ * `lockoutEnd` is written by POST /lock|/unlock (the only endpoint that moves it). A run that
+ * applied one and failed before the other leaves the two disagreeing, and that residue is what
+ * reading `lockoutEnd` alone could not see: `--unlock` short-circuited on "already UNLOCKED" and
+ * returned WITHOUT restoring `status`, so nothing recovered it.
+ *
+ * `desiredStatus` is DERIVED from the fixture row (`repFixtureStatus`), never transcribed — a
+ * second lockable rep with a different resting status must not be silently reset to Approved.
+ */
+export function lockStateMatches(user, wantLocked, desiredStatus, now = Date.now()) {
+  return isLockedNow(user, now) === wantLocked && (user?.status ?? '') === desiredStatus;
+}
+
+/** Human-readable current state of BOTH halves, for logs and `--verify`. */
+export function describeLockState(user, now = Date.now()) {
+  return `lockoutEnd=${user?.lockoutEnd ?? 'null'} status=${user?.status ?? 'null'} `
+    + `lockoutEnabled=${user?.lockoutEnabled} accessFailedCount=${user?.accessFailedCount ?? 0} `
+    + `=> ${isLockedNow(user, now) ? 'LOCKED' : 'UNLOCKED'}`;
+}
+
 async function main() {
   assertSafeTarget();
   if (!MODE) throw new Error('specify one of --lock | --unlock | --verify');
@@ -111,16 +142,31 @@ async function main() {
     throw new Error(`${REP_KEY} (${row.email}) has no platform account on this env — run \`TEST_ENV=${process.env.TEST_ENV || 'vcst'} npm run seed:sales-rep -- --only ${REP_KEY}\` first`);
   }
   const wasLocked = isLockedNow(user);
-  log(`${REP_KEY} (${row.email}) account ${user.id}: lockoutEnd=${user.lockoutEnd ?? 'null'} lockoutEnabled=${user.lockoutEnabled} accessFailedCount=${user.accessFailedCount ?? 0} => ${wasLocked ? 'LOCKED' : 'UNLOCKED'}`);
+  const restingStatus = repFixtureStatus(row);
+  log(`${REP_KEY} (${row.email}) account ${user.id}: ${describeLockState(user)}`);
 
   if (MODE === 'verify') {
-    log(`resting state per the fixture is UNLOCKED (is_locked=${row.is_locked} => ${repFixtureStatus(row)}); currently ${wasLocked ? 'LOCKED — run `npm run sr:unlock` (or any `npm run seed:sales-rep`, which self-heals)' : 'as expected'}`);
+    // Judge BOTH halves. Reporting only `lockoutEnd` told an operator the fixture was "as expected"
+    // while `status` was still Locked — i.e. it exonerated exactly the residue it should surface.
+    const consistent = lockStateMatches(user, false, restingStatus);
+    log(`resting state per the fixture is UNLOCKED / status=${restingStatus} (is_locked=${row.is_locked}); currently ${
+      consistent
+        ? 'as expected'
+        : `INCONSISTENT (${describeLockState(user)}) — run \`npm run sr:unlock\` (or any \`npm run seed:sales-rep\`, which self-heals)`
+    }`);
+    if (!consistent) process.exitCode = 1;
     return;
   }
 
   const want = MODE === 'lock';
-  if (want === wasLocked) { log(`already ${want ? 'LOCKED' : 'UNLOCKED'} — nothing to do (idempotent)`); return; }
-  if (DRY_RUN) { log(`[DRY] would ${MODE} ${REP_KEY}`); return; }
+  const targetStatus = want ? 'Locked' : restingStatus;
+  // Short-circuit only when BOTH halves already match. Keying this on `lockoutEnd` alone is what
+  // made a residual `status` unrecoverable: `--unlock` reported "nothing to do" and left it.
+  if (lockStateMatches(user, want, targetStatus)) {
+    log(`already ${want ? 'LOCKED' : 'UNLOCKED'} with status=${targetStatus} — nothing to do (idempotent)`);
+    return;
+  }
+  if (DRY_RUN) { log(`[DRY] would ${MODE} ${REP_KEY} (target: lockedOut=${want}, status=${targetStatus})`); return; }
 
   // ── The lockout is NOT settable through `PUT /api/platform/security/users` ────────────────────
   // Measured on vcst 2026-09-02. That PUT returns `{ succeeded: true, errors: [] }` and persists
@@ -135,21 +181,25 @@ async function main() {
   //
   // `status` is still worth PUTting: it is the field that surface reads for the Admin UI's account
   // state, and it is the half the PUT genuinely applies.
-  user.status = want ? 'Locked' : 'Approved';
+  // Order matters: the `status` half goes first because the PUT round-trips the whole entity, then
+  // the `lockoutEnd` half through the SHARED helper so there is one implementation of that move.
+  user.status = targetStatus;
+  if (!want) { user.lockoutEnabled = false; user.accessFailedCount = 0; }
   await api('PUT', '/api/platform/security/users', user, { expectStatus: [200, 204] });
-  const res = await api('POST', `/api/platform/security/users/${user.id}/${want ? 'lock' : 'unlock'}`, {}, { expectStatus: [200, 201, 204] });
-  if (res && res.succeeded === false) {
-    throw new Error(`POST /users/${user.id}/${want ? 'lock' : 'unlock'} returned succeeded:false (errors: ${JSON.stringify(res.errors || [])}) — the endpoint reports failure with an empty errors array, so there is nothing more to read; check the token has platform:security:update`);
+  __setApi(api); // the helper is authenticated through THIS script's seed-common client
+  const moved = await setLockoutVerified(user.id, row.email, want);
+  if (!moved) {
+    throw new Error(`${MODE} did NOT take effect on lockoutEnd — check the token has platform:security:update`);
   }
 
-  // Read back — the endpoint returns 200 on shapes it did not apply, so success is confirmed from
-  // the persisted entity, never from the status code.
+  // Read back BOTH halves. The endpoint returns 200 on shapes it did not apply, so success is
+  // confirmed from the persisted entity — and confirming only `lockoutEnd` is what let the two
+  // fields drift apart in the first place.
   const after = await api('GET', `/api/platform/security/users/${encodeURIComponent(row.email)}`, null, { expectStatus: [200, 404] });
-  const nowLocked = isLockedNow(after);
-  if (nowLocked !== want) {
-    throw new Error(`${MODE} did NOT take effect: lockoutEnd=${after?.lockoutEnd ?? 'null'} (still ${nowLocked ? 'LOCKED' : 'UNLOCKED'})`);
+  if (!lockStateMatches(after, want, targetStatus)) {
+    throw new Error(`${MODE} left the two halves disagreeing: ${describeLockState(after)} (wanted lockedOut=${want}, status=${targetStatus})`);
   }
-  log(`${REP_KEY} is now ${nowLocked ? 'LOCKED' : 'UNLOCKED'} (lockoutEnd=${after?.lockoutEnd ?? 'null'}, accessFailedCount=${after?.accessFailedCount ?? 0})`);
+  log(`${REP_KEY} is now ${describeLockState(after)}`);
   if (nowLocked) log('  REMEMBER: the resting state is UNLOCKED. Run `npm run sr:unlock` when the case is done; any `npm run seed:sales-rep` also self-heals it.');
 }
 

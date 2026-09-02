@@ -27,6 +27,7 @@ import {
   matchObservables,
   matchOracles,
   parseArgs,
+  pathTokensForPaths,
   resolveScopeSuites,
   scanExistingCoverage,
   SEARCHED_COLUMNS,
@@ -267,6 +268,34 @@ test("a missing file is unscannable, not an absence of risk", () => {
   assert.deepEqual(r.unscannable.map((u) => u.reason), ["file not found"]);
 });
 
+// A NAMED suite that is not in the manifest at all used to vanish: it never entered `scoped`, so
+// it reached neither `hits[]` nor `unscannable[]`, the run exited 0, and an empty worklist read as
+// "no stale rows found". Suite 093 was historically found in exactly that state (present on disk,
+// absent from the manifest), and `91` is the plausible typo for `091`.
+test("a --suite id absent from the manifest is REPORTED, never silently dropped", () => {
+  const r = scanExistingCoverage({
+    suites: SUITES,
+    suiteIds: ["091", "999"],
+    observables: ["x"],
+    readSuite: () => csv([row({ ID: "SR-CP-001", Assertions: "x" })]),
+  });
+  const missing = r.unscannable.filter((u) => u.suiteId === "999");
+  assert.equal(missing.length, 1, "the unknown id must appear in unscannable[]");
+  assert.match(missing[0].reason, /not in config\/test-suites\.json/);
+});
+
+test("an unknown --suite id does not suppress the real hits from the known one", () => {
+  // Fail-open: the worklist for the suite that DOES exist still has to be produced.
+  const r = scanExistingCoverage({
+    suites: SUITES,
+    suiteIds: ["091", "999"],
+    observables: ["recent orders"],
+    readSuite: () => csv([row({ ID: "SR-CP-001", Assertions: "Recent orders" })]),
+  });
+  assert.equal(r.hits.length, 1);
+  assert.equal(r.unscannable.length, 1);
+});
+
 test("an observable that matched nothing is reported rather than read as clean", () => {
   // Either the corpus genuinely never asserts it (a gap) or the diff words it differently. The
   // two need different responses, so the tool must not silently pick one.
@@ -321,4 +350,53 @@ test("lists split on commas; --observable takes one phrase so a comma stays part
   assert.deepEqual(a.domains, ["sales-rep", "orders"]);
   assert.deepEqual(a.oracles, ["BL-SR-002", "BL-SR-012"]);
   assert.deepEqual(a.observables, ["All orders, newest first"]);
+});
+
+// ---- --changed-files: the flag the header documented before it existed -------------------------
+// The path pathway (ScanInput.pathTokens, the token branch, the "path" reason kind) was reachable
+// ONLY from this test file, because parseArgs had no case for the flag and its default: rejected
+// it. A documented capability an operator cannot invoke is a defect, so these pin the CLI seam.
+
+test("parseArgs accepts --changed-files and its aliases", () => {
+  for (const flag of ["--changed-files", "--path", "--paths"]) {
+    const a = parseArgs(["--domain", "sales-rep", "--observable", "x", flag, "a/b/c.vue"]);
+    assert.ok(!("error" in a), `${flag} must be accepted`);
+    assert.deepEqual((a as { paths: string[] }).paths, ["a/b/c.vue"]);
+  }
+});
+
+test("--changed-files takes a comma list and looks ahead for its value", () => {
+  const a = parseArgs(["--domain", "d", "--observable", "x", "--changed-files", "a.vue,b/c.ts"]);
+  assert.deepEqual((a as { paths: string[] }).paths, ["a.vue", "b/c.ts"]);
+  // as the final token with no value it must fail loudly, not bind undefined
+  const bad = parseArgs(["--domain", "d", "--observable", "x", "--changed-files"]);
+  assert.ok("error" in bad && /needs a value/.test(bad.error));
+});
+
+test("paths alone do NOT scope a scan — they are additive to a vocabulary scope", () => {
+  const a = parseArgs(["--observable", "x", "--changed-files", "a/b/customer-orders.vue"]);
+  assert.ok("error" in a, "a path-only invocation must still demand --domain/--suite/--module");
+  assert.match((a as { error: string }).error, /--domain \/ --suite \/ --module/);
+});
+
+test("pathTokensForPaths derives tokens from the manifest vocabulary, matching EXACTLY", () => {
+  const tokens = pathTokensForPaths(["client-app/pages/company/customer-orders.vue"], SUITES);
+  // 'orders' is a tag the fixture suites carry; 'order' (singular) must never be produced from it
+  assert.ok(!tokens.includes("order"), "an exact-match tokenizer must not emit 'order'");
+  // a path whose segments match no suite vocabulary yields nothing rather than widening blindly
+  assert.deepEqual(pathTokensForPaths(["some/unrelated/path.txt"], SUITES), []);
+  // and no paths means no tokens at all
+  assert.deepEqual(pathTokensForPaths([], SUITES), []);
+});
+
+test("a path token can ADD a suite the vocabulary missed but never remove one it found", () => {
+  const viaVocab = resolveScopeSuites(SUITES, { domains: ["sales-rep"] });
+  const viaBoth = resolveScopeSuites(SUITES, {
+    domains: ["sales-rep"],
+    pathTokens: ["orders"],
+  });
+  const idsOf = (r: ReadonlyArray<{ id: string }>) => r.map((s) => s.id);
+  for (const id of idsOf(viaVocab)) {
+    assert.ok(idsOf(viaBoth).includes(id), `path tokens removed ${id} — they must only add`);
+  }
 });

@@ -9,7 +9,10 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'csv-parse/sync';
-import { LOCKABLE_REP_KEYS, isLockedNow } from '../seed-data/sales-rep/set-rep-account-lock.mjs';
+import {
+  LOCKABLE_REP_KEYS, isLockedNow, assertLockable, repRow as repRowFromScript,
+  lockStateMatches,
+} from '../seed-data/sales-rep/set-rep-account-lock.mjs';
 import { repFixtureStatus, DISPOSABLE_LAYOUT_REP_KEYS, parseServedOrgs } from '../seed-data/sales-rep/sales-rep-layout-specs.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -66,10 +69,70 @@ test('the statically-locked rep is NOT the account-state fixture, and the two ar
   // SR_REP_BLOCKED is locked at rest, so /connect/token refuses it and the GraphQL gate is never
   // reached. If someone ever "simplifies" by pointing the #21 procedure at it, this fails.
   const blocked = repRow('SR_REP_BLOCKED');
-  if (blocked) {
-    assert.equal(repFixtureStatus(blocked), 'Locked');
-    assert.ok(!LOCKABLE_REP_KEYS.includes('SR_REP_BLOCKED'));
+  // Asserted, not guarded: wrapping the body in `if (blocked)` meant a RENAME of this fixture made
+  // the test pass while proving nothing.
+  assert.ok(blocked, 'SR_REP_BLOCKED is missing from sales-reps.csv');
+  assert.equal(repFixtureStatus(blocked), 'Locked');
+  assert.ok(!LOCKABLE_REP_KEYS.includes('SR_REP_BLOCKED'));
+});
+
+// ---- the SAFETY GATE itself, not just the list it reads ----------------------------------------
+// These are the highest-value tests in this file: `assertLockable` is the only thing between
+// `npm run sr:lock` and locking a shared fixture out of the whole environment. Asserting only
+// `LOCKABLE_REP_KEYS`'s contents left the gate itself uncovered — weakening it to
+// `|| key.startsWith('SR_')` kept every other test in this file green.
+
+test('assertLockable REFUSES a rep that is not on the allowlist', () => {
+  assert.throws(
+    () => assertLockable('SR_REP_PRIMARY', repRowFromScript('SR_REP_PRIMARY')),
+    /REFUSING to change the account lock of "SR_REP_PRIMARY"/,
+    'the guard must refuse the rep ~40 cases authenticate as',
+  );
+});
+
+test('assertLockable names the specific blast radius for SR_REP_PRIMARY', () => {
+  // The message is the whole value of the refusal: a bare "not allowed" leaves an operator
+  // reaching for --rep on the next rep along.
+  assert.throws(() => assertLockable('SR_REP_PRIMARY', repRowFromScript('SR_REP_PRIMARY')), /backs ~40 cases/);
+});
+
+test('assertLockable REFUSES every other rep in the committed CSV', () => {
+  for (const row of REPS) {
+    if (LOCKABLE_REP_KEYS.includes(row.rep_key)) continue;
+    assert.throws(() => assertLockable(row.rep_key, row), /REFUSING/, `${row.rep_key} must not be lockable`);
   }
+});
+
+test('assertLockable ALLOWS the declared lockable rep', () => {
+  for (const key of LOCKABLE_REP_KEYS) {
+    assert.doesNotThrow(() => assertLockable(key, repRowFromScript(key)));
+  }
+});
+
+test('repRow fails loudly on an unknown rep_key rather than returning undefined', () => {
+  assert.throws(() => repRowFromScript('SR_REP_DOES_NOT_EXIST'), /is not in test-data\/sales-rep\/sales-reps\.csv/);
+});
+
+// ---- a lock is TWO fields ----------------------------------------------------------------------
+
+test('lockStateMatches requires BOTH lockoutEnd and status to match the target', () => {
+  const future = new Date(Date.now() + 60_000).toISOString();
+  // the residue that used to be unrecoverable: status says Locked, lockoutEnd says not locked
+  const residue = { lockoutEnd: null, status: 'Locked' };
+  assert.equal(lockStateMatches(residue, false, 'Approved'), false,
+    'a residual status:Locked must NOT read as a clean unlocked state');
+  assert.equal(lockStateMatches(residue, true, 'Locked'), false,
+    'a missing lockoutEnd must NOT read as a fully locked state either');
+  // both halves consistent
+  assert.equal(lockStateMatches({ lockoutEnd: null, status: 'Approved' }, false, 'Approved'), true);
+  assert.equal(lockStateMatches({ lockoutEnd: future, status: 'Locked' }, true, 'Locked'), true);
+});
+
+test('lockStateMatches honours a DERIVED resting status, not a hardcoded Approved', () => {
+  // A future lockable rep resting in some other status must not be silently reset to Approved.
+  const user = { lockoutEnd: null, status: 'EmailUnconfirmed' };
+  assert.equal(lockStateMatches(user, false, 'EmailUnconfirmed'), true);
+  assert.equal(lockStateMatches(user, false, 'Approved'), false);
 });
 
 test('no rep key is duplicated and the lockable rep has its own email', () => {

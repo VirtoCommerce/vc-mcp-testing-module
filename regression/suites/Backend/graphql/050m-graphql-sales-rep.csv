@@ -1399,7 +1399,7 @@ query { salesRepCustomerOrders(organizationId: ""{{orgId}}"", storeId: ""{{store
 query { salesRepCustomerOrders(storeId: ""{{storeId}}"") { totalCount } }
 [GQL-EXEC unscoped]","[ERRORS label=scoped] errors[] empty {OBSERVED}
 [COUNT label=scoped] data.salesRepCustomerOrders.totalCount > 0 {OBSERVED}
-[COUNT label=scoped] data.salesRepCustomerOrders.items[*?organizationId={{orgId}}].length = {{SCOPED_COUNT}} {OBSERVED}
+[COUNT label=scoped] data.salesRepCustomerOrders.items[*?organizationId!={{orgId}}].length = 0 {OBSERVED}
 [ERRORS label=unscoped] errors[] empty {OBSERVED}
 [COUNT label=unscoped] data.salesRepCustomerOrders.totalCount >= {{SCOPED_COUNT}} {OBSERVED}","[API] errors[] is empty in the GraphQL response
 [NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:SCOPE · Technique:EP,Draft

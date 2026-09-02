@@ -72,6 +72,7 @@ import {
 } from "./append-test-cases-to-suite.js";
 import { parseAuditStamp } from "./lint-test-cases.js";
 import { filterRows } from "../regression/filter-cases.js";
+import { pathTokens } from "../lib/suite-selection.js";
 
 /** The subset of a manifest suite this module needs. Keeps the tests fixture-free. */
 export interface ScopeSuite {
@@ -156,6 +157,28 @@ export interface ScopeResult {
 // ---------------------------------------------------------------------------------------------
 
 const norm = (s: string) => s.trim().toLowerCase();
+
+/**
+ * Tokenize changed paths against the manifest's own vocabulary, reusing `suite-selection.ts`'s
+ * `pathTokens` rather than re-deriving the split rules (dots, dashes, CamelCase, the structural
+ * `Module`/`Service`/`Controller` suffix, then an EXACT match so `cart` cannot capture `cartridge`).
+ * A second copy of that tokenizer is exactly the drift this file avoids everywhere else.
+ *
+ * The vocabulary is built from the suites themselves, so it needs no hand-maintained path map.
+ */
+export function pathTokensForPaths(
+  paths: readonly string[],
+  suites: readonly ScopeSuite[],
+): string[] {
+  if (paths.length === 0) return [];
+  const vocab = new Set<string>();
+  for (const s of suites) {
+    if (s.domain) vocab.add(norm(s.domain));
+    for (const t of s.tags ?? []) vocab.add(norm(t));
+    for (const m of s.requiresModules ?? []) vocab.add(norm(m));
+  }
+  return [...new Set(paths.flatMap((p) => pathTokens(p, vocab)))];
+}
 
 /**
  * Suites whose coverage a change in these domains/tags/modules could invalidate.
@@ -331,6 +354,20 @@ export function scanExistingCoverage(input: ScanInput): ScopeResult {
   const seenTerms = new Set<string>();
   let rowsScanned = 0;
 
+  // An id named on `--suite` that is in NO manifest suite never entered `scoped`, so without this
+  // it reached neither `hits[]` nor `unscannable[]` — it vanished, the run exited 0, and an empty
+  // worklist read as "no stale rows found". That is the precise failure this tool exists to close,
+  // arrived at from the inside: a typo (`91` for `091`), a renumbered suite, or a suite not yet in
+  // the manifest — which is exactly the state suite 093 was historically found in — all answered
+  // "clean" to a question that was never actually asked. A suite reached by VOCABULARY that cannot
+  // be scanned still exits 0 (widening found it, widening may lose it); a suite named EXPLICITLY
+  // must never be silently ignored, so it lands here and the exit-2 rule picks it up for free.
+  const scopedIds = new Set(scoped.map((s) => s.id));
+  for (const id of input.suiteIds ?? []) {
+    if (!id.trim() || scopedIds.has(id)) continue;
+    unscannable.push({ suiteId: id, file: "(unknown)", reason: "not in config/test-suites.json" });
+  }
+
   for (const s of scoped) {
     const raw = input.readSuite(s.file);
     if (raw === null) {
@@ -412,6 +449,8 @@ export interface Args {
   readonly domains: string[];
   readonly suiteIds: string[];
   readonly modules: string[];
+  /** Changed paths — additive scope only, never a filter (see the --path case in parseArgs). */
+  readonly paths: string[];
   readonly observables: string[];
   readonly oracles: string[];
   readonly tiers: string[];
@@ -426,6 +465,7 @@ export function parseArgs(argv: readonly string[]): Args | { error: string } {
     domains: string[];
     suiteIds: string[];
     modules: string[];
+    paths: string[];
     observables: string[];
     oracles: string[];
     tiers: string[];
@@ -435,6 +475,7 @@ export function parseArgs(argv: readonly string[]): Args | { error: string } {
     domains: [],
     suiteIds: [],
     modules: [],
+    paths: [],
     observables: [],
     oracles: [],
     tiers: [],
@@ -474,6 +515,19 @@ export function parseArgs(argv: readonly string[]): Args | { error: string } {
         const v = value();
         if (!v) return { error: `${arg} needs a value` };
         a.modules.push(...list(v));
+        break;
+      }
+      // Paths are ADDITIVE ONLY — they can add a suite the manifest vocabulary missed, never
+      // remove one it found (the asymmetry `selectSuites` applies to its own repo index). They do
+      // NOT satisfy the scope requirement below: there has to be a vocabulary scope for a path to
+      // be additive TO. The header documented this flag before it existed, which left the whole
+      // path pathway reachable only from the unit test.
+      case "--path":
+      case "--paths":
+      case "--changed-files": {
+        const v = value();
+        if (!v) return { error: `${arg} needs a value` };
+        a.paths.push(...list(v));
         break;
       }
       case "--observable": {
@@ -603,7 +657,10 @@ async function main(): Promise<number> {
     console.error(
       "\nusage: npm run tc:scope -- --domain <d>[,<d>] [--suite <ids>] [--module <m>]\n" +
         "                          (--observable <text> | --oracle <ID>)...\n" +
-        "                          [--cases critical[,high]] [--also-ids <ids>] [--json]",
+        "                          [--changed-files <p>[,<p>]] [--cases critical[,high]]\n" +
+        "                          [--also-ids <ids>] [--json]\n" +
+        "\n  --changed-files is ADDITIVE: it adds a suite the vocabulary missed, never removes\n" +
+        "  one it found, and it does not by itself scope a scan.",
     );
     return 1;
   }
@@ -623,6 +680,7 @@ async function main(): Promise<number> {
     domains: parsed.domains,
     suiteIds: parsed.suiteIds,
     modules: parsed.modules,
+    pathTokens: pathTokensForPaths(parsed.paths, manifest.suites),
     observables: parsed.observables,
     oracles: parsed.oracles,
     tiers: parsed.tiers,

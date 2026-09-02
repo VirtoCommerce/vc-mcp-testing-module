@@ -52,7 +52,7 @@ import {
   customerRoleFor, isAuthorshipRow, AUTHORSHIP_MATRIX, ROLE_REP,
 } from './sales-rep-orders-specs.mjs';
 import { requiredProductSlots } from './sales-rep-stats-specs.mjs';
-import { hasStaleLockout } from '../../lib/user-provision.mjs';
+import { hasStaleLockout, setLockoutVerified } from '../../lib/user-provision.mjs';
 
 const OWNER_NAME = 'AGENT-TEST-SR-Owner-Acme';
 const OWNER_PHONE = '+1-206-555-0142';
@@ -127,8 +127,8 @@ async function confirmRepEmail(email) {
  * A password reset does NOT clear a non-empty `LockoutEnd` or reset `accessFailedCount`, so a rep
  * that collected failed logins stays unauthenticable AFTER a credential-repairing reseed — the
  * exact state REG-2026-08-24-1806 hit, where 104 cases in 050m were BLOCKED at
- * `POST /connect/token`. Symmetrical with `ensureSecurityAccount()`'s stale-lockout branch, which
- * already does this for the CSV-driven b2b users.
+ * `POST /connect/token`. Shares its repair with `ensureSecurityAccount()`'s stale-lockout branch via
+ * the shared `setLockoutVerified()`, so both surfaces clear a lockout the one way that works.
  *
  * `status` comes from `repFixtureStatus(row)`, so SR_REP_BLOCKED — whose lockout is the fixture —
  * is excluded by `hasStaleLockout()` itself rather than by a branch here.
@@ -146,18 +146,13 @@ async function clearRepStaleLockout(email, status) {
   //
   // `POST /users/{ACCOUNT_GUID}/unlock` is the endpoint that works. It keys on the GUID — the
   // userName/email form returns `{ succeeded: false, errors: [] }`, a failure with no message.
-  u.status = 'Approved'; u.lockoutEnabled = false; u.accessFailedCount = 0;
+  // `status` is the half the PUT DOES persist, so it is repaired here; the `lockoutEnd` half goes
+  // through the shared `setLockoutVerified` (POST /unlock + read-back) so there is ONE
+  // implementation of that repair rather than a sales-rep-local copy that can drift from it.
+  u.status = status; u.lockoutEnabled = false; u.accessFailedCount = 0;
   await api('PUT', '/api/platform/security/users', u, { expectStatus: [200, 204] });
-  const res = await api('POST', `/api/platform/security/users/${u.id}/unlock`, {}, { expectStatus: [200, 201, 204] });
-  // Read back rather than trusting the envelope — the whole point of this change is that the
-  // envelope lied. A still-locked account must be reported, never announced as cleared.
-  const after = await api('GET', `/api/platform/security/users/${encodeURIComponent(email)}`, null, { expectStatus: [200, 404] });
-  const stillLocked = after?.lockoutEnd ? new Date(after.lockoutEnd).getTime() > Date.now() : false;
-  if (stillLocked) {
-    log(`  WARN: could NOT clear the stale lockout on ${email} — lockoutEnd is still ${after.lockoutEnd} (unlock returned ${JSON.stringify(res)}). The rep will fail at /connect/token; fix the account in Admin.`);
-    return false;
-  }
-  log(`  ↻ cleared stale lockout on ${email} (verified: lockoutEnd=${after?.lockoutEnd ?? 'null'})`);
+  if (!await setLockoutVerified(u.id, email, false)) return false;
+  log(`  ↻ cleared stale lockout on ${email} (verified)`);
   return true;
 }
 
@@ -600,6 +595,15 @@ async function main() {
   log(`Sales Rep role: ${roleId || '(service default)'}`);
   const repWriteback = {};
   const orderWriteback = {};
+  // Per-ROW order failures are collected rather than thrown, because a throw out of the Phase-4 loop
+  // skips Phase 5 entirely — and that loses the write-back for orders already created in THIS run
+  // (including rolling-window rows `ensureOrder` deleted and recreated) plus every rep that seeded
+  // fine. The overlay then keeps ids of entities that no longer exist, which is the stale-overlay
+  // class `td:reconcile` [11] and §DISPOSABLE FIXTURES exist to prevent, and it presents later as a
+  // product failure rather than a seed failure. Both triggers are ordinary env states (b2b users not
+  // seeded; a catalog too small to satisfy a pinned slot), not programmer errors. So: persist what
+  // succeeded, then fail loud with the full list — never fail silently, and never fail before saving.
+  const orderFailures = [];
   let primaryRepEmail = null;
   for (const row of reps) {
     const { contactId, userId, lockedMembershipId } = await ensureRep(row, orgs, roleId);
@@ -651,8 +655,14 @@ async function main() {
       // customerId is per ROW now, not per run: `customer_role` is the AUTHORSHIP dimension the
       // VCST-5733 fixtures vary, and it is the only thing separating SRO-TF-REP-PLACED from
       // SRO-TF-BUYER-PLACED (same org, store, status, item count — deliberately).
-      const rowCustomerId = await resolveRowCustomerId(row, primaryUserId);
-      await ensureOrder(row, orgs, rowCustomerId, products, { productSlot: slotFor(row) });
+      try {
+        const rowCustomerId = await resolveRowCustomerId(row, primaryUserId);
+        await ensureOrder(row, orgs, rowCustomerId, products, { productSlot: slotFor(row) });
+      } catch (e) {
+        // Collected, NOT swallowed — `orderFailures` makes the run exit non-zero after Phase 5.
+        orderFailures.push({ order_key: row.order_key, message: String(e.message) });
+        log(`  FAIL: order ${row.order_key} not seeded — ${String(e.message).slice(0, 200)}`);
+      }
     }
 
     // Phase 4b — MAXIMALITY. A row declaring `recency_contract=newest-in-org` must be its org's most
@@ -722,6 +732,16 @@ async function main() {
   if (ownerId) writeEnvAliasOverride({ SR_OWNER_ACME: { id: ownerId } });
 
   log(DRY_RUN ? 'DRY RUN complete (no writes).' : 'Seed complete. Runtime GUIDs written to aliases.<env>.json.');
+
+  // Phase 6 — fail loud, AFTER the write-back above persisted everything that did succeed.
+  // Ordering is the whole point: the run still exits non-zero (a partial fixture set must never
+  // read as a clean seed), but the overlay is consistent with what is actually on the env.
+  if (orderFailures.length) {
+    log(`\n${orderFailures.length} order(s) FAILED to seed — the overlay above reflects only what succeeded:`);
+    for (const f of orderFailures) log(`  - ${f.order_key}: ${f.message}`);
+    log('Fix the cause and re-run; `npm run seed:b2b` first if a buyer account was missing.');
+    process.exit(1);
+  }
 }
 
 main().catch((e) => { console.error('SEED FAILED:', e.message); process.exit(1); });

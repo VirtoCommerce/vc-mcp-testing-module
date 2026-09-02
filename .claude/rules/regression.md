@@ -684,8 +684,11 @@ and never widens. Artifact C then applies `--cases critical`, dropping the High 
 route assertions live (091: 24 High, 093: 29 High). And a row that never executes is never triaged. The
 concrete hole: PR #2444 renames the hub widget to "My recent orders" across 13 locales, and the existing
 suites assert the OLD label **62 times** (093: 43, 091: 19). The Dim-11 rotation is no backstop either —
-corpus-wide only **71 of ~4,409 rows** carry an `Audited:` stamp, and **0 of the 202 rows** in the four
-suites the two FULL `/qa-test` runs touched (083c 0/77, 083d 0/8, 075d 0/34, 075e 0/23).
+almost nothing in the corpus carries an `Audited:` stamp, and **not one** of the rows in the four suites
+the two FULL `/qa-test` runs touched does. The stamped share is a moving number (every append changes
+it, and the append that added this section moved it), so it is measured once in
+[`skills/qa-test/coverage-triage.md`](../skills/qa-test/coverage-triage.md) §1 and cited from here —
+a count transcribed into four files is wrong in four places at once, silently (§GOLDEN RULE).
 
 | Command | Does |
 |---|---|

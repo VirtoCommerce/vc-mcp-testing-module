@@ -29,7 +29,7 @@ Verdicts are `PASS` / `FAIL` / `BLOCKED` / `SKIPPED` / `NOT-RUN`. Written at Ste
 | C6 | Breadcrumb on the cross-customer route names **no** single customer | AC-3 | SR-CO-003 | NOT-RUN |
 | C7 | The breadcrumb customer segment is a working link back to the profile (mouse **and** keyboard) | AC-3/AC-5 | SR-CO-004 | NOT-RUN |
 | C8 | Paging via Previous/Next + numbered pages re-fetches and pages are **disjoint** | AC-4a | SR-CO-007, SR-GQL-128 | NOT-RUN |
-| C9 | Keyword search matches by order number | AC-4b | SR-CO-* (search row) | NOT-RUN |
+| C9 | Keyword search matches by order number | AC-4b | **GAP — no covering case** | GAP |
 | C10 | Sorting by Date reverses, and reversal is observable | AC-4c | SR-CO-001 | NOT-RUN |
 | C11 | Which columns are sortable is stated (AC-4 implies "sort" unconditionally; only Date shows an affordance in the implementation screenshot) | AC-4c | SR-CO-001 | NOT-RUN |
 | C12 | Returning to the profile keeps it in its Orders context | AC-5 | SR-CO-005 | NOT-RUN |
@@ -49,7 +49,7 @@ Verdicts are `PASS` / `FAIL` / `BLOCKED` / `SKIPPED` / `NOT-RUN`. Written at Ste
 | G9 | An order the rep did **not** place opens read-only — no Pay-now / Reorder | {SPEC} PR#2444 | SR-CO-010 | NOT-RUN |
 | G10 | An order the rep **did** place opens on the buyer page with actions intact | {SPEC} PR#2444 | SR-CO-011 | NOT-RUN |
 | G11 | A **typed** buyer-page URL for a served customer's order the rep did not place is refused (two pages, two authorization rules, one order) | {HYPOTHESIS} | SR-CO-012 | NOT-RUN |
-| G12 | A locked **account** is refused at query time on a token issued before the lock | {OBSERVED} — PR#14 breaking change | SR-GQL-* / see note | NOT-RUN |
+| G12 | A locked **account** is refused at query time on a token issued before the lock | {OBSERVED} — PR#14 breaking change | **GAP — fixture ready, no case authored** | GAP |
 | G13 | Deep-link / refresh of a filtered URL restores the view or degrades safely, never losing customer scope | UIP-DEEP/REFRESH | SR-CO-014 | NOT-RUN |
 | G14 | A failed or slow facet request leaves the filter drawer honest, not stale from the previous customer | VCST-5589 precedent | SR-CO-015 | NOT-RUN |
 | G15 | Multi-organization customer: only the navigated-from org's orders show, and the page says which org | PROPOSED-BL-SR-033 | SR-GQL-122 | NOT-RUN |
@@ -80,6 +80,8 @@ Invariant failures may fail the ticket; `vs. DESIGN` drift is advisory and never
 
 | Condition | Why uncovered |
 |---|---|
+| **C9 — keyword search by order number (AC-4b)** | **GAP.** No row in 097 touches the search input, so AC-4b is unverified. Previously pointed at the wildcard `SR-CO-* (search row)`, which matches zero cases. To close: one 097 row searching a served customer's own order number, asserting the set narrows AND that a non-matching number yields the empty state (both branches decidable) |
+| **G12 — locked account refused at query time** | **GAP.** The whole fixture stack shipped (`SR_REP_LOCKABLE` row, base alias, overlay GUIDs, `set-rep-account-lock.mjs`, `sr:lock`/`sr:unlock`/`sr:lock:verify`) but **no case consumes it** — `grep -c SR_REP_LOCKABLE` is 0 in 097 and 050m, so PR#14's re-check is untested and the fixture is unowned. To close: one 050m row following the 4-step procedure in the alias notes (token → `sr:lock` → re-issue the same token on a FRESH request → assert the refusal → `sr:unlock`); the request must be fresh, since Xapi#84 memoizes the verdict per request |
 | Screen-reader output on the filters drawer | Manual-only; may never be reported as PASS (`visual-axis.md`) |
 | Five of the six WCAG 2.2 additions | Manual-only |
 | `salesRepCustomerOrders` on the **default** `/graphql` endpoint | Registered there too ("a convenience view, not an isolation boundary"), but the gate lives in the shared builders; covered indirectly by the scoped-endpoint cases. Not separately asserted this run |
@@ -110,3 +112,4 @@ Invariant failures may fail the ticket; `vs. DESIGN` drift is advisory and never
 | Process failure, which is the more useful lesson | `td:validate` was run **before** the append and its result then asserted **after** the append. A gate is only evidence about the tree state it actually ran against; re-run every gate after the write it is supposed to guard |
 | `PUT /api/platform/security/users` silently discards `lockoutEnd` in both directions | Returns `{succeeded:true, errors:[]}` while changing nothing. Working endpoints are `POST …/users/{GUID}/lock|/unlock` (**GUID only**; the email form returns `{succeeded:false, errors:[]}`). Consequence: `clearRepStaleLockout()` logged success while doing nothing, so the documented remedy for REG-2026-08-24-1806 (104 cases BLOCKED at `/connect/token`) had never worked. **Fixed** in `seed-sales-rep.mjs` with a read-back. **The same broken pattern remains in `scripts/lib/user-provision.mjs` (~518–520, ~527, ~1047)**, serving the b2b/loyalty user families — needs an owner, wider blast radius than this ticket |
 | TechFlow top-sellers were already contaminated before this run | Dominated by `msne2e`/`loyzero` orders from other suites. Not made worse — the new fixtures pin dedicated product slots and the shaped BL-SR-008 rankings are bit-identical after seeding |
+
