@@ -35,6 +35,13 @@
       { "sha": "80d1e3b9", "date": "2026-09-02", "title": "fix: register loyalty routes regardless of auth state", "addresses": "VCST-5822 (To do)" }
     ]
   },
+  "layer": "storefront",
+  "layer_derivation": "Every changed path in PR #2396 is under client-app/modules/loyalty/ plus the shared client-app/core/api/graphql/types.ts codegen artifact; the manifest places 083c/083d under Frontend/loyalty. Derived, not defaulted.",
+  "release": {
+    "fragment_written": false,
+    "refusal_reason": "verdict-not-pass",
+    "note": "A release-note fragment is refused because this run's verdict is FAIL. The /ba-analyze docs release pointer is therefore not issued. Recorded explicitly so the absence reads as a decision rather than an omission. This run executed against the pre-2026-09-02 /qa-test contract; the layer and release fields were added afterwards from the updated rules and are accurate for this run."
+  },
   "verdict": "FAIL",
   "verdict_reason": "Three in-scope conditions fail against AC-2 and the a11y gap-AC: the mission card omits the goal target (2.e); an untranslated locale renders five raw dotted i18n keys as customer-visible sidebar labels and drops the mission description (2.h/2.i); and all twelve open-mission controls share one accessible name (G11). Both changes actually under test - the currency fix and the route-guard fix - passed.",
   "changes_under_test": {
