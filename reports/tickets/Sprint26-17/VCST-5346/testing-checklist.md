@@ -29,7 +29,7 @@
 | 3.b | SKU modal "targets met" counter is correct | MSNF-025 (existing) | PASS |
 | 3.c | Card and modal report the same progress on an unchanged cart | **MSNF-079** (new) · VCST-5824 open | PASS |
 | 3.d | Every SKU-modal price equals that SKU's PDP price in the session currency | **MSNF-073** (new) — *the test for `5a677230`* | PASS |
-| 3.e | SKU-modal cart subtotal sums one currency and is labelled with it | **MSNF-078** (new) | BLOCKED |
+| 3.e | SKU-modal cart subtotal sums one currency and is labelled with it | **MSNF-078** (new) — **needs re-authoring, not fixture data** (see below) | BLOCKED |
 
 ## Gap conditions (no story AC — from 1d)
 
@@ -57,24 +57,16 @@
 | **UIP-TABS / UIP-INPUT** | Named in the model, not authored this run. `MSNF-UIP-BACK-001`, `MSNF-UIP-EXPIRE-001` and `MSNF-UIP-STORAGE-001` already exist in 083c as Draft, so the gap is narrower than the previous model's — `UIP-BACK` was listed here in error and is in fact covered. |
 | **`culture × currency` (model scenario #18)** | Covered-but-unexecuted, not uncovered. MSNF-075 **did** gain the culture arm at the Step-3 re-verify, so an authored case exists for the cell — but it **BLOCKED** at execution (its mission read `Completed` against a `progress_percent_at_seed: 0` baseline). It needs a re-run on uncontended fixtures, not new authoring. |
 | Points-history row **currency** | Matrix cell `Points-history × L6c` is a declared `GAP` — no AC governs the page, so no case was authored for it. |
+| **MSNF-078 (condition 3.e)** — asserts a state that is **unreachable by construction** | Investigated as a suspected fixture defect (the `PERSKU-PTS` control rendering `$0.00 USD`); the seeding turned out to be **correct**. `loyaltyMissionProgress` takes **one** `currencyCode` for the whole query and the storefront passes the session currency, so every row of every modal is normalised to one currency — two modals can never carry different currency codes in a single session, whatever anything is priced in. The `$0.00` is currency-scoped price evaluation: a pricelist holds one currency, and a product with no row in the requested one falls to the empty-price fallback, which stamps the *request* currency at amount 0 and drops `isAvailable`/`isBuyable`. Proven by the mirror — with `currencyCode` omitted the same rows return `1 PTS` / `10 USD` / `34 EUR`; with `currencyCode=PTS` the USD products return `0 PTS`. **No fixture change can satisfy this case as written.** The defect it hunts is still real but reachable only via the omitted-`currencyCode` path — the first-paint race where `currentCurrency` is unresolved at bootstrap — so the case needs re-authoring against that trigger. Recorded so it does not sit looking like it is waiting on data that will never arrive. |
 | **MSNF-073 EUR arm** — **RESOLVED this run** | The single-currency fixture limitation first recorded here was closed after the Step-3 gate REJECTED the case as vacuous: `MSN_E2E_PRODUCT_A` was re-seeded dual-priced (`10 USD` / `34 EUR`) alongside single-priced `MSN_E2E_PRODUCT_B` as an in-modal control. MSNF-073 then **PASSED** with genuine discrimination — a `FirstOrDefault()` implementation would have failed both the amount and the denomination assertion. |
 
 ## Pre-flight API evidence (superseded by execution, kept for the audit trail)
 
 Probing `loyaltyMissionProgress` directly before any browser run: a USD session returned `currency.code = USD` on every featured-SKU row and an EUR session returned `EUR`, with **no** `errors[]` on a full nested `product` selection. That settled 1c's open source question in the fix's favour and confirmed VCST-5842's resolver fix, and it is what made MSNF-074's trigger non-organic. MSNF-073 has since proved the same point with real discrimination.
 
-### The BL-PRICE-005 line on MSNF-073 — what it actually tests
+### The BL-PRICE-005 line on MSNF-073
 
-BL-PRICE-005 requires that a product with no price list in the selected currency **shows as unavailable**, not as a zero amount. Probed live on the single-priced control `MSN_E2E_PRODUCT_B`:
-
-| Session | Price | `availabilityData` |
-|---|---|---|
-| USD | `$10.00` | `isAvailable=true · isBuyable=true · isInStock=true` |
-| EUR | `€0.00` | `isAvailable=false · isBuyable=false · isInStock=false` |
-
-So **the platform already signals unavailability correctly** — the invariant is satisfied at the data layer, and `€0.00` is just the price field carrying no meaningful value. The mission query at `80d1e3b9` **does select `availabilityData`** (via the shared `availabilityData.graphql` fragment), so the modal holds the flags it needs.
-
-That makes this line a real, undecided UI check rather than a foregone red: does `sku-mission-modal.vue` **honour** those flags — presenting the row as unavailable with no active stepper or add-to-cart — or does it render a buyable-looking `€0.00` row? If the latter, the finding is mission-modal-specific and **in scope**; if the row is correctly disabled, the assertion passes and no finding exists. Either way this is not the storefront-wide "EUR prices are zero" env condition, which is a data fact about the pricelist and not a defect of this ticket.
+Probed live: the platform already signals unavailability correctly — in EUR the single-priced control reports `isAvailable`/`isBuyable`/`isInStock` all false alongside `€0.00`, and the mission query selects `availabilityData` via the shared fragment. So the invariant holds at the data layer and `€0.00` is just a price field carrying no meaningful value. The assertion was reworded at the Step-3 gate to score only the *availability presentation* (is the row shown unavailable, stepper and add-to-cart inactive?) rather than the absence of an amount — conflating the two would have failed a correct modal. MSNF-073 subsequently **PASSED**.
 
 ## Findings held below the 5d severity floor
 
@@ -119,6 +111,6 @@ Separately, the overlay's `*_at_seed` fields are **stale** against generation `2
 
 `Not filed (below severity floor):` **F7** — untranslated locale drops the mission description entirely (name falls back, description returns `null`); draft `reports/bugs/open/` , prior ticket VCST-5828 (Cancelled). **F8** — every language-selector option carries the active locale's flag alt text, so each option's accessible name states the wrong language. **F9** — open-ended mission card renders a bare amber dot with no adjacent text, colour as the sole differentiator (BL-A11Y-003); prior ticket VCST-5827 (Cancelled).
 
-**Filed:** VCST-5858 (Medium, Sub-task) — VCST-5843 resolved `Done` but its partial-payload fix is absent from every branch.
+**Filed then closed:** VCST-5858 (Sub-task) — **Cancelled as a duplicate** of a disposition a parallel session had already made (won't-fix, P3 latent, re-open bar "a partial response observed in the wild"). I over-graded it Medium: the shape is reachable at the API layer, but the shipped storefront passes `cultureName`, so no ordinary-use path triggers it. The residual point is narrower and is a records issue on VCST-5843 — it reads `Done` when the outcome was *declined*. `MSNF-074` keeps the watch armed and will turn red on its own if the trigger ever becomes reachable.
 
 **Assessed Medium and file-eligible, not filed by operator decision at the 5d gate:** F1 (raw i18n keys visible in `fr`), F2 (card omits the spend target — needs a PO ruling on AC-2 text vs design F1/F2, not a third re-file), F6 (xAPI throws `ARGUMENT_NULL` on an omitted optional `cultureName`). F4 links to the open VCST-5826; F5 attributes to VCST-5319. These are recorded here because on any run this file is the durable record — a finding that appears in neither the checklist nor a draft has been deleted rather than deprioritised.

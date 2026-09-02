@@ -32,6 +32,7 @@ import {
   buildReindexRequest, indexDocumentTypeProblem,
   CREDENTIAL_ALIASES, credentialProblems, ACCOUNT_PASSWORD_VAR, passwordTokenFor, FUNDED_ACCOUNTS, PTS_SPEND_ALIAS, PTS_SPEND_UNITS, ptsLineCost, balanceCoversPtsLine,
   SECONDARY_CURRENCY, SECONDARY_CURRENCY_INTENT, DUAL_PRODUCTS, priceSetsFor,
+  PRODUCT_INVARIANT_FLAGS, productFlagDrift, productFlagDriftMessage,
 } from '../seed-data/loyalty/missions-e2e-specs.mjs';
 import {
   rankEligiblePrograms, isEligibleProgram, pointsPerUnit, qtyForTarget, pollBalanceChange,
@@ -1591,4 +1592,70 @@ test('an overlay whose two prices resolved in ONE currency is rejected', () => {
 
   const missing = { ...run, [dual.aliasName]: { productId: 'p', catalogId: 'c', currency: 'USD', slug: 's', url: '/s' } };
   assert.ok(validateSeededState(missing, {}).some((m) => /currency_secondary is empty/.test(m)));
+});
+
+/* ── Product invariants: the create-only flag drift (2026-09-02) ──────────────────────────────
+ *
+ * `ensureProduct` wrote every product flag into the CREATE body and re-asserted only `packSize`, so a
+ * flag flipped on the platform afterwards drifted forever while the seeder reported success. The
+ * drift has no data footprint, so these tests pin the one thing that is checkable in pure logic: the
+ * declaration, and the comparison the seeder and td:reconcile [14] both run against it.
+ */
+test('PRODUCT_INVARIANT_FLAGS covers trackInventory — the flag that actually drifted', () => {
+  const fields = PRODUCT_INVARIANT_FLAGS.map((f) => f.field);
+  assert.ok(fields.includes('trackInventory'),
+    'trackInventory was the measured drift (PERSKU-PTS true against a spec declaring false); dropping it from the set restores the bug');
+  assert.ok(fields.includes('packSize'), 'packSize was the one flag the old re-assert covered — it must not be lost in the generalisation');
+  for (const f of PRODUCT_INVARIANT_FLAGS) {
+    assert.equal(typeof f.of, 'function', `${f.field} must derive its value from the spec, not hold a literal`);
+    assert.ok(f.why && f.why.length > 40, `${f.field} must say what BREAKS when it drifts — a flag nobody can justify is a flag nobody will keep`);
+  }
+});
+
+test('PRODUCT_INVARIANT_FLAGS excludes productType — auto-healing a type change is not a silent repair', () => {
+  assert.ok(!PRODUCT_INVARIANT_FLAGS.some((f) => f.field === 'productType'),
+    'changing a live product type is a different class of operation from flipping a boolean; it is reported, never repaired');
+});
+
+test('every fixture product satisfies its own invariants when live matches spec', () => {
+  for (const p of PRODUCTS) {
+    const live = { packSize: p.packSize, trackInventory: false, isActive: true, isBuyable: true };
+    assert.deepEqual(productFlagDrift(p, live), [], `${p.sku} should report no drift against a compliant product`);
+  }
+});
+
+test('productFlagDrift catches the measured PERSKU-PTS drift', () => {
+  const live = { packSize: 1, trackInventory: true, isActive: true, isBuyable: true };
+  const drift = productFlagDrift(PTS_PRODUCT, live);
+  assert.equal(drift.length, 1);
+  assert.equal(drift[0].field, 'trackInventory');
+  assert.equal(drift[0].got, true);
+  assert.equal(drift[0].want, false);
+  assert.match(productFlagDriftMessage(PTS_PRODUCT, drift[0]), /trackInventory is true but the spec requires false/);
+});
+
+test('productFlagDrift catches a deactivated or non-buyable fixture', () => {
+  const off = { packSize: 1, trackInventory: false, isActive: false, isBuyable: false };
+  const fields = productFlagDrift(UNIT_PRODUCT, off).map((d) => d.field);
+  assert.deepEqual(fields.sort(), ['isActive', 'isBuyable']);
+});
+
+test('productFlagDrift catches a pack size that would make the stepper unreachable', () => {
+  const drift = productFlagDrift(UNIT_PRODUCT, { packSize: 2, trackInventory: false, isActive: true, isBuyable: true });
+  assert.deepEqual(drift.map((d) => d.field), ['packSize']);
+  assert.equal(drift[0].got, 2);
+});
+
+test('an ABSENT packSize reads as the platform default, not as drift', () => {
+  // A product that never set packSize comes back null and the platform treats it as 1. Reporting
+  // that as drift would make the seeder rewrite every product on every run and bury a real drift.
+  assert.deepEqual(productFlagDrift(UNIT_PRODUCT, { trackInventory: false, isActive: true, isBuyable: true }), []);
+});
+
+test('an ABSENT boolean IS drift — a missing flag is not a true one', () => {
+  // The mirror of the packSize rule, and deliberately the opposite: `isActive` absent from the body
+  // cannot be assumed true, and `trackInventory` absent cannot be assumed false-by-luck. Only the
+  // value the platform actually reports counts.
+  const fields = productFlagDrift(UNIT_PRODUCT, { packSize: 1 }).map((d) => d.field).sort();
+  assert.deepEqual(fields, ['isActive', 'isBuyable']);
 });

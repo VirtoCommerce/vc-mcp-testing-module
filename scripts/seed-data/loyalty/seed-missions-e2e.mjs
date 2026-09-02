@@ -64,6 +64,7 @@ import {
   absenceIsProven, productTeardownVerdict,
   PRODUCT_INDEX_DOCUMENT_TYPE, buildReindexRequest, indexDocumentTypeProblem,
   FUNDED_ACCOUNTS, PTS_PRODUCT, balanceCoversPtsLine,
+  productFlagDrift,
 } from './missions-e2e-specs.mjs';
 import {
   resolveWinningEarning, placeEarnOrder, pollBalanceChange, qtyForTarget, pointsPerUnit,
@@ -345,14 +346,22 @@ async function ensureProduct(spec, location, pricelistByCurrency, currencies) {
 
   if (DRY_RUN) return { ...spec, id: product.id, catalogId: product.catalogId, currency, secondaryCurrency: secondary?.currency || '', slug, url: `/${slug}` };
 
-  // PACK SIZE, re-asserted every run. This is gap 3: a product whose pack size drifts above 1 makes
-  // the stepper jump (0 -> 2 -> 0) and every "set the quantity to exactly 1" step unachievable — and
-  // it drifts silently, because the product still exists and still adds to cart.
+  // EVERY DECLARED INVARIANT, re-asserted every run — not just packSize, and not just at create time.
+  // A flag written only into the CREATE body drifts SILENTLY: the product still exists, still resolves
+  // by code and still renders, so this seeder printed success on every run while the property the
+  // fixture depends on was gone. Measured on vcst-qa 2026-09-02 — PERSKU-PTS sat at
+  // `trackInventory: true` (availableQuantity 88) against a spec declaring false, while the three
+  // products this loop DID keep correct hid it. PRODUCT_INVARIANT_FLAGS is the single declaration;
+  // td:reconcile [14] probes the same set live, which is the only place the drift is visible.
+  //
+  // GET-merge-PUT, never a partial body: PUT /api/catalog/products REPLACES the entity, so sending
+  // only the changed fields blanks everything else (the same whole-entity hazard as PUT /api/stores).
   const full = await api('GET', `/api/catalog/products/${product.id}`);
-  const livePack = Number(full?.packSize ?? 1) || 1;
-  if (livePack !== spec.packSize) {
-    await api('PUT', '/api/catalog/products', { ...full, packSize: spec.packSize, minQuantity: 1 }, { expectStatus: [200, 204] });
-    log(`  ✓ ${spec.sku}: packSize ${livePack} → ${spec.packSize}`);
+  const drift = productFlagDrift(spec, full);
+  if (drift.length) {
+    const patch = Object.fromEntries(drift.map((d) => [d.field, d.want]));
+    await api('PUT', '/api/catalog/products', { ...full, ...patch, minQuantity: 1 }, { expectStatus: [200, 204] });
+    for (const d of drift) log(`  ✓ ${spec.sku}: ${d.field} ${JSON.stringify(d.got)} → ${JSON.stringify(d.want)}`);
   }
 
   // BOTH currencies in ONE call. A pricelist carries exactly one currency platform-side, so a second

@@ -352,6 +352,78 @@ export const PRODUCT_BY_SLOT = Object.fromEntries(PRODUCTS.map((p) => [p.slot, p
 export const PRODUCT_BY_ALIAS = Object.fromEntries(PRODUCTS.map((p) => [p.aliasName, p]));
 
 /**
+ * PRODUCT INVARIANTS — the flags a fixture product must carry on EVERY run, not merely at birth.
+ *
+ * `ensureProduct` set all of these in the CREATE body and re-asserted only `packSize` on a product
+ * that already existed. A create-only flag is a flag that drifts SILENTLY: the product still exists,
+ * still resolves by code, still renders in the modal, so the seeder prints success every run while
+ * the property the fixture depends on is gone. There is no data footprint — no alias, no overlay
+ * field, no price row changes — which is why nothing in this repo could see it.
+ *
+ * Measured on vcst-qa 2026-09-02: `AGENT-TEST-MSN-E2E-PERSKU-PTS` carried `trackInventory: true`
+ * with `availableQuantity: 88` against a spec that declares `trackInventory: false`. The other three
+ * products were still correct, which is exactly why it went unnoticed — and 083d places REAL orders
+ * on every run forever, so that fixture drains and then blocks MSN-E2E-007 for a reason that has
+ * nothing to do with missions. That is the silent-decay class this whole module exists to remove.
+ *
+ * Declared ONCE and consumed three ways, so the three can never disagree:
+ *   - the seeder RE-ASSERTS this set every run (`seed-missions-e2e.mjs` `ensureProduct`);
+ *   - `td:reconcile` [14] PROBES it live — the only place the drift is visible, because a static
+ *     guard reads committed fixtures and this drift lives entirely on the platform;
+ *   - the static guard asserts the seeder still re-asserts it, so removing the fix fails a gate.
+ *
+ * `productType` is deliberately NOT in this set. Changing a live product's type is a different class
+ * of operation from flipping a boolean — a fixture whose type drifted wants a human, not a silent
+ * repair — so it is reported by the live probe's own eyes, never auto-healed.
+ */
+export const PRODUCT_INVARIANT_FLAGS = [
+  {
+    field: 'packSize',
+    of: (spec) => Number(spec.packSize),
+    why: 'the storefront stepper moves in pack-size increments, so a pack size above 1 makes every "set the quantity to exactly 1" step unachievable (the MSN_PERSKU_PRODUCT_B 0 → 2 → 0 failure)',
+  },
+  {
+    field: 'trackInventory',
+    of: () => false,
+    why: '083d places real orders on every run forever, so a stock-tracked fixture drains and starts blocking cases for a reason unrelated to missions',
+  },
+  {
+    field: 'isActive',
+    of: () => true,
+    why: 'an inactive product drops out of loyaltyMissionProgress entirely, so the modal renders a row set the case cannot find its target in — an absence, which is the least diagnosable failure a case can hit',
+  },
+  {
+    field: 'isBuyable',
+    of: () => true,
+    why: 'a non-buyable row renders with a disabled stepper, so the quantity steps every featured-SKU case depends on cannot be performed at all',
+  },
+];
+
+/**
+ * Which declared invariants does this live product violate? PURE — takes the spec and the product
+ * body as read from `GET /api/catalog/products/{id}`, returns one entry per drifted flag.
+ *
+ * An ABSENT field is read as the platform default rather than as drift (`packSize` comes back null on
+ * a product that never set it, and the platform treats that as 1) — inventing drift out of a missing
+ * key would make the seeder rewrite every product on every run and bury a real drift in the noise.
+ */
+export function productFlagDrift(spec, live = {}) {
+  const drift = [];
+  for (const f of PRODUCT_INVARIANT_FLAGS) {
+    const want = f.of(spec);
+    const raw = live?.[f.field];
+    const got = typeof want === 'boolean' ? raw === true : (Number(raw ?? 1) || 1);
+    if (got !== want) drift.push({ field: f.field, want, got, why: f.why });
+  }
+  return drift;
+}
+
+/** One sentence per drifted flag, shared by the seeder's log and the live probe's failure. Pure. */
+export const productFlagDriftMessage = (spec, d) =>
+  `${spec.sku}: ${d.field} is ${JSON.stringify(d.got)} but the spec requires ${JSON.stringify(d.want)} — ${d.why}`;
+
+
+/**
  * Every product carrying a SECOND-currency list price — the dual-currency fixtures.
  *
  * A FUNCTION, not a computed array, for the same reason `FUNDED_ACCOUNTS` is one: derived at call

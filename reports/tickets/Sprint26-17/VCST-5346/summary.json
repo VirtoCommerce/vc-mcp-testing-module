@@ -148,10 +148,16 @@
       "note": "Below the severity floor - not filed." }
   ],
   "bugs_filed": [
-    { "key": "VCST-5858", "finding": "F3", "severity": "Medium", "relationship": "Sub-task of VCST-5346, Relates VCST-5843",
+    { "key": "VCST-5858", "finding": "F3", "severity_filed": "Medium", "severity_corrected": "P3 (latent)",
+      "status": "CANCELLED as duplicate of a disposition already made", "relationship": "Sub-task of VCST-5346, Relates VCST-5843",
       "title": "VCST-5843 was resolved Done but its partial-payload fix is absent from every branch",
-      "draft": "reports/bugs/open/BUG-missions-page-fails-whole-page-on-partial-graphql-response.md",
-      "note": "Operator selected F3 only at the 5d filing gate. F1, F2 and F6 were assessed as Medium and file-eligible but were not filed on that decision; F4 links to the open VCST-5826; F5 attributes to VCST-5319." }
+      "draft": "reports/bugs/closed/BUG-missions-page-fails-whole-page-on-partial-graphql-response.md",
+      "note": "Operator selected F3 only at the 5d filing gate. F1, F2 and F6 were assessed Medium and file-eligible but were not filed on that decision; F4 links to the open VCST-5826; F5 attributes to VCST-5319.",
+      "closure": "Filed, then closed the same day. A parallel session had already assessed the same finding as won't-fix / P3 (latent) - 'the errorPolicy hardening was considered and declined; the residual gap is latent, not reachable by ordinary use' - with an explicit re-open bar: 'Re-open if a partial response is ever observed in the wild.' I filed before seeing that decision.",
+      "self_correction": "I over-graded this as Medium. The partial-payload shape is reachable at the API layer (MSN-009: HTTP 200, totalCount 29, populated data, 58 errors[] from omitting the optional cultureName), but the SHIPPED storefront passes cultureName, so no ordinary-use path triggers it. That is latent by definition and supports the P3 decline. My evidence does not clear their re-open bar.",
+      "residual_point": "Narrower than the ticket and still true: VCST-5843 is recorded Done, but the outcome was DECLINED, not fixed. Done and Won't Do are different records, and a future reader of VCST-5843 will reasonably assume code shipped. Worth a status correction on that ticket; not worth a defect ticket.",
+      "watch_armed": "Regression case MSNF-074 asserts exactly this and reports BLOCKED:PRECONDITION_UNMET while the trigger is unreachable. It turns red on its own if the condition ever becomes reachable, so the re-open bar is monitored without a manual re-check."
+    }
   ],
   "findings_eligible_but_not_filed_by_operator_decision": [
     "F1 (Medium, IN-SCOPE) - five raw dotted i18n keys render as customer-visible sidebar labels in fr",
