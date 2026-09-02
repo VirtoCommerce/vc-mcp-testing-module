@@ -220,6 +220,44 @@
       ]
     }
   },
+  "coverage_triage": {
+    "$comment": "Triage of the EXISTING cases this change invalidates, run at Step 2a on BOTH paths. `surface` is derived at 1b item 2e beside layer (2b), visual.surface (2c) and contract.surface (2d) — derived, never asked, never defaulted, \"unresolved\" treated as true, because a skipped triage leaves stale assertions nobody looks at again while a needless one costs one script run. A NULL block means the step never ran (a gap, not a clean triage); surface:false WITH sources is the opposite. WHY THE STEP EXISTS: the pipeline only ever asked what the corpus already COVERS, so a stale row was reachable only by FAILING at Step 4 and being triaged at 5a — and three things stop that firing (regression:select maps changed PATHS and misses a suite whose domain the path does not spell, while reporting unmappedPaths:[] because the fail-open widening needs a total vocabulary miss; --cases critical then drops the High rows; and a row that never runs is never triaged). Measured on VCST-5733: 62 existing assertions on a widget label PR#2444 renames, 45 of the 81 at-risk rows FILTERED_OUT of the run. DISPOSITIONS are a closed set and every hit takes exactly one: CONFIRMED (still correct) · REPAIR (mechanically stale — renamed selector/moved route/removed arg/dead @td() alias — fixed BEFORE the run via /qa-review-tests file <suite> --fix, safe precisely because it moves the mechanics and not the oracle, and leaving it manufactures an artefactual BLOCKED) · RE-BASE (its expected value conflicts with the change — NOT rewritten before the run: the change under test is normally an unmerged PR, so a pre-run rewrite makes the change its own oracle and the case can then only pass; it is carried into Artifact C on --also-ids and 5a rewrites it with the run's own evidence) · SUPERSEDED (the surface is gone — a proposal, never an edit; TRI-006 keeps retirement human). HARD RULE: every FILTERED_OUT row disposed RE-BASE appears in rebased_into_artifact_c[], or its disposition is CONFIRMED/SUPERSEDED with a reason — an undisposed RE-BASE that never runs re-creates the exact gap this step closes. Step 2a files NO bug: a hit is a claim about a test case, never about the product. never_audited is context, not a verdict (TRI-000 reports WHEN a row was audited, never whether it is right). Spec: .claude/skills/qa-test/coverage-triage.md",
+    "surface": "true|false|unresolved",
+    "surface_source": [],
+    "scope": {
+      "$comment": "The tc:scope arguments actually used — recorded so the Step-3 verifier can re-run the identical scan, and so a later reader can tell a narrow triage from a thorough one. Scope comes from the manifest's own domain/tags/requiresModules vocabulary, never from diff paths; a path token may only ADD a suite, never filter one out.",
+      "domains": [],
+      "modules": [],
+      "suites_named": [],
+      "observables": [],
+      "oracles": [],
+      "cases_filter": "critical|critical,high|null"
+    },
+    "counts": {
+      "$comment": "Straight from tc:scope --json. filtered_out is the coverage hole: a stale row that WILL run goes red at Step 4 and gets triaged, a stale row that will not run is invisible forever. not_executing (explicit Manual/Deprecated, EX-200/EX-201) is opted out by intent and is NOT a hole — kept as its own count so the number that measures real holes cannot lie.",
+      "suites_scoped": 0,
+      "rows_scanned": 0,
+      "hits": 0,
+      "will_run": 0,
+      "filtered_out": 0,
+      "not_executing": 0,
+      "never_audited": 0
+    },
+    "dispositions": { "confirmed": 0, "repair": 0, "rebase": 0, "superseded": 0 },
+    "repaired": [
+      { "$comment": "Fixed BEFORE the run. Mechanics only — never an expected value.", "case": "<CASE-ID>", "suite": "<suite id>", "what": "<the mechanical staleness>", "relint": "suites:review --fail-on=High clean" }
+    ],
+    "rebased_into_artifact_c": [
+      { "$comment": "Carried on --also-ids with its assertion UNCHANGED, so Step 4 can falsify it either way. Its Step-4 result and any 5a rewrite live in the normal triage record, not here.", "case": "<CASE-ID>", "suite": "<suite id>", "run_fate_before": "FILTERED_OUT|WILL_RUN" }
+    ],
+    "superseded_proposals": [
+      { "$comment": "Recorded, never edited — retirement is human (TRI-006) and tc:demote may only reach Manual.", "case": "<CASE-ID>", "suite": "<suite id>", "reason": "<the surface the change removes>" }
+    ],
+    "unscannable": [
+      { "$comment": "Reported, never read as an absence of risk. A legacy 11-column suite is REFUSED because parseSuite maps positionally, so its Priority is not Priority and runFate would be predicted off the wrong column.", "suite": "<suite id>", "reason": "legacy header|file not found|unparsable CSV" }
+    ],
+    "unmatched_observables": []
+  },
   "business_rules_verified": ["BL-CART-001"],
   "appinsights": {
     "checked": true,

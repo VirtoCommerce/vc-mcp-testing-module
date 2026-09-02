@@ -23,6 +23,7 @@ about to change how a step works.
 | [`close-out.md`](close-out.md) | Step 5 — triage, AC/DoD reconciliation, the verdict table, the severity floor on filing, the report, promotion | Triaging findings, filing, or promoting |
 | [`visual-axis.md`](visual-axis.md) | The visual axis — the `visual_surface` derivation, surface → axes → executor, the invariant-blocks/spec-advises verdict rule, the browser budget | A UI-visible ticket, or changing how design/a11y is scheduled |
 | [`contract-refresh.md`](contract-refresh.md) | The contract-refresh axis — the `contract_surface` derivation at `1b` 2d, the two-artifacts/two-commands split, `UNKNOWN` never falling back, drift as a `1e` input | A ticket touching GraphQL/xAPI, or changing when the schema + fixtures are refreshed |
+| [`coverage-triage.md`](coverage-triage.md) | The coverage-triage axis — the `coverage_surface` derivation at `1b` 2e, Step 2a's four dispositions, and why a `RE-BASE` is resolved BY the run rather than before it | A change that renames, moves or removes something existing cases already assert |
 | [`modes.md`](modes.md) | `--epic` and `--iterate` (5k) | Running either opt-in mode |
 | [`../../templates/test-model.md`](../../templates/test-model.md) | The Test Model fill-in shape + the authoring-plan JSON shape | Writing the model or a plan |
 
@@ -124,8 +125,8 @@ This is the harness's own guidance applied per step, not a new mechanism.
 | Wave | Contains | Consumes |
 |---|---|---|
 | **A** — one message | item 1 env health · item 2 build/version (both GitHub reads + the `/api/platform/modules` probe) · item 2a release-ledger read · item 2b's local reads (suite manifest, repo-router) · item 3 sprint resolve → item 4 duplicate check | only `1a`'s fetch |
-| *(no I/O)* | derive **2b** `layer`, then **2c** `visual_surface` — pure computation over what Wave A returned | Wave A |
-| **B** — one message | **2d**'s two refreshers, concurrently ([`contract-refresh.md`](contract-refresh.md) §2) | `2b`'s token |
+| *(no I/O)* | derive **2b** `layer`, then **2c** `visual_surface` and **2e** `coverage_surface` — pure computation over what Wave A returned | Wave A |
+| **B** — one message | **2d**'s two refreshers, concurrently ([`contract-refresh.md`](contract-refresh.md) §2) · **2e**'s `npm run tc:scope` ([`coverage-triage.md`](coverage-triage.md) §4) | `2b`'s token |
 
 Items 3 → 4 stay ordered inside Wave A as the command states. They are both local globs costing
 milliseconds, so splitting them buys nothing — **and that is the general test: parallelise where the
