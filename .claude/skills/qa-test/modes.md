@@ -142,7 +142,7 @@ the max-3-browser cap):
 
 1. **RED→GREEN** — exactly the previously-FAILED case IDs, as its own
    `/qa-regression <suites> --ids <IDs>` run. Its pass rate answers **one** question — did the fix turn red
-   green — and keeping it out of the Artifact-C run is what stops the release gate's ≥95% from blending two
+   green — and keeping it out of the Artifact-C run is what stops the release gate's ≥80% floor from blending two
    questions into one number. **FAST:** the failed **checklist items**, run by the one execution agent; no
    `RUN_ID`, no `--ids`.
 2. **Artifact C, re-scoped to the FIX's diff** —

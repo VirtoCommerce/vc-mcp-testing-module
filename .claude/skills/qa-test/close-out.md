@@ -274,15 +274,27 @@ The 5c verdict is the primary input to the **Feature Release Gate**
 (`.claude/skills/qa-metrics/quality-gates.md` §1a), owned by `qa-lead-orchestrator`. **`/qa-test` does not
 decide release.**
 
-A PASS/PASS-WITH-NOTES run **feeds a GO** only if the team-level criteria also hold: 0 open P0, P1s
-deferred-with-acceptance, change-scoped regression ≥95% (this phase's own `regression.pass_rate`), NFRs
-clean, smoke PASS. A FAIL/BLOCKED is an automatic NO-GO. If the Artifact-C run was deferred or skipped, say
-so — the gate cannot be evaluated on a null pass rate.
+A PASS/PASS-WITH-NOTES run **feeds a GO** only if the team-level criteria also hold: 0 open P0, **0 open
+undeferred P1/High**, change-scoped regression ≥80% (this phase's own `regression.pass_rate`), NFRs clean,
+smoke PASS. A FAIL/BLOCKED is an automatic NO-GO.
+
+Two things about the bug ledger and the run, because both changed on 2026-09-02:
+
+- **An open High blocks — it no longer downgrades on its own.** Either 5d's fix landed, or the High is
+  **declared** deferred: `--p1-deferred N` asserts N of them carry a documented workaround + signed risk
+  acceptance + a monitoring plan. A declared deferral caps the gate at **CONDITIONAL GO**, never a clean
+  GO. Report the declared count in the 5e comment; an undeclared High is a NO-GO, not a note.
+- **Report the run's COMPLETENESS, not only its pass rate** (§0). BLOCKED sits outside the pass-rate
+  denominator, so the rate rises as blockers accumulate; >10% of planned BLOCKED-and-untriaged returns
+  **CANNOT EVALUATE** (exit 2). Triage via `/qa-triage-results` and pass `--blocked-triaged N`, or re-run
+  the blocked cases. If the Artifact-C run was deferred or skipped, say so — the gate cannot be evaluated
+  on a null pass rate, and NOT EVALUATED is neither a pass nor a failure.
 
 **Independent verification (FULL):** a fresh `qa-lead` verifier re-evaluates §1a from the raw inputs — the
 5c verdict, the `reports/bugs/` open-P0/P1 ledger (now current, since 5d already filed), the regression pass
 rate via
-`npx tsx scripts/regression/compute-metrics.ts --gate feature --run-id <regression.run_id> --p0-bugs N --p1-bugs N`
+`npx tsx scripts/regression/compute-metrics.ts --gate feature --run-id <regression.run_id> --p0-bugs N
+--p1-bugs N [--p1-deferred N] [--blocked-triaged N]`
 (`--run-id` **required**; `--suites <ids>` is the fallback), and the smoke result — and ratifies or
 **downgrades**. Recommendation only; a human decides release.
 

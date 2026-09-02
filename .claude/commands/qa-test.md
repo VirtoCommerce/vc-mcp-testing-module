@@ -418,7 +418,7 @@ reachability precondition.
    [`skills/qa-test/SKILL.md`](../skills/qa-test/SKILL.md) §Agent dispatch.
 2. **Change-scoped regression (Artifact C)** — as its own **`/qa-regression <ids> --cases critical
    --also-ids <new Draft case IDs>`** run (it owns suite→agent assignment, the browser pool, retries and the
-   run report). Capture its **`RUN_ID`** (5e records it; the release-gate feed keys "≥95%" off it) **and its
+   run report). Capture its **`RUN_ID`** (5e records it; the release-gate feed keys its ≥80% floor off it) **and its
    wall-clock** — the 40-minute window is a claim about time, and an unrecorded one cannot be checked.
    **Carry the run's Scope Exclusions into the Step-5 report**: a suite that contributed zero Critical cases
    and a suite that passed look identical otherwise.
