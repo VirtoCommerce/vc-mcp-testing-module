@@ -1,6 +1,6 @@
 {
   "runId": "REG-2026-09-02-0930",
-  "status": "in_progress",
+  "status": "completed",
   "startedAt": "2026-09-02T09:30:09.948Z",
   "selection": "083c,083d,075d --cases critical --also-ids MSNF-072..MSNF-080",
   "environment": "vcst",
@@ -8,9 +8,13 @@
     {
       "id": "083c",
       "name": "Loyalty Missions Storefront",
-      "status": "running",
+      "status": "done",
       "browser": "playwright-chrome",
-      "lane": "browser"
+      "lane": "browser",
+      "pass": 16,
+      "fail": 2,
+      "blocked": 5,
+      "skipped": 0
     },
     {
       "id": "083d",
@@ -33,5 +37,6 @@
       "blocked": 0,
       "skipped": 3
     }
-  ]
+  ],
+  "finishedAt": "2026-09-02T10:21:22.933Z"
 }

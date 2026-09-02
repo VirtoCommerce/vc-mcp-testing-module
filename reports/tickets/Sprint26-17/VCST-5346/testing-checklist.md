@@ -15,34 +15,34 @@
 
 | # | Condition (atomic, observable) | Covering case | Verdict |
 |---|---|---|---|
-| 2.a | Card shows the mission's localized name | MSNF-011 (existing) | NOT-RUN |
-| 2.b | Card shows the mission description | MSNF-011 (existing) | NOT-RUN |
-| 2.c | Card shows the reward amount | MSNF-042/043 (existing) | NOT-RUN |
-| 2.d | Card shows days remaining | MSNF-017 (existing) | NOT-RUN |
-| 2.e | Card shows the goal **target** (not only amount spent) | **MSNF-077** (new) | NOT-RUN |
-| 2.f | Modal shows the goal target | MSNF-042 (existing) | NOT-RUN |
-| 2.g | Card progress value equals backend `currentValue` | MSNF-015 (existing) | NOT-RUN |
-| 2.h | Untranslated locale → default-locale name, never the raw internal key | MSNF-068 (existing) | NOT-RUN |
-| 2.i | Untranslated locale → description present, not dropped | MSNF-068 (existing) | NOT-RUN |
-| 2.j | Goal amount and progress amount share one currency on a single card | **MSNF-075** (new) | NOT-RUN |
-| 3.a | SKU modal lists each target SKU with its required quantity | MSNF-026 (existing) | NOT-RUN |
-| 3.b | SKU modal "targets met" counter is correct | MSNF-025 (existing) | NOT-RUN |
-| 3.c | Card and modal report the same progress on an unchanged cart | **MSNF-079** (new) · VCST-5824 open | NOT-RUN |
-| 3.d | Every SKU-modal price equals that SKU's PDP price in the session currency | **MSNF-073** (new) — *the test for `5a677230`* | NOT-RUN |
-| 3.e | SKU-modal cart subtotal sums one currency and is labelled with it | **MSNF-078** (new) | NOT-RUN |
+| 2.a | Card shows the mission's localized name | MSNF-011 (existing) | PASS |
+| 2.b | Card shows the mission description | MSNF-011 (existing) | PASS |
+| 2.c | Card shows the reward amount | MSNF-042/043 (existing) | PASS |
+| 2.d | Card shows days remaining | MSNF-017 (existing) | PASS |
+| 2.e | Card shows the goal **target** (not only amount spent) | **MSNF-077** (new) | **FAIL** |
+| 2.f | Modal shows the goal target | MSNF-042 (existing) | PASS |
+| 2.g | Card progress value equals backend `currentValue` | MSNF-015 (existing) | PASS |
+| 2.h | Untranslated locale → default-locale name, never the raw internal key | MSNF-068 (existing) | **FAIL** |
+| 2.i | Untranslated locale → description present, not dropped | MSNF-068 (existing) | **FAIL** |
+| 2.j | Goal amount and progress amount share one currency on a single card | **MSNF-075** (new) | BLOCKED |
+| 3.a | SKU modal lists each target SKU with its required quantity | ~~MSNF-026~~ — **case does not exist** | **UNCOVERED** |
+| 3.b | SKU modal "targets met" counter is correct | MSNF-025 (existing) | PASS |
+| 3.c | Card and modal report the same progress on an unchanged cart | **MSNF-079** (new) · VCST-5824 open | PASS |
+| 3.d | Every SKU-modal price equals that SKU's PDP price in the session currency | **MSNF-073** (new) — *the test for `5a677230`* | PASS |
+| 3.e | SKU-modal cart subtotal sums one currency and is labelled with it | **MSNF-078** (new) | BLOCKED |
 
 ## Gap conditions (no story AC — from 1d)
 
 | # | Condition | Covering case | Verdict |
 |---|---|---|---|
-| G5 | Partially-successful payload still renders every mission that resolved | **MSNF-074** (new) — *VCST-5843 Done but fix absent from branch* | NOT-RUN |
-| G6 | Anonymous `/account/missions` → sign-in with `returnUrl`, not 404 | **MSNF-072** `[JOURNEY]` (new) — *the test for `80d1e3b9`* | NOT-RUN |
-| G6b | In-session sign-in reveals the Missions nav entry without a reload | **MSNF-076** (new) — *regression introduced by `80d1e3b9`* | NOT-RUN |
-| G7 | Zero missions available → dedicated empty state, distinct from the error state | MSNF-007 (existing) | NOT-RUN |
-| G8 | Zero-target / zero-reward / expired missions each render a defined state | MSNF-059 + 075d MSN-016 | NOT-RUN |
-| G11 | Mission controls expose distinct accessible names; modal background hidden from AT | MSNF-046/047 (existing) · VCST-5826 open | NOT-RUN |
-| G12 | 375 px SKU modal does not truncate product names | MSNF-023 (existing) · VCST-5831 open | NOT-RUN |
-| G13 | Points-history row identifies its granting mission | **MSNF-080** (new) — BL-LOY-015 VIOLATED backend-side | NOT-RUN |
+| G5 | Partially-successful payload still renders every mission that resolved | **MSNF-074** (new) — *VCST-5843 Done but fix absent from branch* | BLOCKED |
+| G6 | Anonymous `/account/missions` → sign-in with `returnUrl`, not 404 | **MSNF-072** `[JOURNEY]` (new) — *the test for `80d1e3b9`* | PASS |
+| G6b | In-session sign-in reveals the Missions nav entry without a reload | **MSNF-076** (new) — *regression introduced by `80d1e3b9`* | PASS |
+| G7 | Zero missions available → dedicated empty state, distinct from the error state | MSNF-007 (existing) | BLOCKED |
+| G8 | Zero-target / zero-reward / expired missions each render a defined state | MSNF-059 + 075d MSN-016 | PASS |
+| G11 | Mission controls expose distinct accessible names; modal background hidden from AT | MSNF-046/047 (existing) · VCST-5826 open | **FAIL** |
+| G12 | 375 px SKU modal does not truncate product names | ~~MSNF-023~~ — **case does not exist** · VCST-5831 open | **UNCOVERED** |
+| G13 | Points-history row identifies its granting mission | **MSNF-080** (new) — BL-LOY-015 VIOLATED backend-side | **FAIL** |
 
 ## Uncovered conditions — stated, not dropped
 
@@ -55,22 +55,13 @@
 | **G4** — cancelled order reverses its mission contribution | **BL-LOY-019 VIOLATED — the reversal mechanism does not exist in product.** Recorded so its absence is not mistaken for coverage; backend scope. |
 | **G10** — mission progress under a B2B org switch: per-contact or per-org? | Undefined by the story. Needs a PO answer before it is testable at all. |
 | **UIP-TABS / UIP-INPUT** | Named in the model, not authored this run. `MSNF-UIP-BACK-001`, `MSNF-UIP-EXPIRE-001` and `MSNF-UIP-STORAGE-001` already exist in 083c as Draft, so the gap is narrower than the previous model's — `UIP-BACK` was listed here in error and is in fact covered. |
-| **`culture × currency` (model scenario #18)** | The model's Reduction keeps this cell explicitly (`AfterMediatorSend` formats top-level money by `CultureName` while product price resolves off `currencyCode`). Pending the Step-3 re-verify: if MSNF-075 does not gain a culture arm, this cell is uncovered and stays listed here rather than being claimed by the model. |
+| **`culture × currency` (model scenario #18)** | Covered-but-unexecuted, not uncovered. MSNF-075 **did** gain the culture arm at the Step-3 re-verify, so an authored case exists for the cell — but it **BLOCKED** at execution (its mission read `Completed` against a `progress_percent_at_seed: 0` baseline). It needs a re-run on uncontended fixtures, not new authoring. |
 | Points-history row **currency** | Matrix cell `Points-history × L6c` is a declared `GAP` — no AC governs the page, so no case was authored for it. |
-| **MSNF-073 EUR arm** — a mission featured-SKU priced in a second currency | **Fixture limitation, not a product gap.** The `AGENT-TEST-*` mission products are USD-only: an EUR session returns `€0.00` for every one of them, so the EUR arm cannot discriminate a correct implementation from a broken one. The general catalog *does* carry a partial EUR pricelist (e.g. `$349.00` / `€455.00` on the same SKU — the exact pair from the original VCST-5821 report), so the discriminating control exists in the catalog but is not wired to a mission. Closing this properly needs a dual-currency featured-SKU fixture; recorded as a follow-up, not run here. |
+| **MSNF-073 EUR arm** — **RESOLVED this run** | The single-currency fixture limitation first recorded here was closed after the Step-3 gate REJECTED the case as vacuous: `MSN_E2E_PRODUCT_A` was re-seeded dual-priced (`10 USD` / `34 EUR`) alongside single-priced `MSN_E2E_PRODUCT_B` as an in-modal control. MSNF-073 then **PASSED** with genuine discrimination — a `FirstOrDefault()` implementation would have failed both the amount and the denomination assertion. |
 
-## Live API evidence captured at pre-flight (before browser execution)
+## Pre-flight API evidence (superseded by execution, kept for the audit trail)
 
-Probing `loyaltyMissionProgress` directly at both session currencies on the deployed build:
-
-| Observation | Result |
-|---|---|
-| USD session → featured-SKU prices | `$10.00`, `$42.50`, `$30.00`, `$99.00` — all `currency.code = USD` |
-| EUR session → same rows | all `currency.code = EUR` (amounts `€0.00`, see the fixture limitation above) |
-| Cross-currency leak (the VCST-5821 symptom) | **not reproducible** — no row's currency differs from the session currency |
-| `errors[]` on a full nested `product` selection | **none** — the resolver that threw for VCST-5842 now resolves cleanly |
-
-Two consequences carried into execution: the `5a677230` currency fix **does** propagate to the nested `items[].product` price (settling 1c's open source question in the fix's favour), and **MSNF-074 has no organic trigger on this build** — with VCST-5842 fixed, the partial-payload path is no longer reached by itself, so the absent `errorPolicy` is a **latent** defect needing a deliberate trigger to demonstrate, not a live outage.
+Probing `loyaltyMissionProgress` directly before any browser run: a USD session returned `currency.code = USD` on every featured-SKU row and an EUR session returned `EUR`, with **no** `errors[]` on a full nested `product` selection. That settled 1c's open source question in the fix's favour and confirmed VCST-5842's resolver fix, and it is what made MSNF-074's trigger non-organic. MSNF-073 has since proved the same point with real discrimination.
 
 ### The BL-PRICE-005 line on MSNF-073 — what it actually tests
 
@@ -95,3 +86,39 @@ That makes this line a real, undecided UI check rather than a foregone red: does
 
 `083c`, `083d`, `075d` · `--cases critical --also-ids MSNF-072..MSNF-080` · no `--target` time trim (operator decision).
 Narrowed from the selector's fail-open 62-suite / 392-min set on 1c's source evidence that the shared `client-app/core/api/graphql/types.ts` change is inert (one doc-comment reword plus one optional loyalty-only input field, both TypeScript-only). **Every suite dropped by that narrowing is named in the Step-5 report's Scope Exclusions.**
+
+
+## Execution results
+
+**Run `REG-2026-09-02-0930`** (09:30–10:21Z) — 36 cases: 22 PASS · 5 FAIL · 6 BLOCKED · 3 SKIPPED · **61.1%**. Lanes: 083c chrome, 083d edge, 075d machine. No suite touched firefox; no retries needed.
+
+**Gap-coverage run** (a second pass, same lane) — the `--cases critical` filter had excluded the High/Medium cases covering 12 of the 23 conditions, so only 11 were executed by the main run. Nine further cases were executed to close that: 4 PASS · 2 FAIL · 3 BLOCKED.
+
+**Condition tally:** 23 mapped · 21 with a verdict · **12 PASS · 5 FAIL · 4 BLOCKED · 2 UNCOVERED**.
+AC-2/AC-3 alone: 15 conditions, 14 decided (93%), 9 PASS / 3 FAIL / 2 BLOCKED.
+
+**Two conditions are UNCOVERED because their mapped cases do not exist.** `MSNF-023` and `MSNF-026` were deleted on 2026-08-28 in commit `de670ad5` — the VCST-5346 value-chain restructure itself. This checklist's condition→case map was built from the 2026-08-27 run's inventory, one day before the cull, and the IDs were not re-checked against the current CSV. Conditions **3.a** (SKU modal lists each target SKU with its quantity) and **G12** (375 px truncation) therefore have no covering case at all and need new ones authored.
+
+### The four BLOCKED, and why none is a product signal
+
+| Case | Reason |
+|---|---|
+| MSNF-074 (G5) | The `errors[] + data` trigger no longer occurs organically — VCST-5842's backend fix removed it. Correctly held at `BLOCKED:PRECONDITION_UNMET` rather than scored PASS, since a clean payload takes the same path under either error policy |
+| MSNF-078 (3.e) | **Fixture defect.** `PERSKU-PTS` is seeded at `$0.00 USD` rather than a distinct `PTS` price, with `isAvailable`/`isBuyable` false, so both modals resolve to USD and the currency-label assertion is undecidable as seeded |
+| MSNF-075 (2.j) | Its mission read `Completed` against a `progress_percent_at_seed: 0` baseline |
+| MSNF-007 (G7) | The zero-mission empty state is unreachable for any seeded account on this store (`totalCount = 28`) |
+
+### Fixture problems this run exposed — both need fixing before the suite pair is trusted
+
+1. **Missions are minted with a backdated window.** Freshly seeded missions carry `startDate`/`periodStart` of `2026-08-26`, a week before the 08:59 mint, so they retroactively count orders placed before they existed. `$234.00 spent` against a `$50` target exceeds what either suite placed, so this — not concurrency — is the larger cause of the `Completed`-at-start blocks.
+2. **083c and 083d were run concurrently against the shared `LOYALTY_VIP_USER`.** The fixture set provisions dedicated per-case accounts, but several cases' preconditions sign in as the shared VIP account instead. These two suites must be serialised, or those cases re-pointed at their per-case accounts.
+
+Separately, the overlay's `*_at_seed` fields are **stale** against generation `20260902085919-b156`: `MSN_ORDERVALUE` records `Completed / 100%` while live reads `InProgress / 0%`. Nothing in this run depended on them, but any case that does would be misled.
+
+## Findings held below the 5d severity floor
+
+`Not filed (below severity floor):` **F7** — untranslated locale drops the mission description entirely (name falls back, description returns `null`); draft `reports/bugs/open/` , prior ticket VCST-5828 (Cancelled). **F8** — every language-selector option carries the active locale's flag alt text, so each option's accessible name states the wrong language. **F9** — open-ended mission card renders a bare amber dot with no adjacent text, colour as the sole differentiator (BL-A11Y-003); prior ticket VCST-5827 (Cancelled).
+
+**Filed:** VCST-5858 (Medium, Sub-task) — VCST-5843 resolved `Done` but its partial-payload fix is absent from every branch.
+
+**Assessed Medium and file-eligible, not filed by operator decision at the 5d gate:** F1 (raw i18n keys visible in `fr`), F2 (card omits the spend target — needs a PO ruling on AC-2 text vs design F1/F2, not a third re-file), F6 (xAPI throws `ARGUMENT_NULL` on an omitted optional `cultureName`). F4 links to the open VCST-5826; F5 attributes to VCST-5319. These are recorded here because on any run this file is the durable record — a finding that appears in neither the checklist nor a draft has been deleted rather than deprioritised.

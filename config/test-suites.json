@@ -2493,10 +2493,10 @@
       "envRiskGate": "staging",
       "customerApplicability": "reference",
       "lanes": {
-        "machine": 29,
+        "machine": 28,
         "browser": 0,
         "manual": 4,
-        "deprecated": 1
+        "deprecated": 2
       }
     },
     {

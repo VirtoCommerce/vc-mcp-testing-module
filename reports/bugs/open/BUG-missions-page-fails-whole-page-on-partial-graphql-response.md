@@ -1,6 +1,6 @@
 # Missions page discards a successful payload — one failing nested field blanks all 12 returned missions — **P2**
 
-## Status: CONFIRMED
+## Status: REOPENED — resolved `Done` 2026-08-28, but the fix never landed on any branch
 **Tracker:** VCST-5843 (Subtask of VCST-5346; Relates VCST-5842)
 **Found by:** manual · investigation of `BUG-missions-page-dead-product-resolver-throws-on-missing-currency.md` · — none (not case-attributable)
 **Archetype:** `ERROR-HANDLING`
@@ -13,6 +13,21 @@
 The mission cards do not need `product` to be useful: a card's headline, progress bar, reward and deadline all come from fields that resolved correctly. Failing the whole view on any `errors[]` entry means one broken nested resolver — anywhere in a 60-field query — silently costs the customer the entire feature.
 
 This is the frontend half of the current outage; the backend cause is `BUG-missions-page-dead-product-resolver-throws-on-missing-currency.md` (P1). They are independently fixable and both should be: with only the backend fixed, the next nested-field failure reproduces this same blank page.
+
+## 2026-09-02 re-test (`REG-2026-09-02-0930`) — closed `Done`, no fix in the codebase
+
+**The fix is absent**, established by reading source at the two SHAs that matter rather than by re-observing the symptom:
+
+- `client-app/core/api/graphql/client.ts` — `graphqlClient.defaultOptions` sets `fetchPolicy` on `watchQuery` / `query` / `mutate` and **no `errorPolicy` on any of them**, so Apollo's default `errorPolicy: "none"` still applies: any `errors[]` entry throws and `data` is discarded.
+- `useMissions.ts` sets no per-query `errorPolicy` and its `catch` re-throws; `missions.vue` `loadData()` catches and sets `loadError`, rendering the whole-page `VcEmptyView variant="error"` instead of the card grid.
+- **`errorPolicy` appears nowhere under `client-app/modules/loyalty/`.**
+- Checked at PR #2396 head `80d1e3b9` **and on `dev`** — so this is not a missing rebase. The change exists on neither.
+
+**The trigger is now proven reachable**, which moves this from latent to live-on-demand. VCST-5842's backend fix removed the *original* trigger, so the page no longer blanks by itself. But case `MSN-009` produced the exact shape on this build: `loyaltyMissionProgress` returned **HTTP 200, `totalCount: 29`, fully populated `data`, and 58 `errors[]` entries** (`Error trying to resolve field 'localizedName'` / `'description'`, code `ARGUMENT_NULL`) purely because the query omitted the optional `cultureName` argument. Any client omitting an optional argument reproduces the blank page.
+
+**Why this is recorded rather than silently re-opened:** the original report described the defect; this records that the ticket was resolved `Done` with no corresponding code change on any branch. Those are different assertions, and the second is the one needing a decision.
+
+**Evidence:** `reports/regression/REG-2026-09-02-0930/graphql-evidence/MSN-009-1788341664309.json`. Case `MSNF-074` was authored for this and correctly reported `BLOCKED:PRECONDITION_UNMET` rather than PASS — a clean payload takes the same code path under either error policy, so it is never evidence the policy is right.
 
 ## STR
 1. Sign in on `{{FRONT_URL}}` as any customer account.
