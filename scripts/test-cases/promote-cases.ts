@@ -40,6 +40,13 @@
  *
  *     --apply                write the CSVs (default is a dry run that writes nothing)
  *     --suite <ID>           restrict to one suite (repeatable)
+ *     --ids <ID,ID>          restrict to these case ids (repeatable; comma lists ok). A SCOPE,
+ *                            never a gate: it only shrinks the set considered, and every PR-* rule
+ *                            still runs on what it leaves. A multi-round `--iterate` run needs it
+ *                            because a case is promotable from the run that EXECUTED it, so the
+ *                            close-out promotes per RUN_ID; without it each invocation considers
+ *                            every Draft row in the suite and holds most of them with PR-002,
+ *                            making "not executed here" indistinguishable from "refused".
  *     --min-green-runs <N>   require N trailing green runs in the fingerprint store (default 1)
  *     --stamp <label>        References stamp label (default: the RUN_ID)
  *     --no-stamp             do not touch References
@@ -329,6 +336,8 @@ export interface SuitePlanInput {
   runCases: ReadonlyMap<string, RunCase>;
   /** Ids the run reported more than once — ambiguous evidence, never promoted. */
   ambiguousIds: ReadonlySet<string>;
+  /** Case ids to consider. Empty = no id scoping — the same convention `opts.suites` uses. */
+  ids: ReadonlySet<string>;
   isFlaky(caseId: string): boolean;
   greenRuns(caseId: string): number;
   minGreenRuns: number;
@@ -407,6 +416,10 @@ export function planSuite(input: SuitePlanInput): SuiteDecision {
     const fields = records[r].record;
     const caseId = fields[0] ?? "";
     if (!caseId) continue;
+    // Out of SCOPE, not held — same reasoning as the `Draft` check below. An id-scoped call is
+    // answering "what about these", so emitting a CaseDecision for every unnamed row would bury
+    // the real decisions under PR-002 noise.
+    if (input.ids.size && !input.ids.has(caseId)) continue;
     const row = Object.fromEntries(COLUMNS.map((c, k) => [c, fields[k] ?? ""])) as Row;
     // Anything not exactly `Draft` is out of SCOPE, not held back: reporting it as a refusal
     // would bury the handful of real decisions under thousands of rows nobody asked about.
@@ -655,6 +668,7 @@ interface Options {
   runArg: string;
   apply: boolean;
   suites: Set<string>;
+  ids: Set<string>;
   minGreenRuns: number;
   stamp: string | null;
   noStamp: boolean;
@@ -663,11 +677,19 @@ interface Options {
   json: boolean;
 }
 
+/** Reads a value-taking flag's argument, refusing a missing one or the next flag. */
+function valueOf(flag: string, next: string | undefined, consume: () => void): string {
+  if (next === undefined || next.startsWith("--")) throw new Error(`${flag} requires a value`);
+  consume();
+  return next;
+}
+
 export function parseArgs(argv: string[]): Options {
   const o: Options = {
     runArg: "latest",
     apply: false,
     suites: new Set(),
+    ids: new Set(),
     minGreenRuns: 1,
     stamp: null,
     noStamp: false,
@@ -683,9 +705,19 @@ export function parseArgs(argv: string[]): Options {
     else if (a === "--no-stamp") o.noStamp = true;
     else if (a === "--strict-mtime") o.strictMtime = true;
     else if (a === "--allow-incomplete") o.allowIncomplete = true;
-    else if (a === "--suite") o.suites.add(argv[++i]);
-    else if (a === "--stamp") o.stamp = argv[++i];
-    else if (a === "--min-green-runs") o.minGreenRuns = Math.max(1, Number(argv[++i]) || 1);
+    // A value-taking flag must never take the NEXT flag, or nothing, as its value. Unguarded,
+    // `--ids` as the final token pushed `undefined` into the set, `ids.size` became 1, every case
+    // fell out of scope, and the run exited 1 ("nothing promotable") looking like a clean no-op.
+    // `filter-cases.ts` already carries this guard and a test named for exactly that failure.
+    else if (a === "--suite") o.suites.add(valueOf(a, argv[i + 1], () => i++));
+    else if (a === "--ids") {
+      for (const id of valueOf(a, argv[i + 1], () => i++).split(",").map((s) => s.trim()).filter(Boolean)) {
+        o.ids.add(id);
+      }
+    } else if (a === "--stamp") o.stamp = valueOf(a, argv[i + 1], () => i++);
+    else if (a === "--min-green-runs") {
+      o.minGreenRuns = Math.max(1, Number(valueOf(a, argv[i + 1], () => i++)) || 1);
+    }
     else if (a.startsWith("--")) throw new Error(`unknown option ${a}`);
     else if (positional++ === 0) o.runArg = a;
   }
@@ -750,6 +782,7 @@ function main(): void {
       ambiguousIds: run.ambiguousIds,
       isFlaky: (id) => flakiness.isFlaky(suiteId, id),
       greenRuns: (id) => flakiness.greenRuns(suiteId, id),
+      ids: opts.ids,
       minGreenRuns: opts.minGreenRuns,
       csvNewerThanRun,
       strictMtime: opts.strictMtime,
@@ -796,6 +829,11 @@ function main(): void {
 
   const all = decisions.flatMap((d) => d.cases);
   const promoted = all.filter((c) => c.promote);
+  // Computed AFTER the per-suite loop, because `--ids` is run-global while a suite is not: an id
+  // absent from one suite is expected. Reported, never a refusal — a wholly mistyped list already
+  // surfaces as exit 1 ("nothing promotable").
+  const seenIds = new Set(all.map((c) => c.caseId));
+  const unknownIds = [...opts.ids].filter((id) => !seenIds.has(id));
 
   if (opts.json) {
     console.log(
@@ -812,6 +850,8 @@ function main(): void {
             held: all.length - promoted.length,
             suiteRefusals: refusals,
           },
+          ids: [...opts.ids],
+          unknownIds,
           suites: decisions,
           written,
           writeErrors,
@@ -834,6 +874,9 @@ function main(): void {
         if (c.promote) console.log(`    + ${c.caseId}  Draft → ${c.to}  [${c.lane ?? "?"}]`);
         else console.log(`    · ${c.caseId}  held — ${c.reasons[0] ?? "no reason recorded"}`);
       }
+    }
+    for (const id of unknownIds) {
+      console.log(`  ! --ids ${id}: no such Draft case in any scoped suite`);
     }
     console.log(
       `\n  ${promoted.length} promotable of ${all.length} Draft case(s) considered` +

@@ -7,6 +7,11 @@ detail. **5a before 5b before 5c is load-bearing:** the verdict is expressed in 
 FAST runs 5a → 5f and stops. `5g` promotes cases a FAST run never authored. `5b` still runs on FAST — the
 AC/DoD reconciliation is what produces the verdict, and dropping it would leave `5c` deciding on nothing.
 
+**On an `--iterate` run these phases do not all fire once.** Step 5k repeats 5a–5e per round and
+defers 5e.1 / 5f / 5g to the exit round; the per-round assignment table — and the reason for each row —
+is owned by [`modes.md`](modes.md) §5k and is not restated here. Each phase below carries one
+`--iterate` clause pointing at it. Without the flag, read this file straight through.
+
 ---
 
 ## 5a. Triage — correlate → validate evidence → classify → provenance → severity → dedup
@@ -75,7 +80,14 @@ Ambiguous → **real bug / LOW**, never relabelled as a test-defect. A test-defe
 | **IN-SCOPE** | in what this ticket changed | fails this ticket; files as a Sub-task at 5d |
 | **OUT-OF-SCOPE incidental** | unrelated defect found opportunistically | files as its own standalone ticket + a *related* link; doesn't fail this ticket unless a P0 revenue-flow break |
 
+| **CARRIED** (`--iterate` only) | dedup match is a bug **this run filed in an earlier round** | keeps its original IN-SCOPE provenance **and** severity, so it still fails this ticket; files nothing; one comment on its existing Sub-task |
+
 Unclear → treat **IN-SCOPE** (fail-safe).
+
+**`--iterate`:** without the CARRIED row, item 6's dedup matches this run's own round-1 Sub-task and
+the PRE-EXISTING row then says *don't re-file, don't fail this ticket* — wrong twice, since it is this
+ticket’s own Sub-task and it is still failing. Rationale, plus what happens when a carried bug goes
+green: [`modes.md`](modes.md) §5k §Three carve-outs.
 
 ### 5. Severity + priority
 
@@ -167,6 +179,13 @@ Note that filing and failing are separate decisions: a `Medium` files (5d) witho
 File the confirmed, non-duplicate real bugs from 5a, each carrying a `## Fix Routing` hint. **Ask before
 filing.**
 
+**`--iterate`: 5d runs PER ROUND, for new findings only.** A round that files nothing cannot fix
+anything — `/qa-fix` needs a filed ticket — so skipping 5d in round 2 dead-ends the loop at its own
+precondition. A **CARRIED** finding (5a item 4) files nothing and gets one comment on its existing
+Sub-task; a carried bug that went green this round is commented and recorded, and deliberately **not**
+transitioned (the fix is an unmerged prerelease). The floor is unchanged per round: 5d still does not
+file a `Low` in round 2, which is why below-floor findings stay outside the loop.
+
 ### The floor: `Critical` / `High` / `Medium` only
 
 | Severity | = | Tracker item |
@@ -251,20 +270,40 @@ App Insights (test window): [N] correlated — [confirmed/needs-review/none].
 Business rules verified: [BL-* list]. Bugs: [list, with relationship — sub-task/linked/standalone — or None].
 Not filed (below severity floor): [N] Low — [one line each + reports/bugs/open/<file>.md], or None.
 Release gate: [GO/CONDITIONAL GO/NO-GO recommendation]. Decision: [verdict].
+Release note: [<layer>/<audience> — /ba-analyze docs release <ticket-key>], or "none — <refusal>".
 Evidence: reports/tickets/{SPRINT}/<ticket-key>/screenshots/
 ```
 
+The `Release note` line is **mandatory too, and says `none — <refusal>` when there is no fragment** —
+the person reading the tracker is the one who will later run the aggregate, so a silent omission there
+costs a ticket nobody knows to include.
+
 The `Not filed` line is **mandatory and says `None` when there are none** — an omitted line is
 indistinguishable from a run that found no Low issues.
+
+**`--iterate`:** this full template is posted **once, at loop exit**. Rounds 1…N−1 post the much
+shorter **round delta** instead ([`modes.md`](modes.md) §5k §The round-delta comment) — the full
+template every round buries the ticket under near-identical comments, while posting nothing leaves a
+prerelease deployed to the shared test env with no trace. The delta carries the same mandatory
+`Not filed` accounting.
 
 ### 3. Persist `summary.json` and update the checklist
 
 Write `reports/tickets/{SPRINT}/<ticket-key>/summary.json` per
 [`.claude/templates/qa-test-summary.schema.json`](../../templates/qa-test-summary.schema.json): `path`, the
 AC-analysis + `ac_dod_estimate` block, counts, the `regression` and `regression_triage` blocks, `bugs_filed`
-with relationship + severity, `bugs_not_filed`, the `promotion` block for 5g, and the **`timing`** block.
+with relationship + severity, `bugs_not_filed`, the `promotion` block for 5g, the **`timing`** block, and
+— at 5f — **`layer`** plus the **`release`** block (§Release note).
 Then **update `testing-checklist.md` in place with each item's verdict**, so the committed file is the
 checklist that ran and not the one that was planned.
+
+**`--iterate`: both writes happen PER ROUND, and the checklist becomes append-only.** `summary.json`
+is rewritten at the end of every round with that round appended to `iterations.per_round[]` — the loop
+can STOP at any round (G0 BAIL, BLOCKED, the cap, a dropped session), and a history persisted only on a
+clean exit is missing exactly when it is needed. The checklist gains a `## Round N` section holding the
+re-run items as transitions (`Round 1: FAIL → Round N: PASS`); **never edit a round-1 verdict cell in
+place** — the RED→GREEN transition is the loop’s deliverable, and on FAST this file is the only
+durable record of it.
 
 **`timing` is not bookkeeping.** The 40-minute window and the FAST/FULL split are both claims about cost,
 and until a run records its own they stay unfalsifiable — the schema carried 78 keys and not one duration.
@@ -295,6 +334,12 @@ On Jira both closing transitions require the in-testing status (the Step 4 move)
 the in-testing hop first (discover live). On Azure Boards set `System.State` directly. **TESTED is the
 terminal state this command may reach — never Done or Cancelled.**
 
+**`--iterate`: the transition happens AT LOOP EXIT ONLY** — one transition per run, whatever the round
+count. REOPEN is the human-handoff signal, and a loop about to start another round is not handing off; a
+per-round REOPEN would also flap the ticket out of in-testing, which is the precondition both closing
+transitions need. The ticket therefore stays in-testing across rounds, so the Step-4 hop fires once — and
+if round 1 skipped it, the exit round does it here, exactly as the paragraph above already requires.
+
 ### Close the loop
 
 By default `/qa-test` verifies and reports; it never fixes — it states the next command and stops (pointers,
@@ -302,17 +347,58 @@ not auto-triggers). This close-out is the `feature-test` flow's; `verify-fix` al
 VERIFIED/REOPEN verdict, and `hotfix-verify` handed off before 1b.
 
 - **PASS / PASS WITH NOTES** → ticket TESTED; hand to the Feature Release Gate. Done — 5g still runs
-  (non-blocking) if new cases were authored.
+  (non-blocking) if new cases were authored. **Then point at the release note** — see §Release note
+  below.
 - **FAIL → REOPEN** → `/qa-fix <ticket-key>` (autonomous G0–G7, never auto-merges) → human review + merge +
   deploy → `/qa-verify-fix <ticket-key>`. A too-complex/multi-repo bug (G0 BAIL) is handed to a human,
   resuming at `/qa-verify-fix`. Once the fix is deployed, a re-run of `/qa-test <ticket-key>` auto-routes the
   Bug to the `verify-fix` flow, since its status is now `fix-ready`.
 - **BLOCKED** → resolve the blocker (env/data/dependency) and **re-run `/qa-test <ticket-key>`** from the
   top; no partial credit.
+- **With `--iterate`** the FAIL bullet is what 5k automates, bounded — it is the loop, not a pointer.
+  Everything else here is unchanged: merge and release stay the human’s, and the loop only ever
+  re-tests an unmerged prerelease.
 
+### Release note — a pointer, not a trigger
+
+The **machine half is already written**: `summary.json.layer` (derived at `1b` item 2b) plus the
+`release` block — `audience`, `component_versions`, `platform_version`, `breaking` + `breaking_source`,
+and either a `refusal` or a null `fragment`. Fill it here, at 5f, from what the run already knows:
+
+- **Versions come from `build.deployed`** (probed), never from `build.relevant_modules` (declared git
+  state) and never from the release ledger, which records what shipped **upstream**. `UNKNOWN` is legal;
+  a guess is not, and a version that cannot be resolved sets `refusal: "no-version"`.
+- **`breaking` is true only** from `build.releasedThrough.breaking[]` or a cited contract change in the
+  diff, with the citation in `breaking_source`. Never from ticket, PR or commit prose.
+- **`audience` is derived from the layer**, per `.claude/knowledge/ba/virto-doc-style.md` §9.1 — it is
+  not a choice made here.
+- **Refuse rather than pad.** `refusal` ∈ `verdict-not-pass` · `layer-unresolved` · `not-deployed` ·
+  `not-user-visible` · `no-version`. A pure refactor with nothing a user can observe is a legitimate
+  `not-user-visible`, not a thin note.
+
+Then **point, and stop.** `/ba-analyze` is `disable-model-invocation: true`, so nothing here can (or
+should) auto-fire it. When `refusal` is null, state exactly this:
+
+```
+/ba-analyze docs release <ticket-key>
+# layer=<layer> · audience=<audience> · summary.json: reports/tickets/{SPRINT}/<ticket-key>/summary.json
+```
+
+Those four facts are the whole hand-off — the follow-up run re-derives nothing. When `refusal` is
+non-null, state `no release fragment: <refusal>` and **name no command**. The aggregate is a separate,
+later run (`/ba-analyze docs release --sprint {SPRINT}`), never part of this close-out.
+
+**The `verify-fix` flow produces no fragment**, by design: it writes `verification-summary.json` rather
+than `summary.json`, and a fix’s release story is the bundle/hotfix narrative `/qa-hotfix` owns.
 ---
 
 ## 5g. Promote the new cases — FULL only, last, non-blocking
+
+**`--iterate`: 5g runs AT LOOP EXIT, ONCE.** `tc:promote` reads `Draft` and writes `Automated` and can
+**never re-promote**, so a round-1 flip is irreversible and would ground `{OBSERVED}` in the build that
+was wrong. At exit, promote **per `RUN_ID`, `--ids`-scoped to the cases that run actually executed** —
+the three invocations and the expected PR-014 warning are in [`modes.md`](modes.md) §5k §5g at loop
+exit.
 
 The verdict/report/status close-out (5a–5f) is already complete and delivered to the user before this phase
 starts; a slow or REJECTed promotion never delays TESTED/REOPEN. The cases are in the suite as `Draft`,

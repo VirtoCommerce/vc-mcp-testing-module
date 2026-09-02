@@ -25,6 +25,7 @@ import {
   fieldSpans,
   flakinessFrom,
   groundingReasons,
+  parseArgs,
   planSuite,
   quoteField,
   replaceFields,
@@ -77,6 +78,7 @@ function planInput(over: Partial<SuitePlanInput> & { rawText: string }): SuitePl
     file: "regression/suites/Fixture/999-fixture.csv",
     runCases: new Map<string, RunCase>(),
     ambiguousIds: new Set<string>(),
+    ids: new Set<string>(),
     isFlaky: () => false,
     greenRuns: () => 1,
     minGreenRuns: 1,
@@ -409,6 +411,83 @@ test("a mixed suite promotes only the cases that earned it", () => {
   );
 });
 
+// ---- --ids scoping ---------------------------------------------------------------
+// A multi-round `--iterate` close-out promotes per RUN_ID, because a case is promotable from the
+// run that EXECUTED it. `--suite` cannot express that: one suite holds both the re-run set and the
+// cases only round 1 ever ran.
+
+test("--ids is a SCOPE, not a hold — an unnamed Draft case yields no decision at all", () => {
+  const d = planSuite(
+    planInput({
+      rawText: csvOf([cleanRow("A-001"), cleanRow("A-002")]),
+      runCases: new Map([
+        ["A-001", { status: "PASS", lane: "machine" }],
+        ["A-002", { status: "PASS", lane: "machine" }],
+      ]),
+      ids: new Set(["A-001"]),
+    }),
+  );
+  // A-002 is Draft, reported, and PASSing — and still absent, because it was not asked about.
+  // Emitting a PR-002-shaped hold for it would bury the one real decision.
+  assert.equal(d.cases.length, 1);
+  assert.equal(d.cases[0].caseId, "A-001");
+  assert.equal(d.cases[0].promote, true);
+});
+
+test("a named case still runs every PR-* rule — the scope narrows, it does not exempt", () => {
+  const d = planSuite(
+    planInput({
+      rawText: csvOf([cleanRow("A-001")]),
+      runCases: new Map([["A-001", { status: "FAIL", lane: "machine" }]]),
+      ids: new Set(["A-001"]),
+    }),
+  );
+  assert.equal(d.cases.length, 1);
+  assert.equal(d.cases[0].promote, false);
+  assert.match(d.cases[0].reasons[0], /^PR-003/);
+});
+
+test("an empty --ids means no id scoping — the same convention --suite uses", () => {
+  const d = planSuite(
+    planInput({
+      rawText: csvOf([cleanRow("A-001"), cleanRow("A-002")]),
+      runCases: new Map([
+        ["A-001", { status: "PASS", lane: "machine" }],
+        ["A-002", { status: "PASS", lane: "browser" }],
+      ]),
+      ids: new Set<string>(),
+    }),
+  );
+  assert.deepEqual(
+    d.cases.map((c) => c.caseId),
+    ["A-001", "A-002"],
+  );
+});
+
+// ---- argument surface ------------------------------------------------------------
+
+test("--ids splits comma lists and is repeatable", () => {
+  const o = parseArgs(["REG-2026-01-01-0000", "--ids", "A-001,A-002", "--ids", "A-003"]);
+  assert.deepEqual([...o.ids], ["A-001", "A-002", "A-003"]);
+  assert.equal(o.runArg, "REG-2026-01-01-0000");
+});
+
+test("a trailing value-taking flag throws rather than scoping to `undefined`", () => {
+  // Unguarded, `--ids` as the last token put `undefined` in the set, ids.size became 1, EVERY case
+  // fell out of scope, and the run exited 1 ("nothing promotable") looking like a clean no-op.
+  for (const flag of ["--ids", "--suite", "--stamp", "--min-green-runs"]) {
+    assert.throws(() => parseArgs(["REG-1", flag]), /requires a value/, `${flag} accepted no value`);
+    assert.throws(
+      () => parseArgs(["REG-1", flag, "--json"]),
+      /requires a value/,
+      `${flag} swallowed the next flag`,
+    );
+  }
+});
+
+test("--ids defaults to empty, so an unscoped run is unchanged", () => {
+  assert.equal(parseArgs(["REG-1"]).ids.size, 0);
+});
 // ---- References stamp -------------------------------------------------------------
 
 test("stampReferences appends without clobbering a sibling stamp, and is idempotent", () => {
