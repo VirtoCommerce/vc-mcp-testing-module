@@ -52,12 +52,14 @@ You coordinate three specialist subagents in sequence, then synthesize their fin
    refusal is a legitimate outcome (`verdict-not-pass` · `layer-unresolved` · `not-deployed` ·
    `not-user-visible` · `no-version`), not a failure.
 2b. **On `docs ticket`, read `summary.json` FIRST — before any MCP call**, exactly as 2a does. Refuse
-   and stop on `verdict-not-pass` (verdict is `FAIL`/`BLOCKED`), `layer-unresolved` (`layer` is null —
-   never guess, never default to `storefront`), `not-deployed`, or `not-user-visible` (no `PASS` row in
-   `testing-checklist.md` a shopper, operator or integrator can act on). A refusal is a legitimate
-   outcome, not a failure — and `not-user-visible` is the **expected** one for most FAST-path tickets.
-   There is **no `no-version` refusal** in this mode: a how-to does not quote a build number
-   (`virto-doc-style.md` §10).
+   and stop on `layer-unresolved` (`layer` is null — never guess, never default to `storefront`),
+   `not-deployed`, or `not-user-visible` (no `PASS` row in `testing-checklist.md` a shopper, operator
+   or integrator can act on). A refusal is a legitimate outcome, not a failure — and `not-user-visible`
+   is the **expected** one for most FAST-path tickets.
+   **A non-`PASS` verdict is NOT a refusal here** — unlike 2a's release note, it *scopes* the guide:
+   document the run's passing paths, omit the failing ones, and carry the mandatory `Not documented`
+   line and the verbatim verdict (`virto-doc-style.md` §10.4). There is likewise **no `no-version`
+   refusal** in this mode: a how-to does not quote a build number (`virto-doc-style.md` §10).
 3. Confirm GitHub MCP and browser MCP servers are available (needed for sub-agents).
 3. **Read `knowledge/oracles/business-logic.md`** and extract the list of existing `BL-DOMAIN-NNN` IDs. You will pass this list to `ba-system-analyzer` as `existing_bl_ids` so it can (a) avoid re-proposing known invariants and (b) pick the next available number per domain when drafting new ones.
 

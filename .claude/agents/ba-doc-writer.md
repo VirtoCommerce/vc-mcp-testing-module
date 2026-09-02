@@ -376,9 +376,13 @@ the verdict** (not versions, which this mode does not print), and `testing-check
 > 1. **Every instruction maps to a verified `PASS` row** in `testing-checklist.md` or a green case in
 >    `regression.suites`. No roadmap, no "will also support", no step nobody executed. A ticket with
 >    nothing verified to say is **refused** (`not-user-visible`), never padded.
-> 2. **Refuse rather than pad** — `verdict-not-pass` · `layer-unresolved` · `not-deployed` ·
->    `not-user-visible` (style guide §10.4). A refusal returns `documents: []`, a non-null `refused`, and no comment
->    body; that is a legitimate outcome, not a failure.
+> 2. **Refuse rather than pad** — `layer-unresolved` · `not-deployed` · `not-user-visible` (style guide
+>    §10.4). A refusal returns `documents: []`, a non-null `refused`, and no comment body; that is a
+>    legitimate outcome, not a failure. **`verdict-not-pass` is NOT in this set** — unlike the §9 release
+>    fragment's verdict gate, a non-`PASS` run *scopes* the guide: write its passing paths, omit the
+>    failing ones, fill the mandatory `Not documented` line, and print the verdict verbatim. Guardrail 1
+>    is per-instruction and is what keeps an unverified step out; a run-level gate added nothing to it
+>    and discarded a dozen verified paths to block three (VCST-5346).
 > 3. **`layer` is read from `summary.json` and never re-derived.** `null` ⇒ refuse
 >    (`layer-unresolved`). Never default to `storefront` — a wrong layer routes the guide to the wrong
 >    audience.

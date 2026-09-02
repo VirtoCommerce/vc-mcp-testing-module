@@ -450,14 +450,19 @@ reason, when any of these holds (§10.4):
 
 | Refusal | When |
 |---|---|
-| `verdict-not-pass` | verdict `FAIL` / `BLOCKED` |
 | `layer-unresolved` | `summary.json.layer` is null — never guess, never default to `storefront` |
 | `not-deployed` | the change is not live on the env under test |
-| `not-user-visible` | no `PASS` row a shopper, operator or integrator can act on |
+| `not-user-visible` | no `PASS` row a shopper, operator or integrator can act on — including a run in which nothing passed |
 
-**A refusal is a legitimate outcome, not a failure.** State it and stop — no file, no comment. There is
-no `no-version` refusal here: a how-to does not quote a build number, and requiring one would refuse
-guides that are perfectly writable (§10, head table).
+**A refusal is a legitimate outcome, not a failure.** State it and stop — no file, no comment.
+
+**The verdict is not one of them.** `FAIL`/`BLOCKED` **scopes** this step rather than refusing it:
+document the conditions that PASSed, omit the ones that did not, and carry the mandatory `Not documented`
+line plus the verbatim verdict (§10.2/§10.4). 5f's release note keeps its `verdict-not-pass` gate —
+*what shipped* and *how do I use this* fail differently, and this step runs only once a human has already
+transitioned the ticket to TESTED. There is likewise no `no-version` refusal here: a how-to does not
+quote a build number, and requiring one would refuse guides that are perfectly writable (§10, head
+table).
 
 ### 2. Run the writer, then post
 

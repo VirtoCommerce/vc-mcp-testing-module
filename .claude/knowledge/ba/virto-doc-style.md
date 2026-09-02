@@ -460,13 +460,14 @@ one comment on the ticket itself** so the people who asked for the change read i
 looking. Produced at `/qa-test` **5h**, after the ticket reaches TESTED.
 
 **It is not a release note and must not read like one.** A release note answers *what shipped*; a guide
-answers *how do I use this*. Concretely, three differences that keep the two from collapsing into each
+answers *how do I use this*. Concretely, four differences that keep the two from collapsing into each
 other:
 
 | | Release note (§9) | Ticket documentation (§10) |
 |---|---|---|
 | Audience | **one**, derived from the layer — the deliberate inversion §9 exists to explain | **one or more**, per §1's ordinary rule; the layer picks which are *in scope*, not which is the only one |
 | Versions | mandatory; a fragment with no resolvable version is refused (`no-version`) | **absent** — a how-to does not quote a build number, and requiring one would refuse guides that are perfectly writable |
+| Verdict | **gates the document** — `FAIL`/`BLOCKED` ⇒ `verdict-not-pass`, no fragment | **scopes it, never refuses it** — write the passing paths, name the omitted ones (§10.4) |
 | Delivery | a committed file, linked from the aggregate | a committed file **and** a tracker comment; the comment is the deliverable people read |
 
 ### 10.1 Which audiences a ticket earns
@@ -506,13 +507,20 @@ ending in the verbatim quoted success message.}
 `{{BACK_URL}}` for hosts, field names schema-validated.}
 
 ---
-*{TICKET} verdict {PASS | PASS WITH NOTES} · verified on {env} ·
+*{TICKET} verdict {the run's own verdict, verbatim} · verified on {env} ·
+Not documented: {each omitted condition with its reason, or the word none} ·
 Evidence: `reports/tickets/{SPRINT}/{TICKET}/` · Audiences derived from layer `{layer}`*
 ```
 
 Include only the sections the ticket earned — an absent audience is an absent heading, never an empty
 one. Heading wording is fixed (**For shoppers** / **For administrators** / **For developers**) so a
 reader scanning several tickets finds the same three labels in the same order.
+
+**The `Not documented` line is mandatory and reads `none` when there is nothing to report.** An omitted
+line is indistinguishable from a run in which everything passed — the same reason the 5d `Not filed` line
+and the aggregate's `Not included` section are mandatory rather than conditional. The verdict is printed
+**verbatim** for the same reason: a reader following these steps is entitled to know the surface is still
+moving.
 
 **The comment carries the guides IN FULL** — `tracker-ops.md` **§5d**: publishing a deliverable to a
 ticket means the deliverable, and a summary plus a repo path is not a delivery. So the size guidance is
@@ -550,12 +558,44 @@ Padding a guide is worse than skipping one: it puts an unverified instruction in
 
 | Refusal | When |
 |---|---|
-| `verdict-not-pass` | verdict is `FAIL` or `BLOCKED` — nothing is documentable yet |
+| ~~`verdict-not-pass`~~ | **Retired 2026-09-02** — a non-`PASS` verdict now *scopes* the guide rather than refusing it (see below). Kept as a tombstone so an existing reference resolves to its replacement instead of reading as an omission |
 | `layer-unresolved` | `summary.json.layer` is null; never guess, and never default to `storefront` |
 | `not-deployed` | the change is not live on the environment under test — documenting it is a false instruction |
 | `not-user-visible` | no `PASS` row in `testing-checklist.md` that a shopper, an operator or an integrator can act on: a refactor, a test-only change, an internal config tweak. **The expected outcome for most FAST-path tickets**, and it costs nothing |
 
-`no-version` is deliberately **not** in this set — see the table at the head of §10.
+`no-version` is deliberately **not** in this set — see the table at the head of §10. Neither, since
+2026-09-02, is `verdict-not-pass`.
+
+#### The run verdict SCOPES the guide; it does not refuse it
+
+A run-level verdict is a claim about a **set** of conditions, not about the ticket. VCST-5346 is the case
+that removed this gate: verdict `FAIL`, and **12 of its 23 conditions PASS** — including both changes
+actually under test. The gate discarded a dozen verified paths in order to block three unverified ones,
+when the rule that already blocks those three is *every instruction maps to a verified `PASS` row*. That
+rule is **per instruction**, it is strictly stronger than a run-level check, and it needs no help from
+one. The verdict gate also scaled backwards: the larger and more thoroughly tested a ticket, the likelier
+some condition fails, so the features most worth documenting were the ones it refused most reliably.
+
+So on a run whose verdict is not `PASS`:
+
+1. **Write the passing paths.** Every step still maps to its own `PASS` row. Nothing about the evidence
+   bar moves.
+2. **Omit the failing ones.** Never present a failing path as working, and never write the defect up as
+   though it were behaviour — a guide is not a bug report, and the defect's home is the tracker.
+3. **Name what was left out.** The guide and the comment both carry the `Not documented` line (§10.2),
+   one entry per omitted condition with its reason — `FAIL`, `BLOCKED` or `UNCOVERED`, naming the ticket
+   where one exists. An omission nobody can see is indistinguishable from a surface that does not exist.
+4. **Print the real verdict**, per §10.2's footer.
+
+**The tracker outranks `summary.json` on whether the ticket shipped.** 5h runs *after the ticket reaches
+TESTED*, so by the time this mode is reached a human has already made that call. On VCST-5346 they made
+it in the direction the gate did not expect — ticket at `Tested`, `summary.json.verdict` still `FAIL` —
+and the gate answered by publishing nothing at all: one 2026-08-27 comment carrying a zip URL, and no
+documentation. Refusing on the run verdict there second-guesses a transition a person had already made,
+using a field they were not looking at.
+
+A `FAIL` run whose passing rows are all internal still refuses — on `not-user-visible`, which is the
+honest reason. The verdict was never the reason.
 
 **Every instruction maps to a verified `PASS` row.** This is §9's "no capability the run did not observe"
 rule, and it binds harder here: a release note that overclaims is a wrong record, while a guide that

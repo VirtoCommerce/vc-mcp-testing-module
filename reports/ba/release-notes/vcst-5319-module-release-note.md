@@ -5,19 +5,21 @@
 ### What changed
 
 You can now build **Missions** in the Loyalty module — campaigns that watch a customer's orders and
-award points automatically when a goal is met. Turn them on per store with the **Missions enabled**
-setting, then author each mission with a goal type, an active window, an audience and a reward.
+award points automatically when a goal is met. Missions are switched on per store by the **Enable
+Loyalty** toggle in the store's **Loyalty settings** widget; each mission then carries a goal, an active
+window, an audience and a reward.
 
 ### What you can now do
 
-Click **Loyalty** in the main menu → **Missions** → **Add**.
+Click **Loyalty missions** in the main menu → **Add** in the toolbar. (This is a separate menu item from
+**Loyalty**, which opens the older Loyalty *programs* list.)
 
 | Field | What it does | Example |
 |---|---|---|
-| Goal type | Which order fact drives progress | `OrderCountGoal` — counts placed orders |
-| Target | The value that completes the mission | `2` |
+| Goal | Which order fact drives progress | Reach target number of orders |
+| Target | The value that completes the mission | `2` orders |
 | Start / End date | Bounds the window in which orders count | `2026-09-01` → `2026-09-30` |
-| Audience | Customer group the mission is offered to | a customer group |
+| Audience | Customer group the mission is offered to | `VIP` |
 | Reward | Points credited once, on completion | `501` |
 
 Progress and the credit are both persisted server-side: after the customer's first order the mission
@@ -32,8 +34,8 @@ ledger row of `501 PTS` appears on their balance.
   date are both accepted.
 - **Per-customer targeting is not available.** Missions target a customer group; an explicit customer
   list is not supported.
-- **Mission periodicity is not applied.** The setting is accepted but progress does not reset per
-  period.
+- **There is no mission periodicity.** The blade prints "per mission period" as fixed text with no
+  control behind it; the period is the mission's own start-to-end window and never resets.
 - **`Public = false` does not hide a mission.** The flag is stored but not enforced on read.
 - **Cancelling or refunding an order does not reverse mission progress**, the completion status, or
   the points already credited.
