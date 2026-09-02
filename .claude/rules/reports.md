@@ -131,6 +131,14 @@ Real examples from recent reports (BUG-IMP-049 at 315 lines vs 150 target; BA-VC
 | Regression suite (20+ tests) | failures + 1 summary per area | 15–20 |
 | Exploratory session | anomalies only | 10 |
 
+**On a `/qa-test --iterate` run every round stamps `-r{N}`, round 1 included.** Round N+1 re-runs the
+**same** case IDs into the **same** folder, so an unstamped name means the round-2 PASS overwrites the
+round-1 FAIL — and the checklist's `Round 1: FAIL → Round 2: PASS` row then points at an image showing
+green, which is worse than a missing file because it silently contradicts the record. Stamping *every*
+round rather than only round ≥2 avoids the "did round 1 stamp or not" ambiguity when a reader resolves
+an evidence ref. This is the append-only checklist rule applied one layer down, and for the same
+reason: the RED→GREEN transition is what the loop is for, so the RED must survive it.
+
 **Retention:** Regression/test-lifecycle/coverage screenshots under `reports/regression/REG-*/`, `reports/test-lifecycle/TLC-*/`, `reports/coverage/COV-*/` are gitignored — disposable artifacts referenced from the permanent markdown. Bug evidence (`reports/bugs/screenshots/`) and per-ticket evidence (`reports/tickets/SprintXX-XX/VCST-XXXX/screenshots/`, `reports/tickets/VCST-XXXX/screenshots/`) stay tracked.
 
 ## 6. Console & Network Evidence
@@ -152,6 +160,7 @@ Format: `Failed: POST /graphql (SearchProducts) → 500 Internal Server Error`
 ```
 Screenshots:
   {TC-ID}-FAIL-{description}.png      → TC-004-FAIL-cart-total-wrong.png
+  {TC-ID}-FAIL-r{N}-{description}.png → TC-004-FAIL-r1-cart-total-wrong.png   (--iterate runs ONLY, every round incl. r1)
   {TC-ID}-{description}.png           → TC-001-checkout-confirmation.png
   BUG-{short-name}-{detail}.png       → BUG-price-display-configurable.png
   {component}-{state}-{viewport}.png  → product-card-hover-mobile.png

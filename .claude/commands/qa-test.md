@@ -218,7 +218,9 @@ Per `.claude/templates/agent-dispatch.md`:
    - **A ⚠ BREAKING change in the component under test forces FULL**, whatever `1a` scored. `ticket-routing.md` says *when in doubt → FULL*; a contract that moved last month is doubt with a date on it, and a FAST run would author no cases and write no Test Model against it.
    - **It feeds `1d`'s AC↔implementation check a third leg.** That check is otherwise static — ACs vs *this* PR's diff — and a breaking change elsewhere in the same component is invisible to that diff while being the likeliest cause of a DRIFT nobody owns.
    - **Released ≠ deployed.** A capability the ledger records that the probe does not carry is `NOT_DEPLOYED` → BLOCKED-on-deploy, never a FAIL and never a filed bug. And the ledger carries **no behaviour**, so it can never ground an assertion as `{DOC}`; that stays `{OBSERVED}`.
-2b. **Resolve the LAYER — derived, never asked, never defaulted.** Record it as `summary.json.layer`
+2b. **Resolve the LAYER — derived, never asked, never defaulted.** Derived HERE and persisted at 5e.3
+    (with the rest of `summary.json`); 5e.0 resolves everything downstream of it and 5f only points.
+    It lands as `summary.json.layer`
     with the ordered sources that voted in `release.layer_source[]`. It is resolved here, not at 5f, so
     one derivation serves both the FAST/FULL decision (`ticket-routing.md` already routes cross-layer →
     FULL) and the release note 5f points at, whose whole routing axis is the layer

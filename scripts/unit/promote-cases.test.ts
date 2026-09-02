@@ -488,6 +488,34 @@ test("a trailing value-taking flag throws rather than scoping to `undefined`", (
 test("--ids defaults to empty, so an unscoped run is unchanged", () => {
   assert.equal(parseArgs(["REG-1"]).ids.size, 0);
 });
+test("an --ids value that names nothing is an error, not an unscoped full-suite promotion", () => {
+  // `ids.size === 0` is the sentinel for "no scoping", so an empty list would INVERT the scope from
+  // nothing to EVERYTHING — and --apply makes Draft -> Automated one-way. Not hypothetical: the
+  // modes.md §5k close-out prescribes three invocations whose id sets are legitimately empty, so this
+  // is reachable from the documented happy path. filter-cases.ts fails closed on the same input.
+  for (const v of ["", ",", " , ", "  "]) {
+    assert.throws(
+      () => parseArgs(["REG-1", "--ids", v]),
+      /at least one case id/,
+      `--ids ${JSON.stringify(v)} was accepted and silently meant UNSCOPED`,
+    );
+  }
+  // ...and a list that names something still parses, including around the empties.
+  assert.deepEqual([...parseArgs(["REG-1", "--ids", " ,A-1, ,A-2, "]).ids], ["A-1", "A-2"]);
+});
+
+test("--ids naming an already-promoted case yields no decision — never a re-promotion", () => {
+  // The routine round-2 shape: the ids check runs BEFORE the Draft check, so a case an earlier round
+  // already flipped is out of scope rather than held. "Never a re-promotion" is load-bearing.
+  const d = planSuite(
+    planInput({
+      rawText: csvOf([cleanRow("A-001", PROMOTION_TARGET)]),
+      runCases: new Map([["A-001", { status: "PASS", lane: "machine" }]]),
+      ids: new Set(["A-001"]),
+    }),
+  );
+  assert.equal(d.cases.length, 0);
+});
 // ---- References stamp -------------------------------------------------------------
 
 test("stampReferences appends without clobbering a sibling stamp, and is idempotent", () => {

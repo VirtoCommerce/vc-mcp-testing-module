@@ -102,6 +102,7 @@ promotion. This table is the rest of the contract.
 | `5e.2` tracker comment | **PER ROUND** — a **round delta** in rounds 1…N−1, the **full template once**, at exit | The full template every round buries the ticket under near-identical comments. Nothing at all leaves a prerelease deployed to the shared test env with no trace on the ticket. The delta is the minimum that keeps a human able to see the env moved, and why. |
 | `5e.3` persist `summary.json` | **PER ROUND** (rewritten in place; the round appended to `iterations.per_round[]`) | The loop can STOP at any round — G0 BAIL, BLOCKED, the cap, a dropped session — and a history persisted only on a clean exit is missing exactly when it is needed. It is also the only artifact that can support the cap-reached hand-off's per-round claims. |
 | `5e.4` `testing-checklist.md` | **PER ROUND**, **append-only** | On FAST it is the run's ONLY durable record, and the RED→GREEN transition *is* the loop's deliverable: overwriting a round-1 FAIL with a round-2 PASS deletes the evidence that the defect was ever there. |
+| Evidence screenshots | **PER ROUND**, round-stamped | Round N+1 re-runs the same case IDs into the same folder, so an unstamped `{TC-ID}-FAIL-{description}.png` lets the round-2 PASS **overwrite the round-1 FAIL** — and the checklist row that cites it then points at a green image. Every round stamps `-r{N}`, round 1 included (`.claude/rules/reports.md` §7). |
 | `5f` tracker transition | **AT LOOP EXIT** | REOPEN is the human-handoff signal, and a loop about to start another round is not handing off. A per-round REOPEN would also flap the ticket out of in-testing — the precondition both closing transitions need — and fire N−1 false handoff notifications. |
 | `5g` promotion | **AT LOOP EXIT, ONCE** | `tc:promote` reads `Draft` and writes `Automated`, **never a re-promotion** (`scripts/test-cases/promote-cases.ts`), so a round-1 promotion is irreversible and grounds `{OBSERVED}` in the build that was WRONG. Only the last round's evidence describes the code a human is being asked to ship. |
 
@@ -217,6 +218,11 @@ move is `/qa-review-tests file <suite> --fix` on that row, not a new row. And au
 that will execute it: a case authored after the final round is `Draft` with no evidence anywhere (PR-002 at
 5g, held forever) — if that happens, record it in `promotion.blocked` with exactly that reason rather than
 leaving it silently unpromoted.
+
+**Evidence — round-stamped, never overwritten.** Screenshots go to the ticket folder as
+`{TC-ID}-FAIL-r{N}-{description}.png` on every round including the first, because the round-2 re-run
+targets the same case IDs and would otherwise replace the RED frame the checklist transition cites.
+Naming rule: `.claude/rules/reports.md` §7.
 
 **Checklist (Artifact B) — append-only, one section per round.** Round 1 writes the item table with
 verdicts, as today. Round N **appends** `## Round N — re-test (<probed version>, prerelease <PR>)`

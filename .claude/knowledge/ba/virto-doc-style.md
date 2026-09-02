@@ -349,7 +349,7 @@ The layer is resolved once, upstream, at `/qa-test` `1b` item 2b and read from `
 |---|---|---|---|
 | `storefront` | **customer** | §3 — 1–4 numbered shopper steps, the exact control in **bold**, ending in the verbatim quoted success message. Zero jargon, no ids | a before/after screenshot from the ticket's own evidence folder. A **visual/styling** change adds the corrected computed style or DOM value |
 | `admin-spa` | **admin** | §4 — `Click **{Module}** in the main menu → {blade}`, then a **field / setting delta table** (Field · What it does · Example). The delta, never the whole field list | an `playwright-edge` screenshot from the ticket folder + the literal blade/menu path |
-| `api` | **developer** | §5 — the changed operation named, **one** runnable request and its real response, `{{BACK_URL}}` for hosts, field names schema-validated | the **real** request/response from `scripts/.graphql-evidence/<CASE>-*.json` — **never hand-written**. This is `.claude/commands/qa-verify-fix.md`'s own rule, applied unchanged |
+| `api` | **developer** | §5 — the changed operation named, **one** runnable request and its real response, `{{BACK_URL}}` for hosts, field names schema-validated | the **real** request/response from `scripts/.graphql-evidence/<CASE>-*.json` — **never hand-written**, and **never unredacted** (§9.4). This is `.claude/commands/qa-verify-fix.md`'s own rule, and it travels with its redaction and containment halves — see §9.4 before embedding a payload |
 | `module` | **admin** (plus **developer** iff a setting, permission or config key was added) | §4, with the field table becoming a **settings / permission delta** | the persisted-state or API assertion from the ticket's own case evidence; the version from `build.deployed.relevant_modules` |
 | `platform` | **admin** *and* **developer** | two sections in one file: §4 for the operator, §5 for the integrator | the `GET {{BACK_URL}}/api/platform/modules` probe + `build.deployed.platform` |
 | `cross-layer` | the audience of the **outermost surface the user finally sees** (`storefront` > `admin-spa` > `api` > `module` > `platform`), plus a second audience section **only** when a contract also moved | ONE file. Lead with the outermost audience's shape, then one short paragraph per contributing layer, outermost → innermost | the union of the rules above, with one hard requirement: **the storefront or admin screenshot is mandatory**, because that is the surface the reader is standing on |
@@ -415,7 +415,32 @@ its fragment. Section order is fixed:
 
 It **links** fragments, never inlines them (`.claude/rules/reports.md` §8).
 
-### 9.4 The truth guardrail
+### 9.4 Payload hygiene — the half of the evidence rule that is easy to drop
+
+§9.1 borrows `.claude/commands/qa-verify-fix.md`'s evidence rule, and that rule has **three** parts, not
+one. Only the first is about authorship; the other two are about what may leave the project, and a
+release note needs them **more** than an evidence page does, because its destination is the opposite:
+`evidence.html` is local-by-default and the runner evidence dirs are gitignored, while a release note is
+**durable category 3 in a public repo with an explicit no-prune rule** (`.claude/rules/reports.md` §9).
+Whatever is embedded here is permanent and world-readable.
+
+1. **Never hand-written** — the payload comes from the runner evidence (§9.1).
+2. **Always redact secrets** — `Authorization`, any token, `password`, PAN — **regardless of
+   destination**. This is not theoretical for this repo: suite `050d` embeds
+   `password: "{{DEFAULT_TEST_PASSWORD}}"` in its query text, and `graphql-runner.ts` stores the
+   **resolved** query plus `variables` verbatim, so the evidence JSON holds the plaintext value. Redact
+   before writing, never after.
+3. **Client containment (`.claude/rules/quality-gates.md` §2a).** Scrub every client host, path,
+   identifier and datum. A real response body carries customer emails, order numbers and addresses; on a
+   client deployment that is client customer data, and a committed release note is exactly the
+   one-way door §2a exists to keep shut. If the payload cannot be shown without client data, **describe
+   the field that changed and embed nothing** — an `api` note with a prose field delta is a fine note; a
+   note that leaks is not a note, it is an incident.
+
+The same three apply to a screenshot: it is a payload too. Crop or refuse rather than ship a frame
+carrying a real customer record.
+
+### 9.5 The truth guardrail
 
 Non-negotiable, and owned in full by `.claude/agents/ba-doc-writer.md` §Release truth guardrail — read it
 there rather than reconstructing it here. The short form: versions come only from `build.deployed`;

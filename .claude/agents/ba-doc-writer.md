@@ -305,7 +305,18 @@ section its rows for free, from the fragments that carry a `refusal`.
 > 8. **`layer` is derived once, upstream, and never re-derived here.** Read `summary.json.layer` and stop:
 >    do not ask the user, do not infer it from ticket text, do not re-run the ladder. `null` ⇒ refuse
 >    (`layer-unresolved`). A second derivation site is how the two drift.
-> 9. **Real screenshots, resolvable paths.** The evidence file must exist under the ticket's
+> 9. **Redact, and contain — the payload rule has three parts and only one is about authorship.**
+>    §9.1 borrows `/qa-verify-fix`'s evidence rule; that rule also says **always redact secrets
+>    (`Authorization` / token / `password` / PAN) regardless of destination**, and on a client project
+>    **scrub every client host, path, identifier and datum** (`.claude/rules/quality-gates.md` §2a).
+>    Both halves are mandatory here and matter MORE than on an evidence page, because a release note is
+>    durable, committed, never-pruned and public while `evidence.html` is local-by-default. Concretely:
+>    the runner stores the **resolved** query and its `variables`, and at least one suite carries a
+>    `password` in its query text — so an unredacted copy-paste publishes a credential. A real response
+>    body carries customer emails, order numbers and addresses. **If the payload cannot be shown without
+>    client data or a secret, describe the changed field and embed nothing** — a prose field delta is a
+>    valid `api` note; a leak is an incident. Applies to screenshots too: crop or refuse.
+> 10. **Real screenshots, resolvable paths.** The evidence file must exist under the ticket's
 >    `screenshots/` folder and be referenced with a prefix that resolves **from
 >    `reports/ba/release-notes/`** — i.e. `../../tickets/<Sprint>/<TICKET>/screenshots/<name>.png`. Run a
 >    `[ -f ]` check over the extracted paths before writing; §7.7 of the style guide records two repo docs

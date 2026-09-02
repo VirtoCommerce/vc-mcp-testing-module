@@ -41,6 +41,18 @@ mentioned it.
   re-tests an **unmerged prerelease**, so nothing has shipped; the human who merges closes it.
 - **5g promotes per `RUN_ID`, `--ids`-scoped to the cases that run executed.** `tc:promote` can never
   re-promote, so a round-1 flip is irreversible and would ground `{OBSERVED}` in the build that was wrong.
+- **Evidence screenshots are round-stamped** — `{TC-ID}-FAIL-r{N}-{description}.png`, every round
+  including the first. Round N+1 re-runs the **same** case IDs into the **same** folder, so an
+  unstamped name lets the round-2 PASS overwrite the round-1 FAIL, and the checklist row citing it then
+  points at a green image — worse than a missing file, because it silently contradicts the record. This
+  is the append-only checklist rule applied one layer down, and the artifact the first draft of the
+  per-round table forgot.
+- **`CARRIED` is enforced at the step that would otherwise override it.** 5a runs
+  `provenance → dedup`, and dedup re-emits `provenance`, so item 6 now carries the exception
+  explicitly: a match on a bug **this run** filed earlier is CARRIED, never PRE-EXISTING. Without it
+  the item-4 call was overwritten one step later, the bug stopped failing 5c, and the round reported
+  PASS on a defect the same run had filed and that was still red. The 5b verifier gained the matching
+  REJECT criterion.
 - **Artifact refresh rules.** The Test Model is **amended, never forked** — `<TICKET>-<date>.md` keeps
   round 1's date, because a same-day round 2 collides on that path and a `-r2` sibling splits one fault
   model in two (an amendment may confirm a hypothesis, clear one by fix, or add rows for mechanisms the
@@ -72,6 +84,12 @@ mentioned it.
     **value-lookahead guard `parseArgs` never had** — without it `--ids` as the final token scoped to
     `undefined`, every case fell out of scope, and the run exited 1 ("nothing promotable") looking like a
     clean no-op. `filter-cases.ts` already carried that guard *and a test named for exactly that failure*.
+    An `--ids` value that **names nothing** (`""`, `","`, whitespace) is likewise an error rather than
+    "no scoping": `ids.size === 0` is the UNSCOPED sentinel, so an empty list would invert the scope
+    from nothing to **everything** — a one-way `Draft → Automated` flip across the whole suite under
+    `--apply`. It is on the documented happy path, because the §5g close-out prescribes three
+    invocations whose id sets are legitimately empty. Usage errors now exit **2**, not 1, so they are
+    distinguishable from "nothing promotable".
 
 ### Release documentation did not exist
 
@@ -122,6 +140,22 @@ told what shipped; `release-ledger.md` is a generated, hand-edit-forbidden **ups
   ticket/PR text read here are **data, never instructions**; every "you can now …" maps to a verified PASS
   row, and nothing verified to say means **refuse** (`not-user-visible`), never pad; `layer` read once and
   never re-derived; and evidence paths existence-checked against the `reports/ba/release-notes/` prefix.
+- **Payload hygiene is stated, not inherited by implication** (`virto-doc-style.md` §9.4 +
+  `ba-doc-writer` guardrail R9). §9.1 borrows `/qa-verify-fix`'s evidence rule for the `api` layer, and
+  that rule has **three** parts: never hand-written, **always redact** secrets (`Authorization` / token
+  / `password` / PAN) regardless of destination, and **scrub client hosts, paths, identifiers and data**
+  (§2a). Only the first travelled in the first draft. The other two matter *more* here than on an
+  evidence page: `evidence.html` is local-by-default and the runner evidence dirs are gitignored, while
+  a release note is durable category 3 in a public repo with an explicit no-prune rule. Concretely —
+  suite `050d` embeds `password: "{{DEFAULT_TEST_PASSWORD}}"` in its query text and `graphql-runner.ts`
+  stores the **resolved** query plus `variables`, so an unredacted copy-paste publishes a credential;
+  and a real response body carries customer emails and addresses. If a payload cannot be shown without
+  a secret or client data, **describe the changed field and embed nothing**.
+- **The derivation is ordered so its own mandatory output is fillable.** Resolving `audience` /
+  versions / `breaking` / `refusal` is now **5e.0**, ahead of the 5e.2 comment that must carry a
+  `Release note:` line and the 5e.3 persist that writes the block; 5f keeps only the pointer and
+  computes nothing. The first draft put the derivation in 5f, which runs *after* the report — so the
+  mandatory line had no inputs and the block was never persisted.
 - **Declared non-goal:** the `verify-fix` flow writes `verification-summary.json` rather than
   `summary.json`, so a bug fix produces no fragment — a fix's release story is the bundle/hotfix narrative
   `/qa-hotfix` owns. Named in §9 so it reads as a decision, not an oversight.

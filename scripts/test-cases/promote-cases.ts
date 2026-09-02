@@ -40,7 +40,8 @@
  *
  *     --apply                write the CSVs (default is a dry run that writes nothing)
  *     --suite <ID>           restrict to one suite (repeatable)
- *     --ids <ID,ID>          restrict to these case ids (repeatable; comma lists ok). A SCOPE,
+ *     --ids <ID,ID>          restrict to these case ids (repeatable; comma lists ok). A value that
+ *                            names nothing is an ERROR, never "no scoping" — see parseArgs. A SCOPE,
  *                            never a gate: it only shrinks the set considered, and every PR-* rule
  *                            still runs on what it leaves. A multi-round `--iterate` run needs it
  *                            because a case is promotable from the run that EXECUTED it, so the
@@ -711,9 +712,19 @@ export function parseArgs(argv: string[]): Options {
     // `filter-cases.ts` already carries this guard and a test named for exactly that failure.
     else if (a === "--suite") o.suites.add(valueOf(a, argv[i + 1], () => i++));
     else if (a === "--ids") {
-      for (const id of valueOf(a, argv[i + 1], () => i++).split(",").map((s) => s.trim()).filter(Boolean)) {
-        o.ids.add(id);
-      }
+      const named = valueOf(a, argv[i + 1], () => i++)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      // An --ids list that names nothing must NEVER fall through to "no scoping": `ids.size === 0`
+      // is the sentinel for UNSCOPED, so an empty value would INVERT the scope from nothing to
+      // EVERYTHING — and with --apply that is a one-way Draft -> Automated flip across the whole
+      // suite. It is not a hypothetical: modes.md §5k's close-out prescribes three invocations whose
+      // id sets are legitimately empty (if the final RED->GREEN run re-ran everything, two of them
+      // are), so `--ids ""` is on the documented happy path. filter-cases.ts already fails closed on
+      // the same input; this is the same rule, stated where this parser can enforce it.
+      if (named.length === 0) throw new Error(`${a} requires at least one case id`);
+      for (const id of named) o.ids.add(id);
     } else if (a === "--stamp") o.stamp = valueOf(a, argv[i + 1], () => i++);
     else if (a === "--min-green-runs") {
       o.minGreenRuns = Math.max(1, Number(valueOf(a, argv[i + 1], () => i++)) || 1);
@@ -893,4 +904,15 @@ function main(): void {
 }
 
 const isCli = !!process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
-if (isCli) main();
+if (isCli) {
+  // A usage error must not surface as a raw stack trace on exit 1 — that is the SAME exit code as
+  // "nothing promotable", so a caller reading only $? cannot tell a typo'd flag from a clean no-op,
+  // which is the very confusion the valueOf guard exists to remove. Exit 2 is this script's
+  // established "refused" code. Same discipline filter-cases.ts states as a rule.
+  try {
+    main();
+  } catch (e) {
+    console.error(`[tc:promote] ${(e as Error).message}`);
+    process.exit(2);
+  }
+}
