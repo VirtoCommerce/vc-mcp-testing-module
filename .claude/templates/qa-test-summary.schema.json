@@ -197,6 +197,29 @@
     ],
     "report": null
   },
+  "contract": {
+    "$comment": "The API contract-refresh axis. `surface` is derived at 1b item 2d beside `layer` (2b) and `visual.surface` (2c), same discipline: derived, never asked, never defaulted, \"unresolved\" treated as true — the axis fails OPEN because a skipped refresh leaves the run reading a snapshot of unknown age while a needless one costs one introspection call. A NULL block means the step never ran (a gap, not a clean refresh); surface:false WITH sources is the opposite — it ran and correctly declined. TWO ARTIFACTS, TWO COMMANDS, and neither freshens the other: `schema` is .claude/knowledge/api/graphql-schema.md (npm run schema:refresh — what 1c/1d/1e and the Step-3b authoring pack READ), `fixtures` is scripts/.graphql-schema.cache.json + the 74 test-data/graphql documents (npm run graphql:fixtures:validate:refresh — the gate, exits non-zero on drift). `schema.refreshed` takes the string UNKNOWN on an unreachable endpoint and NEVER falls back to the committed snapshot's own date (same rule as build.deployed); UNKNOWN downgrades every {DOC} GraphQL oracle to {HYPOTHESIS}. `fixtures.drift_in_scope[]` is the consequential array: an op the TICKET'S OWN DIFF touches is a 1e finding (a moved contract is a chain link and a candidate reverse edge), while `drift_out_of_scope[]` is recorded and not chased (cross-check build.releasedThrough.breaking[]). Neither array files a bug from the gate alone — a schema-validation failure is a claim about a query document, not about product behaviour. npm run schema:check is a liveness check, NOT a drift gate. Spec: .claude/skills/qa-test/contract-refresh.md",
+    "surface": "true|false|unresolved",
+    "surface_source": [],
+    "schema": {
+      "refreshed": "YYYY-MM-DD|UNKNOWN|null",
+      "unknown_reason": null,
+      "queries": 0,
+      "mutations": 0
+    },
+    "fixtures": {
+      "refreshed": "YYYY-MM-DD|UNKNOWN|null",
+      "validated_against_env": "{TEST_ENV}",
+      "total": 0,
+      "failed": 0,
+      "drift_in_scope": [
+        { "$comment": "An op the ticket's own diff touches — a 1e Test Model input, and the OLD shape belongs in the regression scope. Fix the fixture via npm run graphql:fixtures:update.", "fixture": "mutations/<op>.graphql", "error": "<validation error>", "model_ref": "<scenario # or link in the Test Model>" }
+      ],
+      "drift_out_of_scope": [
+        { "$comment": "Pre-existing drift or an unannounced upstream break. Recorded, named in the Step-5 report, NOT chased — fixing it is /qa-test-lifecycle's.", "fixture": "queries/<op>.graphql", "error": "<validation error>", "breaking_row": null }
+      ]
+    }
+  },
   "business_rules_verified": ["BL-CART-001"],
   "appinsights": {
     "checked": true,
