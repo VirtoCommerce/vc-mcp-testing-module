@@ -96,6 +96,17 @@ Invariant failures may fail the ticket; `vs. DESIGN` drift is advisory and never
 
 | Finding | Detail |
 |---|---|
-| `td:validate` is **red corpus-wide**, pre-existing | `@td(ADDR_NY.*)` is invalid `@td()` syntax in the **P0 smoke suite** `042-smoke-tests.csv` (90/91 refs resolve). Identical in HEAD and the working tree, so not from this run. A **test defect** → `/qa-review-tests --fix`, not a product bug |
+| `td:validate` is **red corpus-wide**, pre-existing | `@td(ADDR_NY.*)` is invalid `@td()` syntax in the **P0 smoke suite** `042-smoke-tests.csv` (90/91 refs resolve). Verified byte-identical in `HEAD` and the working tree, so not from this run. A **test defect** → `/qa-review-tests --fix`, not a product bug |
+
+**`td:validate` attributable to this ticket: ZERO.** After the fix recorded below, `050m` resolves **280/280** and the single remaining corpus failure is the pre-existing `042` one above. Stated as a positive count rather than as "the only failure is pre-existing", because that phrasing was previously true only because it had stopped mentioning a second failure.
+
+## Defect this run introduced and fixed (caught by the Step-3 verifier)
+
+| | Detail |
+|---|---|
+| What | `SR-GQL-124`'s `Test_Data` bound `rep=@td(SR_REP_LOCKED_TFCTX.email)`. That alias is **auth-only** (`_inline`, no `fields` map at all — it carries `email_env`/`password_env`/`organization_id`, consumed by `[AUTH role=…]`, never by `@td()`), so the ref could not resolve and `050m` went to 279/280 |
+| Origin | The orchestrator's own authoring brief specified that alias. The three pre-existing cases using it (`SR-GQL-012/017/024`) correctly reference it **only** via `[AUTH role=SR_REP_LOCKED_TFCTX]`; `SR-GQL-124` was the first row to dereference `.email` through `@td()` |
+| Fix | `rep=@td(SR_REP_LOCKED.email)` — the CSV-backed alias for the **same account**, whose own `_notes` says it "stays for its `@td` id/email/membership fields". Applied as a surgical single-occurrence replacement (byte delta −6, line count unchanged at 1505, `suites:lint` re-verified green) |
+| Process failure, which is the more useful lesson | `td:validate` was run **before** the append and its result then asserted **after** the append. A gate is only evidence about the tree state it actually ran against; re-run every gate after the write it is supposed to guard |
 | `PUT /api/platform/security/users` silently discards `lockoutEnd` in both directions | Returns `{succeeded:true, errors:[]}` while changing nothing. Working endpoints are `POST …/users/{GUID}/lock|/unlock` (**GUID only**; the email form returns `{succeeded:false, errors:[]}`). Consequence: `clearRepStaleLockout()` logged success while doing nothing, so the documented remedy for REG-2026-08-24-1806 (104 cases BLOCKED at `/connect/token`) had never worked. **Fixed** in `seed-sales-rep.mjs` with a read-back. **The same broken pattern remains in `scripts/lib/user-provision.mjs` (~518–520, ~527, ~1047)**, serving the b2b/loyalty user families — needs an owner, wider blast radius than this ticket |
 | TechFlow top-sellers were already contaminated before this run | Dominated by `msne2e`/`loyzero` orders from other suites. Not made worse — the new fixtures pin dedicated product slots and the shaped BL-SR-008 rankings are bit-identical after seeding |
