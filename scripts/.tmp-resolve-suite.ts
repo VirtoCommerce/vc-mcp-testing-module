@@ -1,0 +1,10 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { TestDataResolver } from "./lib/test-data-resolver.js";
+import "../config.js";
+const [src, out] = process.argv.slice(2);
+const r = new TestDataResolver("test-data", process.env.TEST_ENV || "vcst");
+const resolved = r.resolveCSV(readFileSync(src, "utf-8"));
+writeFileSync(out, resolved);
+const w = r.getWarnings();
+console.log(`[resolve] ${src} -> ${out}  warnings=${w.length}`);
+w.slice(0, 20).forEach(x => console.log("  WARN " + x));

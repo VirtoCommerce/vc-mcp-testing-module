@@ -147,6 +147,12 @@ for (const p of PRODUCTS) {
   expectMatch(p.aliasName, 'pack_size', p.packSize);
   expectMatch(p.aliasName, 'list_price', p.listPrice);
   if (p.goalQuantity != null) expectMatch(p.aliasName, 'quantity', p.goalQuantity);
+  // The second-currency AMOUNT is authored (a price is a business key, identical on every env that
+  // carries the currency); the second-currency CODE is runtime and lives in the overlay, so [3] holds
+  // it empty here via RUNTIME_FIELDS_BY_KIND.dualProduct. A case reads the pair to know what the
+  // second-currency row must render — recomputing either by hand is how a fixture and its assertion
+  // stop following the same source.
+  if (p.secondaryListPrice != null) expectMatch(p.aliasName, 'list_price_secondary', p.secondaryListPrice);
 }
 expectMatch(REWARD_USER.aliasName, 'source_alias', REWARD_USER.sourceAlias);
 expectMatch(REWARD_USER.aliasName, 'reward_alias', REWARD_USER.rewardAlias);
