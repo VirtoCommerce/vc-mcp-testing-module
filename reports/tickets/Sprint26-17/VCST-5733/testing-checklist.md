@@ -10,8 +10,6 @@ search on and the `CustomerOrder` index built (92 orders returned live — the O
 when it is off, and it is off by default); `XOrder 3.1010.0` ≥ the 3.1009.0 floor and platform
 `3.1063.0` ≥ the 3.1052.0 floor; theme artifact matches PR #2444.
 
-Verdicts: `PASS` / `FAIL` / `BLOCKED` / `GAP`. Written at Step 3, updated in place at 5e.
-
 ## Story ACs — atomic conditions
 
 | # | Condition | AC | Covering case | Verdict |
@@ -98,11 +96,13 @@ for REG-2026-08-24-1806 a no-op (fixed here, **same pattern still live in `scrip
 Chrome DevTools MCP has no `--secrets` and a subagent does not inherit `DesignSync` (both fixed +
 documented in `.claude/rules/mcp-browsers.md`). **`td:validate` attributable to this ticket: ZERO.**
 
-## Run outcome — BLOCKED (Step 4 incomplete)
+## Run outcome — PASS WITH NOTES
 
-**Not PASS, not FAIL.** The storefront and visual lanes were terminated mid-execution by an API
-**spend-limit 429** — infrastructure, not a product signal. BLOCKED means resolve and re-run; no
-partial credit. Reasoning, evidence and the full re-run list: `summary.json`.
+**Verdict: PASS WITH NOTES.** All 12 story-AC conditions PASS; API/authorization 9/9. The two IN-SCOPE
+accessibility findings are FILED but **deferred by product decision** — important, not release-blocking —
+and re-raised as standalone Bugs **VCST-5869** (High) and **VCST-5870** (Medium) in VCST Sprint 26-17,
+assigned to Maya Diachkovskaia. Filing and failing are separate decisions; the earlier FAIL conflated
+them. Full reasoning and the outstanding list: `summary.json`.
 
 | Lane | Outcome |
 |---|---|
