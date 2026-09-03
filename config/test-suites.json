@@ -1684,7 +1684,7 @@
       "layer": "backend",
       "concern": "api",
       "priority": "P1",
-      "testCount": 129,
+      "testCount": 130,
       "estimatedMinutes": 245,
       "agent": "qa-backend-expert",
       "tags": [
@@ -1700,7 +1700,7 @@
       "customerApplicability": "reference",
       "lanes": {
         "machine": 126,
-        "browser": 0,
+        "browser": 1,
         "manual": 0,
         "deprecated": 3
       }
@@ -3196,7 +3196,7 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 24,
+      "testCount": 25,
       "estimatedMinutes": 40,
       "agent": "qa-frontend-expert",
       "tags": [

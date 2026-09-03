@@ -1388,7 +1388,7 @@ query {
 [DATA label=main] data.salesRepCustomerOrders.items[?number=@td(ORDER_REP_PLACED.number)] is non-null {OBSERVED}
 [DATA label=main] data.salesRepCustomerOrders.items[?number=@td(ORDER_BUYER_PLACED.number)] is non-null {OBSERVED}
 [DATA label=main] data.salesRepCustomerOrders.items[?number=@td(ORDER_BUYER_PLACED.number)].customerId = @td(ORDER_BUYER_PLACED.customerId) {OBSERVED}","[API] errors[] is empty in the GraphQL response
-[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:SCOPE · Technique:EP,Draft
+[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:SCOPE · Technique:EP | Promoted: REG-2026-09-02-2055 (2026-09-02),Automated
 SR-GQL-122,salesRepCustomerOrders — organizationId narrows to the served org and never widens,Sales Rep > Customer Orders > salesRepCustomerOrders,Critical,BL-SR-002,,"Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY), served org {{orgId}} = @td(ORG_TECHFLOW.id), which holds real orders (ORDER_REP_PLACED / ORDER_BUYER_PLACED). The rep also serves ACME, BuildRight and AcmeWest, so the no-arg cross-customer dashboard is a strict superset of the scoped result.","rep=@td(SR_REP_PRIMARY.email), orgId=@td(ORG_TECHFLOW.platform_id), storeId={{STORE_ID}}","[GQL-ENDPOINT /graphql/sales-rep]
 [AUTH role=SALES_REP]
 [GQL-OP scoped]
@@ -1402,7 +1402,7 @@ query { salesRepCustomerOrders(storeId: ""{{storeId}}"") { totalCount } }
 [COUNT label=scoped] data.salesRepCustomerOrders.items[*?organizationId!={{orgId}}].length = 0 {OBSERVED}
 [ERRORS label=unscoped] errors[] empty {OBSERVED}
 [COUNT label=unscoped] data.salesRepCustomerOrders.totalCount >= {{SCOPED_COUNT}} {OBSERVED}","[API] errors[] is empty in the GraphQL response
-[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:SCOPE · Technique:EP,Draft
+[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:SCOPE · Technique:EP | Promoted: REG-2026-09-02-2055 (2026-09-02),Automated
 SR-GQL-123,"salesRepCustomerOrders — an unserved organizationId yields empty, not a fallback to all served orgs",Sales Rep > Customer Orders > salesRepCustomerOrders,Critical,BL-SR-002,,"Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY), who holds NO membership on {{orgId}} = @td(ORG_SUSPENDED.id) (verified live). Proves an unserved org id returns a clean empty result rather than falling back to the caller's full served-org set.","rep=@td(SR_REP_PRIMARY.email), orgId=@td(ORG_SUSPENDED.platform_id), storeId={{STORE_ID}}","[GQL-ENDPOINT /graphql/sales-rep]
 [AUTH role=SALES_REP]
 [GQL-OP unserved]
@@ -1414,7 +1414,7 @@ query { salesRepCustomerOrders(storeId: ""{{storeId}}"") { totalCount } }
 [COUNT label=unserved] data.salesRepCustomerOrders.totalCount = 0 {OBSERVED}
 [ERRORS label=baseline] errors[] empty {OBSERVED}
 [COUNT label=baseline] data.salesRepCustomerOrders.totalCount > 0 {OBSERVED}","[API] errors[] is empty in the GraphQL response
-[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:SCOPE · Technique:EG,Draft
+[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:SCOPE · Technique:EG | Promoted: REG-2026-09-02-2055 (2026-09-02),Automated
 SR-GQL-124,salesRepCustomerOrders — a per-org LOCKED membership excludes that org while unlocked orgs still resolve,Sales Rep > Customer Orders > salesRepCustomerOrders,Critical,"BL-SR-002, BL-SR-011",,"Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller signs in as SR_REP_LOCKED_TFCTX — the org-scoped grant for SR_REP_LOCKED under its UNLOCKED served org {{unlockedOrg}} = @td(ORG_TECHFLOW.id) (a plain password grant against its locked default org ACME returns 400 user_is_locked_in_organization). The per-org lock on {{lockedOrg}} = @td(ORG_ACME.id) still applies regardless of the token's org context. Mirrors 050m SR-GQL-024's single-entity lock, applied here to the creator-agnostic query.","rep=@td(SR_REP_LOCKED.email), lockedOrg=@td(ORG_ACME.platform_id), unlockedOrg=@td(ORG_TECHFLOW.platform_id), storeId={{STORE_ID}}","[GQL-ENDPOINT /graphql/sales-rep]
 [AUTH role=SR_REP_LOCKED_TFCTX]
 [GQL-OP locked]
@@ -1426,7 +1426,7 @@ query { salesRepCustomerOrders(organizationId: ""{{unlockedOrg}}"", storeId: ""{
 [COUNT label=locked] data.salesRepCustomerOrders.totalCount = 0 {OBSERVED}
 [ERRORS label=unlocked] errors[] empty {OBSERVED}
 [COUNT label=unlocked] data.salesRepCustomerOrders.totalCount > 0 {OBSERVED}","[API] errors[] is empty in the GraphQL response
-[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:SCOPE · Technique:DT,Draft
+[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:SCOPE · Technique:DT | Promoted: REG-2026-09-02-2055 (2026-09-02),Automated
 SR-GQL-125,"salesRepCustomerOrders — facet is whitelisted; a scope-prefixed field name is dropped, never aggregated",Sales Rep > Customer Orders > salesRepCustomerOrders,Critical,BL-SR-002,,"Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY), served org @td(ORG_ACME.id). facet is whitelisted to status and organizationname only (live-probed 2026-09-02); organizationid is NOT whitelisted and also prefix-collides with the organizationId scope filter's own field name — proves passing it as a facet neither errors nor strips the caller's own org scope.","rep=@td(SR_REP_PRIMARY.email), storeId={{STORE_ID}}","[GQL-ENDPOINT /graphql/sales-rep]
 [AUTH role=SALES_REP]
 [GQL-OP baseline]
@@ -1439,7 +1439,7 @@ query { salesRepCustomerOrders(organizationId: ""@td(ORG_ACME.platform_id)"", st
 [ERRORS label=faceted] errors[] empty {OBSERVED}
 [COUNT label=faceted] data.salesRepCustomerOrders.totalCount = {{BASELINE_COUNT}} {OBSERVED}
 [DATA label=faceted] data.salesRepCustomerOrders.term_facets[?name=organizationid] is null {OBSERVED}","[API] errors[] is empty in the GraphQL response
-[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:SCOPE · Technique:EG,Draft
+[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:SCOPE · Technique:EG | Promoted: REG-2026-09-02-2055 (2026-09-02),Automated
 SR-GQL-126,salesRepCustomerOrders — whitelisted facet counts sum to totalCount and ignore their own axis selection,Sales Rep > Customer Orders > salesRepCustomerOrders,High,BL-SR-013,,"Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY), served org @td(ORG_ACME.id), which per 050m SR-GQL-028/030 holds orders in >=2 distinct statuses including New and Processing. facet=status is whitelisted (live-probed 2026-09-02). Proves the status facet's own axis re-aggregates ignoring its own selected filter — a facet that shrinks under its own selection turns the filter into a one-way door (STALE archetype).","rep=@td(SR_REP_PRIMARY.email), storeId={{STORE_ID}}","[GQL-ENDPOINT /graphql/sales-rep]
 [AUTH role=SALES_REP]
 [GQL-OP unfiltered]
@@ -1454,7 +1454,7 @@ query { salesRepCustomerOrders(organizationId: ""@td(ORG_ACME.platform_id)"", st
 [ERRORS label=filtered] errors[] empty {OBSERVED}
 [COUNT label=filtered] data.salesRepCustomerOrders.totalCount < {{UNFILTERED_COUNT}} {OBSERVED}
 [DATA label=filtered] data.salesRepCustomerOrders.term_facets[?name=status].terms[?term=Processing].count = {{PROCESSING_UNFILTERED}} {OBSERVED}","[API] errors[] is empty in the GraphQL response
-[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:STALE · Technique:DT,Draft
+[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:STALE · Technique:DT | Promoted: REG-2026-09-02-2055 (2026-09-02),Automated
 SR-GQL-127,"salesRepCustomerOrders — an unrecognized facet name is dropped silently, not rejected",Sales Rep > Customer Orders > salesRepCustomerOrders,Low,,,"Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY), served org @td(ORG_ACME.id). facet names a field that is neither in the whitelist nor indexed at all — proves the storefront orders page degrades to the unfiltered list rather than an error banner when a facet name drifts.","rep=@td(SR_REP_PRIMARY.email), storeId={{STORE_ID}}","[GQL-ENDPOINT /graphql/sales-rep]
 [AUTH role=SALES_REP]
 [GQL-OP baseline]
@@ -1467,7 +1467,7 @@ query { salesRepCustomerOrders(organizationId: ""@td(ORG_ACME.platform_id)"", st
 [ERRORS label=bogus_facet] errors[] empty {OBSERVED}
 [COUNT label=bogus_facet] data.salesRepCustomerOrders.totalCount = {{BASELINE_COUNT}} {OBSERVED}
 [DATA label=bogus_facet] data.salesRepCustomerOrders.term_facets[?name=xyz_not_a_real_facet] is null {OBSERVED}","[API] errors[] is empty in the GraphQL response
-[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:FALLBACK · Technique:EG,Draft
+[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:FALLBACK · Technique:EG | Promoted: REG-2026-09-02-2055 (2026-09-02),Automated
 SR-GQL-128,salesRepCustomerOrders — paging boundary: pageInfo.endCursor returns disjoint pages,Sales Rep > Customer Orders > salesRepCustomerOrders,High,PROPOSED-BL-SR-SCOPE,,"Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY), served org @td(ORG_ACME.id), which holds >=3 orders (per 050m SR-GQL-026). Pages with first:2 using pageInfo.endCursor (not the manual after=skip offset SR-GQL-026 uses) and asserts the two pages share no order number. The manual-offset after path is documented as off-by-one by one repeated row (unfixed, shared platform code) — this case exercises the correct endCursor path, not a repro of that defect.","rep=@td(SR_REP_PRIMARY.email), storeId={{STORE_ID}}","[GQL-ENDPOINT /graphql/sales-rep]
 [AUTH role=SALES_REP]
 [GQL-OP page1]
@@ -1484,7 +1484,7 @@ query { salesRepCustomerOrders(organizationId: ""@td(ORG_ACME.platform_id)"", st
 [ERRORS label=page2] errors[] empty {OBSERVED}
 [DATA label=page2] data.salesRepCustomerOrders.items[?number={{PAGE1_NUM_0}}] is null {OBSERVED}
 [DATA label=page2] data.salesRepCustomerOrders.items[?number={{PAGE1_NUM_1}}] is null {OBSERVED}","[API] errors[] is empty in the GraphQL response
-[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:BOUNDARY · Technique:BVA,Draft
+[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:BOUNDARY · Technique:BVA | Promoted: REG-2026-09-02-2055 (2026-09-02),Automated
 SR-GQL-129,salesRepCustomerOrder — an order outside the rep served organizations resolves null,Sales Rep > Customer Orders > salesRepCustomerOrders,Critical,BL-SR-002,,"Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY). @td(ORDER_NOT_SERVED.id) lives in ORG-005 (Acme-EU-Operations, Active), which the rep holds NO membership on, even though the rep is that order's own author (VCST-5733 authorship-matrix negative fixture) — isolates the null to ORG SCOPE, not authorship. The oracle is null, not an error: vc-module-sales-rep PR #14 loads the order and only then filters it through IsVisibleAsync.","rep=@td(SR_REP_PRIMARY.email), foreignOrderId=@td(ORDER_NOT_SERVED.id)","[GQL-ENDPOINT /graphql/sales-rep]
 [AUTH role=SALES_REP]
 [GQL-OP control]
@@ -1501,4 +1501,15 @@ query { salesRepCustomerOrders(storeId: ""{{STORE_ID}}"") { items { number } } }
 [DATA label=foreign] data.salesRepCustomerOrder is null {OBSERVED}
 [ERRORS label=dashboard] errors[] empty {OBSERVED}
 [DATA label=dashboard] data.salesRepCustomerOrders.items[?number=@td(ORDER_NOT_SERVED.number)] is null {OBSERVED}","[API] errors[] is empty in the GraphQL response
-[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:SCOPE · Technique:EG,Draft
+[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:SCOPE · Technique:EG | Promoted: REG-2026-09-02-2055 (2026-09-02),Automated
+SR-GQL-130,salesRepCustomerOrders — a token issued BEFORE an account lock is refused at query time,Sales Rep > Customer Orders > Account-state gate,High,"BL-SR-002, BL-SR-011",,SR_REP_LOCKABLE is UNLOCKED at rest and serves ORG-002/TechFlow. The lock/unlock helpers are allowlisted to this account and refuse SR_REP_PRIMARY and every other rep by name. Teardown MUST leave the account unlocked — a shared fixture left locked blocks every later suite that signs in as it.,"rep=@td(SR_REP_LOCKABLE.email), storeId={{STORE_ID}}, password={{TEST_USER_PASSWORD}}","[AUTH role=SR_REP_LOCKABLE] obtain a bearer token while the account is UNLOCKED (POST /connect/token, grant_type=password, storeId={{STORE_ID}}) and KEEP it for step 4 — the whole point is reusing a pre-lock token
+[API] with that token, POST /graphql/sales-rep { salesRepCustomerOrders(storeId:""{{STORE_ID}}"", cultureName:""{{CULTURE_NAME}}"", first:1) { totalCount } } and capture totalCount as BASELINE_COUNT
+[SHELL] npm run sr:lock  — locks ONLY the allowlisted SR_REP_LOCKABLE account (the helper refuses SR_REP_PRIMARY and every other rep by name)
+[API] re-send the IDENTICAL query with the SAME pre-lock token from step 1 — do NOT request a new token, which would test the wrong gate (/connect/token refuses a locked account outright)
+[API] request a NEW token for the same account and record the /connect/token status and error code
+[SHELL] npm run sr:unlock && npm run sr:lock:verify — MANDATORY teardown; a shared fixture left locked blocks every later suite signing in as it","[COUNT label=prelock] data.salesRepCustomerOrders.totalCount > 0 {OBSERVED}
+[NULL label=postlock] data.salesRepCustomerOrders is null {OBSERVED}
+[DATA label=postlock] errors[0].extensions.code = UserLocked {OBSERVED}
+[STATE] the post-lock refusal is returned for the SAME token that succeeded in step 2 — the token is never re-issued between the two calls, so a PASS here cannot be explained by the token endpoint refusing a locked account {OBSERVED}
+[STATE] the new-token request in step 5 is refused with user_is_locked_out — recorded to distinguish the token-endpoint gate from the query-time gate this case is about {OBSERVED}
+[STATE] after teardown the account is usable again and the query returns data, so the fixture is left exactly as found {OBSERVED}",[NETWORK] no unexpected 4xx/5xx on the endpoint under test,"Spinner visible >5s, 4xx/5xx on the endpoint under test, empty or malformed response body","npm run sr:unlock, then npm run sr:lock:verify to confirm the account is usable again",VCST-5733 · Archetype:LIFECYCLE · Technique:ST | Promoted: REG-2026-09-02-2055 (2026-09-02),Automated
