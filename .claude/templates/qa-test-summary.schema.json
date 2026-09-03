@@ -59,6 +59,28 @@
     "comment_posted": false,
     "refusal": "verdict-not-pass|layer-unresolved|not-deployed|not-user-visible|null"
   },
+  "status_transitions": [
+      {
+        "$comment": "Every status hop this run made, AND every hop it skipped, with the reason. Single source of truth for the rules: .claude/knowledge/execution/ticket-status-transitions.md. WHY IT EXISTS: a skipped transition previously left NO trace in any artifact, so \"the ticket was never moved\" and \"the ticket was moved and the note was lost\" were indistinguishable after the fact — and the 5f table had two rows for a four-value verdict vocabulary, so a BLOCKED run silently left the ticket parked in in-testing. A run makes at most TWO hops: the opening hop at 1a, the moment the feature-test route resolves (never confirmed, reversible, and on Jira the precondition both closing transitions need; it moved here from Step 4 because in-testing means QA OWNS the ticket, which is true when the run is accepted rather than when the first browser opens — at Step 4 the ticket read as unclaimed through 30+ minutes of context, modelling, authoring and seeding) and the closing hop at 5f (always confirmed, terminal for the run). qa-lead is the only actor: no specialist, runner, verifier, doer or sub-agent transitions a ticket. NULL for this whole field means no hop was even attempted, which is a gap and not a clean run (the axes.md §2 rule one level down); an EMPTY ARRAY means the run reached the tracker and deliberately made no move. On --iterate the closing hop appears ONCE, at loop exit, whatever the round count.",
+        "hop": "opening",
+        "at": "1a",
+        "from": "READY FOR TEST",
+        "to": "TESTING",
+        "transition": "On QA",
+        "confirmed": false,
+        "actor": "qa-lead"
+      },
+      {
+        "hop": "closing",
+        "at": "5f",
+        "from": "TESTING",
+        "to": null,
+        "transition": null,
+        "confirmed": true,
+        "actor": "qa-lead",
+        "skipped": "verdict BLOCKED — blocker comment posted, ticket stays in-testing awaiting a re-run"
+      }
+    ],
   "agents_dispatched": ["ba-story-writer", "qa-frontend-expert", "qa-backend-expert"],
   "epic": {
     "$comment": "parent = the Epic this story belongs to (null if none). roll_up is written only on an --epic serial run (in the Epic's own summary), combining the child-story verdicts + the cross-story E2E into one Epic recommendation.",
@@ -299,6 +321,24 @@
     ],
     "unmatched_observables": []
   },
+  "test_data": {
+      "$comment": "The 2f test-data axis — the fifth derived pre-flight token (axes.md), and the only one that SUBTRACTS: it decides whether Step 3a dispatches test-data-engineer at all. Derived, never asked, never defaulted; \"unresolved\" treated as true. WHY IT EXISTS: 3a was an unconditional member of the Step-3 wave under a \"seeded env, green td:validate\" gate, with the only escape hatch one sentence in authoring.md phrased \"skip ONLY when every planned case resolves\" — default-on with a burden of proof to skip, so an opus agent was dispatched on runs whose cases resolved entirely against fixtures the environment already held. A false requires BOTH claims, not one: the planned @td()/{{VAR}} refs RESOLVE (deterministic, td:validate) AND no link under test needs a DIVERGENCE the fixtures lack (judgment, .claude/rules/test-data.md §SECOND RULE — Loyalty Missions resolved every alias and still left the mechanism question undecidable on flat $30 orders). fixtures_covering[] is mandatory when surface is false: an unstated skip reads exactly like a satisfied seed. It fails OPEN because authoring against data that cannot answer the question yields BLOCKED cases triaged as product defects, while a needless dispatch costs one browserless agent inside time the wave already spends. A NULL block means the axis never derived (a gap); surface:false WITH sources is the opposite.",
+      "surface": false,
+      "surface_source": [
+        "1e-plan: 14 planned rows, all @td() refs already declared",
+        "td:validate: green",
+        "value chain: no link needs a divergence beyond PROD_MOQ vs PROD_PACK"
+      ],
+      "dispatched": false,
+      "fixtures_covering": [
+        "@td(PROD_MOQ)",
+        "@td(PROD_PACK)",
+        "{{B2B_USER_EMAIL}}"
+      ],
+      "divergence_resolved": true,
+      "td_validate": "green",
+      "seed_run": null
+    },
   "business_rules_verified": ["BL-CART-001"],
   "appinsights": {
     "checked": true,
