@@ -3,8 +3,11 @@
 **Path:** FULL (Story) · **Flow:** feature-test · **Env:** vcst-qa — theme `2.57.0-pr-2452-d1e4-d1e45b04`
 (PR #2452, **open**), Platform `3.1063.0` · **Model:** `reports/ba/test-models/VCST-5735-2026-09-03.md`
 
-> The ticket declares **no acceptance criteria** (`1. No requirements.`) and no DoD. Conditions are derived
-> from the 11 bullets + the Claude Design prototype + the PR diff — so no PASS below means "matches an agreed spec".
+> **The ticket's TEN-bullet description IS the specification**, and it carries measurable criteria — `>=44px
+> touch targets`, `locked label column + 2 product columns per viewport`, `hiding, not just highlighting`.
+> An earlier version of this file claimed the ticket declared no acceptance criteria; **that was false and is
+> retracted** — the string it quoted appears nowhere in VCST-5735. Conditions below are derived from that
+> description plus the design prototype and the PR diff.
 >
 > **Over the 120-line cap at 141.** Three passes removed every line of process narrative and moved the
 > per-bullet measurements into the linked bug drafts. What is left is 35 condition rows, 10 visual rows, the

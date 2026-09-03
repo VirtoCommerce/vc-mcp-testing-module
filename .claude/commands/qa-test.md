@@ -337,8 +337,29 @@ retrying the delegation. The `1e` model carries the same fields either way.
 
 ### 1d — Review the story (FULL only)
 
-**Advisory, never blocking.** Runs for a ticket/story **with ACs**; skip with a one-line note for a bare
-feature name or a PR with no governing story.
+**Advisory, never blocking.** Runs for any ticket/story that **specifies behaviour anywhere**; skip with a
+one-line note only for a bare feature name or a PR with no governing story.
+
+> **THE SPECIFICATION IS WHEREVER IT IS — an empty AC field is not an absent spec.** This step used to be
+> gated on a ticket *"with ACs"*, which invites the inference *no AC field ⇒ nothing to verify against*.
+> That inference is wrong and it is expensive. **Read, in order: the AC field · the DESCRIPTION · an
+> AC-affecting comment · a linked design ticket.** A description written as prose bullets is a
+> specification and is treated as one.
+>
+> **Harvest its MEASURABLE criteria into conditions, one per criterion.** A number, a threshold, a count
+> or an explicit negation in the prose is an acceptance criterion wearing different clothes — `>=44px
+> touch targets`, `2 product columns per viewport`, `hiding, not just highlighting`, `shown even in
+> "Differences only" mode`. Each becomes its own checklist row with its own verdict, and each is
+> gradeable against the TICKET rather than against an internal invariant.
+>
+> **Never report that a ticket lacks requirements without a full-field fetch in THIS run, and never quote
+> a field you have not read.** A verbatim string attributed to a tracker field must come from a fetch in
+> this session, not from recall. Measured on VCST-5735 (2026-09-03): the run asserted the AC field read
+> `1. No requirements.` — a string appearing **nowhere on that ticket** — and posted it to the board. It
+> then built a process finding on it (*"the Story reached READY FOR TEST with nothing to check against"*),
+> mis-counted ten description bullets as eleven, and graded a control size as a UI-kit design-system
+> tradeoff when **bullet 9 of the ticket specified `>=44px`**. One unread source, three wrong conclusions,
+> one of them published. The correction cost far more than the re-fetch would have.
 
 Dispatch `ba-story-writer` in review mode (Mode B) — analyze only, no new story, no tracker writes. Pass
 `existing_story` (summary + description + ACs from `1a`), any **AC-affecting clarifications from the `1a`
@@ -635,7 +656,9 @@ and promotion deferred to the exit round
   delegation. If the tracker MCP is unavailable, skip transitions and ask the user for ticket details.
 - **What persists:** `summary.json` + `testing-checklist.md` + screenshots under
   `reports/tickets/{SPRINT}/<ticket-key>/`; the FULL-path Test Model to `reports/ba/test-models/`; new
-  cases to `regression/suites/`; the 3x session report to `reports/exploratory/`. `ac-analysis.md` and
+  cases to `regression/suites/`; the 3x session report to `reports/exploratory/`. `test-execution-report.md` is terminal-only;
+  **`ac-analysis.md` PERSISTS** to the ticket folder — its `NOT-FOUND` list is a set of predictions that die
+  with the session otherwise (`.claude/rules/reports.md` §1). Previously
   `test-execution-report.md` are **never written**. Full table, and the per-axis `summary.json` blocks:
   [`skills/qa-test/SKILL.md`](../skills/qa-test/SKILL.md) §What persists · [`axes.md`](../skills/qa-test/axes.md) §5.
   Validate with `npm run summary:validate`.
