@@ -32,7 +32,13 @@
     }
   },
   "release": null,
-  "documentation": null,
+  "documentation": {
+    "comment_posted": {
+      "id": "108211",
+      "at": "2026-09-03T17:34:22.379Z",
+      "kind": "QA Complete (5e)"
+    }
+  },
   "agents_dispatched": [
     "ba-system-analyzer (1c)",
     "ba-story-writer (1d)",
@@ -239,7 +245,29 @@
       "classification": "UNRESOLVED",
       "was": "PRE-EXISTING",
       "blocks": true,
-      "why_reversed": "The controls taken (home 0.2412, search 0.4616) are DIFFERENT ROUTES, not the same route on the pre-PR theme — and this PR is a full rewrite of /compare, so a high CLS elsewhere is no evidence that this page's 0.12 predates it. The instrument is wrong too: this run itself established that CLS CANNOT see the 144px morph shift because hadRecentInput excludes it, so CLS cannot then be used to dismiss a finding on the same surface. The numbers appeared in no artifact. The control that settles it is /compare on the base theme, and it was not taken."
+      "why_reversed": "The controls taken (home 0.2412, search 0.4616) are DIFFERENT ROUTES, not the same route on the pre-PR theme — and this PR is a full rewrite of /compare, so a high CLS elsewhere is no evidence that this page's 0.12 predates it. The instrument is wrong too: this run itself established that CLS CANNOT see the 144px morph shift because hadRecentInput excludes it, so CLS cannot then be used to dismiss a finding on the same surface. The numbers appeared in no artifact. The control that settles it is /compare on the base theme, and it was not taken.",
+      "reconciliation": {
+        "measurements": [
+          {
+            "value": 0.051,
+            "instrument": "post-load PerformanceObserver (my visual lane)",
+            "sees": "nothing — the observer is installed after the first paint, so the first-load shift is already over"
+          },
+          {
+            "value": 0.12,
+            "instrument": "three loads, my CMP-021 case",
+            "sees": "the first-load shift"
+          },
+          {
+            "value": 0.1273,
+            "instrument": "observer installed PRE-PAINT via initScript (readyState 'loading'), peer session",
+            "sees": "the first-load shift, with attribution: svg 0.1256 moved 377px, footer#footer moved 751px"
+          }
+        ],
+        "resolution": "There is ONE first-load shift, and the three numbers differ only by instrumentation. 0.051 was measured too late to see it and must not be cited as a pass. My 0.12 and the peer's 0.1273 agree, and the peer's attribution (svg + footer) matches both my CMP-021 sourcing and the footer-snap signature in the existing P1 open bug BUG-layout-cls-images-missing-dimensions.md.",
+        "still_unresolved": "WHETHER THIS PR INTRODUCED IT. Both sessions measured the post-PR build only; nobody measured /compare on the pre-PR theme. The existing P1 shows the same footer-snap class site-wide (home 0.502, catalog 0.198) but on a different element (a Builder.io .features-block), so it is the same CLASS, not a duplicate.",
+        "and_separately": "The 144px morph shift is a DIFFERENT finding that CLS cannot see at all (hadRecentInput excludes it) and is filed as BL-UI-003. Two findings, two instruments — neither substitutes for the other."
+      }
     },
     "severity_regrade": {
       "finding": "secondary-action set hidden below md (CMP-003 + CMP-031, folded)",
@@ -251,11 +279,102 @@
       "token": "FAIL",
       "but_communicate_as": "incomplete delivery against the description, NOT defective implementation",
       "why": "Six of ten description bullets are wholly or partly unimplemented. 'Defective' routes to a bug-fix cycle (reproduce, fix, re-verify); 'incomplete' routes back to the story's own scope — to the PM and designer, and to whether this story was finishable as written. A bug-shaped comment sends a scope conversation to the wrong people. The token stays FAIL because nothing downstream recognises a new one, and inventing one breaks the gate math and the release-note refusal logic.",
-      "root_cause": "The Story reached READY FOR TEST with its acceptance-criteria field reading '1. No requirements.' That is the mechanism that let six of ten described behaviours go unbuilt with nobody noticing — there was no artifact anyone could check done against. Everything downstream inherited it: 1d had to derive 74 conditions from prose, the verdict is scoped to a spec the ticket does not contain, and the checklist carries a disclaimer saying so. No amount of testing downstream fixes that."
+      "root_cause": "The Story reached READY FOR TEST with its acceptance-criteria field reading '1. No requirements.' That is the mechanism that let six of ten described behaviours go unbuilt with nobody noticing — there was no artifact anyone could check done against. Everything downstream inherited it: 1d had to derive 74 conditions from prose, the verdict is scoped to a spec the ticket does not contain, and the checklist carries a disclaimer saying so. No amount of testing downstream fixes that.",
+      "filing_state_at_handoff": "CLOSED OUT. 10 filed: 7 Sub-tasks of VCST-5735 (VCST-5871 P1 · 5872 · 5873 · 5874 · 5875 · 5876 · 5877) and 3 standalone accessibility Bugs at real P1 severity that do NOT block the story (VCST-5878 keyboard scroll · VCST-5879 contrast + selected state · VCST-5880 split-table association). 3 Low/P3 held below the 5d floor and recorded in bugs_not_filed. A11Y-4 was NOT filed by either session — a recursive duplicate check across reports/bugs/open/** found it already tracked under VCST-5653; its new sightings are an amendment to that report. A11Y-6 folds into VCST-5873's bullet-7 finding; A11Y-8 folds into VCST-5871."
     }
   },
-  "bugs_filed": [],
-  "bugs_not_filed": [],
+  "bugs_filed": [
+    {
+      "key": "VCST-5871",
+      "severity": "High",
+      "relationship": "sub-task",
+      "parent_or_linked_ticket": "VCST-5735",
+      "report": "reports/bugs/open/critical-high/BUG-compare-secondary-actions-hidden-below-md.md"
+    },
+    {
+      "key": "VCST-5872",
+      "severity": "Medium",
+      "relationship": "sub-task",
+      "parent_or_linked_ticket": "VCST-5735",
+      "report": "reports/bugs/open/medium/BUG-compare-diff-marking-not-built.md"
+    },
+    {
+      "key": "VCST-5873",
+      "severity": "Medium",
+      "relationship": "sub-task",
+      "parent_or_linked_ticket": "VCST-5735",
+      "report": "reports/bugs/open/medium/BUG-compare-mobile-presentation-set-not-built.md"
+    },
+    {
+      "key": "VCST-5874",
+      "severity": "Medium",
+      "relationship": "sub-task",
+      "parent_or_linked_ticket": "VCST-5735",
+      "report": "reports/bugs/open/medium/BUG-compare-sticky-morph-shifts-body-144px.md"
+    },
+    {
+      "key": "VCST-5875",
+      "severity": "Medium",
+      "relationship": "sub-task",
+      "parent_or_linked_ticket": "VCST-5735",
+      "report": "reports/bugs/open/medium/BUG-compare-file-section-config-silent-noop.md"
+    },
+    {
+      "key": "VCST-5876",
+      "severity": "Medium",
+      "relationship": "sub-task",
+      "parent_or_linked_ticket": "VCST-5735",
+      "report": "reports/bugs/open/medium/BUG-compare-duplicate-label-config-sections-collapse.md"
+    },
+    {
+      "key": "VCST-5877",
+      "severity": "Medium",
+      "relationship": "sub-task",
+      "parent_or_linked_ticket": "VCST-5735",
+      "report": "reports/bugs/open/medium/BUG-compare-single-product-toggle-reports-enabled.md"
+    },
+    {
+      "key": "VCST-5878",
+      "severity": "High",
+      "relationship": "standalone",
+      "parent_or_linked_ticket": null,
+      "report": "reports/bugs/open/critical-high/BUG-compare-table-body-not-keyboard-scrollable.md"
+    },
+    {
+      "key": "VCST-5879",
+      "severity": "High",
+      "relationship": "standalone",
+      "parent_or_linked_ticket": null,
+      "report": "reports/bugs/open/critical-high/BUG-compare-segmented-control-contrast-and-state.md"
+    },
+    {
+      "key": "VCST-5880",
+      "severity": "High",
+      "relationship": "standalone",
+      "parent_or_linked_ticket": null,
+      "report": "reports/bugs/open/critical-high/BUG-compare-split-tables-break-header-association.md"
+    }
+  ],
+  "bugs_not_filed": [
+    {
+      "severity": "Low",
+      "provenance": "in-scope",
+      "summary": "booleans render icon AND text; the negative glyph is a cross, not the specified minus. Removing the text to match the spec would CREATE a WCAG 1.1.1 defect (icons are aria-hidden) — fix the glyph only",
+      "report": "reports/bugs/open/low/BUG-compare-boolean-renders-icon-and-text.md"
+    },
+    {
+      "severity": "Low",
+      "provenance": "in-scope",
+      "summary": "the compare list survives sign-out and is readable by the next user of the browser; public catalog data only. The org-switch half of the same mechanism is not Low and is covered by CMP-015",
+      "report": "reports/bugs/open/low/BUG-compare-list-survives-sign-out.md"
+    },
+    {
+      "severity": "Low",
+      "provenance": "in-scope",
+      "summary": "a parent category and its child render two tabs with an identical label; partitioning is correct, only the labels are ambiguous. Same DOM fact as A11Y-7",
+      "report": "reports/bugs/open/low/BUG-compare-two-tabs-share-identical-label.md"
+    }
+  ],
   "discovery": {
     "ran": true,
     "box_minutes": 25,
@@ -356,12 +475,7 @@
         "note": "The diff-marking finding was previously recorded here as UNSPEC on the grounds that the PROTOTYPE renders no dot/amber row. That was wrong and it laundered an in-scope defect into a bucket that can never fail 5c: the TICKET is the oracle, and bullet 3 promises the marking in the ticket own words. Moved to unbuilt_promises below as an IN-SCOPE finding."
       }
     ],
-    "unverified": [
-      {
-        "condition": "V3 (BL-UI-005) column alignment between the header and body tables",
-        "reason": "The PASS was measured at desktop with both scrollers at zero. The two tables are INDEPENDENT scrollers with different geometry (header client 234 / scroll 448 vs body client 346 / scroll 560), which is the precondition for the sticky header drifting out of column alignment on mobile. Re-verify at 375px with the body scrolled, or leave it unverified — do not carry a BL-UI-005 PASS resting on a desktop-only measurement."
-      }
-    ],
+    "unverified": [],
     "a11y_findings": [
       {
         "id": "A11Y-1",
@@ -370,7 +484,10 @@
         "severity": "Serious/P1",
         "blocks": false,
         "provenance": "in-scope",
-        "summary": "the table body cannot be scrolled by keyboard at <=767px — scrollWidth 560 > clientWidth 361, 0 focusable descendants, no tabindex, no role, no accessible name"
+        "summary": "the table body cannot be scrolled by keyboard at <=767px — scrollWidth 560 > clientWidth 361, 0 focusable descendants, no tabindex, no role, no accessible name",
+        "draft": "reports/bugs/open/critical-high/BUG-compare-table-body-not-keyboard-scrollable.md",
+        "action_here": "STANDALONE ticket at real severity — never a Sub-task. Drafted, NOT filed.",
+        "filed_as": "VCST-5878"
       },
       {
         "id": "A11Y-2",
@@ -379,7 +496,10 @@
         "severity": "Serious/P1",
         "blocks": false,
         "provenance": "in-scope",
-        "summary": "inactive All/Differences segment measures 4.34:1 (needs 4.5) at 14px bold — light mode only, dark passes"
+        "summary": "inactive All/Differences segment measures 4.34:1 (needs 4.5) at 14px bold — light mode only, dark passes",
+        "draft": "reports/bugs/open/critical-high/BUG-compare-segmented-control-contrast-and-state.md",
+        "action_here": "STANDALONE ticket at real severity — never a Sub-task. Drafted, NOT filed.",
+        "filed_as": "VCST-5879"
       },
       {
         "id": "A11Y-3",
@@ -388,7 +508,10 @@
         "severity": "High/P1",
         "blocks": false,
         "provenance": "in-scope",
-        "summary": "All/Differences exposes no selected state (role, aria-pressed, aria-checked all null); the category tabs DO carry aria-pressed, which is the tell"
+        "summary": "All/Differences exposes no selected state (role, aria-pressed, aria-checked all null); the category tabs DO carry aria-pressed, which is the tell",
+        "draft": "reports/bugs/open/critical-high/BUG-compare-segmented-control-contrast-and-state.md",
+        "action_here": "STANDALONE ticket at real severity — never a Sub-task. Drafted, NOT filed.",
+        "filed_as": "VCST-5879"
       },
       {
         "id": "A11Y-4",
@@ -397,7 +520,10 @@
         "severity": "High/P1",
         "blocks": false,
         "provenance": "pre-existing",
-        "summary": "focus indicators at 1.47:1 (pin) and about 1.9:1 (breadcrumb, Clear category) — shared vc-button ring, cross-cutting on the UI kit"
+        "summary": "focus indicators at 1.47:1 (pin) and about 1.9:1 (breadcrumb, Clear category) — shared vc-button ring, cross-cutting on the UI kit",
+        "filed_by": "peer session vc-mcp-testing-module-cd — design-system-wide on vc-button, standalone ticket",
+        "action_here": "ALREADY TRACKED. Not filed by either session — a duplicate check across open/** found the existing report. The new sightings (1.47:1 pin, 1.40:1 neutral ring on grey, on a theme a week newer) are an AMENDMENT to that report, not a new record.",
+        "filed_as": "VCST-5653 (pre-existing — reports/bugs/open/critical-high/BUG-storefront-focus-ring-token-cannot-reach-3to1.md)"
       },
       {
         "id": "A11Y-5",
@@ -406,7 +532,10 @@
         "severity": "Serious/P1",
         "blocks": false,
         "provenance": "in-scope",
-        "summary": "header and body are two separate table elements so scope=col cannot associate across them, and every table element is overridden to block/flex. ECL-15.1 notes this violates no BL-A11Y rule as written — PROPOSED-BL candidate"
+        "summary": "header and body are two separate table elements so scope=col cannot associate across them, and every table element is overridden to block/flex. ECL-15.1 notes this violates no BL-A11Y rule as written — PROPOSED-BL candidate",
+        "draft": "reports/bugs/open/critical-high/BUG-compare-split-tables-break-header-association.md",
+        "action_here": "STANDALONE ticket at real severity — never a Sub-task. Drafted, NOT filed.",
+        "filed_as": "VCST-5880"
       },
       {
         "id": "A11Y-6",
@@ -437,7 +566,53 @@
         "summary": "pin and info are hidden below md and browser zoom crosses md, so at 400% a desktop user loses pinning and tooltips",
         "note": "THIS ONE BLOCKS and is deliberately NOT filed as a separate a11y ticket: it is the same stylesheet rule as CMP-003/CMP-031 and folds into that in-scope report. Recorded here so the fold is auditable rather than looking like a dropped a11y finding."
       }
-    ]
+    ],
+    "v3_resolved": {
+      "was": "UNVERIFIED",
+      "now": "PASS",
+      "by": "peer session vc-mcp-testing-module-cd, standalone /qa-design audit, Chrome DevTools lane",
+      "evidence": "alignmentAuditSnippet + classifyAlignment at 375/768/1280 — product cards x5, category tabs x3, row-0 cells x6, all at 0px centre AND height drift. Head-to-body horizontal scroll sync measured EXACT with the body scrolled (497/497 at 768, 311/311 at 375), which is precisely the measurement my run lacked. Document never h-scrolls (375: scrollWidth 375 == innerWidth 375).",
+      "note": "The dual-scroller risk I flagged does not materialise. Upgraded on another session's evidence, not my own — stated so the provenance is visible."
+    },
+    "v4_corrected": {
+      "was": "PASS at 375",
+      "interim": "WARN at <=768 (my re-grade — WRONG, see correction_trail)",
+      "now": "FAIL at <=768, attributed to SPACING; the 375 cell is HIDDEN-NOT-COMPLIANT",
+      "why_375_is_not_a_pass": "At 375 the pin, Clear all and Clear category controls are display:none — UNMEASURABLE, not compliant. A bare 'PASS at 375' reads as 'targets are fine' when the small controls are simply absent.",
+      "the_failure": "The All-to-Differences gap is 2px against TOUCH_TARGET_GAP_PX = 8. classifyTouchTargets pushes tooClose into failIssues, so its own return for this measurement is severity FAIL.",
+      "the_appended_warn": "pin 26x26, remove 32x32, add-to-cart 38x38, tabs and All/Differences 32px high — all >=24, so WCAG 2.5.8 AA passes and these are the UI kit's deliberate xxs/xs/sm sizes. belowAAAOnly goes to warnIssues, which classifyTouchTargets APPENDS to the FAIL message rather than using to downgrade it. Recorded as the appended WARN, never as the grade.",
+      "correction_trail": "I graded the row WARN on the strength of the size band while simultaneously accepting the 2px gap as 'a genuine failure that gets no UI-kit exemption'. Those two positions cannot both hold. Raised by peer session vc-mcp-testing-module-cd; verified by reading classifyTouchTargets in scripts/lib/measure-layout.ts rather than by accepting the claim. The grade is now the deterministic helper's own return value, not one either session argued to.",
+      "net": "The peer's outcome was right for the wrong reason (it over-weighted the sizes); my reason was right with the wrong outcome."
+    },
+    "spec_source": {
+      "project_read": "518d0b90-… (Virto Commerce Frontend Design System) — the project the TICKET links, read via DesignSync",
+      "trap": "TWO copies of ui_kits/storefront/CompareScreenV2.jsx exist in two different Claude Design projects, and the one reachable from DESIGN_SYSTEM_PROJECT_ID (5aca50fb-…) is the OLDER one. A default /qa-design run therefore reads the wrong copy. My extract came from the ticket's own project, so it carries the newer values (pin/pin-outline rather than star/star-outline; no 'Pinned characteristics' section header; the active tab badge override).",
+      "bundled_files_unresolved": "Compare v2 - standalone.html AND ui_kits/storefront/compare-v2.html are both bundled (the latter a thin harness over app.bundle.js) — neither yields statically extractable values. Recorded unresolved, never guessed."
+    },
+    "peer_findings": {
+      "source": "peer session vc-mcp-testing-module-cd — reports/tickets/Sprint26-17/VCST-5735/design-report.md (untracked)",
+      "provenance_caveat": "The peer's spec expectations were relayed BY HAND from the JSX rather than produced by extractDesignSpec(), so its axis's unresolved count is UNKNOWN rather than zero and its parity coverage is partial. Carry that whenever its numbers are cited.",
+      "corroborates": [
+        "the add slot never renders at 0 < N < 5 — verified at N=1,2,4 (my CMP-024 independently resolved the same: no add affordance is rendered at all)",
+        "the compact morph never engages at 375 — matches my second BL-UI-003 entry"
+      ],
+      "new_to_this_run": [
+        "the empty-value dash is painted --color-neutral-900 instead of --color-neutral-400, so a MISSING value looks like a real one",
+        "price cells render font-weight 400 against a declared 900; the 'Differ: N of M' emphasis element does not exist",
+        "no in-cart state and no success toast after adding to cart — the cart went 0->2 but the button stayed primary/shopping-cart",
+        "product titles truncate to an indistinguishable string even at 1280 with no title attribute",
+        "vector-effect: none on all 76 glyphs, so the icon stroke ladder is unevaluable — that single fact IS the finding"
+      ],
+      "correction_to_a_peer_claim": {
+        "claim": "'Restore products is in-memory only — so a reload permanently loses the comparison.'",
+        "correction": "The first half is right and the conclusion is wrong. The restore BUFFER is in-memory (lastRemovedEntries is a bare ref, cleared on unmount), but the compare LIST itself lives in localStorage and survives a reload — my CMP-027 verified exactly that (reload after Clear all does not resurrect the list, and a populated list persists). What a reload loses is the ability to UNDO a clear, not the comparison. Filing it as 'a reload loses the comparison' would overstate it into a data-loss defect it is not."
+      },
+      "not_duplicated_here": "The peer is filing the focus-ring contrast finding (1.40:1 composited, design-system-wide on vc-button, standalone ticket at real severity, never a Sub-task). That is the same finding as my A11Y-4 (measured 1.47:1 on the pin). Theirs is canonical — I am not filing it.",
+      "peer_caveats_preserved": [
+        "dark-mode contrast is clean INSIDE .compare-table (0 text / 0 non-text over 63/58 evaluated) and INCONCLUSIVE outside it — every ancestor to html.dark is rgba(0,0,0,0) so effectiveBg falls back to white and manufactured 5 phantom failures, which were excluded. NOT a pass.",
+        "during focusIndicatorAudit the theme flipped auto->light with focus on the header Theme control; unattributed, flagged as a possible WCAG 3.2.1 follow-up on the page SHELL, not reported as a defect."
+      ]
+    }
   },
   "contract": {
     "surface": true,
@@ -524,6 +699,17 @@
       "late": true,
       "why_late": "The opening-hop rule (knowledge/execution/ticket-status-transitions.md, and the 1a instruction in commands/qa-test.md) landed MID-RUN — both files were written at 17:28, hours after this run read qa-test.md at 1a. So the run was compliant with the command as it stood when it routed, and non-compliant with the command as it stands now. Recovered under §7, which requires a run that skipped the opening hop to make it at 5f before closing: on Jira neither REOPEN nor TESTED is reachable from Ready for test — the live transition list from that status offered only On QA, go to inprogress, Cancelled and On hold.",
       "cost": "The ticket read as unclaimed on the board for the whole run — roughly 10 agent dispatches, 35 authored cases, a seeded fixture set and two verifier gates — which is the precise failure the rule was written against. 1b's duplicate check guards only against THIS pipeline re-testing the ticket inside 2h; it does not stop a human picking it up."
+    },
+    {
+      "hop": "closing",
+      "from": "Testing",
+      "to": "Reopen",
+      "transition_id": "7",
+      "transition_name": "Need fixes",
+      "at": "2026-09-03T17:34:22.379Z",
+      "actor": "/qa-test 5f",
+      "confirmed": true,
+      "note": "Transition id verified live via getTransitionsForJiraIssue immediately before the write, not taken from the recorded value. Comment posted FIRST (5e), then the transition (5f) — two distinct actions in that order."
     }
   ]
 }

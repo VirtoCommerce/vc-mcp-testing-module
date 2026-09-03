@@ -28,7 +28,7 @@
 | TOKEN | empty value `—` | `--color-neutral-400` | `neutral-900` — a *missing* value looks like a real one | **DRIFT** |
 | TOKEN | price cell | `font-weight: 900` | `400` | **DRIFT** |
 | TOKEN | "Differ: **N** of M" | N `fw900` `--color-warning-600` | no emphasis element at all | **MISSING** |
-| TOKEN | toast | bottom 20, centred, max-w 420, z 999 | top-right, w 320, z 5000 | **DRIFT** |
+| TOKEN | toast | **two conflicting declarations in one prototype** — `Cv2Toasts` (`CompareScreenV2.jsx`) says centred-bottom, max-w 420, z 999; the App-level toast in `ui_kits/storefront/index.html` (the file the TICKET links) says bottom-**right** 22/22, `--color-success-500` on white, radius 8, fw 700, 14px, max-w 360, plus a `--color-warning-50` + `triangle-alert` warning variant | top-right, w 320, z 5000 | **UNRESOLVED** — re-graded from DRIFT: the spec contradicts itself, so no single expectation is derivable and inventing one would fail a correct implementation. Anchor drifts either way; which is authoritative is a question for the design owner |
 | TOKEN | cell borders | `1px neutral-100` right + bottom | right `neutral-200`, bottom `0px` | **DRIFT** |
 | ICON | add-to-cart in-cart | `check`, `color=success` | no in-cart state (2 items in cart, still `shopping-cart`/primary) | **MISSING** |
 | ICON | toast confirm | `check` @15 | no success toast observed | **MISSING** |
@@ -69,7 +69,7 @@ Not a gate on this run (`feedback_a11y_never_blocks_feature_stories`); recorded 
 | # | Finding | Criterion | Sev |
 |---|---|---|---|
 | A11Y-1 | **Focus ring 1.40:1 against its own background** — `outline: 3px solid color(srgb .451 .451 .451 / 0.3)` composites to `rgb(193,193,193)` on `rgb(227,227,227)`. Ring *exists* (2.4.7 met) but is effectively invisible. Design-system-wide (`vc-button`), not compare-specific | **1.4.11** | **High** |
-| A11Y-2 | Touch targets ≤768: pin 26×26, remove 32×32, add-to-cart 38×38, tabs + All/Differences 32px high; All↔Differences gap **2px** (<8). All ≥24 so **WCAG 2.5.8 AA passes**; `BL-UI-006` (≥44×44, ≥8px) fails | `BL-UI-006`/2.5.5 | **High** |
+| A11Y-2 | **The FAIL is the SPACING, not the sizes** — `classifyTouchTargets` returns FAIL on any `tooClose` pair, and All↔Differences sit **2px** apart against the 8px floor. The sizes (pin 26², remove 32², add-to-cart 38², tabs 32px high at ≤768) are all ≥24, so WCAG 2.5.8 AA passes and they land in the invariant's **AA-to-AAA WARN band** — `BL-UI-006` states two tiers on purpose because the UI kit ships 26/32/38 deliberately, and flattening that to FAIL produced 13 of 36 phantom failures in `REG-2026-07-24-2121`. At 375 these controls are `display:none` — **unmeasurable, not compliant**. *(Size band re-graded FAIL→WARN after reconciliation with the VCST-5735 close-out session; the gap keeps the row at FAIL.)* | `BL-UI-006`/2.5.5 | **High** |
 | A11Y-3 | Row tooltip trigger `div.vc-popover__trigger` has **`tabIndex=-1`** → MOQ/VAT explanations cannot be opened by keyboard. Text *is* reachable via the icon's `aria-label`, so AT is not blocked; sighted keyboard users are | **2.1.1** | **Medium** |
 | A11Y-4 | `aria-pressed="false"` on remove-from-compare — a delete action announced as an unpressed toggle | **4.1.2** | **Medium** |
 | A11Y-5 | "Differ: N of M rows" is a `<p>` with no live region, yet changes on tab switch and All↔Differences | **4.1.3** | **Medium** |
@@ -94,7 +94,7 @@ Not a gate on this run (`feedback_a11y_never_blocks_feature_stories`); recorded 
 |---|---|---|---|
 | UX-1 | #6 Recognition | **Titles truncate to an indistinguishable string.** At 1280 two columns both read `AGENT-TEST-Compare-Filler-…`; at 375 all five read `AGENT-TEST-Compare-…`. 2-line clamp + ellipsis, **no `title`**, no tooltip. Telling products apart is the feature's purpose | **3** |
 | UX-2 | #3 User control | **At 375 both *Clear all* and *Clear category* are `display:none`** (`.compare-products__actions`, `.compare-table__clear-category`). Mobile users can only remove one at a time | **3** |
-| UX-3 | #3/#9 Undo | *Restore products* is in-memory only — present right after *Clear all*, **gone after a reload**, nothing in `localStorage`/`sessionStorage`. A reload permanently loses the comparison | **2** |
+| UX-3 | #3/#9 Undo | **A reload loses the UNDO, not the comparison.** The restore *buffer* is in-memory (gone after a reload, so *Restore products* cannot be reached), but the compare **list itself persists** in `localStorage.compareProducts` and survives a reload — CMP-008 documents that key and CMP-027 verifies the reload path. *(Corrected after reconciliation: this row previously read "a reload permanently loses the comparison", which is wrong. The original "nothing in storage" probe was taken **after a Clear all**, when the key is legitimately empty, and over-generalised. Not a data-loss defect.)* | **2** |
 | UX-4 | #1 Visibility | The "Differ: N of M rows" count **disappears entirely in Differences mode** — the number vanishes exactly when it is being acted on | **2** |
 | UX-5 | #1 Visibility | No in-cart feedback: after adding 2 products the buttons stay primary/`shopping-cart` and no success toast fires | **2** |
 | UX-6 | #8 Aesthetic | Empty-state emphasis inverted: *Restore products* is `solid--primary` while *Add products* — the primary task — is `outline--primary` | **2** |
