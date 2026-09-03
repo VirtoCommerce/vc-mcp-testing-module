@@ -141,7 +141,6 @@ async function main() {
   if (!user?.id) {
     throw new Error(`${REP_KEY} (${row.email}) has no platform account on this env — run \`TEST_ENV=${process.env.TEST_ENV || 'vcst'} npm run seed:sales-rep -- --only ${REP_KEY}\` first`);
   }
-  const wasLocked = isLockedNow(user);
   const restingStatus = repFixtureStatus(row);
   log(`${REP_KEY} (${row.email}) account ${user.id}: ${describeLockState(user)}`);
 
@@ -200,7 +199,7 @@ async function main() {
     throw new Error(`${MODE} left the two halves disagreeing: ${describeLockState(after)} (wanted lockedOut=${want}, status=${targetStatus})`);
   }
   log(`${REP_KEY} is now ${describeLockState(after)}`);
-  if (nowLocked) log('  REMEMBER: the resting state is UNLOCKED. Run `npm run sr:unlock` when the case is done; any `npm run seed:sales-rep` also self-heals it.');
+  if (want) log('  REMEMBER: the resting state is UNLOCKED. Run `npm run sr:unlock` when the case is done; any `npm run seed:sales-rep` also self-heals it.');
 }
 
 // Run ONLY when executed, never on import — `LOCKABLE_REP_KEYS` / `LOCK_UNTIL` / `isLockedNow` are

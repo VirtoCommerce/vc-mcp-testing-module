@@ -52,7 +52,7 @@ import {
   customerRoleFor, isAuthorshipRow, AUTHORSHIP_MATRIX, ROLE_REP,
 } from './sales-rep-orders-specs.mjs';
 import { requiredProductSlots } from './sales-rep-stats-specs.mjs';
-import { hasStaleLockout, setLockoutVerified } from '../../lib/user-provision.mjs';
+import { hasStaleLockout, setLockoutVerified, __setApi } from '../../lib/user-provision.mjs';
 
 const OWNER_NAME = 'AGENT-TEST-SR-Owner-Acme';
 const OWNER_PHONE = '+1-206-555-0142';
@@ -151,6 +151,9 @@ async function clearRepStaleLockout(email, status) {
   // implementation of that repair rather than a sales-rep-local copy that can drift from it.
   u.status = status; u.lockoutEnabled = false; u.accessFailedCount = 0;
   await api('PUT', '/api/platform/security/users', u, { expectStatus: [200, 204] });
+  __setApi(api); // the helper carries its OWN module-level TOKEN (null here) — authenticate it
+                 // through THIS seeder's seed-common client, or the POST /unlock goes out as
+                 // `Bearer null` and 401s on exactly the residue this repair exists to clear.
   if (!await setLockoutVerified(u.id, email, false)) return false;
   log(`  ↻ cleared stale lockout on ${email} (verified)`);
   return true;
