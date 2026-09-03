@@ -110,38 +110,69 @@ So the API is not dropping facets *because of the selection* — it drops them b
 which is uniform and standard aggregation behaviour (an aggregation over zero documents has no buckets).
 B independently confirms own-axis correctness: the status facet ignores its own selection, as designed.
 
-**Consequence:** the report's alternative framing ("or the API returns the unfiltered facet set so the
-control can render") would require the backend to special-case empty results. It is not needed — and the
-API is behaving defensibly. **The owning layer is the frontend.**
+### Backend confirmed in source — there is no zero-result branch to change
 
-### Root cause at source
+`SalesRepCustomerOrdersQueryHandler.Handle` (vc-module-sales-rep, `feat/VCST-5733-srh-all-customer-orders`)
+ends with:
 
-`vc-frontend` `client-app/modules/sales-rep/components/sales-rep-orders-filters.vue`
-(added by PR #2444, branch `feat/VCST-5733-customer-orders`):
-
-```vue
-<div v-if="statuses.length" class="sales-rep-orders-filters__statuses">
-  <VcCheckboxGroup v-model="draft.statuses">
-    <VcCheckbox v-for="status in statuses" :key="status.name" :value="status.name">
+```csharp
+result.Facets = _mapper.ToFacets(searchResult.Aggregations, request.CultureName);
 ```
 
-`statuses` is a **prop** (`IProps { statuses: SalesRepFacetOptionType[] }`) fed from the response facets,
-whereas `draft.statuses` / `applied.statuses` are **local component state**. When facets arrive empty the
-`v-if` unmounts the whole group — label and checkboxes — while the selection persists in local state.
-That is precisely why the outgoing query still carries `status:"Processing"` with no control to clear it.
+It passes through **whatever aggregations the search returned**. There is no conditional on `TotalCount`,
+no special-casing of empty results, and no facet-specific branch anywhere in the handler. The only early
+returns are authorization short-circuits — `string.IsNullOrEmpty(request.UserId)` and
+`organizationIds.Count == 0` — and both return before any search runs.
 
-**The component already has what it needs:** `isEmpty` is computed from `applied.value`, so it knows a
-filter is applied even when the facet list is empty. Rendering the applied-but-unlisted terms from
-`applied.statuses` (or not gating the group on facet length while a selection exists) fixes it with no
-API change. The same `v-if="customers.length"` pattern one block below has the identical exposure.
+So on a zero-match query Elasticsearch produces no aggregation buckets, `ToFacets` maps that to an empty
+list, and the module returns `Facets = []`. **This is search-engine semantics passed through faithfully,
+not a module decision** — there is no choice in the module to reverse. Emitting facets at zero results
+would mean *adding* a special case (a second aggregation-only query with the offending clause removed),
+which is a feature request, not a bug fix. Note also that `result.Facets` is initialised to `[]` at the
+top of the handler, so the field is always an array and never null.
 
+**Layer 3 = PASS, on both behavioural and source evidence.**
+**Consequence:** the report's alternative framing ("or the API returns the unfiltered facet set so the
+control can render") is **withdrawn**: it would require the backend to special-case empty results, which is a new capability
+rather than a fix. **The owning layer is the frontend.**
+
+### Root cause at source — the composable, not the component
+
+The symptom is visible at the `v-if` in the component, but the defect is one level up, in
+`client-app/modules/sales-rep/composables/useSalesRepCustomerOrders.ts`:
+
+```ts
+const facets = computed(() => result.value?.salesRepCustomerOrders?.term_facets);
+const statusOptions = computed(() => toFacetOptions(facets.value, STATUS_ORDERS_FACET_NAME));
+const customerOptions = computed(() => toFacetOptions(facets.value, ORDER_CUSTOMER_FACET));
+```
+
+`statusOptions` is derived **purely** from the response, with no memory of previously-seen options and —
+the actual defect — **no reference to `filters.value.statuses`, the applied selection, which lives in the
+very same composable.** The full chain, with each step judged:
+
+| Step | Correct? |
+|---|---|
+| API returns `term_facets: []` at zero results | ✅ by design, confirmed in source |
+| `facets` → `[]` | ✅ |
+| `toFacetOptions(facets, STATUS)` → `[]` — a pure mapper, `(facets ?? []).filter…flatMap…` | ✅ |
+| **`statusOptions` → `[]`, never unioned with the applied `filters.value.statuses`** | ❌ **the defect** |
+| `v-if="statuses.length"` in `sales-rep-orders-filters.vue` unmounts label + checkbox group | consequence |
+| `filters.value.statuses` still holds `["Processing"]`, so `filterExpression` still emits `status:"Processing"` | the symptom |
+
+Because the composable holds **both** `filters` and `statusOptions`, unioning the applied terms into the
+options is a purely local change with no API involvement. `customerOptions` has the identical exposure on
+the cross-customer route.
+
+The query already passes `keepPreviousResult: true`, but that governs the loading transition — once the
+zero-match response lands it *is* the current result, so it does not retain the earlier facet list.
 ### Layer Validation
 
 | Layer | Result | Evidence |
 |-------|--------|----------|
 | 1. Storefront Frontend | **FAIL** | `v-if="statuses.length"` unmounts the group while `applied.statuses` retains the selection; UI evidence in the original report's two screenshots |
 | 2. Backend Admin | N/A | not an admin-visible surface |
-| 3. GraphQL xAPI | **PASS** | probes A–D above: facet emptiness is caused by the empty result set, not the selection; own-axis independence holds (B) |
+| 3. GraphQL xAPI | **PASS** | probes A–D above **plus** the handler source: `result.Facets = _mapper.ToFacets(searchResult.Aggregations, …)` with no zero-result branch — pass-through of ES aggregation semantics |
 | 4. Platform REST API | N/A | not exercised — the storefront reads this surface only through the scoped xAPI |
 
 **Owning layer:** Layer 1 — Storefront Frontend.
@@ -161,6 +192,45 @@ The same file's presets are **rolling windows measured back from today** (`lastW
 four `ORD-063..066` date-preset failures in suite `014` belong to the **buyer** page's *shared*
 calendar-aligned component and are pre-existing rather than caused by this PR.
 
+### Layer-1 pass: the trigger is NOT zero-match — it is facet self-exclusion, and there are TWO grades
+
+Walking the drawer directly (Layer 1, `playwright-edge`, same build) found a **second, more insidious
+state** the STR does not reach, and it corrects the mechanism stated above.
+
+| Grade | Precondition | What the drawer shows | Screenshot |
+|---|---|---|---|
+| baseline | no filter | `Select order status` with all four options + counts | `…-1-baseline-all-four-statuses.png` |
+| **State A** | `totalCount > 0`, applied status excluded by **another** axis | group **renders**, other options present, **the applied option is absent** | `…-2-applied-option-missing-group-present.png` |
+| **State B** | `totalCount = 0` (`term_facets: []`) | group **absent entirely** | `…-3-group-absent-entirely.png` |
+
+All five in `reports/tickets/Sprint26-17/VCST-5733/screenshots/`, prefix `BUG-zero-match-status-group-`;
+also attached to **VCST-5868**.
+
+**The mechanism is self-exclusion, not emptiness.** Each term facet is aggregated with its **own** axis's
+filter excluded but **every other axis applied** — which is why probe B above legitimately returned all
+four statuses, and it is correct multi-select behaviour. The consequence is general: **an applied term is
+visible only if the response happens to contain a bucket for it**, and self-exclusion guarantees no bucket
+whenever another axis excludes that term. Zero-match (State B) is just the degenerate case where *every*
+bucket disappears at once.
+
+**This invalidates the obvious fix.** "Retain the previous facet list when `totalCount` is 0" repairs
+State B and leaves State A untouched — the group is present, so no `v-if` fires and nothing looks wrong.
+Only unioning `filters.value.*` into `statusOptions` / `customerOptions` covers both, which is the
+`useSalesRepCustomerOrders.ts` anchor below.
+
+**Pairing confirmed in both grades** — the outgoing query retained the applied term
+(`filter: status:"…" …`) while no control in the DOM could clear it, so the list stays filtered by a term
+the rep cannot see or undo. `Reset` is enabled but **all-or-nothing**: it clears the date window and the
+customer selection along with the status, so there is no way to drop one term.
+
+**The cross-customer route is worse.** With both `status` and `organizationname` applied, **both** groups
+lose their applied option simultaneously — the rep cannot see *which customer* or *which status* is
+narrowing the list (`…-4-cross-customer-both-groups-absent.png`), and the empty state offers no inline
+recovery (`…-5-empty-state-no-inline-recovery.png`).
+
+`GET`/`POST` all 200, **zero console errors and zero failed requests** across the whole pass — consistent
+with a client-side render gate and the reason no telemetry correlates.
+
 ## Fix Routing (→ /qa-fix)
 
 - **Owning layer:** Layer 1 — Storefront
@@ -168,9 +238,11 @@ calendar-aligned component and are pre-existing rather than caused by this PR.
 - **repoKind:** `frontend`
 - **Ownership hint:** platform (no `project-profile.json` on this deployment ⇒ native)
 - **Component / module:** Sales Rep Hub — customer-orders filters drawer
-- **RCA anchor:** `client-app/modules/sales-rep/components/sales-rep-orders-filters.vue` — the
-  `v-if="statuses.length"` guard on `.sales-rep-orders-filters__statuses`, with `statuses` a
-  facet-derived prop and `draft.statuses`/`applied.statuses` local state (same exposure on the adjacent
-  `v-if="customers.length"`)
-- **Routing confidence:** **HIGH** — single repo, single component, layer isolated by a paired API control
-  and confirmed in source
+- **RCA anchor (corrected):** `client-app/modules/sales-rep/composables/useSalesRepCustomerOrders.ts` —
+  `statusOptions` / `customerOptions`, which must union the applied `filters.value` terms with the
+  facet-derived options. Secondary (where the symptom shows): the `v-if="statuses.length"` guard in
+  `sales-rep-orders-filters.vue`
+- **Routing confidence:** **HIGH** — single repo, single composable, layer isolated by a paired API control
+  **and** confirmed in backend source (Layer 3 PASS)
+- **Application Insights:** N/A with reason — HTTP 200 throughout, zero console errors, and the defect is a
+  client-side render gate, so there is no server-side error to correlate

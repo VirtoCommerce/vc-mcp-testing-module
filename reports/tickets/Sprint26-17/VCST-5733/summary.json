@@ -588,12 +588,13 @@
   "outstanding_for_rerun": [
     "5h documentation (the audience guides) is now unblocked by the PASS WITH NOTES verdict and the Tested transition - not yet run, and it asks before posting.",
     "Answer the buyer-route design-intent question (summary.json.bugs_pending_confirmation.reclassified_not_filed). If \"by design\", amend BL-SR-002 rather than re-filing the finding.",
-    "Decide whether to file the other session zero-match drawer bug (see coverage_gap_found_by_other_session) and add a case to 097 for the successful-zero-match trigger.",
     "Escalate VIS-01 separately: the focus-indicator token at 1.63:1 affects every vc-input in the storefront, far beyond this ticket.",
     "Settle VIS-06 provenance: seed >10 rows on a pre-existing paginated list and re-measure the active page chip in dark mode.",
     "Repair the remaining 097 test defects via /qa-review-tests --fix, then re-run the 14 held cases and re-promote.",
     "File the /qa-review-oracles bl proposals: split BL-SR-002 (creator half no longer true for the customer-orders family) + PROPOSED-BL-SR-033/034/035/036 + the active-filter-disclosure gap.",
-    "Raise the PR #2444 body inaccuracy with the author: it claims Reorder works on the buyer order page; Reorder does not exist in this build."
+    "Raise the PR #2444 body inaccuracy with the author: it claims Reorder works on the buyer order page; Reorder does not exist in this build.",
+    "VCST-5868 has no sprint and no assignee - decide whether it joins Sprint 26-17 / goes to Maya Diachkovskaia alongside VCST-5869/5870.",
+    "Add a case to suite 097 for the SUCCESSFUL-zero-match trigger, and a second for State A (totalCount > 0, applied option excluded by another axis) - SR-CO-026/027 cover the drawer but were authored against the narrower zero-match framing."
   ],
   "incidental_findings": [
     "td:validate is RED corpus-wide, pre-existing: @td(ADDR_NY.*) is invalid @td() syntax in the P0 smoke suite 042-smoke-tests.csv (90/91 resolved), byte-identical in HEAD and the working tree. A test defect for /qa-review-tests --fix, not a product bug.",
@@ -754,7 +755,17 @@
     "finding": "A zero-match filter combination makes the Select order status group vanish from the drawer entirely: salesRepCustomerOrders returns term_facets: [] whenever totalCount is 0, and the drawer renders its status checkboxes FROM term_facets - so the control that would undo the filter is built from data the zero-match response no longer carries. The applied status term stays in the outgoing query but is invisible; only an all-or-nothing Reset recovers.",
     "gap_in_suite_097": "SR-CO-015 covers a FAILED or SLOW facet request. This is a SUCCESSFUL response that legitimately returns an empty facet list - same drawer, different trigger, asserted by none of the 25 cases. My case design treated facet emptiness only as a failure mode.",
     "oracle_consequence": "BL-SR-012 is SATISFIED on the message (the empty state is correctly filter-aware and offers Reset). The uncovered property is DISCLOSURE OF THE ACTIVE FILTER SET, which no invariant currently states - a further /qa-review-oracles bl candidate alongside PROPOSED-BL-SR-033..036.",
-    "filing_status": "FILED as VCST-5868, linked Relates to VCST-5733 (operator-directed). Filed as a related standalone Bug rather than a Sub-task because the finding originated in another session exploratory run."
+    "filing_status": "FILED as VCST-5868 (Bug, related to VCST-5733) after the operator asked for it. Report path moved by the other session into reports/bugs/open/medium/.",
+    "mechanism_corrected_by_layer1_pass": "The original mechanism (\"term_facets is [] whenever totalCount is 0\") is the DEGENERATE case only. The real trigger is facet SELF-EXCLUSION: each term facet is aggregated with its own axis filter excluded but every other axis applied - correct multi-select behaviour - so an applied term is visible only if the response happens to contain a bucket for it. That yields TWO grades: State A (totalCount > 0, group renders, the APPLIED option is absent because another axis excludes it) and State B (totalCount 0, group absent entirely). This strictly WIDENS the bug and invalidates the obvious fix: retaining the previous facet list at zero results repairs State B and leaves State A untouched. Only unioning filters.value.* into statusOptions/customerOptions covers both.",
+    "evidence_delivered": {
+      "screenshots": 5,
+      "folder": "reports/tickets/Sprint26-17/VCST-5733/screenshots/",
+      "prefix": "BUG-zero-match-status-group-",
+      "attached_to": "VCST-5868 (attachment ids 82844-82848)",
+      "inline_comment": "comment 108189, posted via the v2 wiki route per tracker-ops.md 5c; 3 of 5 embedded inline (baseline / State A / State B), 2 attached as supporting",
+      "verification": "Verified from ?expand=renderedBody, never the status code: 3 <img src=.../attachment/content/> in image-wrap spans, 3 ADF media nodes all 36-char UUID type=file, 0 <span class=\"error\">, 0 surviving literal wiki image markup.",
+      "doc_correction": "tracker-ops.md 5c and the feedback_jira_screenshots_attach_then_wiki memory both said to verify by counting file-preview-id attributes. That marker came from the 2026-09-02 VCST-5319 measurement and is ABSENT from this working render (0 occurrences alongside 3 correct images), so a check gated on it would have called a good render a failure. Both were corrected to read the positive <img>/media-node/no-literal-markup signals instead."
+    }
   },
   "a11y_deferral_decision": {
     "decision": "Accessibility findings do not block this ticket. Product-owner call, recorded rather than inferred.",
