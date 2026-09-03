@@ -6900,7 +6900,7 @@
       "maxQuantity": "max_quantity",
       "stock": "stock_qty"
     },
-    "notes": "Quantity-divergence fixture B (VCST-5735): minQuantity 10 / packSize 4 / maxQuantity 80 / stock 96. MOQ is deliberately NOT a multiple of the pack size. Live on vcst-qa every AGENT-TEST product is minQuantity=1/packSize=1 and the only real MOQ divergence (the imported Printers) is packSize=1 throughout, so no pre-existing product could serve this.",
+    "notes": "Quantity-divergence fixture B (VCST-5735): minQuantity 10 STORED / packSize 4 / maxQuantity 80 / stock 96. MEASURED LIVE on vcst-qa 2026-09-03: xAPI reports minQuantity **12** (ceil(10/4)*4) — the read path rounds a minimum UP onto the pack grid, so a MOQ that is not a multiple of the pack size is NOT observable on the storefront however it is stored. A case must assert 12 in the compare column, never 10. Live on vcst-qa every AGENT-TEST product is minQuantity=1/packSize=1 and the only real MOQ divergence (the imported Printers) is packSize=1 throughout, so no pre-existing product could serve this.",
     "_status": "authored-20260903"
   },
   "PROD_CMP_C": {
@@ -6985,6 +6985,44 @@
       "stock": "stock_qty"
     },
     "notes": "The uncategorized fixture (VCST-5735): created with categoryId=null and linked at the store virtual-catalog ROOT, so its breadcrumbs are Catalog > Product with ZERO Category entries and its compare key is the empty string. Its storefront path has no category segment.",
+    "_status": "authored-20260903"
+  },
+  "PROD_CMP_VARIATIONS": {
+    "file": "compare/compare-products",
+    "filter": {
+      "cmp_id": "CMP-050"
+    },
+    "fields": {
+      "sku": "sku",
+      "name": "product_name",
+      "category": "category_path",
+      "price": "price",
+      "slug": "product_slug",
+      "url": "storefront_url",
+      "id": "platform_id",
+      "minQuantity": "min_quantity",
+      "packSize": "pack_size",
+      "maxQuantity": "max_quantity",
+      "stock": "stock_qty",
+      "variationCount": "variation_count",
+      "minVariationPrice": "min_variation_price"
+    },
+    "notes": "The VARIATION-parent compare fixture (VCST-5735). compare-table.vue branches three ways on product kind — isConfigurable (CFG_LAPTOP / CFG_FILE_UPLOAD / CFG_DUPLABEL), hasVariations (THIS), plain (every other PROD_CMP_*) — and getDisplayPrice() returns minVariationPrice on the hasVariations branch and price on the others, feeding BOTH the Price row and the differs computation. So this column compares a MINIMUM-VARIATION price against its Group A tab-mates' ordinary prices. Assert @td(PROD_CMP_VARIATIONS.minVariationPrice) ($34.99), NOT .price ($89.99) — the two diverge on purpose, and td:validate:compare FAILS if they are ever equalised (equal values make getDisplayPrice return the same string on both branches, so the case would pass whichever ran; that is why INV_VARIATION_MASTER, whose price == minVariationPrice == $59.99, could not serve). 3 variations (AGENT-TEST-CMP-VAR-S/M/L at 34.99 / 44.99 / 54.99) — @td(PROD_CMP_VARIATIONS.variationCount) is 3; the compare link renders the component's own variations.length + 1. The variations are real catalog products with mainProductId set and have NO independent PDP route — navigate the PARENT via {{FRONT_URL}}@td(PROD_CMP_VARIATIONS.url).",
+    "_status": "authored-20260903"
+  },
+  "CFG_DUPLABEL": {
+    "file": "products/configurable-products",
+    "filter": {
+      "product_id": "CFG-033"
+    },
+    "fields": {
+      "id": "product_id_guid",
+      "name": "product_name",
+      "slug": "product_slug",
+      "url": "storefront_url",
+      "price": "base_price"
+    },
+    "notes": "VCST-5735 /compare v2 — a configurable whose TWO configuration sections share one display label (\"Finish\"). The compare table keys configuration rows config:<label>, so a shared label is the only shape that can show one row overwriting the other; all 22 pre-existing configurable specs carry distinct section names, so the collision was unreachable however many configurables a case put side by side. The two sections carry DIFFERENT option sets and prices on purpose — identical content would make the rows indistinguishable even when the implementation is correct. Seeded by scripts/seed-data/products/seed-configurable.mjs --only CFG-033; drift-guarded by td:validate:cfg. NAVIGATE VIA {{FRONT_URL}}@td(CFG_DUPLABEL.url).",
     "_status": "authored-20260903"
   }
 }

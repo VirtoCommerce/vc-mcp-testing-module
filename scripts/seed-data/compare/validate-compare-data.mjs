@@ -25,6 +25,8 @@ import {
   PRODUCTS, CSV_COLUMNS, CSV_PATH, CSV_FILE_KEY, csvRowFor,
   validateSpecShape, quantityDivergence, formatCollisionProblems,
   QUANTITY_DIVERGENCE_FIELDS, COMPARE_LIMIT_PER_CATEGORY, CATEGORY_PATHS,
+  variationPriceDivergence, variationsOf, hasVariations, minVariationPrice,
+  formatMoney, variationLinkCount, byAlias,
 } from './compare-specs.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -104,6 +106,35 @@ const fc = formatCollisionProblems();
 for (const p of qd) fail(`[6] VACUITY (quantity divergence, ${QUANTITY_DIVERGENCE_FIELDS.join('/')}): ${p}`);
 for (const p of fc) fail(`[6] VACUITY (formatted-string collision): ${p}`);
 
+// [8] VACUITY — the hasVariations branch. Its own heading for the same reason as [6]: the failure
+//     mode is a GREEN suite. `getDisplayPrice(product)` returns minVariationPrice when hasVariations
+//     is true and price otherwise, and it feeds both the Price row and the `differs` computation —
+//     so if the two are EQUAL the column renders one string on either branch and every case built
+//     on the fixture is a guaranteed pass. That is not hypothetical: it is the state
+//     INV_VARIATION_MASTER is in (price == minVariationPrice == $59.99), which is why it could not
+//     be reused and this fixture exists.
+for (const p of variationPriceDivergence()) fail(`[8] VACUITY (variation price divergence): ${p}`);
+
+// [9] The variation columns of the CSV are DERIVED, so they cannot disagree with the spec — but a
+//     hand-edit that emptied them would leave a case resolving @td(...minVariationPrice) to "" and
+//     asserting nothing, which reads exactly like a pass.
+for (const rec of PRODUCTS.filter(hasVariations)) {
+  const row = csvRowFor(rec);
+  if (row.min_variation_price !== String(minVariationPrice(rec))) {
+    fail(`[9] ${rec.cmpId}.min_variation_price derives "${row.min_variation_price}" but the spec's minimum variation price is ${minVariationPrice(rec)}`);
+  }
+  if (row.variation_count !== String(variationsOf(rec).length)) {
+    fail(`[9] ${rec.cmpId}.variation_count derives "${row.variation_count}" but the spec declares ${variationsOf(rec).length} variation(s)`);
+  }
+}
+// A plain product must NOT advertise variation data — a non-empty min_variation_price on a plain row
+// would let a case assert the variations semantic against a product that never takes that branch.
+for (const rec of PRODUCTS.filter((r) => !hasVariations(r))) {
+  const row = csvRowFor(rec);
+  if (row.min_variation_price !== '') fail(`[9] ${rec.cmpId} has no variations but carries min_variation_price "${row.min_variation_price}"`);
+  if (row.variation_count !== '0') fail(`[9] ${rec.cmpId} has no variations but carries variation_count "${row.variation_count}"`);
+}
+
 // [7] The env overlays. Informational: an unseeded env resolves the id to "" (a clear miss), never
 //     another env's value — so this is a report of WHERE the fixtures are provisioned, not a gate.
 for (const env of ['vcst', 'vcptcore', 'virtostart']) {
@@ -120,6 +151,13 @@ for (const env of ['vcst', 'vcptcore', 'virtostart']) {
 // ---------------------------------------------------------------------------
 console.log(`\nCompare fixtures: ${PRODUCTS.length} products across ${new Set(PRODUCTS.map((r) => r.categoryPath)).size} tabs`);
 console.log(`  Group A holds ${PRODUCTS.filter((r) => r.categoryPath === CATEGORY_PATHS.A).length} products against a per-category limit of ${COMPARE_LIMIT_PER_CATEGORY}`);
+{
+  const v = byAlias.PROD_CMP_VARIATIONS;
+  if (v) {
+    console.log(`  hasVariations branch: ${v.alias} — price ${formatMoney(v.listPrice)} vs minVariationPrice ${formatMoney(minVariationPrice(v))}`
+      + ` across ${variationsOf(v).length} variations (the compare link renders ${variationLinkCount(v)})`);
+  }
+}
 for (const w of warnings) console.log(`  ⚠ ${w}`);
 if (problems.length) {
   console.error(`\n❌ td:validate:compare — ${problems.length} problem(s):`);

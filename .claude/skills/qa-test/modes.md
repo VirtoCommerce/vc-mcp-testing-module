@@ -212,7 +212,7 @@ mark one **CLEARED-by-fix** with the round it went green, and **add rows for mec
 introduces** (a fix is a change, and it earns the same fault-model treatment the original change got; this
 is the loop's one genuinely new coverage obligation). It may **not** rewrite Part 0: the value chain does
 not change because a bug was fixed, and if it would, the fix changed the mechanism and that is a new ticket,
-not a round. The 9-clause gate re-fires **only on the amendment's new rows**, inline, no verifier.
+not a round. The 10-clause gate re-fires **only on the amendment's new rows**, inline, no verifier.
 
 **Authored cases (Artifact A) — never re-author, sometimes add.** Do **not** re-run Step 3 for round-1
 rows: re-running `tc:scaffold` with round 1's `--id-block` makes the appender reject every row on ID
