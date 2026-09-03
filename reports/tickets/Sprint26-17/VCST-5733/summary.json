@@ -171,7 +171,7 @@
       "sprint": "VCST Sprint 26-17 (id 2714, active)",
       "assignee": "Maya Diachkovskaia",
       "summary": "Filters drawer declares aria-haspopup=\"dialog\" but the panel has role=null, no aria-modal and no accessible name; Escape does not close it and focus is never restored. Its own two child date pickers correctly set role=\"dialog\" plus a name, so the panel is the outlier inside the same PR.",
-      "report": "reports/bugs/open/BUG-salesrep-filters-drawer-not-a-dialog-escape-and-focus.md",
+      "report": "reports/bugs/open/critical-high/BUG-salesrep-filters-drawer-not-a-dialog-escape-and-focus.md",
       "supersedes": "VCST-5866 (sub-task, linked Duplicate then Cancelled)"
     },
     {
@@ -183,7 +183,7 @@
       "sprint": "VCST Sprint 26-17 (id 2714, active)",
       "assignee": "Maya Diachkovskaia",
       "summary": "Breadcrumb slash separators lack aria-hidden on these routes while /catalog and PDP both set it, converting a harmless 2.52:1 decorative glyph into announced under-contrast content. Also a genuine vs. DESIGN drift - the design spec declares aria-hidden=\"true\".",
-      "report": "reports/bugs/open/BUG-salesrep-breadcrumb-slash-missing-aria-hidden.md",
+      "report": "reports/bugs/open/medium/BUG-salesrep-breadcrumb-slash-missing-aria-hidden.md",
       "supersedes": "VCST-5867 (sub-task, linked Duplicate then Cancelled)"
     },
     {
@@ -196,7 +196,7 @@
       "layer_isolation": "Paired API probe: with NO status filter, an impossible date window still empties term_facets (totalCount 0 -> 0 facets), so the API drops facets because the result set is empty, not because of the selection. Own-axis independence separately confirmed (status:\"Processing\" leaves all four status counts intact at 5 results). API therefore defensible; the frontend owns it.",
       "rca_anchor": "client-app/modules/sales-rep/components/sales-rep-orders-filters.vue - v-if=\"statuses.length\" on .sales-rep-orders-filters__statuses (same exposure on the adjacent v-if=\"customers.length\")",
       "found_by": "exploratory SBTM-salesrep-customer-orders-2026-09-03; reproduced independently at Layer 3 + source by this run",
-      "report": "reports/bugs/open/BUG-salesrep-customer-orders-zero-match-hides-active-status-filter.md"
+      "report": "reports/bugs/open/medium/BUG-salesrep-customer-orders-zero-match-hides-active-status-filter.md"
     }
   ],
   "bugs_not_filed": [
@@ -204,25 +204,25 @@
       "severity": "Low",
       "provenance": "pre-existing",
       "summary": "salesRepCustomerOrder(id:) localizes statusDisplayValue but not total/subTotal.formattedAmount ($118.00 under de-DE), while the sibling list query returns 118,00 $ for the same order and culture. Standard xAPI order(id:) behaves identically — shared single-order resolver in vc-module-x-order, not PR #14.",
-      "report": "reports/bugs/open/BUG-salesrep-single-order-money-not-localized.md"
+      "report": "reports/bugs/open/low/BUG-salesrep-single-order-money-not-localized.md"
     },
     {
       "severity": "Low",
       "provenance": "pre-existing",
       "summary": "after-offset beyond ES index.max_result_window returns HTTP 200 with data null + errors[{code:SEARCH}]. Boundary measured exactly: after 9998 first 2 (=10000) clean, after 9999 first 2 (=10001) errors; negative after errors the same way. Standard orders() is byte-identical. Asymmetry worth noting: the module's non-index siblings degrade gracefully instead.",
-      "report": "reports/bugs/open/BUG-salesrep-customer-orders-max-result-window.md"
+      "report": "reports/bugs/open/low/BUG-salesrep-customer-orders-max-result-window.md"
     },
     {
       "severity": "Low",
       "provenance": "pre-existing",
       "summary": "Omitting storeId aggregates across stores (95 vs 94 with storeId=B2B-store; the extra row is an Electronics-store order). Supplied storeId is honoured and a bogus value fails closed. The documented xAPI ambient-context-args hazard; membership scope still holds, so no cross-org leak.",
-      "report": "reports/bugs/open/BUG-salesrep-customer-orders-storeid-ambient.md"
+      "report": "reports/bugs/open/low/BUG-salesrep-customer-orders-storeid-ambient.md"
     },
     {
       "severity": "Low",
       "provenance": "pre-existing",
       "summary": "An unrecognized FILTER field silently yields 0 results (no error), whereas an unrecognized FACET is dropped leaving the result set intact, and an unrecognized SORT field is silently ignored. Shared phrase-parser/index behaviour. Compounded by the design note below: the new surface ships no filter/sort discovery query, so the storefront hardcodes the grammar and a drift renders as 'no orders' rather than an error.",
-      "report": "reports/bugs/open/BUG-salesrep-customer-orders-unknown-filter-silent-empty.md"
+      "report": "reports/bugs/open/low/BUG-salesrep-customer-orders-unknown-filter-silent-empty.md"
     },
     {
       "severity": "Low",
@@ -747,7 +747,7 @@
   },
   "coverage_gap_found_by_other_session": {
     "$comment": "Surfaced by another session exploratory run on the same surface during this window; recorded because it is a real gap in THIS suite.",
-    "report": "reports/bugs/open/BUG-salesrep-customer-orders-zero-match-hides-active-status-filter.md",
+    "report": "reports/bugs/open/medium/BUG-salesrep-customer-orders-zero-match-hides-active-status-filter.md",
     "source": "reports/exploratory/SBTM-salesrep-customer-orders-2026-09-03.md",
     "severity": "Medium",
     "provenance": "in-scope",

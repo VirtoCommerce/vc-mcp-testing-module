@@ -239,7 +239,7 @@ force it, is the one move this rule must not cause.
 
 Silence is the failure mode this pipeline is built against, so a below-floor finding lands in three places:
 
-1. Its **`reports/bugs/open/` draft stays** (5a's `--fix` pass wrote it, or write it here). That is the
+1. Its **`reports/bugs/open/low/` draft stays** (a below-floor finding is `Low`/P3 by definition, so `low/` is always its folder — `.claude/rules/reports.md` §1a) (5a's `--fix` pass wrote it, or write it here). That is the
    durable record, and what a human promotes from later if the finding recurs or the grade is disputed.
 2. **5e's tracker comment names it** — count plus one line each, under `Not filed (below severity floor)`,
    with the draft path. A reviewer who wants it filed can say so; a reviewer who never sees it cannot.
@@ -338,7 +338,7 @@ Change-scoped regression: [suite IDs] — [pass rate] ([RUN_ID]).
 Regression triage: [N] confirmed bugs, [M] test-case fixes applied, [K] dismissed.
 App Insights (test window): [N] correlated — [confirmed/needs-review/none].
 Business rules verified: [BL-* list]. Bugs: [list, with relationship — sub-task/linked/standalone — or None].
-Not filed (below severity floor): [N] Low — [one line each + reports/bugs/open/<file>.md], or None.
+Not filed (below severity floor): [N] Low — [one line each + reports/bugs/open/low/<file>.md], or None.
 Release gate: [GO/CONDITIONAL GO/NO-GO recommendation]. Decision: [verdict].
 Release note: [<layer>/<audience> — /ba-analyze docs release <ticket-key>], or "none — <refusal>".
 Evidence: reports/tickets/{SPRINT}/<ticket-key>/screenshots/

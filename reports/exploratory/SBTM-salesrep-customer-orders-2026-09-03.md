@@ -33,7 +33,7 @@
 ## Bugs Found
 | # | Severity | Title | Evidence | Net-new? |
 |---|----------|-------|----------|----------|
-| 1 | Medium | Zero-match filter hides the active status filter and its control | `reports/bugs/open/BUG-salesrep-customer-orders-zero-match-hides-active-status-filter.md` | Yes |
+| 1 | Medium | Zero-match filter hides the active status filter and its control | `reports/bugs/open/medium/BUG-salesrep-customer-orders-zero-match-hides-active-status-filter.md` | Yes |
 | 2 | Low | Zero-match empty state has no inline clear/reset affordance | same draft, §Notes (below the P3 filing floor) | Yes |
 
 ## Risk Areas
