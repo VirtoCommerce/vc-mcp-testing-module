@@ -79,7 +79,7 @@ FULL   1a → 1b → 1c ‖ 1d ‖ 2-load → 1e → 1e-plan → 2-topup → 2a
                 → 5a → 5b → 5c → 5r → 5d → 5e → 5f → 5h → 5g
 ```
 
-`[2a]` on FAST only under `--coverage`. On `--iterate`, 5a–5d + 5r repeat per round; 5e, 5f, 5h and 5g
+`[2a]` on FAST only under `--coverage`. On `--iterate`, `5k.0` (round entry) + 5a–5d + 5r repeat per round; 5e, 5f, 5h and 5g
 fire once, at loop exit ([`skills/qa-test/modes.md`](../skills/qa-test/modes.md) §5k).
 
 ---
@@ -156,6 +156,12 @@ re-runs the **failed checklist items** plus C2, **re-scoped to the fix's own dif
 ticket's, and the checklist is **appended to** per round rather than overwritten: on FAST it is the only
 durable record, so rewriting a round-1 FAIL as a round-2 PASS deletes the proof the defect existed. What
 stays off inside the loop: the verifier re-ratification, exactly as at every other FAST gate.
+
+**`5k.0` round entry runs on FAST too — and it is the path that needs it most.** Every bug a FAST round
+files comes off a **checklist item**, so it carries no case id and nothing in the RED→GREEN set can ever
+speak for it; an inline `/qa-verify-fix` per fix-ready sub-task is the only way such a bug is ever
+verified or closed. It is not an exception to FAST's one-execution-agent promise for the same reason the
+contract axis is not: the bugs are verified through the flow `1a` already runs inline, not by a new lane.
 
 **Gate (FAST, inline):** the checklist covers every atomic condition; `npm run td:validate` is green; **and
 when `--coverage` ran**, every Step-2a `tc:scope` hit is disposed (`REPAIR` fixed **and re-linted with
@@ -594,7 +600,7 @@ methodology:
 | **5e** | Report | Feed + independently ratify the Feature Release Gate · post the tracker comment (**incl. the mandatory `Not filed (below severity floor)` line, `None` when empty**) · persist `summary.json` + update the checklist in place with verdicts · output the one chat report | verifier |
 | **5f** | Change status | **After** the report, **ask first**, `qa-lead` only. PASS / PASS WITH NOTES → TESTED · FAIL → REOPEN with failures + bug links · **BLOCKED → NO transition + a mandatory comment naming the blocker** (the ticket stays in-testing: TESTED would be a lie and REOPEN files an env blocker into the dev queue). **TESTED is the terminal state this command may reach — never Done or Cancelled.** One row per verdict, the record, and the per-flow ownership: [`ticket-status-transitions.md`](../knowledge/execution/ticket-status-transitions.md) | — |
 | **5h** | Publish documentation | **After** TESTED, **both paths**. Write the §3/§4/§5 guides for the surface the ticket moved into `reports/ba/`, then post them as **ONE tracker comment with a section per audience** — audiences from the §9.1 layer row, size caps and the three refusals (`layer-unresolved` · `not-deployed` · `not-user-visible`) in [`knowledge/ba/virto-doc-style.md`](../knowledge/ba/virto-doc-style.md) §10. Not a release note: no version literals, and the audience is a floor rather than the only one. **A non-`PASS` verdict scopes this step rather than refusing it** — document the passing paths, omit the failing ones, carry the `Not documented` line and the verbatim verdict; its precondition is **5f having run**, not the ticket having reached TESTED — a FAIL run transitions to REOPEN and would otherwise refuse exactly the runs this rule exists to scope. Ask before posting; refuse rather than pad. An existing guide for this surface is **amended, never forked** (`2-map` names it) | inline |
-| **5k** | Iterate (`--iterate` only) | The bounded test → fix → re-test loop. **Per round:** 5a–5d + a short round-delta comment + `summary.json` + an appended checklist section. **At loop exit, once:** 5e in full → 5f → 5h → 5g. So a `--iterate` run posts **one** QA-Complete comment and makes **one** transition, whatever the round count. Which durable step runs per round vs at exit, and why each: [`skills/qa-test/modes.md`](../skills/qa-test/modes.md) §5k | round cap · deploy confirm · G0 BAIL → STOP |
+| **5k** | Iterate (`--iterate` only) | The bounded test → fix → re-test loop. **Per round (≥2), at the head of the round:** `5k.0` round entry — probe the build, then re-read the board (the ticket's sub-tasks + linked bugs), verify each fix-ready bug with `/qa-verify-fix` **inline**, hop a VERIFIED one to `TESTED` **only if its fix is merged and in the probed build**, then re-run the failed cases / checklist items. **Per round:** 5a–5d + a short round-delta comment + `summary.json` + an appended checklist section. **At loop exit, once:** 5e in full → 5f → 5h → 5g. So a `--iterate` run posts **one** QA-Complete comment and makes **one** transition **on the ticket under test**, whatever the round count — a bug sub-task verified at round entry takes its own hop, capped at `TESTED` ([`ticket-status-transitions.md`](../knowledge/execution/ticket-status-transitions.md) §5a). Which durable step runs per round vs at exit, and why each: [`skills/qa-test/modes.md`](../skills/qa-test/modes.md) §5k | round cap · deploy confirm · G0 BAIL → STOP |
 | **5g** | Promote (FULL only) | Harvest `{OBSERVED}` via `--verify --fix`, re-derive G10, then flip `Draft → Automated` via **`npm run tc:promote:apply`** — never by hand-editing the cell, and never via bare `tc:promote`, which is the **dry run** and writes nothing. It writes `Automated` **only**, onto rows that are exactly `Draft`; `Reviewed`/`Manual` stays a human call. Runs **last and non-blocking**: the close-out is already delivered | **hard STOP** + verifier |
 
 **Severity is graded at 5a and never re-graded at 5d** to move a finding across the floor. Filing and

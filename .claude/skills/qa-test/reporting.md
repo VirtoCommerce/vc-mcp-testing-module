@@ -192,11 +192,18 @@ the in-testing hop first (discover live). On Azure Boards set `System.State` dir
 terminal state this command may reach — never Done or Cancelled.** Every hop **and every skip** appends to
 `summary.json.status_transitions[]`.
 
-**`--iterate`: the transition happens AT LOOP EXIT ONLY** — one transition per run, whatever the round
+**`--iterate`: the transition happens AT LOOP EXIT ONLY** — one transition on the ticket under test per run, whatever the round
 count. REOPEN is the human-handoff signal, and a loop about to start another round is not handing off; a
 per-round REOPEN would also flap the ticket out of in-testing, which is the precondition both closing
 transitions need. The ticket therefore stays in-testing across rounds, so the Step-4 hop fires once — and
 if round 1 skipped it, the exit round does it here, exactly as the paragraph above already requires.
+
+**A BUG the loop verified is a different ticket, and it has its own hop** — taken by the inline
+`/qa-verify-fix` at round entry, capped at `TESTED`, and only when that bug's fix is merged and present in
+the round's probed build; everything else the loop left in in-testing closes out here at 5f alongside the
+ticket ([`modes.md`](modes.md) §Round entry ·
+[`ticket-status-transitions.md`](../../knowledge/execution/ticket-status-transitions.md) §5a). It does not
+make this a two-transition run: the count above is per ticket.
 
 ### Close the loop
 

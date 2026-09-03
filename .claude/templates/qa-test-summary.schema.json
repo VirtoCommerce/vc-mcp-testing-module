@@ -132,6 +132,22 @@
           "deploy_pr": null,
           "deploy_confirmed": false
         },
+        "round_entry": [
+          {
+            "$comment": "Step 5k.0 — ONE ROW PER BUG THE BOARD HANDED THIS ROUND, read live from the ticket's sub-tasks + linked/related issues AFTER the deploy and AFTER the build probe, and BEFORE the failed scope is re-run (.claude/skills/qa-test/modes.md §Round entry). It exists because the loop's carried/fixed sets were previously derived from the run's own memory of what 5d filed, so three things were invisible: a sub-task a HUMAN fixed+merged+deployed between rounds, a bug a developer LINKED mid-run, and any bug with no covering case — every bug a FAST round files, since a FAST finding comes off a checklist item and carries no case id. Only a `fix-ready` bug is verified, by a FULL inline /qa-verify-fix (never inferred from the C1 result: a case going green proves that case's assertion, not the bug's STR). Empty on round 1 is legal ONLY as the baseline read (verified: false on every row); EMPTY ON A ROUND >=2 MEANS THE BOARD WAS NEVER READ, which is a gap, not a clean round. `hop` is capped at TESTED and is taken ONLY on a VERIFIED verdict whose fix is MERGED and present in build.deployed — green on the loop's own unmerged prerelease, or either half UNKNOWN, records hop null with the reason. FIX_INCOMPLETE/INTERMITTENT/NEW_REGRESSION/BLOCKED never hop here: verify-fix's REOPEN would flap the bug out of in-testing every round, so it is deferred to loop exit. The hop itself is ALSO recorded in status_transitions[] against the BUG key.",
+            "key": "<tracker-key>",
+            "source": "subtask|linked",
+            "status_role": "fix-ready|not-fixed|testable|terminal",
+            "verified": false,
+            "verify_verdict": "VERIFIED|VERIFIED_WITH_NOTES|FIX_INCOMPLETE|NEW_REGRESSION|INTERMITTENT|BLOCKED|null",
+            "fix_pr": null,
+            "fix_merged": "yes|no|UNKNOWN",
+            "in_probed_build": "yes|no|UNKNOWN",
+            "hop": null,
+            "hop_skipped": "<why no hop — e.g. green on unmerged prerelease | fix_merged UNKNOWN | still failing, deferred to loop exit | already terminal>",
+            "report_moved": false
+          }
+        ],
         "red_green": {
           "$comment": "The re-run of exactly the previously-FAILED cases, as its OWN /qa-regression run (--ids), kept out of the C2 run so its pass rate answers one question and the release gate's >=80% floor keeps answering another (the floor came down from 95% on 2026-09-02; skills/qa-metrics/quality-gates.md owns it). Round 1: all null/empty \u2014 there is no previously-failed set yet, and that is not a gap. FAST: run_id stays null and `checklist_items` carries the re-run items instead of `cases`, because a FAST round re-runs failed checklist items through one agent and produces no RUN_ID.",
           "run_id": null,
@@ -153,7 +169,7 @@
           { "$comment": "A bug THIS RUN filed in an earlier round that is still failing. Neither re-filed nor relabelled PRE-EXISTING: it keeps its original IN-SCOPE provenance and severity (so it still fails 5c this round) and gets one comment on its existing Sub-task. Re-filing would produce N tickets for one defect; PRE-EXISTING would stop it failing the ticket that caused it.", "key": "<tracker-key>", "first_round": 1 }
         ],
         "bugs_fixed": [
-          { "$comment": "A bug filed in an earlier round whose case(s) went GREEN in this round. Commented on its own Sub-task and recorded here, deliberately NOT transitioned: TESTED is the furthest /qa-test may move anything and Done/Cancelled are forbidden, and the fix is an UNMERGED prerelease, so nothing has shipped. The human who merges closes it.", "key": "<tracker-key>", "filed_round": 1, "cases": [] }
+          { "$comment": "A bug filed in an earlier round whose case(s) went GREEN in this round. Commented on its own Sub-task and recorded here. TRANSITIONED ONLY WHEN THE FIX HAS SHIPPED TO THE ENV: green on the loop's own UNMERGED prerelease means nothing has shipped, so no QA state on that bug is honest and it stays comment-only (the human who merges closes it); a fix that is MERGED and present in build.deployed is verified at round entry by an inline /qa-verify-fix and hops to TESTED — see round_entry[] and modes.md §Which hop a verified bug takes. TESTED remains the furthest /qa-test may move anything; Done/Cancelled/Closed are forbidden in every flow.", "key": "<tracker-key>", "filed_round": 1, "cases": [], "hop": null }
         ],
         "qa_fix": [
           { "$comment": "One /qa-fix invocation per in-scope fixable bug this round. outcome pr-open = G0-G7 cleared and a PR is open (never merged); bail = a G0 BAIL, which STOPs the loop and hands THAT bug to a human. An empty array on a FAIL round means no in-scope fixable bug remained and the loop fell back to the pointer close-out \u2014 a legitimate ending, and one the loop-level `outcome` alone cannot express.", "bug": "<tracker-key>", "outcome": "pr-open|bail", "pr": null, "bail_reason": null }
