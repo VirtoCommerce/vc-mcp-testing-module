@@ -836,7 +836,10 @@ test("applyKeystrokes: typing, backspace, control chars, paste with terminator",
 });
 
 test("doctorReport: legacy env var phase-aware, names only", () => {
-    const base = { platform: "linux", enableLists: { enabled: [], disabled: [] }, resolvable: {}, skipped: [], toolsMissing: [], configDirOverride: false };
+    // clientConfigsSeen names the phase this test is about. "Nothing wired" alone no longer implies a
+    // pending switch — it also covers "nothing was inspected", where no claim about a switch is
+    // available. The assertions below are unchanged; only the input now states which of the two it is.
+    const base = { platform: "linux", enableLists: { enabled: [], disabled: [] }, resolvable: {}, skipped: [], toolsMissing: [], configDirOverride: false, clientConfigsSeen: ["/repo/.mcp.json"] };
     const pre = m.doctorReport({ secrets: {}, servers: {} },
         { ...base, env: { ADO_MCP_AUTH_TOKEN: "SENTINEL-DO-NOT-PRINT" }, wired: new Set() });
     assert.ok(pre.some((l) => l.startsWith("INFO") && l.includes("ADO_MCP_AUTH_TOKEN") && l.includes("until the vc-secrets switch")));
@@ -2046,4 +2049,68 @@ test("hooks: Cursor's file uses Cursor's schema, names no client, and fails CLOS
     // The path resolution for a plugin-provided hook is undocumented, and a nonzero exit is fail-open
     // by default — so without this, a wrong path leaves no guard and no signal.
     assert.equal(entry.failClosed, true);
+});
+
+// ── doctor: what was actually inspected ─────────────────────────────────────────────────────────
+
+test("readWiredServers: records which files it actually looked at", () => {
+    const seen = [];
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vcs-"));
+    tmpDirs.push(dir);
+    const mcp = path.join(dir, ".mcp.json");
+    fs.writeFileSync(mcp, JSON.stringify({ mcpServers: {} }));
+    m.readWiredServers(mcp, null, null, [], seen);
+    assert.deepEqual(seen, [mcp], "the file it read, and only that");
+});
+
+test("readWiredServers: a path that does not exist is not 'seen'", () => {
+    const seen = [];
+    m.readWiredServers(path.join(os.tmpdir(), "vcs-absent", ".mcp.json"), null, null, [], seen);
+    assert.deepEqual(seen, []);
+});
+
+test("readWiredServers: still returns a Set, because eight assertions and one call site depend on it", () => {
+    assert.ok(m.readWiredServers(null, null, null, [], []) instanceof Set);
+});
+
+test("readWiredElsewhere: another client's config counts as both seen and wired", () => {
+    // The half that makes the fact meaningful. Without it, "did we see a client config" is a property
+    // of whether Claude Code is installed, not of how this developer works.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vcs-cursor-"));
+    tmpDirs.push(dir);
+    const cursorCfg = path.join(dir, "mcp.json");
+    fs.writeFileSync(cursorCfg, JSON.stringify({
+        mcpServers: { github: { command: "node", args: ["${env:VC_SECRETS}", "run", "github"] } },
+    }));
+    const bare = path.join(dir, "bare.json");
+    fs.writeFileSync(bare, JSON.stringify({ mcpServers: { other: { command: "npx", args: ["x"] } } }));
+
+    const seen = [];
+    const wired = m.readWiredElsewhere([cursorCfg, bare, path.join(dir, "absent.toml")], seen);
+    assert.equal(wired.size, 1, "only the file that routes through the launcher counts as wired");
+    assert.deepEqual(seen, [cursorCfg, bare], "both existing files were inspected; the absent one was not");
+});
+
+test("doctorReport: with nothing wired and no client config seen, the legacy note claims nothing about a switch", () => {
+    const lines = m.doctorReport({ secrets: {}, servers: {} }, {
+        env: { ADO_MCP_AUTH_TOKEN: "x" }, platform: "linux",
+        enableLists: { enabled: [], disabled: [], envKeys: [] },
+        resolvable: {}, skipped: [], toolsMissing: [], wired: new Set(),
+        configDirOverride: null, clientConfigsSeen: [],
+    });
+    const note = lines.find((l) => l.includes("ADO_MCP_AUTH_TOKEN"));
+    assert.ok(note, "the variable is still reported");
+    assert.ok(!note.includes("still required until the vc-secrets switch lands"),
+        "no claim about a switch, because no client config was inspected");
+});
+
+test("doctorReport: with a client config seen and nothing wired, the switch really is pending", () => {
+    const lines = m.doctorReport({ secrets: {}, servers: {} }, {
+        env: { ADO_MCP_AUTH_TOKEN: "x" }, platform: "linux",
+        enableLists: { enabled: [], disabled: [], envKeys: [] },
+        resolvable: {}, skipped: [], toolsMissing: [], wired: new Set(),
+        configDirOverride: null, clientConfigsSeen: ["/repo/.mcp.json"],
+    });
+    assert.match(lines.find((l) => l.includes("ADO_MCP_AUTH_TOKEN")),
+        /still required until the vc-secrets switch lands/);
 });

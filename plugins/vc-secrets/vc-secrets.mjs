@@ -1219,7 +1219,7 @@ function readEnableLists(file) {
 // a personal server is wired with `claude mcp add-json --scope user|local`, which writes ~/.claude.json,
 // so for a user-scope-only setup nothing looked wired — and `doctor` then advised keeping a plaintext
 // token that is already dead. Both files are read, and ~/.claude.json carries per-project blocks too.
-function readWiredServers(mcpJsonPath, userJsonPath = null, projectRoot = null, problems = []) {
+function readWiredServers(mcpJsonPath, userJsonPath = null, projectRoot = null, problems = [], seen = []) {
     const wired = new Set();
     // Case-insensitive, and across `command` too. The documented entry carries `${VC_SECRETS}` — which
     // does not contain the lowercase string — so a case-sensitive args-only match failed on exactly the
@@ -1250,10 +1250,18 @@ function readWiredServers(mcpJsonPath, userJsonPath = null, projectRoot = null, 
     };
 
     if (mcpJsonPath) {
-        collect(load(mcpJsonPath)?.mcpServers);
+        const doc = load(mcpJsonPath);
+        if (doc) {
+            // Only a file that was actually read counts as inspected. An absent or unreadable one must
+            // not, because the caller uses this list to decide whether it may claim anything at all
+            // about the switch — and a path that was merely attempted supports no claim.
+            seen.push(mcpJsonPath);
+            collect(doc.mcpServers);
+        }
     }
     const userJson = userJsonPath ? load(userJsonPath) : null;
     if (userJson) {
+        seen.push(userJsonPath);
         collect(userJson.mcpServers);   // --scope user really is machine-wide
         // Per-project blocks are NOT. Collecting all of them made "wired" machine-global, and `wired`
         // is what flips the legacy-token line from "still required" to "remove it" — so a repo wired
@@ -1270,7 +1278,30 @@ function readWiredServers(mcpJsonPath, userJsonPath = null, projectRoot = null, 
     return wired;
 }
 
-function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, toolsMissing, wired, configDirOverride, legacyOnly = [], shimContract = null, wiringProblems = [] }) {
+// Detection, not parsing. The question is only "does any MCP entry in this file route through our
+// launcher", and answering it by text search keeps a TOML parser out of a diagnostic's dependency
+// list — one client's config is TOML and nothing else here reads TOML. A false negative costs one
+// diagnostic line; a TOML dependency costs it on every launch.
+const WIRED_MARKER_RE = /vc-secrets(-shim)?\.(mjs|js)|VC_SECRETS/;
+
+function readWiredElsewhere(paths, seen = []) {
+    const names = new Set();
+    for (const p of paths) {
+        if (!p || !fs.existsSync(p)) {
+            continue;
+        }
+        seen.push(p);
+        if (WIRED_MARKER_RE.test(fs.readFileSync(p, "utf8"))) {
+            // The file wires at least one server through us. Which ones is not needed: every consumer
+            // of `wired` asks about its size.
+            names.add(p);
+        }
+    }
+
+    return names;
+}
+
+function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, toolsMissing, wired, configDirOverride, legacyOnly = [], shimContract = null, wiringProblems = [], clientConfigsSeen = [] }) {
     const lines = [];
     const loadedFiles = Object.entries(cfg.files ?? {}).map(([scope, file]) => `${scope}=${file}`).join(", ");
     if (loadedFiles) {
@@ -1308,9 +1339,16 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
         if (where === null) {
             continue;
         }
-        lines.push(wired.size > 0
-            ? `WARN ${varName} present in ${where} — remove it (servers now read via vc-secrets)`
-            : `INFO ${varName} present in ${where} — still required until the vc-secrets switch lands`);
+        if (wired.size > 0) {
+            lines.push(`WARN ${varName} present in ${where} — remove it (servers now read via vc-secrets)`);
+        } else if (clientConfigsSeen.length > 0) {
+            lines.push(`INFO ${varName} present in ${where} — still required until the vc-secrets switch lands`);
+        } else {
+            // Naming what was inspected, not which clients exist. A message that says it looked for three
+            // clients while reading two files is a false statement inside the diagnostic whose falsehood this
+            // change exists to remove.
+            lines.push(`INFO ${varName} present in ${where} — no MCP config was inspected, so whether the switch has landed is unknown`);
+        }
     }
     for (const tool of toolsMissing) {
         lines.push(`FAIL required tool "${tool}" not found on PATH`);
@@ -1429,11 +1467,26 @@ async function cmdDoctor(cfg, flags = []) {
     const claudeDir = projectFile ? path.dirname(projectFile) : null;
     const enableLists = claudeDir ? readEnableLists(path.join(claudeDir, "settings.local.json")) : { enabled: [], disabled: [], envKeys: [] };
     const wiringProblems = [];
+    const clientConfigsSeen = [];
     const wired = readWiredServers(
         claudeDir ? path.join(claudeDir, "..", ".mcp.json") : null,
         path.join(process.env.HOME || os.homedir(), ".claude.json"),
         claudeDir ? path.dirname(claudeDir) : null,
-        wiringProblems);
+        wiringProblems,
+        clientConfigsSeen);
+    // The other clients' configs, in their resolvable form. These are NOT clients.json's configFiles:
+    // those are display templates for a human ("<repo>/.mcp.json") and handing one to fs is the mistake
+    // that contract exists to prevent. The two lists agree by review, which is why this comment is here.
+    const home = process.env.HOME || os.homedir();
+    const projectRoot = claudeDir ? path.dirname(claudeDir) : null;
+    const elsewhere = readWiredElsewhere([
+        projectRoot ? path.join(projectRoot, ".cursor", "mcp.json") : null,
+        path.join(home, ".cursor", "mcp.json"),
+        path.join(home, ".codex", "config.toml"),
+    ], clientConfigsSeen);
+    for (const marker of elsewhere) {
+        wired.add(marker);
+    }
 
     // which secrets does an ENABLED (or wired) server actually consume? A task has no enable list —
     // it is run on purpose — so anything it references counts as consumed, otherwise a Key Vault
@@ -1497,7 +1550,7 @@ async function cmdDoctor(cfg, flags = []) {
     const lines = doctorReport(cfg, {
         env: process.env, platform: process.platform, enableLists, resolvable, skipped,
         toolsMissing, wired, configDirOverride: Boolean(process.env.VC_SECRETS_CONFIG_DIR), legacyOnly,
-        shimContract: activeShimContract, wiringProblems,
+        shimContract: activeShimContract, wiringProblems, clientConfigsSeen,
     });
     // sync write: stderr is an async pipe on Windows, and process.exit abandons pending writes
     fs.writeSync(2, lines.join("\n") + "\n");
@@ -1661,7 +1714,7 @@ export {
     validateLaunchables, LEGACY_ENV_VARS, LEGACY_SECRET_ENV_VARS,
     mapResolveError, applyKeystrokes, promptHidden, cmdSet, cmdUnlock, cmdDoctor, cmdMigrate, newKeyPresent,
     SECRET_NAME_RE, LAUNCHABLE_NAME_RE, doctorReport,
-    readEnableLists, readWiredServers, DANGEROUS_ENV_VARS, sanitizeEnv,
+    readEnableLists, readWiredServers, readWiredElsewhere, DANGEROUS_ENV_VARS, sanitizeEnv,
     consumerShape, shapeDifferences, validateAuthorized, validateVaults, authorizationFor, crossingProblem, own,
 };
 
