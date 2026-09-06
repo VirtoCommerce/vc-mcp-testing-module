@@ -1,10 +1,10 @@
 ---
+name: migrate
 description: "One-time: move secrets stored under the older flat `mcpw:` key prefix to their namespaced keys. Needed only on a machine that used the launcher this plugin replaces — otherwise every secret reports `no legacy entry`. Idempotent."
-argument-hint: ""
 disable-model-invocation: true
 ---
 
-# /vc-secrets:migrate — carry existing secrets over to the namespaced keys
+# migrate — carry existing secrets over to the namespaced keys
 
 Keys are now namespaced by the declaration's home (`vc-secrets:<projectId>:<name>`,
 `vc-secrets:user:<name>`) instead of the older flat `mcpw:<name>` credential (Credential Manager,
@@ -21,15 +21,24 @@ rotation. So the launcher reads the old entry itself and writes the new key, nev
 
 ## Run it
 
+On a client that substitutes plugin placeholders into this file before you see it:
+
 ```bash
-node "$VC_SECRETS" migrate
+node "${CLAUDE_PLUGIN_ROOT}/vc-secrets.mjs" migrate
 ```
 
-On the gpg backend the agent has to be warm first, so run `node "$VC_SECRETS" unlock` in a terminal
-before this — `migrate` itself never prompts, it reads with pinentry disabled and fails fast on a cold
-agent rather than waiting for a passphrase nobody can type. That works even here, before anything has
-been migrated: `unlock` decrypts whichever of the current or the legacy stored file exists, so it warms
-the agent equally well before a migration as after one.
+On a client that substitutes nothing, the launcher sits two directories above this one — resolve the
+relative path against **this file's directory**, not the working directory:
+
+```bash
+node ../../vc-secrets.mjs migrate
+```
+
+On the gpg backend the agent has to be warm first, so run the same launcher's `unlock` verb in a
+terminal before this — `migrate` itself never prompts, it reads with pinentry disabled and fails fast
+on a cold agent rather than waiting for a passphrase nobody can type. That works even here, before
+anything has been migrated: `unlock` decrypts whichever of the current or the legacy stored file
+exists, so it warms the agent equally well before a migration as after one.
 
 If every secret reports as unreadable, check whether the shell can reach your credential store at all
 (a sandboxed or restricted shell cannot read `~/.gnupg`, the Keychain or Credential Manager). That
@@ -52,6 +61,6 @@ it, and deleting it would add a second way to fail. Remove it by hand later if y
 
 ## Report
 
-The per-secret lines verbatim plus the final count, then run `/vc-secrets:doctor` and confirm the
+The per-secret lines verbatim plus the final count, then run the `doctor` verb and confirm the
 migrated names now report `OK`. If any secret says `no legacy entry`, list it explicitly — that is a
 value nobody has, and the operator needs to know before a server fails at launch.

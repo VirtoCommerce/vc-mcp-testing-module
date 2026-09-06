@@ -61,7 +61,7 @@ for (const raw of targets.paths) {
     // plugin update never overwrites it, so an edit here survives indefinitely.
     if (SHIM_RE.test(filePath)) {
         fs.writeSync(2,
-            "BLOCK: the vc-secrets shim is on the path of every server launch — reinstall it with /vc-secrets:install instead of editing it.\n");
+            "BLOCK: the vc-secrets shim is on the path of every server launch — reinstall it with the vc-secrets install skill instead of editing it.\n");
         process.exit(2);
     }
 }

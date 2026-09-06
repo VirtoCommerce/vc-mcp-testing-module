@@ -1396,7 +1396,7 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
         }
     }
     if (typeof shimContract === "number" && shimContract < REQUIRED_SHIM_CONTRACT) {
-        lines.push(`WARN the installed shim speaks contract ${shimContract}, this launcher expects ${REQUIRED_SHIM_CONTRACT} — re-run /vc-secrets:install`);
+        lines.push(`WARN the installed shim speaks contract ${shimContract}, this launcher expects ${REQUIRED_SHIM_CONTRACT} — re-run the vc-secrets install skill`);
     }
     if (backend !== null && lines.length === 0) {
         lines.push(`OK platform=${platform} backend=${backend} — nothing to report`);

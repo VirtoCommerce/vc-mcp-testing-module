@@ -941,7 +941,7 @@ test("doctorReport: a shim contract below REQUIRED_SHIM_CONTRACT is a WARN", () 
         resolvable: {}, skipped: [], toolsMissing: [], wired: new Set(), configDirOverride: false,
         shimContract: m.REQUIRED_SHIM_CONTRACT - 1,
     });
-    assert.ok(lines.some((l) => l.startsWith("WARN") && l.includes("vc-secrets:install")));
+    assert.ok(lines.some((l) => l.startsWith("WARN") && l.includes("install skill")));
 });
 
 test("readEnableLists: the two arrays plus env key NAMES; missing file tolerated", () => {
@@ -1901,4 +1901,82 @@ test("guard: an unreadable payload is reported and does not block", () => {
     });
     assert.equal(r.status, 0, "not inspected is not grounds to block");
     assert.match(r.stderr, /not inspected/);
+});
+
+// ── skills/ ─────────────────────────────────────────────────────────────────────────────────────
+
+const SKILLS_DIR = fileURLToPath(new URL("./skills", import.meta.url));
+const VERBS = ["doctor", "install", "migrate"];
+
+test("skills: the three verbs each ship a SKILL.md", () => {
+    assert.deepEqual(fs.readdirSync(SKILLS_DIR).sort(), VERBS);
+    for (const verb of VERBS) {
+        assert.ok(fs.existsSync(path.join(SKILLS_DIR, verb, "SKILL.md")), `${verb}/SKILL.md`);
+    }
+});
+
+test("skills: the destructive verbs keep the model-invocation barrier on both clients that have one", () => {
+    for (const verb of ["install", "migrate"]) {
+        const body = fs.readFileSync(path.join(SKILLS_DIR, verb, "SKILL.md"), "utf8");
+        // Anchored at the start of the string and tolerant of CRLF. A pattern shaped like
+        // /^---\n[\s\S]*?\nname: / cannot match `---\nname:` — it demands a newline that is not there.
+        assert.match(body, /^---\r?\n(?:.*\r?\n)*?disable-model-invocation: true\r?\n/,
+            `${verb}: disable-model-invocation in frontmatter`);
+        const policy = fs.readFileSync(path.join(SKILLS_DIR, verb, "agents", "openai.yaml"), "utf8");
+        // Codex's default is TRUE when the file or the key is absent, so this file is the only thing
+        // standing between the model and a destructive verb there.
+        assert.match(policy, /allow_implicit_invocation:\s*false/, `${verb}: Codex policy`);
+    }
+});
+
+test("skills: doctor is not gated — it is the diagnostic and writes nothing", () => {
+    const body = fs.readFileSync(path.join(SKILLS_DIR, "doctor", "SKILL.md"), "utf8");
+    assert.ok(!body.includes("disable-model-invocation"), "doctor stays model-invocable");
+    assert.ok(!fs.existsSync(path.join(SKILLS_DIR, "doctor", "agents")), "and needs no Codex policy file");
+});
+
+test("skills: every body names the launcher in a form that resolves on each client", () => {
+    // The placeholder is Claude Code's mechanism; the skill-relative path is Codex's, resolved by the
+    // model rather than by a shell. Both are present so neither client silently gets the other's form.
+    for (const verb of VERBS) {
+        const body = fs.readFileSync(path.join(SKILLS_DIR, verb, "SKILL.md"), "utf8");
+        assert.match(body, /\$\{CLAUDE_PLUGIN_ROOT\}/, `${verb}: the substituted form`);
+        assert.match(body, /\.\.\/\.\.\//, `${verb}: the skill-relative fallback`);
+        assert.ok(!body.includes('"$VC_SECRETS"'),
+            `${verb}: $VC_SECRETS comes from a Claude-Code settings env block and is unset on the other two`);
+    }
+});
+
+test("skills: no positional-argument token can be rewritten inside a body", () => {
+    // A skill body is argument-substituted before the model reads it, and a substituted token that
+    // happens to be legal in the target language produces a command that succeeds and lies.
+    for (const verb of VERBS) {
+        const body = fs.readFileSync(path.join(SKILLS_DIR, verb, "SKILL.md"), "utf8");
+        assert.doesNotMatch(body, /\$ARGUMENTS|\$\d|\$@/, `${verb}: no positional token`);
+    }
+});
+
+test("no orphaned command references survive the deletion, with or without the leading slash", () => {
+    // /vc-secrets:install still resolves on Claude Code — a plugin skill keeps the namespaced
+    // invocation. What breaks is its truth on Cursor and Codex, so the strings become client-neutral.
+    //
+    // Matched WITHOUT requiring the slash. A slash-anchored sweep misses an assertion that pins the
+    // bare substring, and misses the references inside the command bodies being carried across. It is
+    // also why the pattern names the three verbs rather than the bare prefix: `vc-secrets:` on its own
+    // is the KEYSTORE namespace (`vc-secrets:<projectId>:<name>`) and appears legitimately ~20 times.
+    const VERB_REF_RE = /vc-secrets:(install|migrate|doctor)\b/;
+    const root = fileURLToPath(new URL(".", import.meta.url));
+    const offenders = [];
+    const walk = (dir) => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                if (entry.name !== "node_modules") { walk(full); }
+            } else if (/\.(mjs|js|md|json)$/.test(entry.name) && !full.endsWith("vc-secrets.test.mjs")) {
+                if (VERB_REF_RE.test(fs.readFileSync(full, "utf8"))) { offenders.push(full); }
+            }
+        }
+    };
+    walk(root);
+    assert.deepEqual(offenders, [], "every command reference was rewritten client-neutrally");
 });

@@ -9,7 +9,7 @@
 // POINTER: this file resolves the plugin's current location per launch, from the same registry the
 // client itself maintains.
 //
-// Installed by /vc-secrets:install. Rarely changes; when its contract does, SHIM_CONTRACT below goes
+// Installed by the vc-secrets install skill. Rarely changes; when its contract does, SHIM_CONTRACT below goes
 // up and `doctor` tells the developer to re-run install.
 
 import fs from "node:fs";
@@ -33,7 +33,7 @@ let registry;
 try {
     registry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
 } catch {
-    fail(`cannot read ${registryPath} — install the vc-secrets plugin, then run /vc-secrets:install`);
+    fail(`cannot read ${registryPath} — install the vc-secrets plugin, then run the vc-secrets install skill`);
 }
 // This file is owned by the client, so a schema change arrives with a Claude Code upgrade — no user
 // action at all. Refusing to launch would take every wrapped server down at once, and the message lands
@@ -49,7 +49,7 @@ if (registry.version !== REGISTRY_SCHEMA) {
 const records = (Array.isArray(registry.plugins?.[PLUGIN_KEY]) ? registry.plugins[PLUGIN_KEY] : [])
     .filter((r) => r !== null && typeof r === "object");
 if (records.length === 0) {
-    fail(`plugin ${PLUGIN_KEY} is not installed — install it from the marketplace, then run /vc-secrets:install`);
+    fail(`plugin ${PLUGIN_KEY} is not installed — install it from the marketplace, then run the vc-secrets install skill`);
 }
 
 // One plugin can be installed several times (per project, plus user scope). Prefer the record whose
@@ -103,7 +103,7 @@ try {
     fail(`cannot load ${launcher}: ${e.message}`);
 }
 if (typeof mod.runCli !== "function") {
-    fail(`${launcher} does not export runCli — this shim is older than the plugin, re-run /vc-secrets:install`);
+    fail(`${launcher} does not export runCli — this shim is older than the plugin, re-run the vc-secrets install skill`);
 }
 
 await mod.runCli(process.argv.slice(2), { shimContract: SHIM_CONTRACT });

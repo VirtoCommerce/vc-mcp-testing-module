@@ -34,13 +34,13 @@ is that the caller cannot choose the command, not that a reviewer can stop readi
 This plugin ships **no MCP servers**. Each server is declared by whoever needs it — a repo for the
 team's servers, a person for their own.
 
-## Commands
+## Skills
 
-| Command | What it does |
+| Skill | What it does |
 |---|---|
-| `/vc-secrets:install` | Put the shim at a stable path and print the settings entry plus the commands that use it |
-| `/vc-secrets:doctor` | Resolve everything a live server needs and report what is broken |
-| `/vc-secrets:migrate` | One-time: move secrets stored under the pre-plugin flat `mcpw:<name>` credential (or `~/.config/mcpw/secrets/<name>.gpg`) to their namespaced keys |
+| `install` | Put the shim at a stable path and print the settings entry plus the commands that use it |
+| `doctor` | Resolve everything a live server needs and report what is broken |
+| `migrate` | One-time: move secrets stored under the pre-plugin flat `mcpw:<name>` credential (or `~/.config/mcpw/secrets/<name>.gpg`) to their namespaced keys |
 
 `install` deliberately installs a **shim**, not a copy of the launcher: plugin files live in a cache
 directory whose path carries the version, so a copy would keep running an old launcher after an
@@ -232,7 +232,7 @@ verb below throws.
 
 ```bash
 # 0. Write a declaration (see "Declarations" above) before anything else.
-/vc-secrets:install                          # installs the shim, prints the settings entry and the commands below
+# Run the install skill                     # installs the shim, prints the settings entry and the commands below
 node "<the path install printed>" set <name> # <name> must be one of the secrets your declaration lists
 node "<the path install printed>" unlock     # gpg backend only, once per session, in a real terminal
 node "<the path install printed>" doctor     # expect no FAIL
@@ -267,7 +267,7 @@ Then wire each server with the launcher as its `command`, either by hand in the 
 | `secret "x" is only under the legacy key` | Run `migrate` — the value cannot be re-typed, the store never gives it back |
 | `projectId disagrees` | The project and local files name different ids; they key the same secrets |
 | `schemaVersion N needs a newer vc-secrets` | The declaration is ahead of the installed plugin — update the plugin |
-| `Missing environment variables: VC_SECRETS` | The variable was never set on this machine — run `/vc-secrets:install` |
+| `Missing environment variables: VC_SECRETS` | The variable was never set on this machine — run the `install` skill |
 | A wrapped server shows failed in `/mcp` | `doctor` first (secret?), then the probe for the binary: take the `installPath` of `vc-secrets@vc-tools` from `~/.claude/plugins/installed_plugins.json`, then `node <installPath>/vc-secrets-probe.mjs <server>` |
 
 The probe separates "secret not resolvable" from "server binary broken": `doctor` covers the first,
