@@ -2099,7 +2099,7 @@ test("readWiredElsewhere: another client's config counts as both seen and wired"
     const seen = [];
     // The third argument and the name assertion are what changed: this returns SERVER NAMES, because
     // the set it feeds is also read as has(serverName). The `seen` half is untouched.
-    const wired = m.readWiredElsewhere([cursorCfg, bare, path.join(dir, "absent.toml")], seen, ["github", "other"]);
+    const wired = m.readWiredElsewhere([cursorCfg, bare, path.join(dir, "absent.toml")], seen);
     assert.deepEqual([...wired], ["github"], "only the server in the file that routes through the launcher");
     assert.deepEqual(seen, [cursorCfg, bare], "both existing files were inspected; the absent one was not");
 });
@@ -2346,7 +2346,7 @@ test("readWiredElsewhere: returns server NAMES, because one consumer asks has() 
     fs.writeFileSync(cfgPath, JSON.stringify({
         mcpServers: { github: { command: "node", args: ["${env:VC_SECRETS}", "run", "github"] } },
     }));
-    const wired = m.readWiredElsewhere([cfgPath], [], ["github", "absent-server"]);
+    const wired = m.readWiredElsewhere([cfgPath], []);
     assert.deepEqual([...wired], ["github"]);
 });
 
@@ -2360,7 +2360,7 @@ test("readWiredElsewhere: a knob name is not a wiring marker", () => {
     fs.writeFileSync(cfgPath, JSON.stringify({
         mcpServers: { github: { command: "npx", args: ["x"], env: { VC_SECRETS_TIMING: "1" } } },
     }));
-    assert.equal(m.readWiredElsewhere([cfgPath], [], ["github"]).size, 0);
+    assert.equal(m.readWiredElsewhere([cfgPath], []).size, 0);
 });
 
 test("shim: a prerelease does not outrank its own release", () => {
@@ -2446,4 +2446,113 @@ test("README: the Codex branch tells the reader to create the shim its emitted e
     // chose.
     const readme = fs.readFileSync(fileURLToPath(new URL("./README.md", import.meta.url)), "utf8");
     assert.match(setupBranch(readme, "Codex"), /install` skill|install skill/, "the branch names the install skill");
+});
+
+// ── wiring attribution reads server KEYS, not substrings ────────────────────────────────────────
+
+test("readWiredElsewhere: a declared name that merely appears in the file is not wired", () => {
+    // The baked shim path alone contains "data", "plugins", "tools", "claude", "run" and "node". A
+    // substring test over the whole file marked every declared server with such a name as wired,
+    // which drops the SKIP that keeps a teammate's doctor from FAILing on a Key Vault secret they
+    // cannot reach — the failure the surrounding design exists to prevent.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vcs-attrib-"));
+    tmpDirs.push(dir);
+    const toml = path.join(dir, "config.toml");
+    fs.writeFileSync(toml, [
+        '[mcp_servers.github]',
+        'command = "node"',
+        'args = ["/home/u/.claude/plugins/data/vc-secrets-vc-tools/vc-secrets-shim.mjs","run","github"]',
+        '',
+        '[mcp_servers.jira]',
+        'command = "npx"',
+        'args = ["-y","jira-mcp"]',
+    ].join("\n"));
+    assert.deepEqual([...m.readWiredElsewhere([toml], [])].sort(), ["github"]);
+});
+
+test("readWiredElsewhere: a JSON client's unwired server is not wired by a neighbour that is", () => {
+    // One Cursor file holds ALL of a user's servers and only some route through the launcher. That is
+    // the ordinary shape, not a corner.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vcs-attrib-json-"));
+    tmpDirs.push(dir);
+    const cfg = path.join(dir, "mcp.json");
+    fs.writeFileSync(cfg, JSON.stringify({ mcpServers: {
+        github: { command: "node", args: ["${env:VC_SECRETS}", "run", "github"] },
+        jira: { command: "npx", args: ["-y", "jira-mcp"], env: { JIRA_TOKEN: "plaintext" } },
+    } }));
+    assert.deepEqual([...m.readWiredElsewhere([cfg], [])].sort(), ["github"]);
+});
+
+test("readWiredElsewhere: a quoted TOML table name is read, since dots are legal in a server name", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vcs-attrib-dotted-"));
+    tmpDirs.push(dir);
+    const toml = path.join(dir, "config.toml");
+    fs.writeFileSync(toml, '[mcp_servers."azure.mcp"]\ncommand = "node"\nargs = ["${x}/vc-secrets-shim.mjs","run","azure.mcp"]\n');
+    assert.deepEqual([...m.readWiredElsewhere([toml], [])], ["azure.mcp"]);
+});
+
+test("readWiredElsewhere: an unreadable client config is reported, not counted as inspected-and-clean", () => {
+    // The sibling reader pushes a problem for the identical condition. Swallowing it converts a crash
+    // into a confident wrong claim: the file is recorded as inspected, contributes no wiring, and the
+    // legacy-token advice then rests on a file nobody could read.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vcs-unreadable-"));
+    tmpDirs.push(dir);
+    const cfg = path.join(dir, "mcp.json");
+    fs.writeFileSync(cfg, JSON.stringify({ mcpServers: {} }));
+    fs.chmodSync(cfg, 0o000);
+    const seen = [];
+    const problems = [];
+    m.readWiredElsewhere([cfg], seen, problems);
+    fs.chmodSync(cfg, 0o600);
+    assert.equal(problems.length, 1, "the unreadable file is reported");
+    assert.match(problems[0], /cannot be read/);
+});
+
+test("shim: a version with fewer segments still loses to a genuinely higher one", () => {
+    // Missing segments count as zero rather than as "lower than anything", so 1.0 and 1.0.0 are the
+    // same version and neither outranks the other by shape alone.
+    const r = runShim(["doctor"], { caches: [
+        { client: "codex", version: "1.0", label: "two-segment" },
+        { client: "codex", version: "1.0.1", label: "higher" },
+    ] });
+    assert.match(r.stderr, /STUB-RAN:higher/);
+});
+
+test("shim: a stale registry record falls back to a HEALTHY REGISTRY record before the caches", () => {
+    // The fallthrough went straight to the caches, so with one broken and one healthy record and no
+    // cache install it exited 1 saying the registry "points nowhere" while a healthy record sat in it.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vcs-sibling-home-"));
+    tmpDirs.push(home);
+    const good = fs.mkdtempSync(path.join(os.tmpdir(), "vcs-sibling-good-"));
+    tmpDirs.push(good);
+    fs.writeFileSync(path.join(good, "vc-secrets.mjs"),
+        'export async function runCli() { process.stderr.write("STUB-RAN:sibling\\n"); }\n');
+    fs.mkdirSync(path.join(home, ".claude", "plugins"), { recursive: true });
+    fs.writeFileSync(path.join(home, ".claude", "plugins", "installed_plugins.json"), JSON.stringify({
+        version: 2,
+        plugins: { "vc-secrets@vc-tools": [
+            { version: "1.0.0", lastUpdated: "2024-01-01", installPath: good },
+            { version: "2.0.0", lastUpdated: "2024-02-01", installPath: path.join(home, "gone") },
+        ] },
+    }));
+    const r = spawnSync(process.execPath, [SHIM_PATH, "doctor"],
+        { env: { ...process.env, HOME: home }, cwd: home, encoding: "utf8" });
+    assert.match(r.stderr, /STUB-RAN:sibling/);
+});
+
+test("README: the Cursor branch also names the shim and the variable that has to reach it", () => {
+    // Only the Codex branch had this assertion, so the Cursor branch could lose the same instruction
+    // silently — and it is the branch whose entry uses a variable, so a missing instruction there
+    // leaves the entry expanding to nothing.
+    const cursor = setupBranch(fs.readFileSync(fileURLToPath(new URL("./README.md", import.meta.url)), "utf8"), "Cursor");
+    assert.match(cursor, /install` skill|install skill/, "names the install skill");
+    assert.match(cursor, /VC_SECRETS/, "names the variable its entry expands");
+});
+
+test("README: the trust probe names both causes, since it cannot distinguish them", () => {
+    // targets.mjs records the matcher assumption and points at this probe as its only detector. A
+    // probe documented as meaning one thing hands back the wrong diagnosis for the other.
+    const readme = fs.readFileSync(fileURLToPath(new URL("./README.md", import.meta.url)), "utf8");
+    assert.match(readme, /two causes/i, "the probe is documented as ambiguous");
+    assert.match(readme, /matcher/i, "and the second cause is named");
 });

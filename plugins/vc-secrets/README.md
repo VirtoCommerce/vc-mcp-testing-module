@@ -298,8 +298,15 @@ Paste `emit-config codex` into `~/.codex/config.toml`, run `doctor`, and trust t
 > listed and not executed until a `trusted_hash` for it exists under `[hooks.state."<key>"]` in your
 > **user** config — and a plugin cannot ship that entry, by design. So "installed and enabled" does
 > not mean the guard is active. Verify by attempting an edit to a declaration file and seeing it
-> refused; if the edit goes through, the hook is untrusted, not broken. A bypass flag exists and is
-> the wrong answer for a guard.
+> refused. A bypass flag exists and is the wrong answer for a guard.
+>
+> **If the edit goes through, there are two causes and this probe cannot tell them apart.** The likely
+> one is that the hook is untrusted — check the client's own hooks view, trust it, and repeat. The
+> other is that the shared hook file's matcher never selected the hook for this client's write tool at
+> all, in which case trusting changes nothing and the guard is inert here. That second cause is a
+> standing assumption recorded in `hooks/targets.mjs`, and this probe is its only detector, so a
+> repeat that still goes through after trusting is the finding worth reporting rather than working
+> around.
 
 ## Knobs
 

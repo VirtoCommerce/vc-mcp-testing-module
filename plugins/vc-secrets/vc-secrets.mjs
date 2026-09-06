@@ -1290,33 +1290,72 @@ function readWiredServers(mcpJsonPath, userJsonPath = null, projectRoot = null, 
 // still live.
 const WIRED_MARKER_RE = /vc-secrets(-shim)?\.(mjs|js)|VC_SECRETS(?![A-Z_])/;
 
+// A TOML table header: `[mcp_servers.name]` or `[mcp_servers."dotted.name"]`. Not a TOML parser — it
+// locates the KEY, which is the one thing a substring search cannot do.
+const TOML_SERVER_TABLE_RE = /^mcp_servers\.(?:"([^"]+)"|([A-Za-z0-9_.-]+))\]/;
+
+function wiredNamesInJson(doc) {
+    const names = new Set();
+    for (const [name, entry] of Object.entries(doc?.mcpServers ?? {})) {
+        const fields = [entry?.command, ...(Array.isArray(entry?.args) ? entry.args : [])];
+        if (fields.some((v) => typeof v === "string" && WIRED_MARKER_RE.test(v))) {
+            names.add(name);
+        }
+    }
+
+    return names;
+}
+
+function wiredNamesInToml(text) {
+    const names = new Set();
+    // Split on table headers so the marker is looked for inside ONE server's table. Testing the whole
+    // file instead is what let a neighbour's wiring vouch for an unwired server.
+    for (const chunk of text.split(/^[ \t]*\[/m)) {
+        const hit = TOML_SERVER_TABLE_RE.exec(chunk);
+        if (hit && WIRED_MARKER_RE.test(chunk)) {
+            names.add(hit[1] ?? hit[2]);
+        }
+    }
+
+    return names;
+}
+
 // Returns SERVER NAMES, not file paths, because the set it feeds is read two ways: `.size` decides a
 // message, and `.has(serverName)` decides which secrets a run actually consumes. Contributing paths
 // type-checks and satisfies every size-based assertion while making a server wired only through this
 // route look unconsumed — so its Key Vault secret is reported SKIP and never checked.
-function readWiredElsewhere(paths, seen = [], serverNames = []) {
+//
+// The name has to come from the file's own server KEY. A substring test over the file text marked
+// every declared name that merely occurred anywhere — and the baked shim path alone contains "data",
+// "plugins", "tools", "claude", "run" and "node", so a server named any of those was wired by the
+// path string itself. Worse, one config file holds ALL of a user's servers and only some route
+// through the launcher, so a single wired neighbour vouched for every plaintext one beside it. That
+// drops the SKIP that keeps a teammate's doctor from FAILing on a Key Vault secret they cannot reach.
+function readWiredElsewhere(paths, seen = [], problems = []) {
     const names = new Set();
     for (const p of paths) {
         if (!p || !fs.existsSync(p)) {
             continue;
         }
-        seen.push(p);
         let text;
         try {
             text = fs.readFileSync(p, "utf8");
-        } catch {
-            continue;   // unreadable is not "nothing is wired", but it is also not something to guess at
-        }
-        if (!WIRED_MARKER_RE.test(text)) {
+        } catch (e) {
+            // Reported, not swallowed — the sibling reader does the same for the same condition. A
+            // file counted as inspected while nobody could read it makes the advice that rests on it
+            // confident and wrong.
+            problems.push(`${p}: cannot be read (${e.message}) — treating it as no wiring, so advice about leftover tokens may be wrong`);
             continue;
         }
-        // The file routes something through the launcher; a declared name appearing in it is taken as
-        // that something. Still detection: naming a server in a wired file and not wiring it is a
-        // shape nobody writes, and the cost of being wrong is one diagnostic line either way.
-        for (const name of serverNames) {
-            if (text.includes(name)) {
-                names.add(name);
-            }
+        seen.push(p);
+        let doc = null;
+        try {
+            doc = JSON.parse(text);
+        } catch {
+            doc = null;   // not JSON, so it is the TOML client's file
+        }
+        for (const name of doc ? wiredNamesInJson(doc) : wiredNamesInToml(text)) {
+            names.add(name);
         }
     }
 
@@ -1505,7 +1544,7 @@ async function cmdDoctor(cfg, flags = []) {
         projectRoot ? path.join(projectRoot, ".cursor", "mcp.json") : null,
         path.join(home, ".cursor", "mcp.json"),
         path.join(home, ".codex", "config.toml"),
-    ], clientConfigsSeen, Object.keys(cfg.servers ?? {}));
+    ], clientConfigsSeen, wiringProblems);
     for (const marker of elsewhere) {
         wired.add(marker);
     }

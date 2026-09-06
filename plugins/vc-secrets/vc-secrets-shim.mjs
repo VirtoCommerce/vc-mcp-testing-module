@@ -122,49 +122,40 @@ const candidates = byProject.length > 0 ? byProject : records;
 // registered project path — the tiebreak must be the VERSION. `lastUpdated` is refreshed
 // independently of any version change, so ordering by it can select an older launcher against newer
 // declarations: exactly the staleness this shim exists to prevent, and silent when it happens.
+// The prerelease suffix is split off rather than parsed with the rest. Without that, "1.0.0-rc.1"
+// splits on dots into ["1","0","0-rc","1"], parseInt("0-rc") is 0, and the extra fourth segment beats
+// the absent one — so a release candidate outranks its own release and runs against production
+// declarations, silently. It is kept OUT of the number array rather than appended to it, because an
+// appended sentinel sits at an index that moves with the segment count, which would then decide
+// between two spellings of the same version.
 const versionKey = (r) => {
     const raw = String(r.version ?? "");
-    // Split the prerelease suffix off before parsing. Without this, "1.0.0-rc.1" splits on dots into
-    // ["1","0","0-rc","1"], parseInt("0-rc") is 0, and the extra fourth segment beats the absent one —
-    // so a release candidate outranks its own release and runs against production declarations,
-    // silently. A sentinel below every real segment restores the semver rule without a semver parser,
-    // which this file has no dependency budget for.
     const dash = raw.indexOf("-");
     const core = dash === -1 ? raw : raw.slice(0, dash);
-    const nums = core.split(".").map((p) => Number.parseInt(p, 10)).map((n) => (Number.isFinite(n) ? n : -1));
-    nums.push(dash === -1 ? 1 : 0);
 
-    return nums;
+    return {
+        core: core.split(".").map((p) => Number.parseInt(p, 10)).map((n) => (Number.isFinite(n) ? n : -1)),
+        release: dash === -1,
+    };
 };
 const newer = (a, b) => {
     const [va, vb] = [versionKey(a), versionKey(b)];
-    for (let i = 0; i < Math.max(va.length, vb.length); i += 1) {
-        const [x, y] = [va[i] ?? -1, vb[i] ?? -1];
+    for (let i = 0; i < Math.max(va.core.length, vb.core.length); i += 1) {
+        // A missing segment is ZERO, not "below everything": 1.0 and 1.0.0 are the same version, and
+        // ranking by segment count is not a rule anyone writing a version number expects. An
+        // unparseable segment is still -1, so junk keeps losing to any real version.
+        const [x, y] = [va.core[i] ?? 0, vb.core[i] ?? 0];
         if (x !== y) {
             return x > y;
         }
+    }
+    if (va.release !== vb.release) {
+        return va.release;   // equal cores: the release outranks a prerelease of itself
     }
 
     return String(a.lastUpdated ?? "") > String(b.lastUpdated ?? "");
 };
 const pick = (rs) => rs.reduce((best, r) => (newer(r, best) ? r : best), rs[0]);
-
-let record;
-if (candidates.length > 0) {
-    record = pick(candidates);
-    if (byProject.length === 0 && records.length > 1) {
-        fs.writeSync(2, `vc-secrets: this directory belongs to none of the ${records.length} installs; using version ${record.version ?? "unknown"} from ${record.projectPath ?? "user scope"}\n`);
-    }
-} else {
-    // The registry knew nothing — either it does not exist, or it lists no install of this plugin.
-    // Both are ordinary on a client that does not maintain one, so the caches decide.
-    const cached = installsInCaches();
-    if (cached.length === 0) {
-        fail(`plugin ${PLUGIN_KEY} is not installed — looked in ${registryPath} and in ${CACHE_ROOTS.join(", ")}. `
-            + "Install it from the marketplace, then run the vc-secrets install skill");
-    }
-    record = pick(cached);
-}
 
 const launcherIn = (r) => {
     if (typeof r?.installPath !== "string" || r.installPath === "") {
@@ -175,24 +166,39 @@ const launcherIn = (r) => {
     return fs.existsSync(candidate) ? candidate : null;
 };
 
-let launcher = launcherIn(record);
-if (!launcher) {
-    // The chosen record is unusable — no installPath, or one whose launcher has gone. A stale entry is
-    // the ordinary result of a manual removal or a half-finished update, and a healthy install may be
-    // sitting in a cache the registry knows nothing about. Failing here told the developer to reinstall
-    // something already on disk. installsInCaches only returns directories that hold the launcher, so
-    // anything it finds is usable by construction.
-    const healthy = installsInCaches();
-    if (healthy.length > 0) {
-        record = pick(healthy);
-        launcher = launcherIn(record);
-        fs.writeSync(2, `vc-secrets: ${registryPath} points at an install that is gone; using version ${record.version ?? "unknown"} from the plugin cache\n`);
+// Usability is part of the ranking, not a check after it. A stale entry — the ordinary result of a
+// manual removal or a half-finished update — must not win and then fail: with a healthy sibling
+// record in the same registry that produced "the record points nowhere" while the healthy one sat
+// beside it. The nearest-project set is preferred, and a broken record there falls back to the wider
+// set before the caches, because a registry record still knows things a cache walk cannot.
+const usable = candidates.filter(launcherIn);
+const fromRegistry = usable.length > 0 ? usable : records.filter(launcherIn);
+
+let record;
+if (fromRegistry.length > 0) {
+    record = pick(fromRegistry);
+    if (byProject.length === 0 && records.length > 1) {
+        fs.writeSync(2, `vc-secrets: this directory belongs to none of the ${records.length} installs; using version ${record.version ?? "unknown"} from ${record.projectPath ?? "user scope"}\n`);
+    }
+} else {
+    // Either the registry knew nothing — ordinary on a client that does not maintain one — or every
+    // record it holds points at a directory with no launcher in it. installsInCaches returns only
+    // directories that DO hold one, so anything it finds is usable by construction.
+    const cached = installsInCaches();
+    if (cached.length === 0) {
+        fail(records.length > 0
+            ? `no usable install of ${PLUGIN_KEY} — every record in ${registryPath} points at a directory holding no ${LAUNCHER}, and no plugin cache holds one either. `
+                + "Reinstall it from the marketplace, then run the vc-secrets install skill"
+            : `plugin ${PLUGIN_KEY} is not installed — looked in ${registryPath} and in ${CACHE_ROOTS.join(", ")}. `
+                + "Install it from the marketplace, then run the vc-secrets install skill");
+    }
+    record = pick(cached);
+    if (records.length > 0) {
+        fs.writeSync(2, `vc-secrets: no record in ${registryPath} points at a usable install; using version ${record.version ?? "unknown"} from the plugin cache\n`);
     }
 }
-if (!launcher) {
-    fail(`no usable install of ${PLUGIN_KEY} — the record in ${registryPath} points nowhere and no plugin cache holds ${LAUNCHER}. `
-        + "Reinstall it from the marketplace, then run the vc-secrets install skill");
-}
+
+const launcher = launcherIn(record);
 
 // Everything up to runCli happens before the launcher installs its own handlers, so a failure here
 // would otherwise surface as a raw Node stack trace from a cache path — unreadable, and it names the
