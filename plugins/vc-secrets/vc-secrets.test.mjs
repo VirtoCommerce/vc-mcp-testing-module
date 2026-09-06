@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as m from "./vc-secrets.mjs";
+import * as clients from "./clients.mjs";
 
 const LAUNCHER_PATH = fileURLToPath(new URL("./vc-secrets.mjs", import.meta.url));
 
@@ -1746,4 +1747,41 @@ test("install-shim: an empty --data-dir falls back to the computed default and s
     assert.equal(r.status, 0, r.stderr);
     assert.ok(fs.existsSync(path.join(home, ".claude", "plugins", "data", "vc-secrets-vc-tools", "vc-secrets-shim.mjs")));
     assert.match(r.stdout, /arrived empty/);
+});
+
+// ── clients.mjs ─────────────────────────────────────────────────────────────────────────────────
+
+test("clientNames: returns the three clients, sorted", () => {
+    assert.deepEqual(clients.clientNames(), ["claude-code", "codex", "cursor"]);
+});
+
+test("clientDescriptor: every client carries the whole contract", () => {
+    for (const name of clients.clientNames()) {
+        const d = clients.clientDescriptor(name);
+        assert.equal(typeof d.displayName, "string", `${name}: displayName`);
+        assert.ok(["json", "toml"].includes(d.format), `${name}: format is json or toml`);
+        assert.equal(typeof d.serversKey, "string", `${name}: serversKey`);
+        assert.ok(d.launcherRef === null || typeof d.launcherRef === "string", `${name}: launcherRef`);
+        assert.ok(
+            d.minVersion === null || d.minVersion === clients.MIN_VERSION_UNKNOWN || typeof d.minVersion === "string",
+            `${name}: minVersion is a version, null for "no floor", or the unknown sentinel`);
+        assert.equal(typeof d.configFiles, "object", `${name}: configFiles`);
+        assert.ok(Object.keys(d.configFiles).length > 0, `${name}: configFiles is not empty`);
+    }
+});
+
+test("clientDescriptor: an unknown client names the ones that exist", () => {
+    assert.throws(() => clients.clientDescriptor("windsurf"), /windsurf.*claude-code, codex, cursor/s);
+});
+
+test("clients.json: claude-code carries all three MCP scopes", () => {
+    assert.deepEqual(
+        Object.keys(clients.clientDescriptor("claude-code").configFiles).sort(),
+        ["local", "project", "user"]);
+});
+
+test("clients.json: only Cursor's floor is unknown", () => {
+    assert.equal(clients.clientDescriptor("claude-code").minVersion, null);
+    assert.equal(clients.clientDescriptor("codex").minVersion, null);
+    assert.equal(clients.clientDescriptor("cursor").minVersion, clients.MIN_VERSION_UNKNOWN);
 });

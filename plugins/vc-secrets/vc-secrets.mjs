@@ -8,6 +8,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { VcSecretsError } from "./vc-secrets-error.mjs";
+
 const CONFIG_NAME = "vc-secrets.json";
 const LOCAL_CONFIG_NAME = "vc-secrets.local.json";
 const KEY_PREFIX = "vc-secrets";
@@ -44,13 +46,6 @@ function sanitizeEnv(env) {
     }
 
     return out;
-}
-
-class VcSecretsError extends Error {
-    constructor(message, exitCode = 1) {
-        super(message);
-        this.exitCode = exitCode;
-    }
 }
 
 // grammar: "secret:" name [ "." field ]; name [a-z0-9-]+, field [A-Za-z0-9_]+
