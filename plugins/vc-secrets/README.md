@@ -224,28 +224,73 @@ credential (Windows), a Keychain generic password (macOS), or a gpg-encrypted fi
 `~/.config/vc-secrets/secrets/<scope>/` (Linux/WSL, `$XDG_CONFIG_HOME` honoured). Use `set` rather
 than writing these by hand — it gets the file mode, the atomic replace and the key shape right.
 
+## Clients
+
+| Client | MCP config | Servers key | Launcher reference | Minimum version |
+|---|---|---|---|---|
+| Claude Code | `<repo>/.mcp.json`, `~/.claude.json` (local and user scopes) | `mcpServers` | `${VC_SECRETS:-.claude/tools/vc-secrets.js}` | none |
+| Cursor | `<repo>/.cursor/mcp.json`, `~/.cursor/mcp.json` | `mcpServers` | `${env:VC_SECRETS}` | **UNKNOWN** |
+| Codex | `~/.codex/config.toml` | `mcp_servers` | none — the entry carries a literal path | none |
+
+`UNKNOWN` is not "no floor". Nobody has measured which Cursor version this works on, and rendering
+that as "none" would be a claim rather than a gap. `emit-config` says the same thing when it prints
+an entry for that client.
+
+`emit-config <client>` generates the entries from your declaration, which already names every
+server. Its stdout is exactly what you paste; the guidance goes to stderr, so a redirect produces a
+valid file.
+
 ## Setup
 
 Every verb reads the declaration, so write one first — `<repo>/.claude/vc-secrets.json` for the team's
 secrets, `~/.claude/vc-secrets.json` for your own. On a fresh machine, skipping this step means every
 verb below throws.
 
+Then follow your client's branch. They differ in three things and nothing else: how the plugin is
+installed, whether the shim is needed at all, and — on one of them — whether the hook is trusted.
+Each branch ends by running `doctor`, which is the verification: a setup check that lives only in a
+repository cannot reach the people who need it, so it ships as a verb of the tool.
+
+### Claude Code
+
+Install from the marketplace. Run the `install` skill once per machine and paste the printed `env`
+entry into `~/.claude/settings.json`, then restart — a wrapped server picks the variable up only on
+start. `install` prints rather than writes: that file is yours, and a tool that edits a developer's
+global settings unasked is a tool nobody trusts twice. Paste `emit-config claude-code` into
+`<repo>/.mcp.json`, or use `claude mcp add-json --scope user|local` for your own. Then:
+
 ```bash
-# 0. Write a declaration (see "Declarations" above) before anything else.
-# Run the install skill                     # installs the shim, prints the settings entry and the commands below
-node "<the path install printed>" set <name> # <name> must be one of the secrets your declaration lists
-node "<the path install printed>" unlock     # gpg backend only, once per session, in a real terminal
-node "<the path install printed>" doctor     # expect no FAIL
+node "<the path install printed>" set <name>  # <name> must be one of the secrets your declaration lists
+node "<the path install printed>" unlock      # gpg backend only, once per session, in a real terminal
+node "<the path install printed>" doctor      # expect no FAIL
 ```
 
-`install` prints an `env` entry for `~/.claude/settings.json`, setting `VC_SECRETS` to the shim's stable
-path, and the exact commands above with that path already filled in — copy-paste, no shell setup needed.
-It prints rather than writes: that file is yours, and a tool that edits a developer's global settings
-unasked is a tool nobody trusts twice. If you'd rather type `$VC_SECRETS` than the full path, export it
-yourself from your shell's own startup file; the tool doesn't need you to.
+### Cursor
 
-Then wire each server with the launcher as its `command`, either by hand in the repo's `.mcp.json`
-(project scope) or with `claude mcp add-json --scope user|local` for your own.
+Load the plugin from `~/.cursor/plugins/local`. That is the only install route documented here, and
+deliberately so: Cursor's marketplace reads its own manifest file, which this repository does not
+ship, so "install it from the marketplace" would be an instruction nobody has performed.
+
+The shim is not needed. Paste `emit-config cursor` into `<repo>/.cursor/mcp.json` or
+`~/.cursor/mcp.json`, and set `VC_SECRETS` in your environment — Cursor reads it as
+`${env:VC_SECRETS}`. Then run `doctor`. If the plugin does not appear in Cursor's own plugin list,
+that is the symptom of the unestablished version floor, and a trace log is the only other place it
+shows.
+
+### Codex
+
+Add this checkout as a marketplace source and install `vc-secrets` from it — the repository's
+existing `.claude-plugin/marketplace.json` is one of the manifest paths Codex accepts, so nothing
+needs publishing. Enable the plugin in `~/.codex/config.toml` and paste `emit-config codex` there
+too. The shim is not needed for the plugin to load, though the emitted entry names it by path. Then
+run `doctor`, and trust the hook.
+
+> **The guard does not run here until you trust it.** A plugin-provided hook arrives untrusted: it is
+> listed and not executed until a `trusted_hash` for it exists under `[hooks.state."<key>"]` in your
+> **user** config — and a plugin cannot ship that entry, by design. So "installed and enabled" does
+> not mean the guard is active. Verify by attempting an edit to a declaration file and seeing it
+> refused; if the edit goes through, the hook is untrusted, not broken. A bypass flag exists and is
+> the wrong answer for a guard.
 
 ## Knobs
 
@@ -275,12 +320,20 @@ the probe the second by completing a real `initialize` handshake through `run`.
 
 ## Why an edit to a declaration gets blocked
 
-The plugin ships a `PreToolUse` hook that denies agent Edit/Write on a declaration file and on the
-shim. A declaration decides which command receives which secret, so it changes through a human PR;
-the shim sits on the path of every launch and no plugin update overwrites it. The hook sees Edit,
-Write, and NotebookEdit only — the same change made through a shell command goes past it — so it is a
-speed bump that surfaces an unexpected edit, not a boundary. Editing those files in your own editor is
-the intended path.
+The plugin ships a `PreToolUse` hook that denies agent writes to a declaration file and to the shim. A
+declaration decides which command receives which secret, so it changes through a human PR; the shim
+sits on the path of every launch and no plugin update overwrites it.
+
+What the hook actually sees differs per client, and the guard reads each shape rather than assuming
+one: on Claude Code the matcher selects `Edit`, `Write` and `NotebookEdit`; on Cursor the hook
+receives every tool call and the guard filters; on Codex the paths live inside `apply_patch` text and
+one patch can name several files, so the guard reads them all. A payload it cannot parse is reported
+rather than passed in silence — that message is the difference between "nothing to block here" and "I
+could not tell".
+
+In all three it stays a speed bump: the same change made through a shell command goes past it. It
+surfaces an unexpected edit; it is not a boundary. Editing those files in your own editor is the
+intended path.
 
 ## Scope of the protection
 

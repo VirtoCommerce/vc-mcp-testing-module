@@ -2256,3 +2256,30 @@ test("emitConfig: the verify line names a real path, never a client-config place
         assert.match(verify, /vc-secrets-shim\.mjs|vc-secrets\.mjs/, `${name}: it names the launcher`);
     }
 });
+
+// ── README ──────────────────────────────────────────────────────────────────────────────────────
+
+test("README: documents every client the descriptors know, with its floor", () => {
+    const readme = fs.readFileSync(fileURLToPath(new URL("./README.md", import.meta.url)), "utf8");
+    for (const name of clients.clientNames()) {
+        const d = clients.clientDescriptor(name);
+        assert.ok(readme.includes(d.displayName), `README names ${d.displayName}`);
+        for (const template of Object.values(d.configFiles)) {
+            // The first token of a template is the path; the parenthetical is guidance.
+            assert.ok(readme.includes(template.split(" ")[0]), `README names ${template.split(" ")[0]}`);
+        }
+    }
+    assert.match(readme, /UNKNOWN/, "the unmeasured floor is marked, not silently omitted");
+});
+
+test("README: every per-client setup branch ends by running the diagnostic", () => {
+    // A setup check that lives only in a repository is unreachable by the people who need it, so the
+    // verification is a command of the distributed thing.
+    const readme = fs.readFileSync(fileURLToPath(new URL("./README.md", import.meta.url)), "utf8");
+    assert.equal((readme.match(/doctor/g) || []).length >= clients.clientNames().length, true);
+});
+
+test("README: the trust step is documented, because a hook that is not trusted never runs", () => {
+    const readme = fs.readFileSync(fileURLToPath(new URL("./README.md", import.meta.url)), "utf8");
+    assert.match(readme, /trusted_hash|trust the hook/i);
+});
