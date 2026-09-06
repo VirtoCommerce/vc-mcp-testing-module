@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as m from "./vc-secrets.mjs";
 import * as clients from "./clients.mjs";
+import * as t from "./hooks/targets.mjs";
 
 const LAUNCHER_PATH = fileURLToPath(new URL("./vc-secrets.mjs", import.meta.url));
 
@@ -1784,4 +1785,120 @@ test("clients.json: only Cursor's floor is unknown", () => {
     assert.equal(clients.clientDescriptor("claude-code").minVersion, null);
     assert.equal(clients.clientDescriptor("codex").minVersion, null);
     assert.equal(clients.clientDescriptor("cursor").minVersion, clients.MIN_VERSION_UNKNOWN);
+});
+
+// ── hooks/targets.mjs ───────────────────────────────────────────────────────────────────────────
+
+test("targetsFrom: the edit tools' path field is read", () => {
+    assert.deepEqual(t.targetsFrom({ tool_name: "Edit", tool_input: { file_path: "/repo/.claude/vc-secrets.json" } }),
+        { paths: ["/repo/.claude/vc-secrets.json"], readable: true });
+});
+
+test("targetsFrom: a notebook path is read too, so a notebook edit is not an unreadable payload", () => {
+    // The matcher is Edit|Write|NotebookEdit (hooks/hooks.json:5) and NotebookEdit carries
+    // notebook_path. Without this the guard prints an unrecognised-payload notice on every notebook
+    // edit in any project — turning a silent no-op into a per-edit warning, which erodes the signal
+    // the notice exists to create.
+    assert.deepEqual(t.targetsFrom({ tool_name: "NotebookEdit", tool_input: { notebook_path: "/repo/nb.ipynb" } }),
+        { paths: ["/repo/nb.ipynb"], readable: true });
+});
+
+test("targetsFrom: a tool that does not write a file is read, not unreadable", () => {
+    // Cursor's hook schema documents no matcher, so its hook sees every tool call. This case must be
+    // silent or the notice fires constantly and stops meaning anything.
+    assert.deepEqual(t.targetsFrom({ tool_name: "Read", tool_input: { pattern: "x" } }),
+        { paths: [], readable: true });
+});
+
+test("targetsFrom: a WRITE tool that yields no path is UNREADABLE, not 'writes nothing'", () => {
+    // The residual Cursor risk, made loud. If Cursor spells its path key differently from its
+    // documentation, this is the payload we get — and `readable: true` would exit 0 with no notice,
+    // which failClosed cannot catch because the hook succeeded.
+    assert.deepEqual(t.targetsFrom({ tool_name: "Write", tool_input: { destination: "/repo/x" } }),
+        { paths: [], readable: false });
+});
+
+test("targetsFrom: a payload with no tool_input at all is unreadable", () => {
+    assert.deepEqual(t.targetsFrom({ tool_name: "Write", hook_event_name: "PreToolUse" }),
+        { paths: [], readable: false });
+});
+
+test("targetsFrom: apply_patch carries its patch under `command`, and every path-bearing header is read", () => {
+    // The key is `command`, NOT `input`: `input` is the internal Rust field name, re-keyed for the hook
+    // at codex-rs/core/src/tools/handlers/apply_patch.rs:464-469
+    //   tool_input: serde_json::json!({ "command": command })
+    // and corroborated where a block reason is composed, hook_runtime.rs:216-218. Reading the wrong key
+    // returns readable:false, the guard exits 0, and EVERY apply_patch write to a declaration is
+    // allowed — behind a notice that reads as harmless.
+    //
+    // *** Move to: is a fourth path-bearing header (parser.rs:42). A rename ONTO a declaration path
+    // writes it while a three-header regex reports success — the exact failure the list contract exists
+    // to prevent, reached through a different header.
+    const patch = [
+        "*** Begin Patch",
+        "*** Update File: /repo/notes.md",
+        "*** Move to: /repo/.claude/vc-secrets.json",
+        "*** End Patch",
+    ].join("\n");
+    const got = t.targetsFrom({ tool_name: "apply_patch", tool_input: { command: patch } });
+    assert.deepEqual(got.paths, ["/repo/notes.md", "/repo/.claude/vc-secrets.json"]);
+    assert.equal(got.readable, true);
+});
+
+test("targetsFrom: a context line is not mistaken for a header", () => {
+    // A context line is space-prefixed (grammar, parser.rs:21), and the upstream parser preserves that
+    // leading space inside a hunk while trimming only at top-level dispatch. A guard that trims both
+    // ends refuses edits to files that merely DOCUMENT the patch format — and a guard that fires on
+    // unrelated edits is the guard people disable.
+    const patch = [
+        "*** Begin Patch",
+        "*** Update File: /repo/doc.md",
+        "@@",
+        " *** Update File: /repo/.claude/vc-secrets.json",
+        "*** End Patch",
+    ].join("\n");
+    assert.deepEqual(t.targetsFrom({ tool_name: "apply_patch", tool_input: { command: patch } }).paths,
+        ["/repo/doc.md"]);
+});
+
+test("targetsFrom: a patch with CRLF line endings is read", () => {
+    const patch = "*** Begin Patch\r\n*** Add File: /repo/.claude/vc-secrets.json\r\n*** End Patch\r\n";
+    assert.deepEqual(t.targetsFrom({ tool_name: "apply_patch", tool_input: { command: patch } }).paths,
+        ["/repo/.claude/vc-secrets.json"]);
+});
+
+test("targetsFrom: an Environment ID header is not a path", () => {
+    // It has a filename production in the grammar and names an environment. The upstream constant is
+    // `*** Environment ID:` with NO trailing space (streaming_parser.rs:19), so a regex demanding one
+    // is stricter than the parser it models.
+    const patch = "*** Begin Patch\n*** Environment ID:remote\n*** Add File: /repo/x\n*** End Patch";
+    assert.deepEqual(t.targetsFrom({ tool_name: "apply_patch", tool_input: { command: patch } }).paths,
+        ["/repo/x"]);
+});
+
+test("guard: exits 2 with a reason on a declaration path, in every payload shape", () => {
+    // One invocation, no --client: the shared hook file has one command string, so the payload has to
+    // be the authority on its own shape.
+    for (const [label, payload] of [
+        ["edit-tool", { tool_name: "Write", tool_input: { file_path: "/repo/.claude/vc-secrets.json" } }],
+        ["notebook", { tool_name: "NotebookEdit", tool_input: { notebook_path: "/repo/.claude/vc-secrets.json" } }],
+        ["apply_patch", { tool_name: "apply_patch", tool_input: { command: "*** Begin Patch\n*** Update File: /repo/.claude/vc-secrets.json\n*** End Patch" } }],
+    ]) {
+        const r = spawnSync(process.execPath, [GUARD_HOOK_PATH], {
+            input: JSON.stringify(payload), encoding: "utf8", env: { ...process.env },
+        });
+        assert.equal(r.status, 2, `${label}: exit 2`);
+        // A non-empty reason is part of the contract, not decoration: exit 2 with empty stderr is
+        // treated as a failure on Codex and the call proceeds.
+        assert.ok(r.stderr.trim().length > 0, `${label}: a non-empty reason`);
+    }
+});
+
+test("guard: an unreadable payload is reported and does not block", () => {
+    const r = spawnSync(process.execPath, [GUARD_HOOK_PATH], {
+        input: JSON.stringify({ tool_name: "Write", hook_event_name: "PreToolUse" }), encoding: "utf8",
+        env: { ...process.env },
+    });
+    assert.equal(r.status, 0, "not inspected is not grounds to block");
+    assert.match(r.stderr, /not inspected/);
 });
