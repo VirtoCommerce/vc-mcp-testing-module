@@ -38,8 +38,11 @@ inherited environment instead, and an argument and an expansion are indistinguis
 script reads them. That is why the check exists rather than the trust.
 
 With `--data-dir` absent or empty the script installs into the documented default under
-`~/.claude/plugins/data/`. On a client with no Claude Code that creates the directory anyway, which is
-deliberate: the shim solves a Claude Code problem and lives where Claude Code looks.
+`~/.claude/plugins/data/`. On a machine with no Claude Code that creates the directory anyway, which is
+deliberate: the path is only a stable place to put the pointer, and one shared location keeps a
+generated config entry identical whichever client reads it. What the shim *resolves to* is not tied to
+that path — it reads an install registry where a client keeps one, and the client's plugin cache
+otherwise.
 
 The script does the three exact things — resolve the stable directory, copy the shim, print the settings
 entry and the commands that use it — so they come out the same on every machine and are covered by tests.

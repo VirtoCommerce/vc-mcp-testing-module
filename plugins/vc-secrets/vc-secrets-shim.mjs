@@ -6,8 +6,9 @@
 // therefore changes on every update. Copying the launcher to a stable path instead would go stale
 // silently — the plugin's commands would update while the launcher kept running an old version, and
 // the launcher's own version diagnostics would then blame the plugin. So the stable path holds a
-// POINTER: this file resolves the plugin's current location per launch, from the same registry the
-// client itself maintains.
+// POINTER: this file resolves the plugin's current location per launch — from the install registry
+// where a client maintains one, and otherwise from the client's own plugin cache, whose layout
+// carries the version in the path.
 //
 // Installed by the vc-secrets install skill. Rarely changes; when its contract does, SHIM_CONTRACT below goes
 // up and `doctor` tells the developer to re-run install.
@@ -21,6 +22,53 @@ const SHIM_CONTRACT = 1;
 const PLUGIN_KEY = "vc-secrets@vc-tools";
 const REGISTRY_SCHEMA = 2;
 const LAUNCHER = "vc-secrets.mjs";
+const [PLUGIN_NAME] = PLUGIN_KEY.split("@");
+
+// Only one of the three clients maintains an install registry, so resolution has two stages. The
+// registry is preferred where it exists because it is the only source that knows about per-project
+// installs. Everywhere else the cache layout is the source: measured as
+// <root>/<marketplace>/<plugin>/<version>/ on both clients available to measure. The marketplace
+// segment is globbed rather than named, because whoever registered the marketplace chose its name.
+//
+// Cursor has no entry yet. That is deliberate: an unmeasured root would be a guess, and a wrong one
+// resolves to nothing in exactly the same way as an absent one while implying it was checked. When
+// its layout is established it becomes one more line here.
+const CACHE_ROOTS = [
+    path.join(os.homedir(), ".claude", "plugins", "cache"),
+    path.join(os.homedir(), ".codex", "plugins", "cache"),
+];
+
+function installsInCaches() {
+    const found = [];
+    for (const root of CACHE_ROOTS) {
+        let marketplaces;
+        try {
+            marketplaces = fs.readdirSync(root, { withFileTypes: true });
+        } catch {
+            continue;   // a client that is not installed contributes nothing, and that is not an error
+        }
+        for (const marketplace of marketplaces.filter((e) => e.isDirectory())) {
+            const pluginDir = path.join(root, marketplace.name, PLUGIN_NAME);
+            let versions;
+            try {
+                versions = fs.readdirSync(pluginDir, { withFileTypes: true });
+            } catch {
+                continue;
+            }
+            for (const version of versions.filter((e) => e.isDirectory())) {
+                const installPath = path.join(pluginDir, version.name);
+                // A version directory with no launcher in it is a partial or abandoned install. Ranking
+                // it would hand the newest slot to a directory whose launch then fails on a missing
+                // file, naming a path nobody chose.
+                if (fs.existsSync(path.join(installPath, LAUNCHER))) {
+                    found.push({ version: version.name, installPath });
+                }
+            }
+        }
+    }
+
+    return found;
+}
 
 function fail(message) {
     // sync write: stderr is an async pipe on Windows, and process.exit abandons pending writes
@@ -29,28 +77,27 @@ function fail(message) {
 }
 
 const registryPath = path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json");
-let registry;
+let registry = null;
 try {
     registry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
 } catch {
-    fail(`cannot read ${registryPath} — install the vc-secrets plugin, then run the vc-secrets install skill`);
+    // No longer fatal. This file belongs to one client, and the plugin is meant to run under three —
+    // failing here is what made every generated config entry naming this shim useless on the other
+    // two. The cache walk covers them, and the failure at the end names every root that was tried.
 }
 // This file is owned by the client, so a schema change arrives with a Claude Code upgrade — no user
 // action at all. Refusing to launch would take every wrapped server down at once, and the message lands
 // on a server's stderr, which surfaces only as "server failed to start" — pointing away from here. So
 // warn and continue: the single field consumed below is `plugins[key][].installPath`, and if that has
 // moved, the checks after this fail with their own legible message.
-if (registry.version !== REGISTRY_SCHEMA) {
+if (registry && registry.version !== REGISTRY_SCHEMA) {
     fs.writeSync(2, `vc-secrets: ${registryPath} is schema version ${registry.version}, this shim was written for ${REGISTRY_SCHEMA} — continuing, but update the plugin\n`);
 }
 
 // Drop anything that is not an object before reading fields off it: the file is the client's, and a
 // hostile or truncated shape must produce this function's own message rather than a raw TypeError.
-const records = (Array.isArray(registry.plugins?.[PLUGIN_KEY]) ? registry.plugins[PLUGIN_KEY] : [])
+const records = (Array.isArray(registry?.plugins?.[PLUGIN_KEY]) ? registry.plugins[PLUGIN_KEY] : [])
     .filter((r) => r !== null && typeof r === "object");
-if (records.length === 0) {
-    fail(`plugin ${PLUGIN_KEY} is not installed — install it from the marketplace, then run the vc-secrets install skill`);
-}
 
 // One plugin can be installed several times (per project, plus user scope). Prefer the record whose
 // project contains the current directory.
@@ -80,9 +127,23 @@ const newer = (a, b) => {
 
     return String(a.lastUpdated ?? "") > String(b.lastUpdated ?? "");
 };
-const record = candidates.reduce((best, r) => (newer(r, best) ? r : best), candidates[0]);
-if (byProject.length === 0 && records.length > 1) {
-    fs.writeSync(2, `vc-secrets: this directory belongs to none of the ${records.length} installs; using version ${record.version ?? "unknown"} from ${record.projectPath ?? "user scope"}\n`);
+const pick = (rs) => rs.reduce((best, r) => (newer(r, best) ? r : best), rs[0]);
+
+let record;
+if (candidates.length > 0) {
+    record = pick(candidates);
+    if (byProject.length === 0 && records.length > 1) {
+        fs.writeSync(2, `vc-secrets: this directory belongs to none of the ${records.length} installs; using version ${record.version ?? "unknown"} from ${record.projectPath ?? "user scope"}\n`);
+    }
+} else {
+    // The registry knew nothing — either it does not exist, or it lists no install of this plugin.
+    // Both are ordinary on a client that does not maintain one, so the caches decide.
+    const cached = installsInCaches();
+    if (cached.length === 0) {
+        fail(`plugin ${PLUGIN_KEY} is not installed — looked in ${registryPath} and in ${CACHE_ROOTS.join(", ")}. `
+            + "Install it from the marketplace, then run the vc-secrets install skill");
+    }
+    record = pick(cached);
 }
 
 if (typeof record.installPath !== "string" || record.installPath === "") {

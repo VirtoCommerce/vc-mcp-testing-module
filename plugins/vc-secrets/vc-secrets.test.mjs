@@ -1248,12 +1248,23 @@ function writeStubInstall(label) {
 
 // A fresh HOME per call so ~/.claude/plugins/installed_plugins.json is exactly what the test wrote —
 // never the real machine's registry.
-function runShim(args, { registry, cwd } = {}) {
+// `caches` is additive: every existing caller omits it and behaves exactly as before. Each entry
+// materialises one <root>/<marketplace>/<plugin>/<version>/ directory the way a real client lays it
+// out, optionally without the launcher so a partial install can be exercised.
+function runShim(args, { registry, cwd, caches = [] } = {}) {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-shim-home-"));
     tmpDirs.push(home);
     if (registry !== undefined) {
         fs.mkdirSync(path.join(home, ".claude", "plugins"), { recursive: true });
         fs.writeFileSync(path.join(home, ".claude", "plugins", "installed_plugins.json"), JSON.stringify(registry));
+    }
+    for (const { client = "claude", marketplace = "vc-tools", version, label, launcher = true } of caches) {
+        const dir = path.join(home, `.${client}`, "plugins", "cache", marketplace, "vc-secrets", version);
+        fs.mkdirSync(dir, { recursive: true });
+        if (launcher) {
+            fs.writeFileSync(path.join(dir, "vc-secrets.mjs"),
+                `export async function runCli() { process.stderr.write("STUB-RAN:${label}\\n"); }\n`);
+        }
     }
 
     return spawnSync(process.execPath, [SHIM_PATH, ...args], { env: { ...process.env, HOME: home }, cwd: cwd ?? home, encoding: "utf8" });
@@ -2113,4 +2124,61 @@ test("doctorReport: with a client config seen and nothing wired, the switch real
     });
     assert.match(lines.find((l) => l.includes("ADO_MCP_AUTH_TOKEN")),
         /still required until the vc-secrets switch lands/);
+});
+
+// ── the shim resolves on any client, not only the one with a registry ───────────────────────────
+
+test("shim: with no client registry, it resolves through a plugin cache instead", () => {
+    // The whole point of generalising: a machine with no Claude Code has no installed_plugins.json,
+    // and before this the shim failed there — which made every generated config entry that names it
+    // useless on the two clients this plugin was widened for.
+    const r = runShim(["doctor"], { caches: [{ client: "codex", version: "1.0.0", label: "codex-cache" }] });
+    assert.match(r.stderr, /STUB-RAN:codex-cache/);
+});
+
+test("shim: the cache walk compares versions, so 0.10.0 beats 0.9.0", () => {
+    // Measured upstream on a sibling plugin: picking by modification time returned the OLDER of two
+    // directories 33 ms apart, and a lexicographic name sort puts 0.10.0 before 0.9.0. Only a numeric
+    // comparison survives both, and getting it wrong runs a stale launcher in silence.
+    const r = runShim(["doctor"], { caches: [
+        { client: "codex", version: "0.9.0", label: "old" },
+        { client: "codex", version: "0.10.0", label: "new" },
+    ] });
+    assert.match(r.stderr, /STUB-RAN:new/);
+    assert.doesNotMatch(r.stderr, /STUB-RAN:old/);
+});
+
+test("shim: a cache directory holding no launcher is not a candidate", () => {
+    // A partial or abandoned install leaves the version directory behind. Treating it as the newest
+    // install would fail every launch with a missing-file error naming a path nobody chose.
+    const r = runShim(["doctor"], { caches: [
+        { client: "codex", version: "2.0.0", label: "empty", launcher: false },
+        { client: "codex", version: "1.0.0", label: "real" },
+    ] });
+    assert.match(r.stderr, /STUB-RAN:real/);
+});
+
+test("shim: caches are searched across clients, and the newest version wins wherever it lives", () => {
+    const r = runShim(["doctor"], { caches: [
+        { client: "claude", version: "1.0.0", label: "claude-cache" },
+        { client: "codex", version: "1.1.0", label: "codex-cache" },
+    ] });
+    assert.match(r.stderr, /STUB-RAN:codex-cache/);
+});
+
+test("shim: the registry still wins over the caches, because only it knows per-project installs", () => {
+    const stub = writeStubInstall("registry");
+    const registry = { version: 2, plugins: { "vc-secrets@vc-tools": [
+        { projectPath: "/nowhere", version: "0.0.1", lastUpdated: "2024-01-01", installPath: stub },
+    ] } };
+    const r = runShim(["doctor"], { registry, caches: [{ client: "codex", version: "9.9.9", label: "cache" }] });
+    assert.match(r.stderr, /STUB-RAN:registry/);
+    assert.doesNotMatch(r.stderr, /STUB-RAN:cache/);
+});
+
+test("shim: when nothing resolves anywhere, the failure names every root it looked in", () => {
+    const r = runShim(["doctor"]);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /installed_plugins\.json/, "the registry it tried");
+    assert.match(r.stderr, /\.codex[/\\]plugins[/\\]cache/, "and the caches it walked");
 });
