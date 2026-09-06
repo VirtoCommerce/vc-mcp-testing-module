@@ -1980,3 +1980,70 @@ test("no orphaned command references survive the deletion, with or without the l
     walk(root);
     assert.deepEqual(offenders, [], "every command reference was rewritten client-neutrally");
 });
+
+// ── manifests and hook files ────────────────────────────────────────────────────────────────────
+
+const CURSOR_HOOKS = fileURLToPath(new URL("./hooks/hooks-cursor.json", import.meta.url));
+const CLAUDE_HOOKS = fileURLToPath(new URL("./hooks/hooks.json", import.meta.url));
+const CLAUDE_MANIFEST = fileURLToPath(new URL("./.claude-plugin/plugin.json", import.meta.url));
+const CURSOR_MANIFEST = fileURLToPath(new URL("./.cursor-plugin/plugin.json", import.meta.url));
+const CODEX_MANIFEST = fileURLToPath(new URL("./.codex-plugin/plugin.json", import.meta.url));
+
+test("manifests: three per-client, and no root one", () => {
+    for (const p of [CLAUDE_MANIFEST, CURSOR_MANIFEST, CODEX_MANIFEST]) {
+        assert.ok(fs.existsSync(p), p);
+    }
+    // A root manifest in the portable format would need a $schema value nobody established, and would
+    // re-impose a version floor that the native per-client manifests remove.
+    assert.ok(!fs.existsSync(fileURLToPath(new URL("./plugin.json", import.meta.url))),
+        "no root manifest — the per-client ones are the shipped shape");
+});
+
+test("manifests: the shared identity fields cannot drift", () => {
+    const claude = JSON.parse(fs.readFileSync(CLAUDE_MANIFEST, "utf8"));
+    for (const p of [CURSOR_MANIFEST, CODEX_MANIFEST]) {
+        const other = JSON.parse(fs.readFileSync(p, "utf8"));
+        for (const key of ["name", "version", "homepage", "repository", "license"]) {
+            assert.equal(other[key], claude[key], `${p}: ${key}`);
+        }
+    }
+});
+
+test("manifests: only Cursor names a hooks file; Codex relies on the default path", () => {
+    const cursor = JSON.parse(fs.readFileSync(CURSOR_MANIFEST, "utf8"));
+    assert.equal(cursor.hooks, "./hooks/hooks-cursor.json");
+    assert.equal(cursor.skills, "./skills/");
+
+    const codex = JSON.parse(fs.readFileSync(CODEX_MANIFEST, "utf8"));
+    // The default when the field is absent is <plugin_root>/hooks/hooks.json — the same file Claude
+    // Code finds by convention. Naming it would be equivalent; omitting it makes the sharing explicit
+    // and removes a second place to keep in sync.
+    assert.ok(!("hooks" in codex), "no hooks field — the default already resolves to hooks/hooks.json");
+    assert.equal(codex.skills, "./skills/");
+});
+
+test("hooks: the shared file names no client, and keeps the substituted placeholder", () => {
+    const h = JSON.parse(fs.readFileSync(CLAUDE_HOOKS, "utf8"));
+    const handler = h.hooks.PreToolUse[0].hooks[0];
+    assert.equal(handler.type, "command");
+    assert.match(handler.command, /\$\{CLAUDE_PLUGIN_ROOT\}/,
+        "both clients that read this file expand it — the second by a deliberate compatibility alias");
+    // The point of the whole arrangement: one file, one command string, and therefore no client
+    // selector in it. A flag here would be right for whichever client was named and silently wrong
+    // for the other.
+    assert.doesNotMatch(handler.command, /--client/);
+    assert.equal(h.hooks.PreToolUse[0].matcher, "Edit|Write|NotebookEdit");
+    // Only `description` and `hooks` are permitted at the top level by the stricter of the two
+    // parsers. A stray key here makes the file unparseable for one client while the other is fine.
+    assert.deepEqual(Object.keys(h).sort(), ["hooks"]);
+});
+
+test("hooks: Cursor's file uses Cursor's schema, names no client, and fails CLOSED", () => {
+    const h = JSON.parse(fs.readFileSync(CURSOR_HOOKS, "utf8"));
+    assert.equal(h.version, 1);
+    const entry = h.hooks.preToolUse[0];          // lowerCamel, and no matcher field exists
+    assert.doesNotMatch(entry.command, /--client/);
+    // The path resolution for a plugin-provided hook is undocumented, and a nonzero exit is fail-open
+    // by default — so without this, a wrong path leaves no guard and no signal.
+    assert.equal(entry.failClosed, true);
+});
