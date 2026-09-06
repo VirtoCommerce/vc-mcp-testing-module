@@ -1280,23 +1280,43 @@ function readWiredServers(mcpJsonPath, userJsonPath = null, projectRoot = null, 
     return wired;
 }
 
-// Detection, not parsing. The question is only "does any MCP entry in this file route through our
+// Detection, not parsing. The question is only "does any entry in this file route through our
 // launcher", and answering it by text search keeps a TOML parser out of a diagnostic's dependency
-// list — one client's config is TOML and nothing else here reads TOML. A false negative costs one
-// diagnostic line; a TOML dependency costs it on every launch.
-const WIRED_MARKER_RE = /vc-secrets(-shim)?\.(mjs|js)|VC_SECRETS/;
+// list — one client's config is TOML and nothing else here reads TOML.
+//
+// `(?![A-Z_])` excludes the documented knobs (VC_SECRETS_TIMING, VC_SECRETS_LOCAL_BACKEND, ...). The
+// asymmetry matters: a false NEGATIVE costs one diagnostic line, while a false POSITIVE flips the
+// legacy-token line from "still required" to "remove it" — advice to delete a credential that is
+// still live.
+const WIRED_MARKER_RE = /vc-secrets(-shim)?\.(mjs|js)|VC_SECRETS(?![A-Z_])/;
 
-function readWiredElsewhere(paths, seen = []) {
+// Returns SERVER NAMES, not file paths, because the set it feeds is read two ways: `.size` decides a
+// message, and `.has(serverName)` decides which secrets a run actually consumes. Contributing paths
+// type-checks and satisfies every size-based assertion while making a server wired only through this
+// route look unconsumed — so its Key Vault secret is reported SKIP and never checked.
+function readWiredElsewhere(paths, seen = [], serverNames = []) {
     const names = new Set();
     for (const p of paths) {
         if (!p || !fs.existsSync(p)) {
             continue;
         }
         seen.push(p);
-        if (WIRED_MARKER_RE.test(fs.readFileSync(p, "utf8"))) {
-            // The file wires at least one server through us. Which ones is not needed: every consumer
-            // of `wired` asks about its size.
-            names.add(p);
+        let text;
+        try {
+            text = fs.readFileSync(p, "utf8");
+        } catch {
+            continue;   // unreadable is not "nothing is wired", but it is also not something to guess at
+        }
+        if (!WIRED_MARKER_RE.test(text)) {
+            continue;
+        }
+        // The file routes something through the launcher; a declared name appearing in it is taken as
+        // that something. Still detection: naming a server in a wired file and not wiring it is a
+        // shape nobody writes, and the cost of being wrong is one diagnostic line either way.
+        for (const name of serverNames) {
+            if (text.includes(name)) {
+                names.add(name);
+            }
         }
     }
 
@@ -1485,7 +1505,7 @@ async function cmdDoctor(cfg, flags = []) {
         projectRoot ? path.join(projectRoot, ".cursor", "mcp.json") : null,
         path.join(home, ".cursor", "mcp.json"),
         path.join(home, ".codex", "config.toml"),
-    ], clientConfigsSeen);
+    ], clientConfigsSeen, Object.keys(cfg.servers ?? {}));
     for (const marker of elsewhere) {
         wired.add(marker);
     }

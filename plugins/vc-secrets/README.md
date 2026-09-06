@@ -271,19 +271,28 @@ Load the plugin from `~/.cursor/plugins/local`. That is the only install route d
 deliberately so: Cursor's marketplace reads its own manifest file, which this repository does not
 ship, so "install it from the marketplace" would be an instruction nobody has performed.
 
-The shim is not needed. Paste `emit-config cursor` into `<repo>/.cursor/mcp.json` or
-`~/.cursor/mcp.json`, and set `VC_SECRETS` in your environment — Cursor reads it as
-`${env:VC_SECRETS}`. Then run `doctor`. If the plugin does not appear in Cursor's own plugin list,
-that is the symptom of the unestablished version floor, and a trace log is the only other place it
-shows.
+Cursor's entry uses a variable rather than a baked path, but something still has to stand behind it:
+run the `install` skill once per machine and set `VC_SECRETS` to the shim path it prints. Cursor reads
+that as `${env:VC_SECRETS}` from your environment, so export it from your shell's own startup file —
+the `env` entry `install` prints is another client's mechanism and does nothing here.
+
+Then paste `emit-config cursor` into `<repo>/.cursor/mcp.json` or `~/.cursor/mcp.json` and run
+`doctor`. If the plugin does not appear in Cursor's own plugin list, that is the symptom of the
+unestablished version floor, and a trace log is the only other place it shows.
 
 ### Codex
 
 Add this checkout as a marketplace source and install `vc-secrets` from it — the repository's
 existing `.claude-plugin/marketplace.json` is one of the manifest paths Codex accepts, so nothing
-needs publishing. Enable the plugin in `~/.codex/config.toml` and paste `emit-config codex` there
-too. The shim is not needed for the plugin to load, though the emitted entry names it by path. Then
-run `doctor`, and trust the hook.
+needs publishing. Enable the plugin in `~/.codex/config.toml`.
+
+Then run the `install` skill once per machine. Codex expands no variables in its config, so
+`emit-config codex` bakes the shim's absolute path into every entry — and the shim is a file that
+`install` creates. Skip this and the pasted entries name a file nothing wrote, so every wrapped
+server fails at launch with a module-not-found naming a path you never chose. You do **not** need the
+`env` entry that `install` also prints: that is read by another client and nothing here uses it.
+
+Paste `emit-config codex` into `~/.codex/config.toml`, run `doctor`, and trust the hook.
 
 > **The guard does not run here until you trust it.** A plugin-provided hook arrives untrusted: it is
 > listed and not executed until a `trusted_hash` for it exists under `[hooks.state."<key>"]` in your

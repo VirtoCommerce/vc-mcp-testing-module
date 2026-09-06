@@ -38,6 +38,13 @@ const CACHE_ROOTS = [
     path.join(os.homedir(), ".codex", "plugins", "cache"),
 ];
 
+// readdirSync does not follow links, so Dirent.isDirectory() is FALSE for a symlink to a directory —
+// measured. Filtering on it alone silently skips a linked install, which either picks an older real
+// directory or reports a plugin that is installed as missing. Loading a plugin from a local directory
+// is a documented route on one of these clients, so linked entries are ordinary here. Whether the
+// target is really usable is settled two lines later by looking for the launcher inside it.
+const isDirLike = (entry) => entry.isDirectory() || entry.isSymbolicLink();
+
 function installsInCaches() {
     const found = [];
     for (const root of CACHE_ROOTS) {
@@ -47,7 +54,7 @@ function installsInCaches() {
         } catch {
             continue;   // a client that is not installed contributes nothing, and that is not an error
         }
-        for (const marketplace of marketplaces.filter((e) => e.isDirectory())) {
+        for (const marketplace of marketplaces.filter(isDirLike)) {
             const pluginDir = path.join(root, marketplace.name, PLUGIN_NAME);
             let versions;
             try {
@@ -55,7 +62,7 @@ function installsInCaches() {
             } catch {
                 continue;
             }
-            for (const version of versions.filter((e) => e.isDirectory())) {
+            for (const version of versions.filter(isDirLike)) {
                 const installPath = path.join(pluginDir, version.name);
                 // A version directory with no launcher in it is a partial or abandoned install. Ranking
                 // it would hand the newest slot to a directory whose launch then fails on a missing
@@ -115,7 +122,20 @@ const candidates = byProject.length > 0 ? byProject : records;
 // registered project path — the tiebreak must be the VERSION. `lastUpdated` is refreshed
 // independently of any version change, so ordering by it can select an older launcher against newer
 // declarations: exactly the staleness this shim exists to prevent, and silent when it happens.
-const versionKey = (r) => String(r.version ?? "").split(".").map((p) => Number.parseInt(p, 10)).map((n) => (Number.isFinite(n) ? n : -1));
+const versionKey = (r) => {
+    const raw = String(r.version ?? "");
+    // Split the prerelease suffix off before parsing. Without this, "1.0.0-rc.1" splits on dots into
+    // ["1","0","0-rc","1"], parseInt("0-rc") is 0, and the extra fourth segment beats the absent one —
+    // so a release candidate outranks its own release and runs against production declarations,
+    // silently. A sentinel below every real segment restores the semver rule without a semver parser,
+    // which this file has no dependency budget for.
+    const dash = raw.indexOf("-");
+    const core = dash === -1 ? raw : raw.slice(0, dash);
+    const nums = core.split(".").map((p) => Number.parseInt(p, 10)).map((n) => (Number.isFinite(n) ? n : -1));
+    nums.push(dash === -1 ? 1 : 0);
+
+    return nums;
+};
 const newer = (a, b) => {
     const [va, vb] = [versionKey(a), versionKey(b)];
     for (let i = 0; i < Math.max(va.length, vb.length); i += 1) {
@@ -146,12 +166,32 @@ if (candidates.length > 0) {
     record = pick(cached);
 }
 
-if (typeof record.installPath !== "string" || record.installPath === "") {
-    fail(`${registryPath} has no installPath for ${PLUGIN_KEY} — reinstall the plugin`);
+const launcherIn = (r) => {
+    if (typeof r?.installPath !== "string" || r.installPath === "") {
+        return null;
+    }
+    const candidate = path.join(r.installPath, LAUNCHER);
+
+    return fs.existsSync(candidate) ? candidate : null;
+};
+
+let launcher = launcherIn(record);
+if (!launcher) {
+    // The chosen record is unusable — no installPath, or one whose launcher has gone. A stale entry is
+    // the ordinary result of a manual removal or a half-finished update, and a healthy install may be
+    // sitting in a cache the registry knows nothing about. Failing here told the developer to reinstall
+    // something already on disk. installsInCaches only returns directories that hold the launcher, so
+    // anything it finds is usable by construction.
+    const healthy = installsInCaches();
+    if (healthy.length > 0) {
+        record = pick(healthy);
+        launcher = launcherIn(record);
+        fs.writeSync(2, `vc-secrets: ${registryPath} points at an install that is gone; using version ${record.version ?? "unknown"} from the plugin cache\n`);
+    }
 }
-const launcher = path.join(record.installPath, LAUNCHER);
-if (!fs.existsSync(launcher)) {
-    fail(`${launcher} is missing — the plugin install looks incomplete, reinstall it from the marketplace`);
+if (!launcher) {
+    fail(`no usable install of ${PLUGIN_KEY} — the record in ${registryPath} points nowhere and no plugin cache holds ${LAUNCHER}. `
+        + "Reinstall it from the marketplace, then run the vc-secrets install skill");
 }
 
 // Everything up to runCli happens before the launcher installs its own handlers, so a failure here

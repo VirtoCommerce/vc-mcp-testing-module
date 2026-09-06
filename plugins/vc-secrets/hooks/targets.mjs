@@ -17,6 +17,15 @@ const PATCH_PATH_HEADER_RE = /^\*\*\* (?:Add File|Delete File|Update File|Move t
 const PATH_FIELD_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 const PATCH_TOOL = "apply_patch";
 
+// A note the shared hook file cannot carry, because it is JSON. That file's matcher is
+// `Edit|Write|NotebookEdit` and does NOT list apply_patch, so this reader is reached only because the
+// client sending apply_patch matches on ALIASES of those names while the payload keeps its canonical
+// one. That is a load-bearing assumption about a client, taken from its source and not verifiable
+// from this repository — so it is written down rather than left implicit, and if it is ever wrong the
+// symptom is total: the guard never runs there, silently. The detector is the manual probe the README
+// prescribes for that client — attempt an edit to a declaration and see it refused. Nothing automated
+// here can catch it, which is exactly why the README makes it a setup step rather than a suggestion.
+
 function fromPathFields(input) {
     // NotebookEdit carries notebook_path rather than file_path. A notebook is never a declaration, so
     // reading it costs nothing and keeps a routine edit out of the unreadable bucket.
@@ -41,7 +50,10 @@ function fromPatch(text) {
         }
     }
 
-    return { paths, readable: true };
+    // Same rule as fromPathFields, and for the same reason: a patch always names at least one file, so
+    // yielding none means this reader did not understand it. Returning readable:true here would turn
+    // any upstream change in header spelling into silence instead of the notice.
+    return { paths, readable: paths.length > 0 };
 }
 
 function targetsFrom(payload) {

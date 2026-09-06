@@ -2097,8 +2097,10 @@ test("readWiredElsewhere: another client's config counts as both seen and wired"
     fs.writeFileSync(bare, JSON.stringify({ mcpServers: { other: { command: "npx", args: ["x"] } } }));
 
     const seen = [];
-    const wired = m.readWiredElsewhere([cursorCfg, bare, path.join(dir, "absent.toml")], seen);
-    assert.equal(wired.size, 1, "only the file that routes through the launcher counts as wired");
+    // The third argument and the name assertion are what changed: this returns SERVER NAMES, because
+    // the set it feeds is also read as has(serverName). The `seen` half is untouched.
+    const wired = m.readWiredElsewhere([cursorCfg, bare, path.join(dir, "absent.toml")], seen, ["github", "other"]);
+    assert.deepEqual([...wired], ["github"], "only the server in the file that routes through the launcher");
     assert.deepEqual(seen, [cursorCfg, bare], "both existing files were inspected; the absent one was not");
 });
 
@@ -2282,4 +2284,166 @@ test("README: every per-client setup branch ends by running the diagnostic", () 
 test("README: the trust step is documented, because a hook that is not trusted never runs", () => {
     const readme = fs.readFileSync(fileURLToPath(new URL("./README.md", import.meta.url)), "utf8");
     assert.match(readme, /trusted_hash|trust the hook/i);
+});
+
+// ── the guard against RELATIVE paths ────────────────────────────────────────────────────────────
+
+test("guard: a relative declaration path is blocked, in every payload shape", () => {
+    // Every earlier guard test wrote an absolute path, so none of them could discover that the
+    // matcher required one. The client whose patch headers are workspace-relative by construction is
+    // the one this guard was widened for, which made it inert there — silently, at exit 0.
+    for (const [label, payload] of [
+        ["edit-tool", { tool_name: "Write", tool_input: { file_path: ".claude/vc-secrets.json" } }],
+        ["dot-slash", { tool_name: "Edit", tool_input: { file_path: "./.claude/vc-secrets.local.json" } }],
+        ["windows", { tool_name: "Write", tool_input: { file_path: ".claude\\vc-secrets.json" } }],
+        ["apply_patch", { tool_name: "apply_patch", tool_input: { command: "*** Begin Patch\n*** Update File: .claude/vc-secrets.json\n*** End Patch" } }],
+    ]) {
+        const r = spawnSync(process.execPath, [GUARD_HOOK_PATH], {
+            input: JSON.stringify(payload), encoding: "utf8", env: { ...process.env },
+        });
+        assert.equal(r.status, 2, `${label}: exit 2`);
+        assert.ok(r.stderr.trim().length > 0, `${label}: a non-empty reason`);
+    }
+});
+
+test("guard: the relative match is anchored at a path boundary, not anywhere in the string", () => {
+    // Loosening the anchor is the obvious fix and it over-matches: a directory merely ENDING in
+    // ".claude" is somebody else's, and a guard that refuses unrelated edits is the guard people turn
+    // off.
+    const r = spawnSync(process.execPath, [GUARD_HOOK_PATH], {
+        input: JSON.stringify({ tool_name: "Write", tool_input: { file_path: "vendor.claude/vc-secrets.json" } }),
+        encoding: "utf8", env: { ...process.env },
+    });
+    assert.equal(r.status, 0, "not our declaration");
+});
+
+test("guard: a relative shim path is blocked too", () => {
+    const r = spawnSync(process.execPath, [GUARD_HOOK_PATH], {
+        input: JSON.stringify({ tool_name: "Write", tool_input: { file_path: "plugins/data/vc-secrets-vc-tools/vc-secrets-shim.mjs" } }),
+        encoding: "utf8", env: { ...process.env },
+    });
+    assert.equal(r.status, 2);
+});
+
+test("targetsFrom: a patch that names no file is unreadable, like any other write that yields no path", () => {
+    // fromPathFields already calls this case unreadable; fromPatch returned readable:true
+    // unconditionally, so an upstream header-spelling change would degrade to silence rather than to
+    // the notice this reader exists to produce.
+    assert.deepEqual(t.targetsFrom({ tool_name: "apply_patch", tool_input: { command: "*** Begin Patch\n*** End Patch" } }),
+        { paths: [], readable: false });
+});
+
+// ── wired stays a set of SERVER NAMES, and the version comparator ───────────────────────────────
+
+test("readWiredElsewhere: returns server NAMES, because one consumer asks has() and not size", () => {
+    // The set it feeds is also read as `wired.has(serverName)` when deciding which secrets a run
+    // actually consumes. Contributing file PATHS to it type-checks, passes every size-based
+    // assertion, and makes a server wired only through another client look unconsumed — so its Key
+    // Vault secret is reported SKIP and never checked.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vcs-names-"));
+    tmpDirs.push(dir);
+    const cfgPath = path.join(dir, "mcp.json");
+    fs.writeFileSync(cfgPath, JSON.stringify({
+        mcpServers: { github: { command: "node", args: ["${env:VC_SECRETS}", "run", "github"] } },
+    }));
+    const wired = m.readWiredElsewhere([cfgPath], [], ["github", "absent-server"]);
+    assert.deepEqual([...wired], ["github"]);
+});
+
+test("readWiredElsewhere: a knob name is not a wiring marker", () => {
+    // VC_SECRETS_TIMING and friends are documented knobs. Matching them marks an unrelated config as
+    // wired, which flips doctor's legacy-token line from "still required" to "remove it" — advice to
+    // delete a credential that is still live. The false positive is the damaging direction.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vcs-knob-"));
+    tmpDirs.push(dir);
+    const cfgPath = path.join(dir, "mcp.json");
+    fs.writeFileSync(cfgPath, JSON.stringify({
+        mcpServers: { github: { command: "npx", args: ["x"], env: { VC_SECRETS_TIMING: "1" } } },
+    }));
+    assert.equal(m.readWiredElsewhere([cfgPath], [], ["github"]).size, 0);
+});
+
+test("shim: a prerelease does not outrank its own release", () => {
+    // parseInt("0-rc") is 0, so 1.0.0-rc.1 keyed as [1,0,0,1] and beat 1.0.0 keyed as [1,0,0] on the
+    // fourth segment. Silently running a release candidate against production declarations.
+    const r = runShim(["doctor"], { caches: [
+        { client: "codex", version: "1.0.0", label: "release" },
+        { client: "codex", version: "1.0.0-rc.1", label: "prerelease" },
+    ] });
+    assert.match(r.stderr, /STUB-RAN:release/);
+    assert.doesNotMatch(r.stderr, /STUB-RAN:prerelease/);
+});
+
+test("shim: a symlinked version directory is a candidate, because a linked install is a real one", () => {
+    // readdirSync does not follow links, so Dirent.isDirectory() is false for a symlink-to-directory —
+    // measured. Skipping those silently picks an older real directory, or reports a plugin that IS
+    // installed as missing. Loading a plugin from a local directory is a documented route.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vcs-link-home-"));
+    tmpDirs.push(home);
+    const real = fs.mkdtempSync(path.join(os.tmpdir(), "vcs-link-real-"));
+    tmpDirs.push(real);
+    fs.writeFileSync(path.join(real, "vc-secrets.mjs"),
+        'export async function runCli() { process.stderr.write("STUB-RAN:linked\\n"); }\n');
+    const pluginDir = path.join(home, ".codex", "plugins", "cache", "vc-tools", "vc-secrets");
+    fs.mkdirSync(pluginDir, { recursive: true });
+    fs.symlinkSync(real, path.join(pluginDir, "2.0.0"), "dir");
+
+    const r = spawnSync(process.execPath, [SHIM_PATH, "doctor"],
+        { env: { ...process.env, HOME: home }, cwd: home, encoding: "utf8" });
+    assert.match(r.stderr, /STUB-RAN:linked/);
+});
+
+test("shim: a registry record pointing at a vanished install falls back to a healthy cache", () => {
+    // The caches were consulted only when the registry yielded ZERO records, so a stale record — the
+    // ordinary result of a manual removal or a half-finished update — was a hard failure telling the
+    // developer to reinstall something that is sitting on disk.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vcs-stale-home-"));
+    tmpDirs.push(home);
+    fs.mkdirSync(path.join(home, ".claude", "plugins"), { recursive: true });
+    fs.writeFileSync(path.join(home, ".claude", "plugins", "installed_plugins.json"), JSON.stringify({
+        version: 2,
+        plugins: { "vc-secrets@vc-tools": [{ version: "1.0.0", installPath: path.join(home, "gone") }] },
+    }));
+    const cacheDir = path.join(home, ".codex", "plugins", "cache", "vc-tools", "vc-secrets", "1.0.0");
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(path.join(cacheDir, "vc-secrets.mjs"),
+        'export async function runCli() { process.stderr.write("STUB-RAN:cache-fallback\\n"); }\n');
+
+    const r = spawnSync(process.execPath, [SHIM_PATH, "doctor"],
+        { env: { ...process.env, HOME: home }, cwd: home, encoding: "utf8" });
+    assert.match(r.stderr, /STUB-RAN:cache-fallback/);
+});
+
+// A branch ends at the NEXT heading of any level, not at the next `###`. Splitting on `###` alone
+// leaves the last client's branch running to the end of the file, so it absorbs the troubleshooting
+// section and an assertion about that branch passes on text from somewhere else entirely.
+function setupBranch(readme, client) {
+    const from = readme.indexOf(`### ${client}`);
+    if (from === -1) {
+        return null;
+    }
+    const rest = readme.slice(from + 4);
+    const next = rest.search(/^#{2,4} /m);
+
+    return next === -1 ? rest : rest.slice(0, next);
+}
+
+test("README: each per-client setup branch names the diagnostic, not just the document", () => {
+    // Counting the word across the whole file is satisfied by the knobs table alone, so the previous
+    // assertion could stay green with a branch that never mentions it.
+    const readme = fs.readFileSync(fileURLToPath(new URL("./README.md", import.meta.url)), "utf8");
+    for (const client of ["Claude Code", "Cursor", "Codex"]) {
+        const branch = setupBranch(readme, client);
+        assert.ok(branch, `a setup branch for ${client}`);
+        assert.match(branch, /doctor/, `${client}: the branch ends by running the diagnostic`);
+    }
+});
+
+test("README: the Codex branch tells the reader to create the shim its emitted entry names", () => {
+    // emit-config bakes an absolute shim path into every entry for that client. A machine following
+    // the branch verbatim and never running install pastes entries naming a file nothing created, and
+    // every wrapped server then fails at launch with a module-not-found naming a path the reader never
+    // chose.
+    const readme = fs.readFileSync(fileURLToPath(new URL("./README.md", import.meta.url)), "utf8");
+    assert.match(setupBranch(readme, "Codex"), /install` skill|install skill/, "the branch names the install skill");
 });

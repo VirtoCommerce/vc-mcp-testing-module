@@ -18,8 +18,13 @@ import fs, { readFileSync } from "node:fs";
 
 import { targetsFrom } from "./targets.mjs";
 
-const DECLARATION_RE = /\/\.claude\/vc-secrets(\.local)?\.json$/i;
-const SHIM_RE = /\/plugins\/data\/[^/]+\/vc-secrets-shim\.mjs$/i;
+// `(^|\/)` and not a bare `\/`: a leading slash was safe only while every payload carried an absolute
+// path, which was true of the one client that used to send them. Patch headers are workspace-RELATIVE
+// by construction, so requiring the slash made this guard match nothing at all on that client — at
+// exit 0, with no notice, which is the one outcome this file is written to avoid. The anchor stays,
+// because dropping it entirely would match a directory merely ending in ".claude".
+const DECLARATION_RE = /(^|\/)\.claude\/vc-secrets(\.local)?\.json$/i;
+const SHIM_RE = /(^|\/)plugins\/data\/[^/]+\/vc-secrets-shim\.mjs$/i;
 
 let input;
 try {
