@@ -2182,3 +2182,77 @@ test("shim: when nothing resolves anywhere, the failure names every root it look
     assert.match(r.stderr, /installed_plugins\.json/, "the registry it tried");
     assert.match(r.stderr, /\.codex[/\\]plugins[/\\]cache/, "and the caches it walked");
 });
+
+// ── emit-config ─────────────────────────────────────────────────────────────────────────────────
+
+test("shim-path: the three levels are three exports, so no caller does dirname arithmetic", () => {
+    const env = { HOME: "/home/x" };
+    assert.equal(m.defaultDataHome(env), path.join("/home/x", ".claude", "plugins", "data"));
+    assert.equal(m.defaultShimDir(env), path.join(m.defaultDataHome(env), "vc-secrets-vc-tools"));
+    assert.equal(m.defaultShimPath(env), path.join(m.defaultShimDir(env), "vc-secrets-shim.mjs"));
+});
+
+test("emitConfig: the JSON client's body is pasteable AS IS — no comment stripping", () => {
+    // .mcp.json and ~/.claude.json are strict JSON. If the body needs a filter before it parses, then
+    // pasting the thing this verb printed corrupts the file it was printed for.
+    const cfg = { secrets: {}, servers: { github: { env: { GITHUB_TOKEN: "secret:gh" } } } };
+    const { body } = m.emitConfig(cfg, "claude-code");
+    const parsed = JSON.parse(body);
+    assert.equal(parsed.mcpServers.github.command, "node");
+    assert.equal(parsed.mcpServers.github.args[0], "${VC_SECRETS:-.claude/tools/vc-secrets.js}");
+    assert.deepEqual(parsed.mcpServers.github.args.slice(1), ["run", "github"]);
+});
+
+test("emitConfig: no secret name and no secret value can reach either channel", () => {
+    const cfg = { secrets: { gh: { backend: "local" } }, servers: { github: { env: { GITHUB_TOKEN: "secret:gh" } } } };
+    const { body, notes } = m.emitConfig(cfg, "claude-code");
+    const all = body + notes.join("\n");
+    assert.ok(!all.includes("GITHUB_TOKEN"), "no env var name");
+    assert.ok(!all.includes("secret:gh"), "no reference");
+});
+
+test("emitConfig: the TOML client gets a table per server", () => {
+    const { body } = m.emitConfig({ secrets: {}, servers: { github: {} } }, "codex");
+    assert.match(body, /^\[mcp_servers\.github\]$/m);
+    assert.match(body, /^command = "node"$/m);
+    // JSON.stringify emits no space after the comma. Asserting the spaced form is how the previous
+    // version of this plan shipped a test that could not pass.
+    assert.match(body, /^args = \["[^"]+","run","github"\]$/m);
+});
+
+test("emitConfig: a dotted server name is quoted in the TOML table header", () => {
+    // LAUNCHABLE_NAME_RE allows dots on purpose. Unquoted, `azure.mcp` becomes the nested table
+    // mcp_servers -> azure -> mcp and the client never sees the server, with no error anywhere.
+    const { body } = m.emitConfig({ secrets: {}, servers: { "azure.mcp": {} } }, "codex");
+    assert.match(body, /^\[mcp_servers\."azure\.mcp"\]$/m);
+});
+
+test("emitConfig: a client whose floor is unknown says so rather than saying nothing", () => {
+    const { notes } = m.emitConfig({ secrets: {}, servers: { github: {} } }, "cursor");
+    assert.ok(notes.some((n) => n.includes("version floor not established")));
+});
+
+test("emitConfig: no entry claims to depend on one client being installed, because the shim no longer does", () => {
+    // The fork's honest fallback carried a note saying the emitted path "requires Claude Code on this
+    // machine". Generalising the shim's resolution made that false, and a false caveat is worse than
+    // no caveat: it tells the developer this widening exists for that the entry cannot work for them,
+    // and they would believe it — the sentence reads like a limitation somebody measured.
+    for (const name of clients.clientNames()) {
+        const { notes } = m.emitConfig({ secrets: {}, servers: { github: {} } }, name);
+        assert.ok(!notes.some((n) => /requires Claude Code/.test(n)), `${name}: no false dependency claim`);
+    }
+});
+
+test("emitConfig: the verify line names a real path, never a client-config placeholder", () => {
+    // launcherRef is a token the CLIENT expands inside its own config file. Spliced into a shell line
+    // it is not a path: measured, `bash -c 'echo node "${env:VC_SECRETS}" doctor'` prints `node  doctor`
+    // — bash reads it as substring expansion of an unset $env and yields the empty string. So the
+    // instruction becomes `node "" doctor`, silently, on the client whose floor is also unknown.
+    for (const name of clients.clientNames()) {
+        const verify = m.emitConfig({ secrets: {}, servers: { github: {} } }, name)
+            .notes.find((n) => n.startsWith("then verify with:"));
+        assert.ok(verify, `${name}: a verify line exists`);
+        assert.doesNotMatch(verify, /\$\{/, `${name}: no unexpanded placeholder in a shell instruction`);
+        assert.match(verify, /vc-secrets-shim\.mjs|vc-secrets\.mjs/, `${name}: it names the launcher`);
+    }
+});

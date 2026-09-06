@@ -9,6 +9,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { VcSecretsError } from "./vc-secrets-error.mjs";
+import { clientNames, clientDescriptor, MIN_VERSION_UNKNOWN } from "./clients.mjs";
+import { defaultDataHome, defaultShimDir, defaultShimPath } from "./scripts/shim-path.mjs";
 
 const CONFIG_NAME = "vc-secrets.json";
 const LOCAL_CONFIG_NAME = "vc-secrets.local.json";
@@ -1642,7 +1644,78 @@ function fail(e) {
 const REQUIRED_SHIM_CONTRACT = 1;
 let activeShimContract = null;
 
-const VERBS = ["run", "task", "set", "unlock", "doctor", "migrate"];
+// TOML bare keys are [A-Za-z0-9_-]+; anything else must be a quoted key, or the dots in the name
+// become table separators.
+const TOML_BARE_KEY_RE = /^[A-Za-z0-9_-]+$/;
+
+function tomlKey(name) {
+    return TOML_BARE_KEY_RE.test(name) ? name : JSON.stringify(name);
+}
+
+function emitConfig(cfg, clientName) {
+    const client = clientDescriptor(clientName);
+    const names = Object.keys(cfg.servers ?? {});
+    const notes = [];
+
+    // A client that expands nothing in its own config needs a literal path, and the shim is it. No
+    // caveat rides along any more: the shim resolves the current install from whichever client's
+    // registry or plugin cache is present, so the emitted entry does not depend on any one client
+    // being installed. The alternative that stays disqualified is a path into the versioned plugin
+    // cache — it keeps resolving after an update and silently runs an OLD launcher.
+    let launcher = client.launcherRef;
+    if (!launcher) {
+        launcher = defaultShimPath();
+        notes.push(`${client.displayName} expands no variables in its config, so this entry names the shim by path — `
+            + "the shim resolves the current plugin install per launch, so an ordinary update needs no re-emit");
+    }
+
+    if (client.minVersion === MIN_VERSION_UNKNOWN) {
+        notes.push(`${client.displayName}: version floor not established — this entry is untested on any specific version`);
+    } else if (client.minVersion) {
+        notes.push(`${client.displayName}: requires ${client.minVersion} or newer`);
+    }
+    // One note per scope. Joining the templates into one sentence after "paste into one of:" produced
+    // the literal instruction "paste into one of: … not by pasting", because a template carries its own
+    // guidance for the scope that is NOT pasted.
+    for (const [scope, where] of Object.entries(client.configFiles)) {
+        notes.push(`${scope} scope → ${where}`);
+    }
+    // A resolved path, never client.launcherRef: that token is expanded by the CLIENT inside its own
+    // config file and is not a path in a shell. Measured — `bash -c 'echo node "${env:VC_SECRETS}"'`
+    // prints an empty word, so the instruction would silently become `node "" doctor`.
+    notes.push(`then verify with: node ${JSON.stringify(defaultShimPath())} doctor`);
+
+    if (client.format === "toml") {
+        const lines = [];
+        for (const name of names) {
+            lines.push(`[${client.serversKey}.${tomlKey(name)}]`, `command = "node"`,
+                `args = ${JSON.stringify([launcher, "run", name])}`, "");
+        }
+
+        return { body: lines.join("\n"), notes };
+    }
+
+    const servers = {};
+    for (const name of names) {
+        servers[name] = { command: "node", args: [launcher, "run", name] };
+    }
+
+    return { body: JSON.stringify({ [client.serversKey]: servers }, null, 2) + "\n", notes };
+}
+
+async function cmdEmitConfig(cfg, argv) {
+    const name = argv[0];
+    if (!name) {
+        throw new VcSecretsError(`emit-config: name a client (${clientNames().join(", ")})`);
+    }
+    const { body, notes } = emitConfig(cfg, name);
+    // Notes to fd 2, body to fd 1: stdout is exactly what gets pasted into a strict-JSON or TOML file,
+    // so a redirect produces a valid file and a terminal still shows the guidance.
+    fs.writeSync(2, notes.map((n) => `emit-config: ${n}\n`).join(""));
+    fs.writeSync(1, body);
+}
+
+const VERBS = ["run", "task", "set", "unlock", "doctor", "migrate", "emit-config"];
 const USAGE = `usage: vc-secrets <${VERBS.join("|")}> [name]`;
 
 async function main(argv) {
@@ -1687,6 +1760,10 @@ async function main(argv) {
         await cmdMigrate(cfg);
         return;
     }
+    if (command === "emit-config") {
+        await cmdEmitConfig(cfg, argv.slice(1));
+        return;
+    }
     throw new VcSecretsError(USAGE);   // a known verb reached here missing its required argument
 }
 
@@ -1716,6 +1793,9 @@ export {
     SECRET_NAME_RE, LAUNCHABLE_NAME_RE, doctorReport,
     readEnableLists, readWiredServers, readWiredElsewhere, DANGEROUS_ENV_VARS, sanitizeEnv,
     consumerShape, shapeDifferences, validateAuthorized, validateVaults, authorizationFor, crossingProblem, own,
+    emitConfig, cmdEmitConfig,
+    // Re-exported so the test file reaches them through the namespace import it already uses.
+    clientNames, clientDescriptor, MIN_VERSION_UNKNOWN, defaultDataHome, defaultShimDir, defaultShimPath,
 };
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

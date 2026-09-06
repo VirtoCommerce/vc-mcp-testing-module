@@ -12,12 +12,10 @@
 // file either — there is no second file in this story.
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const SHIM = "vc-secrets-shim.mjs";
-const CANONICAL_DATA_ID = "vc-secrets-vc-tools";
+import { SHIM, CANONICAL_DATA_ID, defaultDataHome, defaultShimDir } from "./shim-path.mjs";
 
 function fail(message) {
     // sync write: stderr is an async pipe on Windows, and process.exit abandons pending writes
@@ -80,7 +78,7 @@ if (!fs.existsSync(source)) {
 //
 // With no usable value the id is computed rather than searched for: `<plugin>@<marketplace>` with
 // non-alphanumerics dashed, both names from manifests this repo ships.
-const dataHome = path.join(process.env.HOME || os.homedir(), ".claude", "plugins", "data");
+const dataHome = defaultDataHome();
 const declared = flag("--data-dir");
 if (declared !== null && declared !== "" && !path.isAbsolute(declared)) {
     fail(`--data-dir must be an absolute path, got ${JSON.stringify(declared)} — a value still shaped like a placeholder means the command ran where Claude Code does not substitute it`);
@@ -103,7 +101,7 @@ if (!target) {
     } else if (declared === "") {
         why = " (--data-dir arrived empty)";
     }
-    target = path.join(dataHome, CANONICAL_DATA_ID);
+    target = defaultShimDir();
     how = `the documented default under ${dataHome}${why}`;
 }
 
