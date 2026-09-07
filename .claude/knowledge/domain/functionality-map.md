@@ -4,11 +4,11 @@
 > `npm run map:check` is the drift gate. Editing it by hand is reverted by the next refresh,
 > silently. To change what it says, change the source it is derived from.
 >
-> **Rev:** 2026-09-04
+> **Rev:** 2026-09-07
 > **Sources:** `config/test-suites.json` (135 suites, 13 domains) ·
 > the suite CSVs' own `BL-*`/`ECL-*` citations · `.claude/knowledge/oracles/business-logic.md` ·
-> `reports/ba/` (49 docs) · `reports/ba/test-models/` (6) ·
-> `.claude/knowledge/domain/` (6) · `reports/tickets/` (27 runs)
+> `reports/ba/` (45 docs) · `reports/ba/test-models/` (6) ·
+> `.claude/knowledge/domain/` (6) · `reports/tickets/` (3 runs)
 
 ---
 
@@ -72,7 +72,7 @@ rendering artifact: the row says `none`.
 | `auth-security` | 7 | 251 | backend + frontend | 41 | 14 | 0 | 0 | 0 |
 | `background-jobs` | 1 | 52 | backend | 10 | 0 | 0 | 0 | 0 |
 | `branding` | 4 | 128 | backend + frontend | 7 | 2 | 0 | 0 | 0 |
-| `catalog-search` | 19 | 779 | backend + frontend | 82 | 28 | 8 | 1 | 1 |
+| `catalog-search` | 19 | 779 | backend + frontend | 82 | 28 | 9 | 1 | 1 |
 | `communication` | 4 | 121 | backend | 13 | 16 | 0 | 0 | 0 |
 | `content-cms` | 6 | 271 | backend | 16 | 12 | 0 | 0 | 0 |
 | `cross-cutting` | 13 | 322 | backend + frontend | 77 | 41 | 0 | 0 | 0 |
@@ -175,9 +175,9 @@ nothing from a sub-agent CWD because there is no top-level `knowledge/` director
 - **Tags**: admin · admin-to-storefront · advanced · autocomplete · catalog · categories · compare · configurable-products · configuration · configurations · cross-browser · crud · customer-reviews · customer-reviews-suite · e2e · elastic · facets · file-upload · filters · functional · graphql · indexing · navigation · pdp
 - **Oracles cited by those suites**: 82 `BL-*` (**18 not declared in the oracle** — `npm run bl:lint` owns that) · 28 `ECL-*`
 - **Domain knowledge**: [`.claude/knowledge/domain/catalog.md`](../../../.claude/knowledge/domain/catalog.md)
-- **Prior BA analysis** (8): [`catalog-binary-sidecars.md`](../../../reports/ba/Backup-Restore/catalog-binary-sidecars.md) *(2026-09-03)* · [`BA-REPORT-configurable-products-sorting.md`](../../../reports/ba/Configurable products/BA-REPORT-configurable-products-sorting.md) *(2026-07-28)* · [`ba-report-VCST-4713-conditional-sections.md`](../../../reports/ba/Configurable products/ba-report-VCST-4713-conditional-sections.md) *(2026-07-28)* · [`ba-report-VCST-4806-maxlength-validation.md`](../../../reports/ba/Configurable products/ba-report-VCST-4806-maxlength-validation.md) *(2026-07-28)* · [`ba-report-VCST-4928-character-counter-docs.md`](../../../reports/ba/Configurable products/ba-report-VCST-4928-character-counter-docs.md) *(2026-07-28)* · [`conditional-sections-admin-guide.md`](../../../reports/ba/Configurable products/conditional-sections-admin-guide.md) *(2026-07-28)* · [`conditional-sections-storefront-behavior.md`](../../../reports/ba/Configurable products/conditional-sections-storefront-behavior.md) *(2026-07-28)* · [`order-history-filter-persistence-stories.md`](../../../reports/ba/order-history-filter-persistence-stories.md) *(2026-06-08)*
+- **Prior BA analysis** (9): [`vcst-5735-compare-products-customer-guide.md`](../../../reports/ba/vcst-5735-compare-products-customer-guide.md) *(2026-09-07)* · [`catalog-binary-sidecars.md`](../../../reports/ba/Backup-Restore/catalog-binary-sidecars.md) *(2026-09-03)* · [`BA-REPORT-configurable-products-sorting.md`](../../../reports/ba/Configurable products/BA-REPORT-configurable-products-sorting.md) *(2026-07-28)* · [`ba-report-VCST-4713-conditional-sections.md`](../../../reports/ba/Configurable products/ba-report-VCST-4713-conditional-sections.md) *(2026-07-28)* · [`ba-report-VCST-4806-maxlength-validation.md`](../../../reports/ba/Configurable products/ba-report-VCST-4806-maxlength-validation.md) *(2026-07-28)* · [`ba-report-VCST-4928-character-counter-docs.md`](../../../reports/ba/Configurable products/ba-report-VCST-4928-character-counter-docs.md) *(2026-07-28)* · [`conditional-sections-admin-guide.md`](../../../reports/ba/Configurable products/conditional-sections-admin-guide.md) *(2026-07-28)* · [`conditional-sections-storefront-behavior.md`](../../../reports/ba/Configurable products/conditional-sections-storefront-behavior.md) *(2026-07-28)* · [`order-history-filter-persistence-stories.md`](../../../reports/ba/order-history-filter-persistence-stories.md) *(2026-06-08)*
 - **Prior test models** (1): [`VCST-5735`](../../../reports/ba/test-models/VCST-5735-2026-09-03.md) *(2026-09-03, declared)*
-- **Already tested here** (2): VCST-5729 → PASS_WITH_NOTES · VCST-5733 → PASS_WITH_NOTES
+- **Already tested here** (0): no run has verified a BL in this domain
 - **Checklist**: `/qa-checklist catalog-search`
 
   **Test object** — you cannot design an experiment on an object whose properties you do
@@ -250,7 +250,7 @@ nothing from a sub-agent CWD because there is no top-level `knowledge/` director
 - **Domain knowledge**: none
 - **Prior BA analysis** (0): **none — a real gap**
 - **Prior test models** (0): none — the first FULL run on this domain writes one
-- **Already tested here** (2): VCST-5729 → PASS_WITH_NOTES · VCST-5733 → PASS_WITH_NOTES
+- **Already tested here** (0): no run has verified a BL in this domain
 - **Checklist**: `/qa-checklist cross-cutting`
 
   **Test object** — you cannot design an experiment on an object whose properties you do
@@ -271,10 +271,10 @@ nothing from a sub-agent CWD because there is no top-level `knowledge/` director
 - **Tags**: VCST-5239 · a11y · account · admin · admin-spa · api · b2b · bulk-order · catalog · checkout · company · conditions · configurations · contacts · contracts · crud · currency-override · customer · dashboard · e2e · earning · graphql · invites · loyalty
 - **Oracles cited by those suites**: 71 `BL-*` (**6 not declared in the oracle** — `npm run bl:lint` owns that) · 31 `ECL-*`
 - **Domain knowledge**: none
-- **Prior BA analysis** (20): [`vcst-5733-customer-orders-customer-guide.md`](../../../reports/ba/Sales-rep/sales-rep-customer-orders/vcst-5733-customer-orders-customer-guide.md) *(2026-09-04)* · [`vcst-5733-customer-orders-developer-guide.md`](../../../reports/ba/Sales-rep/sales-rep-customer-orders/vcst-5733-customer-orders-developer-guide.md) *(2026-09-04)* · [`view-customer-profile.md`](../../../reports/ba/Sales-rep/sales-rep-view-customer-profile/view-customer-profile.md) *(2026-09-03)* · [`vcst-5346-loyalty-missions-customer-guide.md`](../../../reports/ba/vcst-5346-loyalty-missions-customer-guide.md) *(2026-09-03)* · [`missions-admin-guide-2026-09-02.md`](../../../reports/ba/Loyalty&Mixed cart/missions-admin-guide-2026-09-02.md) *(2026-09-02)* · [`bl-proposals-2026-08-28.md`](../../../reports/ba/bl-proposals-2026-08-28.md) *(2026-08-28)* · [`missions-design-gaps-2026-08-28.md`](../../../reports/ba/Loyalty&Mixed cart/missions-design-gaps-2026-08-28.md) *(2026-08-28)* · [`test-model-VCST-5320-2026-08-27.md`](../../../reports/ba/Loyalty&Mixed cart/test-model-VCST-5320-2026-08-27.md) *(2026-08-27)* · [`ba-admin-doc-VCST-5281-org-membership-status-2026-08-07.md`](../../../reports/ba/Organization roles/ba-admin-doc-VCST-5281-org-membership-status-2026-08-07.md) *(2026-08-07)* · [`ba-customer-doc-VCST-5281-member-status-invites-2026-08-07.md`](../../../reports/ba/Organization roles/ba-customer-doc-VCST-5281-member-status-invites-2026-08-07.md) *(2026-08-07)* · [`ba-VCST-4907-customer-sales-reps-developer-2026-07-21.md`](../../../reports/ba/Sales-rep/ba-VCST-4907-customer-sales-reps-developer-2026-07-21.md) *(2026-07-21)* · [`salesrep-my-customers-customer-guide-2026-07-21.md`](../../../reports/ba/Sales-rep/salesrep-my-customers-customer-guide-2026-07-21.md) *(2026-07-21)* · [`salesrep-my-customers-sales-2026-07-21.md`](../../../reports/ba/Sales-rep/salesrep-my-customers-sales-2026-07-21.md) *(2026-07-21)* · [`ba-customer-doc-VCST-5239-member-roles-2026-07-09.md`](../../../reports/ba/Organization roles/ba-customer-doc-VCST-5239-member-roles-2026-07-09.md) *(2026-07-09)* · [`ba-vcst-5104-admin-multi-currency-order-totals-2026-06-24.md`](../../../reports/ba/Loyalty&Mixed cart/ba-vcst-5104-admin-multi-currency-order-totals-2026-06-24.md) *(2026-06-24)* · [`ba-vcst-5104-customer-mixed-cart-loyalty-order-2026-06-24.md`](../../../reports/ba/Loyalty&Mixed cart/ba-vcst-5104-customer-mixed-cart-loyalty-order-2026-06-24.md) *(2026-06-24)* · [`ba-vcst-5104-developer-ordertotals-graphql-2026-06-24.md`](../../../reports/ba/Loyalty&Mixed cart/ba-vcst-5104-developer-ordertotals-graphql-2026-06-24.md) *(2026-06-24)* · [`VCST-5028-customer-doc-2026-06-19.md`](../../../reports/ba/Organization roles/VCST-5028-customer-doc-2026-06-19.md) *(2026-06-19)* · [`ba-loyalty-mixed-cart-developer-2026-06-10.md`](../../../reports/ba/Loyalty&Mixed cart/ba-loyalty-mixed-cart-developer-2026-06-10.md) *(2026-06-10)* · [`ba-loyalty-mixed-cart-shopping-customer-2026-06-10.md`](../../../reports/ba/Loyalty&Mixed cart/ba-loyalty-mixed-cart-shopping-customer-2026-06-10.md) *(2026-06-10)*
+- **Prior BA analysis** (20): [`vcst-5735-compare-products-customer-guide.md`](../../../reports/ba/vcst-5735-compare-products-customer-guide.md) *(2026-09-07)* · [`vcst-5733-customer-orders-customer-guide.md`](../../../reports/ba/Sales-rep/sales-rep-customer-orders/vcst-5733-customer-orders-customer-guide.md) *(2026-09-04)* · [`vcst-5733-customer-orders-developer-guide.md`](../../../reports/ba/Sales-rep/sales-rep-customer-orders/vcst-5733-customer-orders-developer-guide.md) *(2026-09-04)* · [`vcst-5346-loyalty-missions-customer-guide.md`](../../../reports/ba/Loyalty&Mixed cart/vcst-5346-loyalty-missions-customer-guide.md) *(2026-09-03)* · [`view-customer-profile.md`](../../../reports/ba/Sales-rep/sales-rep-view-customer-profile/view-customer-profile.md) *(2026-09-03)* · [`missions-admin-guide-2026-09-02.md`](../../../reports/ba/Loyalty&Mixed cart/missions-admin-guide-2026-09-02.md) *(2026-09-02)* · [`missions-design-gaps-2026-08-28.md`](../../../reports/ba/Loyalty&Mixed cart/missions-design-gaps-2026-08-28.md) *(2026-08-28)* · [`test-model-VCST-5320-2026-08-27.md`](../../../reports/ba/Loyalty&Mixed cart/test-model-VCST-5320-2026-08-27.md) *(2026-08-27)* · [`ba-admin-doc-VCST-5281-org-membership-status-2026-08-07.md`](../../../reports/ba/Organization roles/ba-admin-doc-VCST-5281-org-membership-status-2026-08-07.md) *(2026-08-07)* · [`ba-customer-doc-VCST-5281-member-status-invites-2026-08-07.md`](../../../reports/ba/Organization roles/ba-customer-doc-VCST-5281-member-status-invites-2026-08-07.md) *(2026-08-07)* · [`ba-VCST-4907-customer-sales-reps-developer-2026-07-21.md`](../../../reports/ba/Sales-rep/ba-VCST-4907-customer-sales-reps-developer-2026-07-21.md) *(2026-07-21)* · [`salesrep-my-customers-customer-guide-2026-07-21.md`](../../../reports/ba/Sales-rep/salesrep-my-customers-customer-guide-2026-07-21.md) *(2026-07-21)* · [`salesrep-my-customers-sales-2026-07-21.md`](../../../reports/ba/Sales-rep/salesrep-my-customers-sales-2026-07-21.md) *(2026-07-21)* · [`ba-customer-doc-VCST-5239-member-roles-2026-07-09.md`](../../../reports/ba/Organization roles/ba-customer-doc-VCST-5239-member-roles-2026-07-09.md) *(2026-07-09)* · [`ba-vcst-5104-admin-multi-currency-order-totals-2026-06-24.md`](../../../reports/ba/Loyalty&Mixed cart/ba-vcst-5104-admin-multi-currency-order-totals-2026-06-24.md) *(2026-06-24)* · [`ba-vcst-5104-customer-mixed-cart-loyalty-order-2026-06-24.md`](../../../reports/ba/Loyalty&Mixed cart/ba-vcst-5104-customer-mixed-cart-loyalty-order-2026-06-24.md) *(2026-06-24)* · [`ba-vcst-5104-developer-ordertotals-graphql-2026-06-24.md`](../../../reports/ba/Loyalty&Mixed cart/ba-vcst-5104-developer-ordertotals-graphql-2026-06-24.md) *(2026-06-24)* · [`VCST-5028-customer-doc-2026-06-19.md`](../../../reports/ba/Organization roles/VCST-5028-customer-doc-2026-06-19.md) *(2026-06-19)* · [`ba-loyalty-mixed-cart-developer-2026-06-10.md`](../../../reports/ba/Loyalty&Mixed cart/ba-loyalty-mixed-cart-developer-2026-06-10.md) *(2026-06-10)* · [`ba-loyalty-mixed-cart-shopping-customer-2026-06-10.md`](../../../reports/ba/Loyalty&Mixed cart/ba-loyalty-mixed-cart-shopping-customer-2026-06-10.md) *(2026-06-10)*
 - **Prior test models** (0): none — the first FULL run on this domain writes one
 - **Release notes**: [`vcst-5319-module-release-note.md`](../../../reports/ba/release-notes/vcst-5319-module-release-note.md)
-- **Already tested here** (1): VCST-5733 → PASS_WITH_NOTES
+- **Already tested here** (0): no run has verified a BL in this domain
 - **Checklist**: `/qa-checklist customer-b2b`
 
   **Test object** — you cannot design an experiment on an object whose properties you do
@@ -389,7 +389,7 @@ nothing from a sub-agent CWD because there is no top-level `knowledge/` director
 - **Domain knowledge**: none
 - **Prior BA analysis** (13): [`vcst-5733-customer-orders-customer-guide.md`](../../../reports/ba/Sales-rep/sales-rep-customer-orders/vcst-5733-customer-orders-customer-guide.md) *(2026-09-04)* · [`vcst-5733-customer-orders-developer-guide.md`](../../../reports/ba/Sales-rep/sales-rep-customer-orders/vcst-5733-customer-orders-developer-guide.md) *(2026-09-04)* · [`customize-your-layout.md`](../../../reports/ba/Sales-rep/sales-rep-customize-dashboard-layout/customize-your-layout.md) *(2026-09-03)* · [`read-your-dashboard.md`](../../../reports/ba/Sales-rep/sales-rep-hub-dashboard/read-your-dashboard.md) *(2026-09-03)* · [`view-customer-profile.md`](../../../reports/ba/Sales-rep/sales-rep-view-customer-profile/view-customer-profile.md) *(2026-09-03)* · [`ba-VCST-4907-customer-sales-reps-developer-2026-07-21.md`](../../../reports/ba/Sales-rep/ba-VCST-4907-customer-sales-reps-developer-2026-07-21.md) *(2026-07-21)* · [`ba-VCST-4907-sales-rep-visibility-admin-2026-07-21.md`](../../../reports/ba/Sales-rep/ba-VCST-4907-sales-rep-visibility-admin-2026-07-21.md) *(2026-07-21)* · [`ba-vcst-5304-developer-salesrepcustomers-graphql-2026-07-21.md`](../../../reports/ba/Sales-rep/ba-vcst-5304-developer-salesrepcustomers-graphql-2026-07-21.md) *(2026-07-21)* · [`salesrep-my-customers-admin-guide-2026-07-21.md`](../../../reports/ba/Sales-rep/salesrep-my-customers-admin-guide-2026-07-21.md) *(2026-07-21)* · [`salesrep-my-customers-customer-guide-2026-07-21.md`](../../../reports/ba/Sales-rep/salesrep-my-customers-customer-guide-2026-07-21.md) *(2026-07-21)* · [`salesrep-my-customers-sales-2026-07-21.md`](../../../reports/ba/Sales-rep/salesrep-my-customers-sales-2026-07-21.md) *(2026-07-21)* · [`salesrep-my-sales-reps-maintainer-guide-2026-07-21.md`](../../../reports/ba/Sales-rep/salesrep-my-sales-reps-maintainer-guide-2026-07-21.md) *(2026-07-21)* · [`ba-VCST-5293-sales-rep-admin-guide-2026-07-20.md`](../../../reports/ba/Sales-rep/ba-VCST-5293-sales-rep-admin-guide-2026-07-20.md) *(2026-07-20)*
 - **Prior test models** (1): [`VCST-5733`](../../../reports/ba/test-models/VCST-5733-2026-09-02.md) *(2026-09-02, declared)*
-- **Already tested here** (2): VCST-5729 → PASS_WITH_NOTES · VCST-5733 → PASS_WITH_NOTES
+- **Already tested here** (0): no run has verified a BL in this domain
 - **Checklist**: `/qa-checklist sales-rep`
 
   **Test object** — you cannot design an experiment on an object whose properties you do
@@ -421,12 +421,8 @@ entirely and reports itself fully mapped (`.claude/skills/qa-test/coverage-triag
 These exist and are worth reading; this tool could not place them from path + title alone.
 **A document here is unplaced, not unimportant.**
 
-- [`reports/ba/bl-proposals-2026-08-24.md`](../../../reports/ba/bl-proposals-2026-08-24.md)
-- [`reports/ba/bl-proposals-2026-09-03.md`](../../../reports/ba/bl-proposals-2026-09-03.md)
 - [`reports/ba/Configurable products/user-stories/EPIC-CP-SORT-stories.md`](../../../reports/ba/Configurable products/user-stories/EPIC-CP-SORT-stories.md)
 - [`reports/ba/Configurable products/user-stories/README.md`](../../../reports/ba/Configurable products/user-stories/README.md)
-- [`reports/ba/ecl-proposals-2026-08-27.md`](../../../reports/ba/ecl-proposals-2026-08-27.md)
-- [`reports/ba/ecl-proposals-2026-09-03.md`](../../../reports/ba/ecl-proposals-2026-09-03.md)
 - [`reports/ba/Organization roles/ba-admin-doc-VCST-5239-organization-roles-2026-07-09.md`](../../../reports/ba/Organization roles/ba-admin-doc-VCST-5239-organization-roles-2026-07-09.md)
 - [`reports/ba/Organization roles/test-model-VCST-5281-2026-08-03.md`](../../../reports/ba/Organization roles/test-model-VCST-5281-2026-08-03.md)
 - [`reports/ba/Organization roles/VCST-5028-admin-doc-2026-06-19.md`](../../../reports/ba/Organization roles/VCST-5028-admin-doc-2026-06-19.md)
@@ -449,11 +445,11 @@ in [`.claude/knowledge/automation/storefront-config-flags.md`](../../../.claude/
 |---|---|
 | Domains | 13 |
 | Suites read | 135 of 135 |
-| BA docs placed | 35 of 49 |
+| BA docs placed | 35 of 45 |
 | Test models placed | 4 of 6 (3 by their own `Domains:` line) |
 | Knowledge docs placed | 1 of 6 |
 | Ambiguous tokens (attribute nothing) | 47 |
-| Runs recording a verified BL invariant | 2 of 27 — the rest reach no domain because the field is empty, not because nothing was tested |
+| Runs recording a verified BL invariant | 0 of 3 — the rest reach no domain because the field is empty, not because nothing was tested |
 | **Purpose DECLARED** | **2 of 13 domains** — the other 11 have no Test Model Part 0, so nothing in the repo states what those surfaces are for. This is the map's most actionable number |
 | Schema operations harvested | 108 from `.claude/knowledge/api/graphql-schema.md` |
 | Config flags parsed | 36 from `.claude/knowledge/automation/storefront-config-flags.md` · 25 attributed |
