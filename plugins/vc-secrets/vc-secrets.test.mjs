@@ -2201,7 +2201,7 @@ test("emitConfig: the JSON client's body is pasteable AS IS — no comment strip
     const { body } = m.emitConfig(cfg, "claude-code");
     const parsed = JSON.parse(body);
     assert.equal(parsed.mcpServers.github.command, "node");
-    assert.equal(parsed.mcpServers.github.args[0], "${VC_SECRETS:-.claude/tools/vc-secrets.js}");
+    assert.equal(parsed.mcpServers.github.args[0], "${VC_SECRETS}");
     assert.deepEqual(parsed.mcpServers.github.args.slice(1), ["run", "github"]);
 });
 

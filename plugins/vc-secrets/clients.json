@@ -3,7 +3,7 @@
     "displayName": "Claude Code",
     "format": "json",
     "serversKey": "mcpServers",
-    "launcherRef": "${VC_SECRETS:-.claude/tools/vc-secrets.js}",
+    "launcherRef": "${VC_SECRETS}",
     "minVersion": null,
     "configFiles": {
       "project": "<repo>/.mcp.json",

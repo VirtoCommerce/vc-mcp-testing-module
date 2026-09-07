@@ -228,7 +228,7 @@ than writing these by hand — it gets the file mode, the atomic replace and the
 
 | Client | MCP config | Servers key | Launcher reference | Minimum version |
 |---|---|---|---|---|
-| Claude Code | `<repo>/.mcp.json`, `~/.claude.json` (local and user scopes) | `mcpServers` | `${VC_SECRETS:-.claude/tools/vc-secrets.js}` | none |
+| Claude Code | `<repo>/.mcp.json`, `~/.claude.json` (local and user scopes) | `mcpServers` | `${VC_SECRETS}` | none |
 | Cursor | `<repo>/.cursor/mcp.json`, `~/.cursor/mcp.json` | `mcpServers` | `${env:VC_SECRETS}` | **UNKNOWN** |
 | Codex | `~/.codex/config.toml` | `mcp_servers` | none — the entry carries a literal path | none |
 
