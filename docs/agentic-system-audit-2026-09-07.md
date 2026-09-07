@@ -245,6 +245,10 @@ Genuinely novel content on a FULL run: **≈15%.**
 
 ## 6. Redesign
 
+> **Measured tier split (see the component audit §0):** the always-loaded set is only **9.9%** of the
+> corpus yet costs 72–76% of every run, while **57.5%** (skill supporting files + `knowledge/`) already
+> costs nothing unless explicitly read. The redesign is therefore **re-tiering, not mass deletion.**
+
 ### Principle: three tiers, and only tier 1 is always-loaded
 
 | tier | what | budget | loaded |
