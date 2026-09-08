@@ -8,7 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Semver 
 
 ---
 
-## `playwright-firefox` click timeouts — candidate mechanisms, config change, A/B probe (open) — 2026-09-08
+## `playwright-firefox` click timeouts — root cause found and fixed in config — 2026-09-08
 
 The lane's `browser_click` timing out on visible, non-moving elements while `browser_type` worked is
 explained by two shipped facts: Playwright's *stable* wait needs **5** identical `requestAnimationFrame`
@@ -17,15 +17,16 @@ covered by other windows — which three headed 1920×1080 browsers on one deskt
 no stable wait, so typing kept working. `config/mcp-playwright-firefox.config.json` now sets
 `widget.windows.window_occlusion_tracking.enabled=false` (Playwright already disables Firefox's
 background *timer* throttling, not occlusion). `scripts/maintenance/firefox-click-probe.mjs` A/B-tests
-it on a Windows desktop with `trial: true` clicks (read-only). **Runs 1–2 were invalid** (the target was the storefront's
-off-viewport `skip-link`; the cover landed on the other monitor of a dual-head desk). **Run 3 was valid and
-overturned the occlusion theory**: plain Firefox clicked in 96 ms while fully covered with rAF at 0, so the
-pref is not the fix — it stays only as one fewer way to stop the refresh driver. The same run found a
-deterministic reproducer: `reducedMotion: 'reduce'` idles the storefront's animations and every click then
-stalls at "waiting for element to be visible, enabled and stable", covered and uncovered, on an element
-Chromium clicks in 40 ms. Probe v4 is built around it — controls, the reproducer, and three candidate fixes
-(keepalive animation, headless, the pref), each clicked 3× with the rAF rate recorded before every attempt.
-The "never schedule a click-driven suite on firefox" rule stays until a candidate clears the reproducer.
+it on a Windows desktop with `trial: true` clicks (read-only). **Confirmed by probe run 4** (3 attempts per phase, rAF sampled
+before each): **15 of 15 failing attempts had a dead rAF, 0 passing ones did**. `firefox-default` timed out
+3/3 covered *and* 3/3 uncovered — the stall is **sticky**, the driver does not restart when the window is
+uncovered, which is why one moment of occlusion poisoned a whole firefox session and the failure read as
+"firefox cannot click here". With the pref, the same covered window keeps ticking (rAF 121 vs 0) and clicks
+6/6. Headless also clears it; a CSS keepalive animation does not. Runs 1–3 were misleading for reasons now
+recorded in the knowledge file (an off-viewport target, a cover on the wrong monitor of a dual-head desk,
+and a single covered attempt that happened to land on a live frame). **The lane rule does not lift yet** —
+the probe proves the browser, not the pipeline; one click-driven suite must run green on the firefox lane
+with the other lanes busy first.
 
 ---
 

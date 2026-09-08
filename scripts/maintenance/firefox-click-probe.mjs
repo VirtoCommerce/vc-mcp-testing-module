@@ -136,8 +136,8 @@ const VARIANTS = {
   // Candidate B — headless: no window, so no occlusion and no compositor idling tied to a visible surface.
   'ff-repro+headless': { engine: 'firefox', context: { reducedMotion: 'reduce' }, headless: true },
   // Candidate C — the occlusion pref now in config/mcp-playwright-firefox.config.json, ON TOP of the
-  // reproducer. Run 3 already showed it is not the lane fix (default clicked fine fully covered, rAF 0);
-  // this row says whether it helps at all.
+  // reproducer. THIS IS THE ONE THAT WON (run 4): covered rAF 121 where firefox-default reads 0 under the
+  // same cover, same window geometry — the window IS covered, the driver keeps ticking, 6/6 clicks pass.
   'ff-repro+pref-off': { engine: 'firefox', context: { reducedMotion: 'reduce' }, prefs: { [OCCLUSION_PREF]: false } },
 };
 const REPEAT = Number(arg('repeat', '3'));
@@ -265,7 +265,7 @@ for (const name of variantNames) {
       if (!v.headless) row.coveredRaf = await rafStats(page);
       // A firefox window that is really covered stops ticking (runs 1–2: 121 when the cover missed, 0 when it
       // landed). With the occlusion pref OFF it keeps ticking by design, so the check applies to the others.
-      row.coverMissed = !v.headless && v.engine === 'firefox' && !(v.prefs ?? {})[OCCLUSION_PREF] && (row.coveredRaf?.ticks ?? 0) > 20;
+      row.coverMissed = !v.headless && v.engine === 'firefox' && (v.prefs ?? {})[OCCLUSION_PREF] !== false && (row.coveredRaf?.ticks ?? 0) > 20;
       if (!v.headless) row.coveredJitter = await rectJitter(target);
       row.coveredClick = v.headless ? undefined : await clickPhase(page, target);
 
@@ -321,7 +321,7 @@ const repro = byName['ff-repro-reducedmotion'];
 const candidates = ['ff-repro+keepalive', 'ff-repro+headless', 'ff-repro+pref-off'];
 const controlOk = !control || allOk(control);
 const reproFailed = anyFail(repro);
-const winners = candidates.filter((n) => allOk(byName[n]));
+const winners = candidates.filter((n) => allOk(byName[n]) && !byName[n].coverMissed);
 // The mechanism claim: every failing attempt was preceded by a dead rAF, and no passing one was.
 const attemptsOf = (r) => [r?.foregroundClick, r?.coveredClick, r?.uncoveredClick].filter(Boolean).flatMap((c) => c.attempts);
 const all = results.filter(usable).flatMap(attemptsOf);
