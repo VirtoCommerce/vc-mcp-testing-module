@@ -837,7 +837,14 @@ if (MODE === 'check') {
     process.exit(1);
   }
   if (strip(current) !== strip(rendered)) {
-    console.error(`map:check — DRIFT: ${OUT} disagrees with its sources. Run \`npm run map:refresh\`.`);
+    // Say WHAT drifted: a gate that only says "DRIFT" cannot be diagnosed from a CI log (2026-09-08,
+    // when this check was green locally and red on the runner, and the log carried no clue).
+    const a = strip(current).split('\n'), b = strip(rendered).split('\n');
+    const shown = [];
+    for (let i = 0; i < Math.max(a.length, b.length) && shown.length < 12; i++) {
+      if (a[i] !== b[i]) shown.push(`  line ${i + 1}\n    committed: ${(a[i] ?? '<absent>').slice(0, 160)}\n    rendered:  ${(b[i] ?? '<absent>').slice(0, 160)}`);
+    }
+    console.error(`map:check — DRIFT: ${OUT} disagrees with its sources (${a.length} vs ${b.length} lines). Run \`npm run map:refresh\`.\n${shown.join('\n')}`);
     process.exit(1);
   }
   console.log(`map:check — clean (${domains.length} domains, ${suites.length} suites, ${baDocs.length} BA docs).`);
