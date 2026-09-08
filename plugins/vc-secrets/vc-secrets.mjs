@@ -731,8 +731,8 @@ function psArgs(script) {
     return ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", psEncode(script)];
 }
 
-// A value written by the pre-UTF-8 launcher is UTF-16LE, and tokens are ASCII, so every
-// second byte is zero. Detecting rather than versioning keeps `run` read-only: a developer
+// A value written by the pre-UTF-8 launcher is UTF-16LE, and tokens are ASCII — checked against
+// the real credentials in use, not inferred from the format — so every second byte is zero. Detecting rather than versioning keeps `run` read-only: a developer
 // whose secret exists only in the keystore cannot re-enter it, so we must read what is there.
 function decodeCredBlobHex(hex) {
     const bytes = Buffer.from(hex.replace(/\s+/g, ""), "hex");
