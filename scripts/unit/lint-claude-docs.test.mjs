@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BUDGET, BASELINE, alwaysLoadedFiles, measureBudget, isPlaceholderPath, isEphemeralPath, citationTarget, pathResolves, headingMatch, MAY_NOT_EXIST, classifyScript, ratchet, lint } from '../maintenance/lint-claude-docs.mjs';
+import { BUDGET, BASELINE, alwaysLoadedFiles, measureBudget, isPlaceholderPath, isEphemeralPath, citationTarget, citedFromRoot, pathResolves, headingMatch, MAY_NOT_EXIST, classifyScript, ratchet, lint } from '../maintenance/lint-claude-docs.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -82,6 +82,27 @@ test('citationTarget prefers the link target over the label', () => {
 
 test('citationTarget falls back to the label when the path is not a link', () => {
   assert.equal(citationTarget('scripts/lib/live-discover.ts', ' — typed xAPI primitives'), 'scripts/lib/live-discover.ts');
+});
+
+// Both of these were regressions introduced by checking the link TARGET instead of the label: the old
+// rule checked `config/test-suites.json` (which exists) and passed, the new one checked the URL and
+// filed a dangling path. With the baseline at zero, the first external link added to `.claude/**`
+// would have failed the gate as exactly the phantom finding this rule was rewritten to remove.
+test('a citation linked to a URL makes no claim about a repo path, so it is not checked', () => {
+  assert.equal(citationTarget('config/test-suites.json', '](https://github.com/VirtoCommerce/x/blob/main/config/test-suites.json)'), null);
+  assert.equal(citationTarget('docs/onboarding.md', '](http://example.com/x)'), null);
+  assert.equal(citationTarget('docs/onboarding.md', '](mailto:qa@example.com)'), null);
+  assert.equal(citationTarget('docs/onboarding.md', '](//cdn.example.com/x.md)'), null, 'protocol-relative is external too');
+  assert.equal(citationTarget('scripts/lib/x.ts', '](../scripts/lib/x.ts)'), '../scripts/lib/x.ts', 'a repo-relative target is still checked');
+});
+
+test('ephemerality is decided on the path from the ROOT, however the link was written', () => {
+  // The same pruned run folder, written two ways. Only the first was recognised, so whether a citation
+  // counted against the zeroed DOC-003 ratchet depended on the author's choice of relative or absolute.
+  assert.ok(isEphemeralPath(citedFromRoot('.claude/rules/reports.md', 'reports/regression/REG-2026-07-24-2121')));
+  assert.ok(isEphemeralPath(citedFromRoot('.claude/skills/qa-test/SKILL.md', '../../../reports/regression/REG-2026-07-24-2121')));
+  assert.ok(!isEphemeralPath(citedFromRoot('.claude/skills/qa-test/SKILL.md', '../../rules/reports.md')), 'a rules file is durable');
+  assert.equal(citedFromRoot('.claude/rules/x.md', 'scripts/lib/y.ts'), 'scripts/lib/y.ts', 'a root-relative citation is returned unchanged');
 });
 
 test('citationTarget drops a #fragment, and yields null for an anchor-only link', () => {

@@ -103,6 +103,10 @@ export const MAY_NOT_EXIST = 'doclint:may-not-exist';
 /** A markdown link target immediately following a backticked label: `` `label` ``](target). */
 const LINK_RE = /^\]\(([^)\s]*)\)/;
 
+/** A link target that leaves the repository: any URI scheme (`https:`, `mailto:`, and a Windows
+ *  `C:` drive too) or a protocol-relative `//host/…`. */
+const EXTERNAL_RE = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
+
 /**
  * What a citation actually points at.
  *
@@ -114,8 +118,27 @@ const LINK_RE = /^\]\(([^)\s]*)\)/;
  */
 export function citationTarget(label, rest) {
   const link = LINK_RE.exec(rest);
+  // A citation linked to a URL makes no claim about a path in THIS repo — the backticked text is a
+  // display label (`[`config/test-suites.json`](https://github.com/…/test-suites.json)`), and the
+  // target is somewhere else entirely. Neither is checkable here, so check neither. Without this the
+  // first external link added to `.claude/**` fails a gate now pinned at zero, which is precisely the
+  // phantom-finding class this rule was rewritten to remove.
+  if (link && (EXTERNAL_RE.test(link[1]) || link[1].startsWith('#'))) return null;
   const cited = (link ? link[1].split('#')[0] : label).replace(/\/$/, '');
   return cited || null;
+}
+
+/**
+ * The citation as a path from the repo ROOT, whichever way it was written.
+ *
+ * Classification must not depend on that choice: `reports/regression/REG-…` and
+ * `../../reports/regression/REG-…` name the same pruned run folder, and only the first was being
+ * recognised as ephemeral — so the same citation counted against the zeroed DOC-003 ratchet or not
+ * depending on how the author happened to write the link.
+ */
+export function citedFromRoot(file, cited) {
+  if (!cited.startsWith('.')) return cited;
+  return posix(path.normalize(path.join(path.dirname(file), cited)));
 }
 
 /** Does a citation resolve — from the repo root, or relative to the file it is written in? Both are
@@ -230,7 +253,7 @@ export function lint(root = '.') {
           if (!cited) continue;
           if (isPlaceholderPath(label) || pathResolves(f, cited) || ignored(cited) || ignored(cited + '/')) continue;
           const detail = `cited path does not exist: ${cited === label ? label : `${label} → ${cited}`}`;
-          add(isEphemeralPath(cited) ? 'DOC-003E' : 'DOC-003', f, i + 1, detail);
+          add(isEphemeralPath(citedFromRoot(f, cited)) ? 'DOC-003E' : 'DOC-003', f, i + 1, detail);
         }
         for (const m of l.matchAll(SEC_RE)) {
           let t = m[1];
