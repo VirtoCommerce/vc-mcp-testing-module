@@ -5,14 +5,15 @@
  * largest remaining item is not the always-loaded tier (that was re-tiered in PRs 1–3) but the
  * per-dispatch reads: ~41 briefs across the agent corpus point at
  * `.claude/knowledge/oracles/business-logic.md` by PATH. Every agent that follows one reads the whole
- * oracle — 386 KB, ~97K tokens, 226 invariants — to use the three or four that touch its domain. A
+ * oracle — every invariant in it — to use the three or four that touch its domain. A
  * `/qa-test` FULL run dispatches many such agents, and each pays it again in its own context.
  *
  * The fix is not to shrink the oracle: it is the single source of truth and every invariant in it is
  * load-bearing somewhere. The fix is to stop shipping ALL of it to an agent that needs ONE domain.
  * This script slices it deterministically so an orchestrator can paste the relevant invariants into a
- * brief as DATA. Measured on this corpus: `--domain cart` is 15 of 216 invariants — 7.5% of the file, ~7.2K tokens
- * against ~96K.
+ * brief as DATA. Measured 2026-09-08: `--domain cart` was 7.5% of the file, ~7.2K tokens against ~96K.
+ * Counts are never transcribed here (CLAUDE.md §Where the rules live) — `npm run bl:extract:list`
+ * prints the live domains and sizes, and `--stats` prints the ratio for whatever you just extracted.
  *
  * VERBATIM, NOT SUMMARISED. The output is the oracle's own markdown, sliced by line range — never a
  * re-rendering. An agent reading extracted text is reading the same authority, character for
@@ -62,8 +63,9 @@ const VALID_TAGS = new Set(["P0-revenue", "P0-security", "P1-data", "P1-ux", "P2
 /**
  * Slice the oracle into per-entry markdown, preserving source order.
  *
- * An entry runs from its `### BL-…` line to just before the next `###`/`##`, with trailing blank
- * lines trimmed — so a slice is self-contained and concatenating several yields valid markdown.
+ * An entry runs from its `### BL-…` line to just before the next heading at `###` or above (another
+ * invariant, a domain, or any other section), with trailing blank lines trimmed — so a slice is
+ * self-contained, carries no borrowed prose, and concatenating several yields valid markdown.
  */
 export function sliceOracle(text: string): Slice[] {
   const lines = text.split(/\r?\n/);
@@ -107,8 +109,11 @@ export function sliceOracle(text: string): Slice[] {
       };
       continue;
     }
-    // A `##` that is not a Domain heading (e.g. an appendix) still terminates the current entry.
-    if (/^##\s/.test(raw)) close(i);
+    // ANY heading at `###` or above ends the entry, not just a BL one. Today the oracle's only
+    // non-BL `###` is "Severity Tags" in the preamble, so this changes no current slice — but the
+    // moment someone adds a `### Note` inside a domain, an entry that swallowed it would ship
+    // unrelated prose inside `BL-X`'s body, and a brief cannot tell borrowed text from the invariant.
+    if (/^#{1,3}\s/.test(raw)) close(i);
   }
   close(lines.length);
   return out;

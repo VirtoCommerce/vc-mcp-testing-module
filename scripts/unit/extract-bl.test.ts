@@ -132,3 +132,28 @@ test("a `##` heading that is not a Domain still closes the preceding entry", () 
   assert.ok(!got[0].markdown.includes("Appendix"), "the appendix leaked into the invariant body");
   assert.ok(!got[0].markdown.includes("not an invariant"));
 });
+
+// A NON-BL `###` inside a domain must end the entry too. Today the oracle's only such heading sits in
+// the preamble, so this is latent — and it is exactly the kind of latent bug that ships borrowed prose
+// inside `BL-X`'s body the first time someone adds a note under an invariant. A brief cannot tell the
+// difference, so the slicer must.
+test("a non-BL `###` subheading ends the entry instead of being absorbed", () => {
+  const synthetic = [
+    "## Domain 1: Cart (BL-CART)",
+    "",
+    "### BL-CART-001: First `[P0-revenue]`",
+    "- **Rule:** one",
+    "",
+    "### Implementation notes",
+    "",
+    "prose that belongs to nobody",
+    "",
+    "### BL-CART-002: Second `[P1-data]`",
+    "- **Rule:** two",
+  ].join("\n");
+  const got = sliceOracle(synthetic);
+  assert.deepEqual(got.map((s) => s.id), ["BL-CART-001", "BL-CART-002"], "only BL entries are slices");
+  assert.ok(!got[0].markdown.includes("Implementation notes"), "the subheading leaked into BL-CART-001");
+  assert.ok(!got[0].markdown.includes("belongs to nobody"), "unrelated prose shipped as part of the invariant");
+  assert.equal(got[0].markdown, "### BL-CART-001: First `[P0-revenue]`\n- **Rule:** one");
+});
