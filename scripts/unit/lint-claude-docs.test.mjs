@@ -112,26 +112,41 @@ test('a reports/ citation is ephemeral; a durable path is not', () => {
 
 // --- the ratchets, over THIS checkout -------------------------------------------------------------
 
+// One `lint(ROOT)` for every corpus-level assertion below. Each failure message carries the whole
+// counts object: a ratchet that only says "expected 0, got 1" costs a CI round-trip to interpret, and
+// these run on two platforms where reproducing locally is not always possible.
+const CORPUS = lint(ROOT);
+const show = (code) => CORPUS.findings.filter((f) => f.code === code).map((f) => `${f.file}:${f.line} ${f.detail}`).join('\n    ');
+const counts = () => `counts=${JSON.stringify(CORPUS.counts)}`;
+
 test('DOC-002 and DOC-003 are at zero — every remaining finding is a real defect to fix', () => {
-  const r = lint(ROOT);
-  const show = (code) => r.findings.filter((f) => f.code === code).map((f) => `${f.file}:${f.line} ${f.detail}`).join('\n  ');
   assert.equal(BASELINE['DOC-002'], 0, 'the baseline must stay at 0 — raising it is how a gate stops gating');
   assert.equal(BASELINE['DOC-003'], 0);
-  assert.equal(r.counts['DOC-003'], 0, `a cited path no longer resolves:\n  ${show('DOC-003')}`);
-  assert.equal(r.counts['DOC-002'], 0, `an npm run cites a script that does not exist:\n  ${show('DOC-002')}`);
+  assert.equal(CORPUS.counts['DOC-003'], 0, `a cited path no longer resolves (${counts()}):\n    ${show('DOC-003')}`);
+  assert.equal(CORPUS.counts['DOC-002'], 0, `an npm run cites a script that does not exist (${counts()}):\n    ${show('DOC-002')}`);
 });
 
-test('DOC-003E is reported but never ratcheted — pruning a report folder must not fail the gate', () => {
-  const r = lint(ROOT);
-  assert.ok(r.counts['DOC-003E'] > 0, 'this corpus cites past runs as provenance; if that stops, drop the code');
-  assert.ok(!r.ratchet.over.some((o) => o.code === 'DOC-003E'), 'an informational code must not enter the ratchet');
+// NOTE the assertion this deliberately does NOT make: "the corpus currently cites at least one pruned
+// report". That is incidental state, not behaviour — it flips the day someone restores or prunes
+// `reports/`, and a test that fails for that reason teaches nobody anything. What must hold on any
+// checkout is the CLASSIFICATION: anything filed as DOC-003E is a `reports/` path, and no informational
+// code ever reaches the ratchet.
+test('DOC-003E is a reports/ path and is never ratcheted — pruning a report folder cannot fail the gate', () => {
+  for (const f of CORPUS.findings.filter((x) => x.code === 'DOC-003E')) {
+    const cited = f.detail.split(': ').pop().split(' → ').pop();
+    assert.match(cited, /^reports\//, `${f.file}:${f.line} was filed as ephemeral but is not under reports/`);
+  }
+  assert.ok(!CORPUS.ratchet.over.some((o) => o.code === 'DOC-003E'), `an informational code must not enter the ratchet (${counts()})`);
   assert.equal(BASELINE['DOC-003E'], undefined, 'it has no baseline by design');
 });
 
 test('the may-not-exist directive is honoured, and only for existence rules', () => {
-  const r = lint(ROOT);
-  const tierD = r.findings.filter((f) => f.file === '.claude/architecture/TIER.md' && f.code.startsWith('DOC-00') && f.code !== 'DOC-004');
-  assert.deepEqual(tierD, [], 'TIER.md\'s "What\'s Missing" table names absent artifacts on purpose');
+  const tierD = CORPUS.findings.filter((f) => f.file === '.claude/architecture/TIER.md' && f.code !== 'DOC-004');
+  assert.deepEqual(
+    tierD.map((f) => `${f.code} ${f.line} ${f.detail}`),
+    [],
+    `TIER.md's "What's Missing" table names absent artifacts on purpose (${counts()})`,
+  );
   assert.ok(MAY_NOT_EXIST.startsWith('doclint:'), 'the marker stays namespaced so it is greppable');
 });
 
@@ -187,8 +202,6 @@ test('a compound citation must satisfy BOTH halves', () => {
 });
 
 test('DOC-004 is at zero — a § citation that stops resolving is a real defect now', () => {
-  const r = lint(ROOT);
-  const show = r.findings.filter((f) => f.code === 'DOC-004').map((f) => `${f.file}:${f.line} ${f.detail}`).join('\n  ');
   assert.equal(BASELINE['DOC-004'], 0, 'raising this baseline is how a gate stops gating');
-  assert.equal(r.counts['DOC-004'], 0, `a cited section heading no longer resolves:\n  ${show}`);
+  assert.equal(CORPUS.counts['DOC-004'], 0, `a cited section heading no longer resolves (${counts()}):\n    ${show('DOC-004')}`);
 });
