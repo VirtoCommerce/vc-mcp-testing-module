@@ -65,37 +65,52 @@ const VALID_TAGS = new Set(["P0-revenue", "P0-security", "P1-data", "P1-ux", "P2
  *
  * An entry runs from its `### BL-…` line to just before the next heading at `###` or above (another
  * invariant, a domain, or any other section), with trailing blank lines trimmed — so a slice is
- * self-contained, carries no borrowed prose, and concatenating several yields valid markdown.
+ * self-contained, carries no borrowed prose, and concatenating several yields valid markdown. The
+ * slice is taken by character offset from the original text, so it is byte-identical to the source
+ * including its line endings (CRLF checkouts included).
  */
 export function sliceOracle(text: string): Slice[] {
-  const lines = text.split(/\r?\n/);
+  // Slice the ORIGINAL string by character offset rather than re-joining split lines. Splitting on
+  // /\r?\n/ and joining with "\n" silently rewrites every line ending, so on a CRLF checkout (Windows,
+  // git autocrlf) the "verbatim" claim above becomes false and `text.includes(slice)` fails for every
+  // entry — measured: 0 of 216. Offsets keep a slice byte-identical to its source on both platforms.
+  const rawLines = text.split("\n");
   const out: Slice[] = [];
+  const offsets: number[] = [];
+  let at = 0;
+  for (const l of rawLines) {
+    offsets.push(at);
+    at += l.length + 1; // + the "\n" that split consumed
+  }
+
   let domain = "(preamble)";
   let cur: { start: number; id: string; title: string; severity: string; domain: string } | null = null;
 
-  const close = (endExclusive: number) => {
+  const close = (endLineExclusive: number) => {
     if (!cur) return;
-    let end = endExclusive;
-    while (end > cur.start + 1 && lines[end - 1].trim() === "") end--;
+    const from = offsets[cur.start];
+    const to = endLineExclusive < offsets.length ? offsets[endLineExclusive] : text.length;
     out.push({
       id: cur.id,
       title: cur.title,
       severity: cur.severity,
       domain: cur.domain,
       domainPrefix: cur.id.replace(/-\d+[A-Z]?$/, ""),
-      markdown: lines.slice(cur.start, end).join("\n"),
+      markdown: text.slice(from, to).replace(/\s+$/, ""),
     });
     cur = null;
   };
 
-  for (let i = 0; i < lines.length; i++) {
-    const raw = lines[i];
-    if (DOMAIN_RE.test(raw)) {
+  for (let i = 0; i < rawLines.length; i++) {
+    // Match on the line WITHOUT its carriage return: `.` matches `\r`, so a CRLF file would otherwise
+    // fold the CR into the captured title and into the severity tag.
+    const line = rawLines[i].endsWith("\r") ? rawLines[i].slice(0, -1) : rawLines[i];
+    if (DOMAIN_RE.test(line)) {
       close(i);
-      domain = raw.replace(/^##\s+/, "").trim();
+      domain = line.replace(/^##\s+/, "").trim();
       continue;
     }
-    const entry = raw.match(ENTRY_RE);
+    const entry = line.match(ENTRY_RE);
     if (entry) {
       close(i);
       const tail = entry[2];
@@ -113,9 +128,9 @@ export function sliceOracle(text: string): Slice[] {
     // non-BL `###` is "Severity Tags" in the preamble, so this changes no current slice — but the
     // moment someone adds a `### Note` inside a domain, an entry that swallowed it would ship
     // unrelated prose inside `BL-X`'s body, and a brief cannot tell borrowed text from the invariant.
-    if (/^#{1,3}\s/.test(raw)) close(i);
+    if (/^#{1,3}\s/.test(line)) close(i);
   }
-  close(lines.length);
+  close(rawLines.length);
   return out;
 }
 

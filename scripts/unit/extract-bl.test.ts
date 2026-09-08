@@ -157,3 +157,44 @@ test("a non-BL `###` subheading ends the entry instead of being absorbed", () =>
   assert.ok(!got[0].markdown.includes("belongs to nobody"), "unrelated prose shipped as part of the invariant");
   assert.equal(got[0].markdown, "### BL-CART-001: First `[P0-revenue]`\n- **Rule:** one");
 });
+
+// --- line endings ---------------------------------------------------------------------------------
+//
+// A Windows checkout (git autocrlf) hands the slicer CRLF. The first implementation split on
+// /\r?\n/ and re-joined with "\n", which silently rewrote every line ending: the "verbatim" claim
+// became false and `text.includes(slice)` matched 0 of 216 entries. CI caught it on the windows-latest
+// job while ubuntu passed — the exact asymmetry this test now pins on every platform.
+
+const CRLF = [
+  "## Domain 1: Cart (BL-CART)",
+  "",
+  "### BL-CART-001: First `[P0-revenue]`",
+  "- **Rule:** one",
+  "- **Verify:** check it",
+  "",
+  "### BL-CART-002: Second `[P1-data]`",
+  "- **Rule:** two",
+  "",
+].join("\r\n");
+
+test("a CRLF oracle yields slices that are still byte-identical substrings of the source", () => {
+  const got = sliceOracle(CRLF);
+  assert.deepEqual(got.map((s) => s.id), ["BL-CART-001", "BL-CART-002"]);
+  for (const s of got) {
+    assert.ok(CRLF.includes(s.markdown), `${s.id}: slice is not a literal substring of the CRLF source`);
+    assert.ok(s.markdown.includes("\r\n"), `${s.id}: line endings were rewritten to LF`);
+  }
+});
+
+test("CRLF does not leak a carriage return into the parsed title or severity", () => {
+  const [first] = sliceOracle(CRLF);
+  assert.equal(first.title, "First", "a stray \\r in the title would corrupt every brief heading");
+  assert.equal(first.severity, "P0-revenue", "a stray \\r would make the severity tag unmatchable");
+  assert.ok(!first.domain.includes("\r"), "domain heading kept its carriage return");
+});
+
+test("the same oracle in LF and CRLF selects the same ids", () => {
+  const lf = sliceOracle(CRLF.replace(/\r\n/g, "\n")).map((s) => s.id);
+  const crlf = sliceOracle(CRLF).map((s) => s.id);
+  assert.deepEqual(crlf, lf, "line endings must not change which invariants an extract contains");
+});
