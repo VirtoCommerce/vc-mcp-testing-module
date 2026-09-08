@@ -8,6 +8,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Semver 
 
 ---
 
+## Correctness defects from the audit (§2 D1 / D3 / D6 / D9 / D10) — 2026-09-08
+
+**Tier A:** `qa-bug.md`, `qa-verify-fix.md`, `qa-env-check.md` (and `qa-fix.md`, `qa-monitoring.md`) now exist
+**only** in `plugins/vc-fix/commands/`. The `.claude/commands/` copies are deleted: they were the older
+Jira-only versions and had forked silently from the tracker-agnostic plugin (`qa-bug` 27 K vs 44 K,
+`qa-verify-fix` missing the confirm-deployment-before-transition ordering fix). No contract changes — the
+same slash names, arguments and outputs, from the copy customers already run; a clone without the plugin
+installed no longer has them in its `/` menu (`.claude/ROUTING.md` says how to install).
+
+Also: the ECL oracle re-synced into the plugin and both oracles under the byte-parity gate (5 → 27 mirrored
+paths); `qa-testing-expert` moved off the firefox lane; `rules/regression.md` no longer describes a cron
+schedule that is commented out; `full-cycle.yml` reports its real exit code; `package-lock.json` version
+matches `package.json`; `scope:validate` joins the offline gate set.
+
+---
+
 ## Component consolidation — commands 31 → 27, skills 41 → 40 — 2026-09-08
 
 **BREAKING:** **Tier A:** `skills/qa-process/` (`test-process-lifecycle.md`, the ISTQB 7-phase lifecycle) is

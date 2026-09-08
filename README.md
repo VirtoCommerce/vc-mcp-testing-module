@@ -159,7 +159,7 @@ Five pipelines, each with an interactive + headless-CI twin:
 
 Full reference: each command and skill file's own frontmatter (`description` + `argument-hint`), which the harness renders as the `/` menu.
 
-- **Slash commands** (`ls .claude/commands` for the current set) — `/qa-bundle-check`, `/code-review-full`, `/qa-smoke`, `/qa-test`, `/qa-regression`, `/qa-bug`, `/qa-fix`, `/qa-verify-fix`, `/qa-hotfix`, `/qa-hotfix-check`, `/qa-monitoring`, `/qa-triage-results`, `/qa-design`, `/qa-exploratory`, `/qa-test-lifecycle`, `/qa-test-plan`, `/qa-seed-data`, `/qa-sitemap`, `/qa-local-env`, `/qa-onboarding`, `/ba-analyze`, …
+- **Slash commands** (`ls .claude/commands` for the current set; the bug-lifecycle ones — `/qa-bug`, `/qa-fix`, `/qa-verify-fix`, `/qa-monitoring`, `/qa-env-check`, `/project-init`, `/vc-self-check` — come from the `vc-fix` plugin, see `.claude/ROUTING.md`) — `/qa-bundle-check`, `/code-review-full`, `/qa-smoke`, `/qa-test`, `/qa-regression`, `/qa-hotfix`, `/qa-hotfix-check`, `/qa-triage-results`, `/qa-design`, `/qa-exploratory`, `/qa-test-lifecycle`, `/qa-test-plan`, `/qa-seed-data`, `/qa-sitemap`, `/qa-local-env`, `/qa-onboarding`, `/ba-analyze`, …
 - **Skills** in [`skills/`](.claude/skills) — one `skills/<name>/SKILL.md` each, category as a `[Tag]` in the description; see [skills/README.md](.claude/skills/README.md) for how the counts are derived.
 - **Agents** in [`agents/`](.claude/agents) across three teams (QA, BA, Developers) — roster in [`.claude/rules/agents.md`](.claude/rules/agents.md). Each parallel agent uses its own browser — see [`.claude/rules/agents.md`](.claude/rules/agents.md). Max 3 concurrent browser agents.
 
