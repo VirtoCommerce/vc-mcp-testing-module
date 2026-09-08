@@ -8,11 +8,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Semver 
 
 ---
 
-## The doc gate was measuring the wrong thing — DOC-002/003 now at zero — 2026-09-08
+## The doc gate was measuring the wrong thing — all three ratchets now at zero — 2026-09-08
 
-`npm run context:check` ratchets three rules over `CLAUDE.md` + `.claude/**`. Two of them were
-reporting findings that were not defects, and their baselines (`DOC-002: 4`, `DOC-003: 43`) had frozen
-that in: a number no amount of fixing could reduce, with real broken links hiding underneath it.
+`npm run context:check` ratchets three rules over `CLAUDE.md` + `.claude/**`. **All three were
+comparing a citation against the wrong thing**, so each carried a mix of phantom findings and real ones
+— and the phantoms are what pinned the baselines (`DOC-002: 4`, `DOC-003: 43`, `DOC-004: 18`), which in
+turn hid the real ones. A ratchet that cannot reach zero is worse than no ratchet: it reports noise on
+every run and gates nothing.
 
 **DOC-003 checked the label, from the wrong place.** It took the backticked text of a citation and
 tested it against the repo root. That is not what a reader follows, and the gap ran both ways:
@@ -47,13 +49,27 @@ sentence that calls it unbuilt. `business-logic.md` is byte-parity mirrored into
 no relative link works on both surfaces, so its broken link became a plain path citation — correct from
 the root of either.
 
-Baselines are now `DOC-002: 0` and `DOC-003: 0`. Nine unit tests pin the resolution semantics and both
-zeros, with the failure message naming the offending file and line.
+**DOC-004 matched the first 25 characters of a run-on citation.** A `§Heading` reference is written
+inside a sentence, so the text after `§` continues into prose the author never meant as part of the
+heading: `§Effort routing records that the…` names `## Effort routing, and why the FAST/FULL line sits
+where it does`. Nine of the eighteen findings were the corpus's own correct citations.
 
-**Not fixed here: DOC-004 (18) has the same root cause** — its `§Heading` capture runs on into the
-following prose, so `§Effort routing records that the` misses the heading `## Effort routing, and why…`.
-A prototype word-prefix matcher clears 9 of the 18; the other 9 look like genuinely renamed or removed
-headings needing a judgment call each. Its own slice, not a footnote to this one.
+The rule now matches the citation's leading **words** against a heading, longest first, **stopping at
+two**. That floor is the whole design: truncating further would let `§Atlassian / Admin SSO` pass on the
+word "Atlassian" alone against the heading "Atlassian / JIRA setup" — hiding a citation that really had
+gone stale when that section was renamed. Punctuation does not count as a word for the same reason, the
+match must land on a word boundary (so `§Assertion STRENGTH` cannot pass on the heading "Assertions"),
+and a compound `§A + §B` must satisfy **both** halves.
+
+**The other nine were genuinely stale and are repointed** — a renamed section (`§ONE AUTHOR PER SUITE` →
+`§WORKING IN A SHARED TREE`), a citation naming the wrong file (`§Release note` is in `reporting.md`, not
+`close-out.md`), a heading that never existed (`§Test Case Review Approval` → `§Decision Framework`), two
+`§Assertion STRENGTH` → `§Assertions`, `§Teardown Collection` → `§Teardown — Reverse Deletion Order`,
+`§Atlassian / Admin SSO` → `§Atlassian / JIRA setup`, and two citations pointing at bolded rules that are
+not headings at all, now quoted as the rules they are.
+
+All three baselines are `0`. Fifteen unit tests pin the three matchers and the three zeros, each failing
+with the offending file and line.
 
 ---
 

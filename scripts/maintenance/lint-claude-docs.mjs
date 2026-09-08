@@ -34,12 +34,19 @@ import { fileURLToPath } from 'node:url';
 export const BUDGET = { alwaysLoadedChars: 80_000, longestLineChars: 2_500, skillBodyWarnChars: 19_000 };
 
 // Ratchet baseline — measured 2026-09-08 right after PR 2. Lower a number when you fix findings; never raise one.
-// DOC-003 sat at 43 until 2026-09-08, when the rule was fixed to resolve a citation the way a reader
-// does (link target, not label; relative to the citing file, not only the repo root). 30 of those 43
-// were `reports/` artifacts that are ephemeral by policy — now DOC-003E — and the rest were either
-// phantom or genuinely broken; the broken ones were fixed in the same change. 0 is the real number,
-// and a ratchet at 0 is the only one that catches the next one.
-export const BASELINE = { 'DOC-002': 0, 'DOC-003': 0, 'DOC-004': 18 };
+// All three baselines were non-zero until 2026-09-08, and none of the three numbers meant what it said.
+// Each rule was comparing a citation against the wrong thing, so each carried a mix of phantom findings
+// and real ones — and the phantoms are what pinned the baseline, which in turn hid the real ones.
+//   DOC-002 (4)  — every finding was a line SAYING the script does not exist ("`npm run model:lint` is
+//                  not implemented, do not cite it as a gate"). Now declared with `doclint:may-not-exist`.
+//   DOC-003 (43) — checked the backticked LABEL against the repo root instead of the link TARGET
+//                  relative to the citing file. 30 were `reports/` artifacts that are ephemeral by
+//                  policy (now DOC-003E, informational); 3 real broken links had been passing.
+//   DOC-004 (18) — matched the first 25 characters of a citation that runs on into the sentence around
+//                  it, so `§Effort routing records that the…` missed "## Effort routing, and why…".
+//                  9 were phantom, 9 were genuinely stale citations and were repointed.
+// 0 is the real number for all three, and a ratchet at 0 is the only one that catches the next one.
+export const BASELINE = { 'DOC-002': 0, 'DOC-003': 0, 'DOC-004': 0 };
 
 /** Codes reported for information but never ratcheted — see DOC-003E on `isEphemeralPath`. */
 export const INFORMATIONAL = new Set(['DOC-003E']);
@@ -134,7 +141,49 @@ export function ratchet(counts, baseline) {
   return { ok: over.length === 0, over };
 }
 
-export const norm = (s) => s.toLowerCase().replace(/[`*_]/g, '').trim();
+export const norm = (s) => s.toLowerCase().replace(/[`*_"]/g, '').trim();
+
+/**
+ * Does a `file.md §Heading` citation name one of that file's headings?
+ *
+ * A citation is written INSIDE a sentence, so the text after `§` runs on into prose the author never
+ * meant as part of the heading: *"`SKILL.md` §Effort routing records that the…"* names the heading
+ * "Effort routing, and why the FAST/FULL line sits where it does". The old rule compared the first 25
+ * characters of the whole run-on against each heading, which failed on every citation of that shape —
+ * 9 of the 18 findings this rule carried were the corpus's own correct citations.
+ *
+ * So: match the citation's leading WORDS against a heading, longest first, and stop at two. The floor
+ * is what keeps the rule honest — truncating further would let `§Atlassian / Admin SSO` match the
+ * heading "Atlassian / JIRA setup" on the word "Atlassian" alone, hiding a citation that really is
+ * stale. Punctuation does not count toward those two words for the same reason ("Atlassian /" is one
+ * word, not two). A single-word citation is matched whole: it was never truncated, so nothing is lost.
+ *
+ * The match must land on a word boundary, so `§Assertion STRENGTH` cannot pass on the heading
+ * "Assertions". Returns the prefix that matched, or null.
+ */
+export function headingMatch(headings, cited) {
+  // `§Assertions + §Measurable UI vocabulary` names TWO headings, so verify both — a compound citation
+  // whose second half is stale is exactly as broken as one whose first half is.
+  const parts = String(cited).split(/\s*\+\s*§/);
+  if (parts.length > 1) {
+    const hit = parts.map((p) => headingMatchOne(headings, p));
+    return hit.every(Boolean) ? hit.join(' + ') : null;
+  }
+  return headingMatchOne(headings, cited);
+}
+
+function headingMatchOne(headings, cited) {
+  const toks = norm(cited).split(/\s+/).filter(Boolean);
+  const isWord = (w) => /[a-z0-9]/.test(w);
+  const boundary = (h, c) => h.startsWith(c) && (h.length === c.length || !/[a-z0-9]/.test(h[c.length]));
+  const floor = toks.length === 1 ? 1 : 2;
+  for (let n = toks.length; n >= floor; n--) {
+    const cand = toks.slice(0, n).join(' ').replace(/[^a-z0-9)\]]+$/, '');
+    if (cand.length < 3 || toks.slice(0, n).filter(isWord).length < floor) continue;
+    if (headings.some((h) => boundary(h, cand))) return cand;
+  }
+  return null;
+}
 
 function walkMd(dir) {
   const out = [];
@@ -188,9 +237,9 @@ export function lint(root = '.') {
           if (!/^(\.claude|docs|scripts|ci|config)\//.test(t)) t = posix(path.normalize(path.join(path.dirname(f), t)));
           const hs = headsOf(t);
           if (!hs) continue;                                      // DOC-003 owns a missing file
-          const q = norm(m[2]).slice(0, 25);
+          const q = norm(m[2]);
           if (q.length < 3 || /^\d/.test(q)) continue;            // numbered anchors (§1a, §5.0) are checked by doclint's stricter form
-          if (!hs.some((h) => h.startsWith(q) || h.includes(q))) add('DOC-004', f, i + 1, `§${m[2].trim()} not found as a heading in ${t}`);
+          if (!headingMatch(hs, m[2])) add('DOC-004', f, i + 1, `§${m[2].trim()} not found as a heading in ${t}`);
         }
       });
     }

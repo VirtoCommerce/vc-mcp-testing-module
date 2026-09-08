@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BUDGET, BASELINE, alwaysLoadedFiles, measureBudget, isPlaceholderPath, isEphemeralPath, citationTarget, pathResolves, MAY_NOT_EXIST, classifyScript, ratchet, lint } from '../maintenance/lint-claude-docs.mjs';
+import { BUDGET, BASELINE, alwaysLoadedFiles, measureBudget, isPlaceholderPath, isEphemeralPath, citationTarget, pathResolves, headingMatch, MAY_NOT_EXIST, classifyScript, ratchet, lint } from '../maintenance/lint-claude-docs.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -133,4 +133,62 @@ test('the may-not-exist directive is honoured, and only for existence rules', ()
   const tierD = r.findings.filter((f) => f.file === '.claude/architecture/TIER.md' && f.code.startsWith('DOC-00') && f.code !== 'DOC-004');
   assert.deepEqual(tierD, [], 'TIER.md\'s "What\'s Missing" table names absent artifacts on purpose');
   assert.ok(MAY_NOT_EXIST.startsWith('doclint:'), 'the marker stays namespaced so it is greppable');
+});
+
+// --- what a §Heading citation NAMES ---------------------------------------------------------------
+//
+// A citation is written inside a sentence, so the text after § runs on into prose the author never
+// meant as part of the heading. Comparing the first 25 characters of that run-on against each heading
+// failed on every citation of that shape: 9 of the 18 findings this rule carried were the corpus's own
+// correct citations. Matching the citation's leading WORDS fixes that -- but the floor of two words is
+// what keeps it from hiding the other 9, which were genuinely stale.
+
+const HEADS = [
+  'effort routing, and why the fast/full line sits where it does',
+  'golden rule — never hardcode in scripts (applies beyond test data)',
+  'atlassian / jira setup',
+  'assertions',
+  'assertion separation',
+  'measurable ui vocabulary (inv class for storefront cases)',
+  'manifest-domain routing',
+  'concurrency — the unit to save is a round-trip, not a second',
+];
+
+test('a citation that runs on into prose still matches its heading', () => {
+  assert.ok(headingMatch(HEADS, 'Effort routing records that the'), 'the run-on is prose, not part of the heading');
+  assert.ok(headingMatch(HEADS, 'GOLDEN RULE failure in its purest form'));
+  assert.ok(headingMatch(HEADS, '"Manifest-Domain Routing" for the target-suite resolution rule'), 'quotes must not block the match');
+});
+
+test('two words is the floor — one word would hide a genuinely stale citation', () => {
+  // The measured case: onboarding.md renamed its section, and `§Atlassian / Admin SSO` must FAIL
+  // rather than pass on the word "Atlassian" alone. Punctuation is not a word, so "atlassian /" is one.
+  assert.equal(headingMatch(HEADS, 'Atlassian / Admin SSO'), null);
+  assert.ok(headingMatch(HEADS, 'Atlassian / JIRA setup'), 'the corrected citation must pass');
+});
+
+test('the match lands on a word boundary, so a longer heading is not a match', () => {
+  assert.equal(headingMatch(HEADS, 'Assertion STRENGTH'), null, '"Assertions" must not satisfy "Assertion STRENGTH"');
+  assert.ok(headingMatch(HEADS, 'Assertion separation'), 'the real two-word heading still matches');
+});
+
+test('a single-word citation is matched whole — it was never truncated', () => {
+  assert.ok(headingMatch(HEADS, 'Concurrency'));
+  assert.equal(headingMatch(HEADS, 'Teardown'), null);
+});
+
+test('a compound citation must satisfy BOTH halves', () => {
+  assert.ok(headingMatch(HEADS, 'Assertions + §Measurable UI vocabulary'));
+  assert.equal(
+    headingMatch(HEADS, 'Assertions + §No Such Heading'),
+    null,
+    'a compound whose second half is stale is exactly as broken as one whose first half is',
+  );
+});
+
+test('DOC-004 is at zero — a § citation that stops resolving is a real defect now', () => {
+  const r = lint(ROOT);
+  const show = r.findings.filter((f) => f.code === 'DOC-004').map((f) => `${f.file}:${f.line} ${f.detail}`).join('\n  ');
+  assert.equal(BASELINE['DOC-004'], 0, 'raising this baseline is how a gate stops gating');
+  assert.equal(r.counts['DOC-004'], 0, `a cited section heading no longer resolves:\n  ${show}`);
 });
