@@ -333,3 +333,82 @@ node -e "const m=require('./config/test-suites.json');
 grep -oE 'BL-[A-Z0-9]+-[0-9]+' plugins/vc-fix/knowledge/oracles/business-logic.md | sort -u | wc -l
 grep -oE 'BL-[A-Z0-9]+-[0-9]+' .claude/knowledge/oracles/business-logic.md | sort -u | wc -l
 ```
+
+## 8. External validation (2026-09-08)
+
+The redesign in §6 was checked against outside evidence by an adversarial web-research run
+(24 sources fetched, 60 claims extracted, 25 verified by three independent votes each) plus two
+in-session measurements. **Ten claims survived 3–0, four were refuted, and the caching and
+subagent-inheritance claims went unverified by the web** when the run hit a spend limit mid-verify
+(32 of 106 verifier agents failed; synthesis did not run). What follows uses only the surviving
+claims, states each refutation as a limit on what this document may assert, and fills the two
+unverified angles from the API reference and from this session's own transcripts.
+
+### 8.1 Confirmed 3–0 — and which §6 recommendation each one grounds
+
+All ten survivors are primary Anthropic sources. Quotes are verbatim.
+
+| # | Verified claim (source) | Grounds |
+|---|---|---|
+| 1 | *"CLAUDE.md is loaded every session, so only include things that apply broadly. For domain knowledge or workflows that are only relevant sometimes, use skills instead."* — code.claude.com/docs/en/best-practices | §6 tier model; Action 1 (delete `## Detailed References`) |
+| 2 | *"Keep it concise. For each line, ask: Would removing this cause Claude to make mistakes? If not, cut it. Bloated CLAUDE.md files cause Claude to ignore your actual instructions!"* — same | §4.4: bloat is a **quality** defect, not only a cost |
+| 3 | *"LLM performance degrades as context fills… Claude may start forgetting earlier instructions or making more mistakes. The context window is the most important resource to manage."* — same | §5 cost model's quality column |
+| 4 | *"as the number of tokens in the context window increases, the model's ability to accurately recall information from that context decreases"* (context rot) — anthropic.com/engineering/effective-context-engineering-for-ai-agents | §3: 114K tokens before the task begins |
+| 5 | *"good context engineering means finding the smallest possible set of high-signal tokens that maximize the likelihood of some desired outcome"* — same | §6 Principle |
+| 6 | Three-level progressive disclosure with **per-level costs**: metadata *"~100 tokens per Skill"* always; SKILL.md body *"Under 5k tokens"* on trigger; resources *"None until accessed"* — platform.claude.com/…/agent-skills/overview | §3 reframe (57.5% of the corpus is already in the free tier) |
+| 7 | *"Reference files, data, or documentation don't consume context tokens until actually read"* — …/agent-skills/best-practices | Action 2 (move rules into skill support files) |
+| 8 | *"The context window is a public good… every token competes with conversation history and other context."* — same | §4.4 restatement finding |
+| 9 | Subagents *"run in their own context with their own set of allowed tools… report back summaries"* — code.claude.com best-practices | §5: each dispatch is a fresh window that re-pays the preamble |
+| 10 | Subagent *"returns only a condensed, distilled summary of its work (often 1,000–2,000 tokens)"* — engineering blog | §6 runtime fix: verifier/authoring fan-out is the right shape; the payload they inherit is the defect |
+
+### 8.2 Refuted — what this document therefore does NOT claim
+
+Each refutation was a real quote stretched past its source. They bound the redesign as much as the confirmations do.
+
+- **No official CLAUDE.md size number exists.** The only verified numeric limit is for **SKILL.md bodies**: *"Keep SKILL.md body under 500 lines"* / *"Under 5k tokens"*. A claim transferring that to CLAUDE.md was refuted 0–3. The §6 target of ~55K chars for the always-loaded set is this audit's engineering judgement, not a vendor figure.
+- **Just-in-time loading is not "preferred over pre-loading."** The mechanism (*"maintains lightweight identifiers… dynamically load data into context at runtime"*) is real; the same article recommends a **hybrid**. So §6 keeps a genuinely always-loaded tier 1 rather than lazy-loading everything.
+- **"Install many Skills without context penalty" is contradicted by its own page** — the ~100-tokens-per-skill line. This matches the measured 43,032-char menu floor in §3: the 41+31+17 frontmatter descriptions are a real, if small, always-cost, and verbose descriptions are the one part of the skill tier worth trimming.
+- **The "right altitude" quote** (*"hardcode complex, brittle logic in their prompts… creates fragility and increases maintenance complexity over time"*) is verbatim, but a broader inference drawn from it was refuted. It is cited here only for what it says: the 30,459-char `/qa-test` bullet is that failure mode by construction.
+
+### 8.3 Unverified by the web — filled from two other sources
+
+**Subagent inheritance (angle 2) — settled empirically, in this session.** Every subagent this
+audit dispatched carried the full always-loaded set: the four audit agents each contain CLAUDE.md
+line 1, `test-data.md`'s GOLDEN RULE heading and `quality-gates.md`'s title, and **106 of 106**
+web-research agents — whose only job was to search anthropic.com — carried the same 114K-token
+Virto QA preamble. On the research run's own aggregate (15,972,437 subagent tokens, 74 agents
+completed) that preamble is **≈8.4M tokens, ≈53% of the spend**, paid by agents to whom none of it
+applied. This is the §5 cost model observed live, on work unrelated to QA. It also answers the
+harness-mechanics questions the web could not: in this harness, project instructions are inherited
+by dispatched agents; scoping them is not a per-agent switch, it is a matter of what sits in the
+always-loaded tier.
+
+**Prompt caching (angle 3) — from the API reference, not the web.** Caching is a **prefix match**:
+any byte change anywhere in the prefix invalidates everything after it (render order
+`tools → system → messages`). Default TTL is 5 minutes, 1 hour is opt-in; a cache write costs
+≈1.25× and a read ≈0.1× of the input price; the minimum cacheable prefix is model-dependent
+(512–4,096 tokens). Two consequences for §6, both conservative:
+
+1. **Caching changes the bill, not the window.** A cached 114K-token preamble still occupies
+   114K tokens of the subagent's context and still counts against claims 3–5 above. Caching does
+   not mitigate context rot; only removing tokens does. The §6 re-tiering is therefore not made
+   optional by a good cache-hit rate.
+2. **Whether the preamble even caches across dispatches is unverified.** Each agent type has a
+   different definition ahead of the project instructions in the prefix, and the 5-minute default
+   TTL is short against a 40-minute pipeline. This audit makes no saving claim from caching; a
+   future measurement should read `usage.cache_read_input_tokens` on a real `/qa-test` run.
+
+### 8.4 One benchmark the corpus can be held to today
+
+Against the single verified numeric rule — SKILL.md *"under 500 lines"* and *"under 5k tokens"* —
+the 41 skills score **0 / 41 over 500 lines** but **11 / 41 over ~5k tokens** (`qa-review-tests`
+≈11.2K, `qa-test-cases-generator` ≈11.2K, `qa-seed-data` ≈8.7K, `qa-design` ≈8.0K, `vc-self-check`,
+`project-init`, `qa-local-env`, `qa-review-oracles`, `qa-hotfix-check`, `qa-test`, `qa-hotfix`). The
+two limits disagree because lines here are long — the same pathology as CLAUDE.md's 30,459-char line
+— so the token form is the one to gate on, and it belongs in the §6 context-budget CI check.
+
+### 8.5 Net effect on the redesign
+
+Nothing in §6 is reversed. Two things are sharpened: the always-loaded target is presented as a
+judgement rather than a vendor number, and caching is explicitly ruled out as a substitute for
+re-tiering. One thing is added: an 11-skill SKILL.md-body trim list under a verified 5k-token rule.
