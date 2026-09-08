@@ -1,6 +1,8 @@
 # Points History — "Operation" column is blank for every loyalty-mission reward row
 
-## Status: CONFIRMED
+## Status: READY_TO_SUBMIT
+
+**Tracker:** [VCST-5916](https://virtocommerce.atlassian.net/browse/VCST-5916) — filed 2026-09-08, screenshot attached + embedded inline (verified via `renderedFields`)
 
 **Environment:** vcst-qa (`TEST_ENV=vcst`) · Storefront theme **2.57.0** · `VirtoCommerce.Loyalty` **3.1006.0** · `VirtoCommerce.Xapi` **3.1020.0**
 **Surface:** `{{FRONT_URL}}/account/points-history` (desktop table + mobile card)
