@@ -1339,6 +1339,30 @@ test("readEnableLists: non-object env (null / array) yields no key names", () =>
     }
 });
 
+const CONSUMED_LISTS = { enabled: ["srv"], disabled: [], envKeys: [] };
+
+function consumedFixture(envValue) {
+    return {
+        secrets: { ado: { backend: "keyvault", vault: "v", secret: "s" } },
+        oauth: { ado: {} },
+        servers: { srv: { env: { T: envValue } } },
+        tasks: { chore: { env: { T: envValue } } },
+    };
+}
+
+test("consumedSecrets: an oauth reference does not consume a same-named secret, on either route", () => {
+    // The two grammars share one name space, so an oauth reference reached this set the moment
+    // parseReference learned the kind — un-skipping a same-named Key Vault entry and reddening the
+    // doctor of a teammate who cannot reach that vault. The task route is asserted with it because
+    // it passes enabled=true unconditionally, so the server route's enable list cannot cover it.
+    assert.deepEqual([...m.consumedSecrets(consumedFixture("oauth:ado"), CONSUMED_LISTS, new Set())], []);
+});
+
+test("consumedSecrets: a secret reference on an enabled server is still consumed", () => {
+    // The positive control: without it an empty body satisfies the test above.
+    assert.deepEqual([...m.consumedSecrets(consumedFixture("secret:ado"), CONSUMED_LISTS, new Set())], ["ado"]);
+});
+
 test("doctorReport: a legacy token in settings.local.json is reported even when absent from the session env", () => {
     const base = { env: {}, platform: "linux", resolvable: {}, skipped: [], toolsMissing: [], configDirOverride: false };
     // The terminal-run case: doctor's own process never inherits settings.local.json's env block,

@@ -1730,6 +1730,36 @@ function commandOnPath(tool) {
 
 const DOCTOR_FLAGS = ["--all"];
 
+// Which secrets does an ENABLED (or wired) launchable actually consume? A task has no enable list —
+// it is run on purpose — so anything it references counts as consumed, otherwise a Key Vault secret
+// used only by a task would be reported SKIP and never checked. Servers and tasks are iterated
+// separately so a task cannot mark a same-named SERVER enabled merely by existing — that would drop
+// the SKIP that keeps a teammate's `doctor` from FAILing on a Key Vault secret they cannot reach.
+// The kind filter carries the same weight in the other direction: an oauth reference shares the
+// reference grammar but declares no secret, and counting one as consumed un-skips a same-named
+// Key Vault entry.
+function consumedSecrets(cfg, enableLists, wired) {
+    const consumed = new Set();
+    const addConsumed = (srv, enabled) => {
+        for (const value of Object.values(srv.env)) {
+            try {
+                const ref = parseReference(value);
+                if (ref?.kind === "secret" && (enabled || cfg.secrets[ref.name]?.backend === "local")) {
+                    consumed.add(ref.name);
+                }
+            } catch { /* reported by doctorReport */ }
+        }
+    };
+    for (const [srvName, srv] of Object.entries(cfg.servers)) {
+        addConsumed(srv, enableLists.enabled.includes(srvName) || wired.has(srvName));
+    }
+    for (const task of Object.values(cfg.tasks ?? {})) {
+        addConsumed(task, true);
+    }
+
+    return consumed;
+}
+
 async function cmdDoctor(cfg, flags = []) {
     // An unrecognized flag used to be ignored, so `doctor --al` printed the same SKIP as a run
     // with no flag at all — output indistinguishable from "checked it and skipped". A diagnostic
@@ -1767,29 +1797,7 @@ async function cmdDoctor(cfg, flags = []) {
         wired.add(marker);
     }
 
-    // which secrets does an ENABLED (or wired) server actually consume? A task has no enable list —
-    // it is run on purpose — so anything it references counts as consumed, otherwise a Key Vault
-    // secret used only by a task would be reported SKIP and never checked. Servers and tasks are
-    // iterated separately so a task cannot mark a same-named SERVER enabled merely by existing — that
-    // would drop the SKIP that keeps a teammate's `doctor` from FAILing on a Key Vault secret they
-    // cannot reach.
-    const consumed = new Set();
-    const addConsumed = (srv, enabled) => {
-        for (const value of Object.values(srv.env)) {
-            try {
-                const ref = parseReference(value);
-                if (ref !== null && (enabled || cfg.secrets[ref.name]?.backend === "local")) {
-                    consumed.add(ref.name);
-                }
-            } catch { /* reported by doctorReport */ }
-        }
-    };
-    for (const [srvName, srv] of Object.entries(cfg.servers)) {
-        addConsumed(srv, enableLists.enabled.includes(srvName) || wired.has(srvName));
-    }
-    for (const task of Object.values(cfg.tasks ?? {})) {
-        addConsumed(task, true);
-    }
+    const consumed = consumedSecrets(cfg, enableLists, wired);
 
     let localBackend = null;
     try {
@@ -2094,7 +2102,7 @@ export {
     validateLaunchables, LEGACY_ENV_VARS, LEGACY_SECRET_ENV_VARS,
     mapResolveError, applyKeystrokes, promptHidden, cmdSet, cmdUnlock, unlockTargets, cmdDoctor, cmdMigrate, newKeyPresent,
     SECRET_NAME_RE, LAUNCHABLE_NAME_RE, PACKAGE_NAME_RE, BIN_NAME_RE, doctorReport,
-    readEnableLists, readWiredServers, readWiredElsewhere, DANGEROUS_ENV_VARS, sanitizeEnv,
+    readEnableLists, readWiredServers, readWiredElsewhere, consumedSecrets, DANGEROUS_ENV_VARS, sanitizeEnv,
     consumerShape, shapeDifferences, validateAuthorized, validateVaults, authorizationFor, crossingProblem, own,
     emitConfig, cmdEmitConfig,
     // Re-exported so the test file reaches them through the namespace import it already uses.
