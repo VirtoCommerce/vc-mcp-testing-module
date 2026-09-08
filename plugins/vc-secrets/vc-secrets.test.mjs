@@ -1369,6 +1369,13 @@ function collidingUserPaths(envValue) {
 test("resolveEnvEntries: an oauth reference never resolves a same-named secret", async () => {
     let asked = 0;
     const cfg = m.loadConfig(collidingProjectPaths("oauth:ado"));
+    // Asserted, not described: move this fixture's secret to user scope and the authorization gate
+    // throws before resolution, leaving `asked` at 0 for a reason that has nothing to do with the
+    // kind branch — the test would keep passing while proving nothing about the injection.
+    // Both halves: crossingProblem is also null for a secret that is not declared at all, so on its
+    // own it is satisfied by a fixture with no collision left in it.
+    assert.ok(Object.hasOwn(cfg.secrets, "ado"));
+    assert.equal(m.crossingProblem(cfg, "servers", "s", "ado"), null);
     await assert.rejects(() => m.resolveEnvEntries("s", cfg, async () => { asked += 1; return "PLAINTEXT"; }),
         /oauth entry "ado" cannot be resolved/);
     assert.equal(asked, 0, "the secret resolver is never reached");
