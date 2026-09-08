@@ -89,6 +89,8 @@ Each agent MUST use its own separate browser session. Agents sharing a browser w
 > firefox clicks the same reproducer fine headed *and* headless, with and without the MCP's
 > `recordHar`/viewport/locale context options (probed 2026-08-05); a browser-revision re-install was
 > tried and did **not** fix it. Detail: `feedback_firefox_cart_dropdown_quirk` memory.
+>
+> **Root cause found 2026-09-08, fix in config, live confirmation pending:** Windows Firefox treats a window covered by the other two browser windows as hidden and stops `requestAnimationFrame`; Playwright's Windows-Firefox *stable* wait needs 5 rAF ticks, so every click times out while `fill` (no stable wait) keeps working. `config/mcp-playwright-firefox.config.json` now sets `widget.windows.window_occlusion_tracking.enabled=false`. **This rule stays until `node scripts/maintenance/firefox-click-probe.mjs` exits 0 on a machine that showed the bug** — mechanism, evidence and the flip procedure: `knowledge/automation/browser-quirks.md` §Firefox.
 
 ### QA Team Browsers
 | Agent | Playwright MCP Server | Alternative |
