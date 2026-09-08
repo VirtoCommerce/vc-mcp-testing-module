@@ -8,6 +8,55 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Semver 
 
 ---
 
+## The doc gate was measuring the wrong thing — DOC-002/003 now at zero — 2026-09-08
+
+`npm run context:check` ratchets three rules over `CLAUDE.md` + `.claude/**`. Two of them were
+reporting findings that were not defects, and their baselines (`DOC-002: 4`, `DOC-003: 43`) had frozen
+that in: a number no amount of fixing could reduce, with real broken links hiding underneath it.
+
+**DOC-003 checked the label, from the wrong place.** It took the backticked text of a citation and
+tested it against the repo root. That is not what a reader follows, and the gap ran both ways:
+
+- `[`templates/test-model.md`](../templates/test-model.md)` in `.claude/commands/` resolves to
+  `.claude/templates/test-model.md` and is fine — reported as dangling for as long as the rule existed.
+- Three genuinely broken relative links **passed**, because their labels happened to resolve from the
+  root: `../../.claude/rules/reports.md` from inside `.claude/skills/` (→ `.claude/.claude/…`), and two
+  links one `../` short from `.claude/knowledge/*/`.
+
+The rule now resolves a citation the way a reader does — link target over label, and from the repo root
+**or** relative to the citing file, which is what DOC-004 has always done. The two rules had disagreed
+about what a cited path means, and DOC-003 was the one manufacturing findings.
+
+**`reports/` citations are ephemeral by policy, and are no longer ratcheted.** 30 of the 43 named a past
+report artifact. `.claude/rules/reports.md` §9 makes run folders gitignored and pruned, and the reports
+tree was pruned at HEAD — so a run id in a citation is *provenance the reader recognises*, not a path
+they open. Those are now **DOC-003E**, reported for information and excluded from the ratchet, so
+pruning a report folder can never fail the gate.
+
+**Prose that says an artifact does not exist is no longer read as a defect.** TIER.md's "Tier D — What's
+Missing" table and its migration checklist name artifacts that must be created; three files say in as
+many words that *"`npm run model:lint` is not implemented — do not cite it as a gate"*. All were
+findings. A `<!-- doclint:may-not-exist -->` marker (line-scoped, or section-scoped on its own line)
+lets the linter read what the prose already says. It suppresses existence checks only.
+
+**Ten real defects fixed** on the way, each one previously invisible: three broken relative links; a
+README naming `docs/ba-output/` as the BA output directory while both BA agents refuse to write there
+(the real home is `reports/ba/`); TIER.md citing `test-data/orgs/` (it is `organizations/`) and
+`docs/prompts/` (it is `vc/shared/docs/prompts/`); and a headless twin cited as a repo path in the same
+sentence that calls it unbuilt. `business-logic.md` is byte-parity mirrored into `plugins/vc-fix/`, and
+no relative link works on both surfaces, so its broken link became a plain path citation — correct from
+the root of either.
+
+Baselines are now `DOC-002: 0` and `DOC-003: 0`. Nine unit tests pin the resolution semantics and both
+zeros, with the failure message naming the offending file and line.
+
+**Not fixed here: DOC-004 (18) has the same root cause** — its `§Heading` capture runs on into the
+following prose, so `§Effort routing records that the` misses the heading `## Effort routing, and why…`.
+A prototype word-prefix matcher clears 9 of the 18; the other 9 look like genuinely renamed or removed
+headings needing a judgment call each. Its own slice, not a footnote to this one.
+
+---
+
 ## `bl:extract` — hand agents the invariants they need, not a 386 KB path — 2026-09-08
 
 First slice of the audit's **runtime** token work (§6 items 7–11), which targets per-dispatch reads

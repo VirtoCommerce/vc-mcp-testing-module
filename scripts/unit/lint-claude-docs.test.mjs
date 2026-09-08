@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BUDGET, BASELINE, alwaysLoadedFiles, measureBudget, isPlaceholderPath, classifyScript, ratchet, lint } from '../maintenance/lint-claude-docs.mjs';
+import { BUDGET, BASELINE, alwaysLoadedFiles, measureBudget, isPlaceholderPath, isEphemeralPath, citationTarget, pathResolves, MAY_NOT_EXIST, classifyScript, ratchet, lint } from '../maintenance/lint-claude-docs.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -63,4 +63,74 @@ test('every path the linter emits is posix — no path.sep leaks (the 2026-09-08
   assert.ok(all.length > 0);
   for (const p of all) assert.ok(!p.includes('\\'), `backslash in emitted path: ${p}`);
   assert.ok(alwaysLoadedFiles(ROOT).slice(1).every((f) => f.startsWith('.claude/rules/')));
+});
+
+// --- what a citation POINTS AT -------------------------------------------------------------------
+//
+// DOC-003 spent its life checking the backticked LABEL against the repo root. That is not what a
+// reader follows, and the gap ran both ways: `[`templates/test-model.md`](../templates/test-model.md)`
+// in .claude/commands/ was reported as dangling although it resolves, while three genuinely broken
+// relative links (one ../ short, or ../../.claude/ from inside .claude/) passed because their labels
+// happened to resolve from the root. 43 was never the real number in either direction.
+
+test('citationTarget prefers the link target over the label', () => {
+  assert.equal(
+    citationTarget('templates/test-model.md', '](../templates/test-model.md) and more prose'),
+    '../templates/test-model.md',
+  );
+});
+
+test('citationTarget falls back to the label when the path is not a link', () => {
+  assert.equal(citationTarget('scripts/lib/live-discover.ts', ' — typed xAPI primitives'), 'scripts/lib/live-discover.ts');
+});
+
+test('citationTarget drops a #fragment, and yields null for an anchor-only link', () => {
+  assert.equal(citationTarget('docs/onboarding.md', '](../docs/onboarding.md#serena)'), '../docs/onboarding.md');
+  assert.equal(citationTarget('docs/onboarding.md', '](#serena)'), null, 'a bare anchor targets this file and names no path');
+});
+
+test('citationTarget strips a trailing slash so a directory citation compares equal', () => {
+  assert.equal(citationTarget('reports/ba/', ' holds the deliverables'), 'reports/ba');
+});
+
+test('pathResolves accepts root-relative AND citing-file-relative, which is how both are written', () => {
+  const have = new Set(['.claude/templates/test-model.md', 'scripts/lib/seed-common.mjs']);
+  const exists = (p) => have.has(p);
+  assert.ok(pathResolves('.claude/commands/qa-test.md', '../templates/test-model.md', exists), 'relative to the citing file');
+  assert.ok(pathResolves('.claude/rules/test-data.md', 'scripts/lib/seed-common.mjs', exists), 'relative to the repo root');
+  // The exact defect this found: from .claude/knowledge/execution/, ../../ is .claude/, not the root.
+  assert.ok(!pathResolves('.claude/knowledge/execution/test-data-authoring.md', '../../scripts/lib/seed-common.mjs', exists));
+  assert.ok(pathResolves('.claude/knowledge/execution/test-data-authoring.md', '../../../scripts/lib/seed-common.mjs', exists));
+});
+
+test('a reports/ citation is ephemeral; a durable path is not', () => {
+  assert.ok(isEphemeralPath('reports/ba/bl-proposals-2026-08-05.md'));
+  assert.ok(isEphemeralPath('reports/regression/REG-2026-07-24-2121/'));
+  assert.ok(!isEphemeralPath('.claude/rules/reports.md'), 'a rules file that merely mentions reports is durable');
+  assert.ok(!isEphemeralPath('scripts/lib/live-discover.ts'));
+});
+
+// --- the ratchets, over THIS checkout -------------------------------------------------------------
+
+test('DOC-002 and DOC-003 are at zero — every remaining finding is a real defect to fix', () => {
+  const r = lint(ROOT);
+  const show = (code) => r.findings.filter((f) => f.code === code).map((f) => `${f.file}:${f.line} ${f.detail}`).join('\n  ');
+  assert.equal(BASELINE['DOC-002'], 0, 'the baseline must stay at 0 — raising it is how a gate stops gating');
+  assert.equal(BASELINE['DOC-003'], 0);
+  assert.equal(r.counts['DOC-003'], 0, `a cited path no longer resolves:\n  ${show('DOC-003')}`);
+  assert.equal(r.counts['DOC-002'], 0, `an npm run cites a script that does not exist:\n  ${show('DOC-002')}`);
+});
+
+test('DOC-003E is reported but never ratcheted — pruning a report folder must not fail the gate', () => {
+  const r = lint(ROOT);
+  assert.ok(r.counts['DOC-003E'] > 0, 'this corpus cites past runs as provenance; if that stops, drop the code');
+  assert.ok(!r.ratchet.over.some((o) => o.code === 'DOC-003E'), 'an informational code must not enter the ratchet');
+  assert.equal(BASELINE['DOC-003E'], undefined, 'it has no baseline by design');
+});
+
+test('the may-not-exist directive is honoured, and only for existence rules', () => {
+  const r = lint(ROOT);
+  const tierD = r.findings.filter((f) => f.file === '.claude/architecture/TIER.md' && f.code.startsWith('DOC-00') && f.code !== 'DOC-004');
+  assert.deepEqual(tierD, [], 'TIER.md\'s "What\'s Missing" table names absent artifacts on purpose');
+  assert.ok(MAY_NOT_EXIST.startsWith('doclint:'), 'the marker stays namespaced so it is greppable');
 });
