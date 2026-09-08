@@ -183,9 +183,15 @@ Step 5 — Also check test repo changes:
 - Merge with deploy-detected affected suites (deduplicate)
 
 **Changelog (`changelog <version>`):**
-1. Query Context7 for release notes for the specified version
-2. Search GitHub: `gh api repos/VirtoCommerce/vc-platform/releases/tags/v<version>` for release notes
-3. Extract: new features, breaking changes, deprecated APIs, module updates
+1. **Resolve through the local ledger** — `.claude/knowledge/domain/release-ledger.md`. §4 (component → month index) maps the version to its month; §2/§3 give that month's feature list with each feature's `component@version`, docs deep link and **⚠ BREAKING** flag; the digest URL is the citation. This is a local file read, no MCP call.
+   - Step 1 used to be "query Context7 for release notes for the specified version". That corpus does not carry them — its newest version page is Platform **3.917.1** while production is past **3.1050**. Fall back to Context7 only if the ledger's `generated:` date is >45 days old, or the version predates its window (§5 states the oldest month indexed).
+2. **Confirm against GitHub Releases** — the authoritative version + date, and the escape hatch for a version the ledger predates:
+   ```bash
+   gh api repos/VirtoCommerce/vc-platform/releases/tags/<version>
+   ```
+   Tags are bare semver for `vc-platform` / `vc-module-*` / `vc-frontend` (`3.1054.0`, `2.56.0`) but `v`-prefixed for `vc-shell` (`v2.5.0`) — normalize before querying. If `GITHUB_TOKEN` is set but invalid, `gh` fails with `401 Bad credentials` on every call; prefix with `env -u GITHUB_TOKEN` to fall through to the `gh` keyring account (see the `reference_github_token_routing` memory).
+   - Module release bodies are one terse HTML bullet (`<h3>🎯 Development</h3><ul><li>Documents library (#12)</li></ul>`) — authoritative for *when*, near-useless for *what*. Only `vc-frontend` and `vc-shell` carry prose, and those carry `VCST-*` keys per PR, which is what lets a change be traced back to a ticket.
+3. **Extract** new features, breaking changes, deprecated APIs, module updates — mostly already structured by step 1. **Note the boundary:** the ledger is `exhaustive: false`, so an absent feature is *unknown*, not *nonexistent*; and it records what was **released upstream**, never what is **deployed** on the env under test (`agent-dispatch.md § Build Verification`).
 
 **For direct scopes (suite, domain):**
 
@@ -461,7 +467,7 @@ domain <name>`. Invoke **`/qa-review-bl`** on the surfaced candidates, delegatin
 - **CONTRADICTORY / UNGROUNDED / STALE-RETIRE**, plus any candidate that fails the applicable-axes bar → drafted to `reports/ba/bl-proposals-<date>.md`, each with its evidence + a **re-audit trigger** (the concrete condition that would let it promote later — docs published, module on a stable release, the contradicting fix deployed, or the blocking fixture authored). Retiring is never auto-applied.
 - The run's `reports/knowledge/BL-AUDIT-<date>.md` is the audit trail; its outcome feeds the Phase 6 **G6** gate.
 
-This is gated by an **evidence bar, not human approval** — the **applicable-axes** rule above (docs + live + source when all three exist; the verifiable subset, minimum two and all agreeing, when an axis is structurally waived). See the `/qa-review-bl` skill + `.claude/rules/quality-gates.md`.
+This is gated by an **evidence bar, not human approval** — the **applicable-axes** rule above (docs + live + source when all three exist; the verifiable subset, minimum two and all agreeing, when an axis is structurally waived). See the `/qa-review-bl` skill + `.claude/knowledge/execution/quality-gates.md`.
 
 ---
 
@@ -615,6 +621,13 @@ existing one, never reuse a retired ID.
 The `Automation_Status` flip `Draft → Reviewed` happens **in the rows being appended** — that flip *is* the
 promotion. Stamp `References` with `Promoted: VCST-XXXX → <suite id> (YYYY-MM-DD)`, appending; never
 clobber an existing `Synced:` / `Audited:` / `Corrected:` stamp.
+
+> **6P promotes to `Reviewed`, and that is a different claim from `Automated` — do not reach for
+> `tc:promote` here.** `Reviewed` says a human/`qa-lead` approved the case; `Automated` says a runner
+> executed it green, which only a completed run can evidence. `npm run tc:promote`
+> (`.claude/knowledge/execution/regression-promotion.md` §Post-Run Promotion) derives `Draft → Automated` from a run's own
+> `suite-*-results.json` and writes nothing else — so it is the tool for a case already in a suite that
+> a regression run has since proven, **after** 6P, not instead of it.
 
 **5 — Re-sync the manifest and re-gate.**
 
@@ -931,7 +944,7 @@ Output: per-case verification:
 | Before a regression run with recent code changes | `/qa-test-lifecycle PR #N` or `/qa-test-lifecycle diff` |
 | After a platform release | `/qa-test-lifecycle changelog <version>` |
 | Quick quality check on a suite | `/qa-test-lifecycle suite <ID> --skip-verify` |
-| After `/qa-coverage-generation` | `/qa-test-lifecycle suite <IDs> --skip-sync --skip-generate` (review only) |
+| After `/qa-coverage-gap` | `/qa-test-lifecycle suite <IDs> --skip-sync --skip-generate` (review only) |
 | **After a `/qa-test` run authored new cases** | Usually **nothing** — `/qa-test` now appends its cases into `regression/suites/` and flips the eligible ones `Draft → Automated`/`Reviewed` **in-run at its own 5g gate** (last, non-blocking). Only reach for `/qa-test-lifecycle VCST-XXXX --promote-only` for a **legacy** run that left a run-scoped `reports/tickets/*/VCST-XXXX/test-cases.csv`, or to re-derive/re-promote cases that stayed `Draft` |
 | After Phase 6 APPROVED | Promote the `Draft` cases (6P for `/qa-test` hand-offs; the human approval step otherwise), then run `/qa-regression <affected suites>` |
 | A whole suite's assertions may have gone stale (not tied to one change) | `/qa-review-tests suite <ID> --triangulate` — Dimension 11 wholesale; this pipeline only triangulates the cases a change touched (4a-bis) |

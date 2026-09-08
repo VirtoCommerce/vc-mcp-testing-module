@@ -120,7 +120,7 @@ query { salesRepCustomers { totalCount items { organizationId } } }
 [GQL-EXEC main]","[ERRORS label=main] errors[] empty {DOC}
 [DATA label=main] data.salesRepCustomers.items[?organizationId={{org_active}}] is non-null {OBSERVED}
 [DATA label=main] data.salesRepCustomers.items[?organizationId={{org_locked}}] is null {OBSERVED}","[ADMIN] SR_REP_LOCKED's Served organizations widget shows @td(ORG_ACME.id) membership as Locked","the locked org still appears in items[] (per-org lock not enforced); errors[] non-empty","none (read-only)","Generated: PR #2 vc-module-sales-rep (VCST-4907/5304/5308), TLC 2026-07-15; Synced: VCST-5304 (2026-07-17) — unblocked via org-scoped SR_REP_LOCKED_TFCTX grant, executed + verified live","Automated"
-"SR-GQL-013","salesRepCustomers — lastOrder Is Store-Scoped (Specific Store + Null = Global Most Recent)","GraphQL > Sales Rep > Query > salesRepCustomers","Critical","PROPOSED-BL-SR-STORE","","Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY). @td(ORG_ACME.id) has an OLDER order on {{STORE_ID}} and a NEWER order on {{STORE_ID_SECONDARY}} — both must be SR_REP_PRIMARY's own rep-flow-created orders (VCST-5304 'my last order' attribution). KNOWN LIMITATION (TLC Phase-3, 2026-07-17; reconfirmed during runner-native migration): {{STORE_ID_SECONDARY}} is unset in .env.vcst on the current environment, so the storeB fixture/order this case depends on cannot be provisioned or queried — NOT EXECUTED. This is an env-config gap, not a test failure; provision a secondary store id for vcst before this case can execute. (Sibling SR-GQL-027 on salesRepOrders and SR-GQL-008 on customerSalesReps have the identical dependency.) GRAMMAR NOTE: the DATA grammar has no top-level `<path> != <literal>` operator on a nested scalar, so storeA's exclusion of the storeB order is proven only via the allStores/storeB equality checks below, not a direct storeA inequality.","org=@td(ORG_ACME.platform_id); store_a={{STORE_ID}}; store_b={{STORE_ID_SECONDARY}}","[GQL-ENDPOINT /graphql/sales-rep]
+"SR-GQL-013","salesRepCustomers — lastOrder Is Store-Scoped (Specific Store + Null = Global Most Recent)","GraphQL > Sales Rep > Query > salesRepCustomers","Critical","PROPOSED-BL-SR-STORE","","Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY). @td(ORG_ACME.id) has an OLDER order on {{STORE_ID}} and a NEWER order on {{STORE_ID_SECONDARY}} — both must be SR_REP_PRIMARY's own rep-flow-created orders (VCST-5304 'my last order' attribution). FIXTURE CONTRACT (REG-2026-08-26-1631): {{STORE_ID_SECONDARY}} is set (.env.defaults, promoted 2026-07-17) and this case executes. Its premise is enforced, NOT hand-dated: CustomerOrder.createdDate is SERVER-ASSIGNED and ignored on POST/PUT, so neither CSV row order nor a date column can make SRO-ACME-ELEC the globally newest order — three rivals overtook it (SRO-ACME-WIN-NEW/-WIN-PROC and SRO-TZ-VCST-2104-001, which is not in the CSV at all). The fixture now declares recency_contract=newest-in-org and the seeder re-asserts maximality per run (seed:sales-rep Phase 4b), guarded by td:validate:sr-orders check [2b]. This case therefore requires a seed run to go green; do NOT weaken the assertion to storeA-OR-storeB, which would make it vacuous. GRAMMAR NOTE: the DATA grammar has no top-level `<path> != <literal>` operator on a nested scalar, so storeA's exclusion of the storeB order is proven only via the allStores/storeB equality checks below, not a direct storeA inequality.","org=@td(ORG_ACME.platform_id); store_a={{STORE_ID}}; store_b={{STORE_ID_SECONDARY}}","[GQL-ENDPOINT /graphql/sales-rep]
 [AUTH role=SALES_REP]
 [GQL-OP storeA]
 query { salesRepCustomers(storeId: ""{{store_a}}"") { items { organizationId lastOrder { number createdDate } } } }
@@ -245,7 +245,7 @@ query { salesRepOrders(organizationId: ""{{org_locked}}"") { totalCount items { 
 query { salesRepOrders(organizationId: ""{{any_org_id}}"") { totalCount items { number } } }
 [GQL-EXEC anon]","[ERRORS label=anon] errors[] non-empty {DOC}
 [DATA label=anon] errors.0.message matches /anonym/i {DOC}","none","errors[] empty; order data returned for an anonymous caller","none (read-only)","Generated: PR #2 vc-module-sales-rep (VCST-4907/5304/5308), TLC 2026-07-15","Automated"
-"SR-GQL-026","salesRepOrders — Paging and Keyword Filter","GraphQL > Sales Rep > Query > salesRepOrders","High","PROPOSED-BL-SR-SCOPE","","Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY). @td(ORG_ACME.id) has >=3 orders with distinct createdDate, and exactly one order (SRO-ACME-KEYWORD, test-data/sales-rep/sales-rep-orders.csv, seeded=true) carries the distinctive customerName token 'Beacon'. KNOWN LIMITATION (discovered during runner-native migration, 2026-07-17): {{ORDER_KEYWORD_TOKEN}} is defined only in .env.vcptcore (=Beacon), NOT in .env.vcst/.env.defaults, even though the underlying fixture is an env-invariant seeded row — the (keyword) tab is NOT EXECUTED on vcst until this cross-env constant is added (recommend promoting it to .env.defaults, same pattern as SALES_REP_EMAIL). (page1)/(page2) paging tabs have no such dependency and can run.","org=@td(ORG_ACME.platform_id); keyword={{ORDER_KEYWORD_TOKEN}}","[GQL-ENDPOINT /graphql/sales-rep]
+"SR-GQL-026","salesRepOrders — Paging and Keyword Filter","GraphQL > Sales Rep > Query > salesRepOrders","High","PROPOSED-BL-SR-SCOPE","","Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY). @td(ORG_ACME.id) has >=3 orders with distinct createdDate, and exactly one order (SRO-ACME-KEYWORD, test-data/sales-rep/sales-rep-orders.csv, seeded=true) carries the distinctive customerName token 'Beacon'. {{ORDER_KEYWORD_TOKEN}} is env-invariant and lives in .env.defaults (promoted 2026-07-17); all three tabs execute on vcst.","org=@td(ORG_ACME.platform_id); keyword={{ORDER_KEYWORD_TOKEN}}","[GQL-ENDPOINT /graphql/sales-rep]
 [AUTH role=SALES_REP]
 [GQL-OP page1]
 query { salesRepOrders(organizationId: ""{{org}}"", first: 2, after: ""0"") { totalCount pageInfo { hasNextPage } items { number } } }
@@ -266,7 +266,7 @@ query { salesRepOrders(organizationId: ""{{org}}"", keyword: ""{{keyword}}"") { 
 [ERRORS label=keyword] errors[] empty {DOC}
 [COUNT label=keyword] data.salesRepOrders.totalCount = 1 {DOC}
 [DATA label=keyword] data.salesRepOrders.items.0.number matches /SRO-ACME-KEYWORD/ {DOC}","none","page1/page2 overlap; keyword does not narrow the result set (returns all ACME orders); the matched order is not the seeded Beacon order","none (read-only)","Generated: PR #2 vc-module-sales-rep (VCST-4907/5304/5308), TLC 2026-07-15","Automated"
-"SR-GQL-027","salesRepOrders — Store-Scoped (Specific Store + Null = Across Stores)","GraphQL > Sales Rep > Query > salesRepOrders","Critical","PROPOSED-BL-SR-STORE","","Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY). @td(ORG_ACME.id) has an OLDER order on {{STORE_ID}} and a NEWER order on {{STORE_ID_SECONDARY}}. KNOWN LIMITATION (TLC Phase-3, 2026-07-17; reconfirmed during runner-native migration): {{STORE_ID_SECONDARY}} is unset in .env.vcst — the (storeB)-dependent assertions cannot be provisioned or queried — NOT EXECUTED. (storeA)/(allStores) tabs have no such dependency and can run structurally, though the 'allStores > storeA' count comparison depends on the storeB order existing.","org=@td(ORG_ACME.platform_id); store_a={{STORE_ID}}; store_b={{STORE_ID_SECONDARY}}","[GQL-ENDPOINT /graphql/sales-rep]
+"SR-GQL-027","salesRepOrders — Store-Scoped (Specific Store + Null = Across Stores)","GraphQL > Sales Rep > Query > salesRepOrders","Critical","PROPOSED-BL-SR-STORE","","Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY). @td(ORG_ACME.id) has an OLDER order on {{STORE_ID}} and a NEWER order on {{STORE_ID_SECONDARY}}. {{STORE_ID_SECONDARY}} is set in .env.defaults (promoted 2026-07-17); the (storeA)/(allStores) tabs this case queries both execute on vcst.","org=@td(ORG_ACME.platform_id); store_a={{STORE_ID}}; store_b={{STORE_ID_SECONDARY}}","[GQL-ENDPOINT /graphql/sales-rep]
 [AUTH role=SALES_REP]
 [GQL-OP storeA]
 query { salesRepOrders(organizationId: ""{{org}}"", storeId: ""{{store_a}}"") { totalCount items { number } } }
@@ -715,7 +715,7 @@ query { salesRepCustomerOrderStatistics(organizationId: ""{{org}}"", currencyCod
 [GQL-EXEC main]","[ERRORS label=main] errors[] empty {OBSERVED}
 [DATA label=main] data.salesRepCustomerOrderStatistics.currencyCode = EUR {OBSERVED}
 [DATA label=main] data.salesRepCustomerOrderStatistics.period.total.formattedAmount matches /€/ {OBSERVED}","none","currencyCode is not echoed back as EUR; formattedAmount has no currency symbol (unlocalized); errors[] non-empty","none (read-only)","Generated: VCST-5309/BL-SR-004 gap-fill (TLC-2026-07-23-1943 restore), 2026-07-28 — EUR echo OBSERVED live 2026-07-23","Draft"
-"SR-GQL-063","salesRepCustomerOrderStatistics — Baseline Excludes Cancelled Orders; filter Re-Includes","GraphQL > Sales Rep > Query > salesRepCustomerOrderStatistics","High","BL-SR-005","","Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY, serves @td(ORG_ACME.id)). @td(ORG_ACME.id) has >=1 order in status Cancelled (SRO-ACME-CANCELLED, established fixture used by SR-GQL-028). Cross-checks the STATISTICS baseline (no filter → excludes cancelled/prototype, per module README + BL-SR-005) against the ORDERS LIST baseline (`salesRepOrders` with no `filter` arg → 'all the rep's orders' per live schema description, i.e. genuinely everything incl. Cancelled — established by SR-GQL-030). If statistics.baseline.count is strictly less than the list's totalCount, the cancelled order is proven excluded from the statistics baseline while still present in the list.","org=@td(ORG_ACME.platform_id); store={{STORE_ID}}","[GQL-ENDPOINT /graphql/sales-rep]
+"SR-GQL-063","salesRepCustomerOrderStatistics — Status-Only Cancelled Order Is Not Flag-Excluded; Counts in Baseline","GraphQL > Sales Rep > Query > salesRepCustomerOrderStatistics","High","BL-SR-005","","Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY, serves @td(ORG_ACME.id)). @td(ORG_ACME.id) has >=1 order with Status=""Cancelled"" but WITHOUT the entity-level IsCancelled flag (SRO-ACME-CANCELLED, established fixture used by SR-GQL-028 — a Status-string-only cancelled-looking order). Corrected BL-SR-005 (audited 2026-08-24): the statistics scope excludes orders/carts flagged IsPrototype/IsCancelled AT THE ENTITY LEVEL unconditionally, under any filter — it never re-includes them; a Status-only cancelled order carries no flag and correctly counts toward every statistics figure, including the baseline. Cross-checks the STATISTICS baseline against the ORDERS LIST baseline (`salesRepOrders` with no `filter` arg → 'all the rep's orders' per live schema description, i.e. genuinely everything incl. Cancelled — established by SR-GQL-030). Since SRO-ACME-CANCELLED is not flag-cancelled, the two counts must be EQUAL, not divergent.","org=@td(ORG_ACME.platform_id); store={{STORE_ID}}","[GQL-ENDPOINT /graphql/sales-rep]
 [AUTH role=SALES_REP]
 [GQL-OP list_all]
 query { salesRepOrders(organizationId: ""{{org}}"") { totalCount } }
@@ -730,12 +730,12 @@ query {
 }
 [GQL-EXEC stats]","[ERRORS label=list_all] errors[] empty {DOC}
 [ERRORS label=stats] errors[] empty {DOC}
-[COUNT label=stats] data.salesRepCustomerOrderStatistics.cancelledOnly.count >= 1 {DOC}
-[DATA label=stats] data.salesRepCustomerOrderStatistics.baseline.count < {{ALL_ORDERS_COUNT}} {SPEC}","none","the statistics baseline count equals (or exceeds) the full order-list totalCount (cancelled/prototype orders leaking into the baseline); filter:""Cancelled"" returns 0 despite a known seeded cancelled order; errors[] non-empty","none (read-only)","Generated: VCST-5309/BL-SR-005 gap-fill (TLC-2026-07-23-1943 restore), 2026-07-28 — cross-query proof via the established SRO-ACME-CANCELLED fixture (SR-GQL-028)","Draft"
+[DATA label=stats] data.salesRepCustomerOrderStatistics.baseline.count = {{ALL_ORDERS_COUNT}} {BL}
+[COUNT label=stats] data.salesRepCustomerOrderStatistics.cancelledOnly.count >= 1 {BL}","none","baseline.count != {{ALL_ORDERS_COUNT}} (a Status-only, non-flag-cancelled order is being wrongly excluded from — or something else is inflating — the baseline); filter:""Cancelled"" returns 0 despite the known Status-only cancelled fixture (SRO-ACME-CANCELLED); errors[] non-empty","none (read-only)","Generated: VCST-5309/BL-SR-005 gap-fill (TLC-2026-07-23-1943 restore), 2026-07-28 — cross-query proof via the established SRO-ACME-CANCELLED fixture (SR-GQL-028); Corrected: re-authored to the corrected BL-SR-005 reading — SRO-ACME-CANCELLED is Status-only (not entity-flag-cancelled), so baseline.count == ALL_ORDERS_COUNT is the right oracle; was asserting the retracted 'filter re-includes flag-excluded orders' premise (2026-08-25)","Draft"
 "SR-GQL-064","salesRepCustomerCartStatistics — Happy Path Default active-carts Shape (count/total/average/lastCartDate)","GraphQL > Sales Rep > Query > salesRepCustomerCartStatistics","High","BL-SR-006; BL-SR-002","","Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment (VCST-5362). Caller is SALES_REP (= SR_REP_PRIMARY, serves @td(ORG_ACME.id)). `organizationId` CONFIRMED present + optional on `salesRepCustomerCartStatistics` via live introspection (not called out in the original change-inventory bullet, discovered this session in scripts/.graphql-schema.graphql-sales-rep.cache.json). Omitting `period.filter` defaults server-side to the 'active-carts' kind (non-empty, non-wishlist), per BL-SR-006. NO SEEDED CART ALIAS EXISTS on this restore (the prior cart-enrichment seeder was lost in the reset per the change-inventory note) — assert SHAPE (types/non-negativity), not a specific seeded count, per the live-discovery caution for this query.","org=@td(ORG_ACME.platform_id); store={{STORE_ID}}","[GQL-ENDPOINT /graphql/sales-rep]
 [AUTH role=SALES_REP]
 [GQL-OP main]
-query { salesRepCustomerCartStatistics(storeId: ""{{store}}"", organizationId: ""{{org}}"") { currencyCode period { total { amount formattedAmount } count average { amount } lastCartDate } } }
+query { salesRepCustomerCartStatistics(storeId: ""{{store}}"", organizationId: ""{{org}}"") { currencyCode period { total { amount formattedAmount } count average { amount } } } }
 [GQL-EXEC main]","[ERRORS label=main] errors[] empty {DOC}
 [DATA label=main] data.salesRepCustomerCartStatistics.currencyCode matches /.+/ {DOC}
 [DATA label=main] data.salesRepCustomerCartStatistics.period.count >= 0 {DOC}
@@ -757,11 +757,9 @@ query { salesRepCustomerCartStatistics { period { count } } }
 "SR-GQL-067","salesRepCustomerCartStatistics — Zero-Served Rep Returns Clean Empty (Not an Error)","GraphQL > Sales Rep > Query > salesRepCustomerCartStatistics","High","BL-SR-002; BL-SR-006","ECL-3.1","Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP_NOCUSTOMERS (= SR_REP_NOCUSTOMERS), a genuine permissioned rep with ZERO org memberships (established fixture, see SR-GQL-041). Mirrors SR-GQL-041's 'clean empty, not an error' contract at the cart-statistics query.","none","[GQL-ENDPOINT /graphql/sales-rep]
 [AUTH role=SALES_REP_NOCUSTOMERS]
 [GQL-OP main]
-query { salesRepCustomerCartStatistics { period { count total { amount } lastCartDate } } }
+query { salesRepCustomerCartStatistics { period { count total { amount } } } }
 [GQL-EXEC main]","[ERRORS label=main] errors[] empty {OBSERVED}
-[DATA label=main] data.salesRepCustomerCartStatistics.period.count = 0 {SPEC}
-[DATA label=main] data.salesRepCustomerCartStatistics.period.total.amount = 0 {SPEC}
-[NULL label=main] data.salesRepCustomerCartStatistics.period.lastCartDate {SPEC}","none","a permissioned-but-zero-served rep gets an authorization error instead of a clean empty result (cross-ref SR-GQL-041); count/total > 0 despite zero org memberships (leak)","none (read-only)","Generated: VCST-5362 gap-fill (TLC-2026-07-23-1943 restore), 2026-07-28 — mirrors SR-GQL-041's verified-live zero-served contract","Draft"
+[DATA label=main] data.salesRepCustomerCartStatistics is null {OBSERVED}","none","a permissioned-but-zero-served rep gets an authorization error instead of a clean empty result (cross-ref SR-GQL-041); count/total > 0 despite zero org memberships (leak)","none (read-only)","Generated: VCST-5362 gap-fill (TLC-2026-07-23-1943 restore), 2026-07-28 — mirrors SR-GQL-041's verified-live zero-served contract","Draft"
 "SR-GQL-068","salesRepCustomerCounts — assignedCustomers Is Period-Independent; Period Counts Never Exceed It","GraphQL > Sales Rep > Query > salesRepCustomerCounts","High","BL-SR-007","","Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment (VCST-5362). Caller is SALES_REP (= SR_REP_PRIMARY), serves >=4 orgs (@td(ORG_ACME.id), @td(ORG_TECHFLOW.id), @td(ORG_BUILDRIGHT.id), @td(ORG_ACMEWEST.id) — established fixture facts, SR-GQL-009/014). `organizationId` on `salesRepCustomerCounts` is omitted here (cross-customer, the natural use for a per-rep counter). Requests the SAME field twice with different period args (aliased) to prove `assignedCustomers` doesn't vary with the period arg, per BL-SR-007.","","[GQL-ENDPOINT /graphql/sales-rep]
 [AUTH role=SALES_REP]
 [GQL-OP main]
@@ -811,9 +809,7 @@ query { salesRepCustomerCounts { assignedCustomers } }
 [GQL-OP main]
 query { salesRepCustomerCounts { assignedCustomers period { orderingCustomers newCustomers } } }
 [GQL-EXEC main]","[ERRORS label=main] errors[] empty {OBSERVED}
-[DATA label=main] data.salesRepCustomerCounts.assignedCustomers = 0 {OBSERVED}
-[DATA label=main] data.salesRepCustomerCounts.period.orderingCustomers = 0 {SPEC}
-[DATA label=main] data.salesRepCustomerCounts.period.newCustomers = 0 {SPEC}","none","a permissioned-but-zero-served rep gets an authorization error instead of a clean zero result; assignedCustomers/period counters > 0 despite zero org memberships (leak)","none (read-only)","Generated: VCST-5362 gap-fill (TLC-2026-07-23-1943 restore), 2026-07-28 — mirrors SR-GQL-041/067's verified zero-served contract","Draft"
+[DATA label=main] data.salesRepCustomerCounts is null {OBSERVED}","none","a permissioned-but-zero-served rep gets an authorization error instead of a clean zero result; assignedCustomers/period counters > 0 despite zero org memberships (leak)","none (read-only)","Generated: VCST-5362 gap-fill (TLC-2026-07-23-1943 restore), 2026-07-28 — mirrors SR-GQL-041/067's verified zero-served contract","Draft"
 "SR-GQL-072","salesRepCustomerCounts — filter=""All"" Is Equivalent to Omitted (Single Baseline Segment)","GraphQL > Sales Rep > Query > salesRepCustomerCounts","Medium","BL-SR-009","","Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY). LIVE-CONFIRMED 2026-07-23 (TLC-2026-07-23-1943 live-api-probe): `salesRepCustomerFilterRules` ships a SINGLE baseline rule (discovered fresh here rather than hardcoded, in case the name ever changes). Applying that discovered name as `period.filter` must equal the unfiltered result.","","[GQL-ENDPOINT /graphql/sales-rep]
 [AUTH role=SALES_REP]
 [GQL-OP discover]
@@ -870,7 +866,7 @@ query {
   filtered: salesRepTopSellers(storeId: ""{{store}}"", organizationId: ""{{org}}"", take: 10, filter: ""{{TOPSELLER_CAT}}"") { productId }
 }
 [GQL-EXEC sellers]","[ERRORS label=discover_cat] errors[] empty {DOC}
-[DATA label=discover_cat] data.salesRepTopSellerFilterRules.0.name is non-empty GUID {OBSERVED}
+[DATA label=discover_cat] data.salesRepTopSellerFilterRules.0.name matches /^[0-9a-f]{32}$/i {OBSERVED}
 [DATA label=discover_cat] data.salesRepTopSellerFilterRules.0.localizedName matches /.+/ {OBSERVED}
 [ERRORS label=sellers] errors[] empty {DOC}
 [DATA label=sellers] data.filtered.length <= data.unfiltered.length {SPEC}","none","filter rule names are not GUIDs (contract regression); the category filter returns MORE rows than the unfiltered baseline (filter widening instead of narrowing); errors[] non-empty","none (read-only)","Generated: VCST-5368 gap-fill (TLC-2026-07-23-1943 restore), 2026-07-28 — category-GUID shape OBSERVED live 2026-07-23","Draft"
@@ -932,7 +928,7 @@ query { salesRepCustomerFilterRules(storeId: ""{{store}}"", cultureName: ""{{cul
 query { salesRepTopSellerFilterRules(storeId: ""{{store}}"", cultureName: ""{{culture}}"") { name localizedName } }
 [GQL-EXEC main]","[ERRORS label=main] errors[] empty {DOC}
 [COUNT label=main] data.salesRepTopSellerFilterRules.length >= 1 {DOC}
-[DATA label=main] data.salesRepTopSellerFilterRules.0.name is non-empty GUID {OBSERVED}
+[DATA label=main] data.salesRepTopSellerFilterRules.0.name matches /^[0-9a-f]{32}$/i {OBSERVED}
 [DATA label=main] data.salesRepTopSellerFilterRules.0.localizedName matches /.+/ {OBSERVED}","none","name is a stable string key instead of a category GUID (contract regression); localizedName is blank; errors[] non-empty","none (read-only)","Generated: VCST-5368 gap-fill (TLC-2026-07-23-1943 restore), 2026-07-28 — category-GUID shape OBSERVED live 2026-07-23 — Reviewed 2026-07-30 (/qa-review-tests --fix): rule vocabulary is sales-rep-only by design — SalesRepRulesQueryHandlerBase returns [] for a caller with no granting membership (category-leak guard); caller corrected ACME_BUYER→SALES_REP.","Draft"
 "SR-GQL-085","salesRepOrderSortRules — Discovery Shape (recent Default, total)","GraphQL > Sales Rep > Query > salesRepOrderSortRules","Medium","BL-SR-010","","Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller-agnostic result (store config). LIVE-CONFIRMED 2026-07-23 (TLC-2026-07-23-1943 live-api-probe): order sort rules are `recent`, `total`.","store={{STORE_ID}}; culture={{CULTURE_NAME}}","[GQL-ENDPOINT /graphql/sales-rep]
 [AUTH role=SALES_REP]
@@ -1327,3 +1323,182 @@ mutation SaveSalesRepLayout($command: InputSalesRepLayout!) { saveSalesRepLayout
 [ERRORS label=object_value] errors[] non-empty {OBSERVED}
 [DATA label=object_value] errors.0.extensions.code = INVALID_VALUE {OBSERVED}
 [DATA label=object_value] errors.0.message matches /Unable to convert.*object.*AnyValue/i {OBSERVED}","none","a list or object setting value is silently accepted instead of raising extensions.code=INVALID_VALUE (contract says only scalar string/number/boolean are valid); either probe returns a different error shape (e.g. HTTP 500, or a different extensions.code) instead of the confirmed INVALID_VALUE / 'Unable to convert' pair; a document is actually persisted despite one of the two invalid inputs","none (both probes are rejected at value-coercion time — no write ever reaches LayoutService for either)","VCST-5367; vc-module-sales-rep#6 change inventory (""Lists/objects are NOT valid values""); LIVE-CONFIRMED 2026-08-04 (vcptcore-qa, SalesRep 3.1001.0-pr-6-4f32) — both array and object rejected with extensions.code=INVALID_VALUE and the exact ""Unable to convert '(array|object)' to 'AnyValue'"" message; SOURCE be-LayoutSettingType.cs field description","Automated"
+"SR-GQL-118","salesRepCustomerOrderStatistics — New-Filtered Count Matches the Independent salesRepOrders List Ground Truth (VCST-5587)","GraphQL > Sales Rep > Query > salesRepCustomerOrderStatistics","Medium","PROPOSED-BL-SR-NEWORDERS; BL-SR-002","","Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. VCST-5587 (QA-confirmed 2026-08-17) defines the ""New orders"" widget as period(filter:""New"") for stat-widget__value and an unfiltered period() for stat-widget__delta. This case proves the New-filtered count moves ONLY for New-status orders by cross-validating against the independent salesRepOrders(filter) list query (established SR-GQL-028/033 pattern) rather than mutating any order — @td(ORG_ACME.id) is confirmed (SR-GQL-028) to hold >=1 order in status ""Cancelled"" (SRO-ACME-CANCELLED) alongside New/Processing orders. A wide all-time window (2000-01-01..2099-12-31) is used so the assertion holds regardless of rolling-7-day drift. NOTE — a genuine tension was found this session between BL-SR-005 (""baseline excludes cancelled orders"", live-probed 2026-07-23) and VCST-5587's own 2026-08-17 QA comment (""Cancelled orders count toward the all-status figure, which is correct per the agreed definition""); RESOLVED 2026-08-25 (REG-2026-08-25-1128 triage): BL-SR-005 was amended 2026-08-24 (BL-AUDIT-2026-08-24) to state a Status-only cancelled order (no IsCancelled flag) correctly counts toward the baseline — this matches VCST-5587's QA comment, so the tension resolves in favor of inclusion; the baseline assertion below now enforces all_count >= new_count + cancelled_count per the amended rule. Caller is SALES_REP (= SR_REP_PRIMARY, serves @td(ORG_ACME.id)).","org=@td(ORG_ACME.platform_id); store={{STORE_ID}}; wide_from=2000-01-01T00:00:00Z; wide_to=2099-12-31T23:59:59Z","[GQL-ENDPOINT /graphql/sales-rep]
+[AUTH role=SALES_REP]
+[GQL-OP list_new]
+  query { salesRepOrders(organizationId: ""{{org}}"", storeId: ""{{store}}"", filter: ""New"") { totalCount } }
+[GQL-EXEC list_new]
+[GQL-CAPTURE list_new.data.salesRepOrders.totalCount → NEW_LIST_COUNT]
+[GQL-OP stats_wide]
+  query {
+    salesRepCustomerOrderStatistics(storeId: ""{{store}}"", organizationId: ""{{org}}"") {
+      new_count: period(from: ""{{wide_from}}"", to: ""{{wide_to}}"", filter: ""New"") { count }
+      all_count: period(from: ""{{wide_from}}"", to: ""{{wide_to}}"") { count }
+      cancelled_count: period(from: ""{{wide_from}}"", to: ""{{wide_to}}"", filter: ""Cancelled"") { count }
+    }
+  }
+[GQL-EXEC stats_wide]","[ERRORS label=list_new] errors[] empty {SPEC}
+[ERRORS label=stats_wide] errors[] empty {SPEC}
+[DATA label=stats_wide] data.salesRepCustomerOrderStatistics.new_count.count = {{NEW_LIST_COUNT}} {SPEC}
+[COUNT label=stats_wide] data.salesRepCustomerOrderStatistics.cancelled_count.count >= 1 {DOC}
+[DATA label=stats_wide] data.salesRepCustomerOrderStatistics.all_count.count >= data.salesRepCustomerOrderStatistics.new_count.count {SPEC}
+[DATA label=stats_wide] data.salesRepCustomerOrderStatistics.all_count.count >= data.salesRepCustomerOrderStatistics.new_count.count + data.salesRepCustomerOrderStatistics.cancelled_count.count {BL}","[EVIDENCE] cross-references BL-SR-005 (documented 2026-07-28) against VCST-5587's QA comment (2026-08-17) — the more recent ticket may supersede the oracle; route to /qa-review-oracles bl for reconciliation","new_count.count != salesRepOrders(filter:""New"").totalCount (the two ""New"" code paths disagree — the same class of defect VCST-5705 fixed for wishlists), cancelled_count.count = 0 despite the SRO-ACME-CANCELLED fixture existing (fixture missing or filter regressed), errors[] non-empty","none (read-only)","VCST-5587; Corrected: REG-2026-08-25-1128 triage (2026-08-25) — list_new scoped to storeId (was store-unscoped vs the store-scoped stats_wide op, causing a false red); trailing {HYPOTHESIS} line replaced with a {BL} assertion citing amended BL-SR-005 (2026-08-24)","Automated"
+"SR-GQL-119","salesRepCustomerCartStatistics — active-carts Shape Now Exposes selectedItemQuantity / unselectedItemQuantity Per the Redesigned Widget (VCST-5588)","GraphQL > Sales Rep > Query > salesRepCustomerCartStatistics","Medium","BL-SR-006; PROPOSED-BL-SR-ACTIVECART","","Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. VCST-5588 (QA-confirmed 2026-08-19/20) redefines the ""Active cart"" widget as value=selectedItemQuantity (sum of SelectedForCheckout=true line quantities), sub=unselectedItemQuantity (the false set), both scoped per-currency after the currency-isolation fix (commit e12a9074). LIVE-CONFIRMED this session via introspection: CustomerCartStatisticsPeriod now exposes selectedItemQuantity/unselectedItemQuantity/count/total/average/warning — fields that do NOT exist on the pre-redesign shape SR-GQL-064 already covers (that case predates VCST-5588 and has no seeded-cart alias). NO SEEDED CART ALIAS EXISTS for a known selected/unselected quantity split on this restore (same lost-seeder caution as SR-GQL-064) — this case asserts SHAPE + per-currency echo, not a specific quantity. Do NOT assert the BL-SR-006/VCST-5648 cancelled-cart-in-dated-window question — that was raised and closed separately; this case sticks to the declared selected/unselected/currency-scoping rule only. Caller is SALES_REP (= SR_REP_PRIMARY, serves @td(ORG_ACME.id)).","org=@td(ORG_ACME.platform_id); store={{STORE_ID}}; currency_a={{CURRENCY_CODE}}; currency_b=EUR","[GQL-ENDPOINT /graphql/sales-rep]
+[AUTH role=SALES_REP]
+[GQL-OP stats_currency_a]
+  query {
+    salesRepCustomerCartStatistics(storeId: ""{{store}}"", organizationId: ""{{org}}"", currencyCode: ""{{currency_a}}"") {
+      currencyCode
+      period(filter: ""active-carts"") { selectedItemQuantity unselectedItemQuantity count total { amount } warning }
+    }
+  }
+[GQL-EXEC stats_currency_a]
+[GQL-OP stats_currency_b]
+  query {
+    salesRepCustomerCartStatistics(storeId: ""{{store}}"", organizationId: ""{{org}}"", currencyCode: ""{{currency_b}}"") {
+      currencyCode
+      period(filter: ""active-carts"") { selectedItemQuantity unselectedItemQuantity count total { amount } warning }
+    }
+  }
+[GQL-EXEC stats_currency_b]","[ERRORS label=stats_currency_a] errors[] empty {SPEC}
+[ERRORS label=stats_currency_b] errors[] empty {SPEC}
+[DATA label=stats_currency_a] data.salesRepCustomerCartStatistics.currencyCode = {{currency_a}} {OBSERVED}
+[DATA label=stats_currency_b] data.salesRepCustomerCartStatistics.currencyCode = {{currency_b}} {OBSERVED}
+[DATA label=stats_currency_a] data.salesRepCustomerCartStatistics.period.selectedItemQuantity >= 0 {SPEC}
+[DATA label=stats_currency_a] data.salesRepCustomerCartStatistics.period.unselectedItemQuantity >= 0 {SPEC}
+[DATA label=stats_currency_b] data.salesRepCustomerCartStatistics.period.selectedItemQuantity >= 0 {SPEC}
+[DATA label=stats_currency_b] data.salesRepCustomerCartStatistics.period.unselectedItemQuantity >= 0 {SPEC}","[EVIDENCE] gifts ARE counted per the ticket's final ruling (comment 106890) — if a future fixture adds a gift line, do not exclude it from selectedItemQuantity expectations. FOLLOW-UP (moved from Assertions 2026-08-25, REG-2026-08-25-1128 triage — was unscoreable {HYPOTHESIS}, evaluator reported 'unrecognized DATA predicate'): verify whether selectedItemQuantity differs between currency_a and currency_b when a cart exists in only one currency — the exact VCST-5588 pre-fix regression (currencies summed together) needs a seeded per-currency cart to prove directly; not seeded on this restore. Author a follow-up case once such a fixture exists.","selectedItemQuantity/unselectedItemQuantity fields missing from the schema (VCST-5588 redesign not deployed — regression to the pre-fix shape SR-GQL-064 covers), negative quantities, currencyCode in the response does not echo the requested arg, errors[] non-empty","none (read-only)","VCST-5588; Corrected: REG-2026-08-25-1128 triage (2026-08-25) — trailing {HYPOTHESIS} line moved to Cross_Layer_Checks as a follow-up note (unscoreable without a seeded per-currency cart fixture); 8/9 assertions passed live, VCST-5588 shape confirmed","Automated"
+SR-GQL-120,salesRepCustomers — Org Maintainer With No Rep Permission Gets No Cross-Boundary Leak,GraphQL > Sales Rep > Query > salesRepCustomers,Critical,BL-SR-002,,"Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is ACME_ADMIN (b2b/users.csv USR-001, org role ""Organization maintainer"" — the highest-privilege ORG role in @td(ORG_ACME.id)), holding no sales-rep:access permission. SR_REP_PRIMARY demonstrably serves @td(ORG_ACME.id) (established coverage: SR-GQL-009/011/013/014). CAVEAT carried forward from SR-GQL-041: totalCount=0 alone does NOT prove the caller was gated — a plain buyer with no sales-rep:access ALSO gets a clean 200/totalCount=0 from this query (it gates on authentication, not on the rep permission), so totalCount is not this case's assertion. This case holds the org constant at ORG_ACME (the same org the suite's existing ACME_BUYER negative controls use — SR-GQL-001/003/004/005/006/007/008) and varies ONLY the caller's org role from Purchasing agent (ACME_BUYER) to Organization maintainer (ACME_ADMIN) — the discriminating change no existing case exercises. The leak assertion is that no item in the response carries organizationId = ORG_ACME's own platform id: if the authorization gate wrongly treats ""holds an elevated role in a served org"" as equivalent to ""holds sales-rep:access"", ACME_ADMIN would get a NON-empty items[] containing exactly its own org (the one SR_REP_PRIMARY serves) — a leak of rep-scoped customer data through a privilege-escalation path this suite has never exercised. errors[] empty is asserted so the gate is proven to fail CLOSED (a clean empty/absent result), never by error-based enumeration.","store={{STORE_ID}}, culture={{CULTURE_NAME}}, acme_org=@td(ORG_ACME.platform_id)","[GQL-ENDPOINT /graphql/sales-rep]
+[AUTH role=ACME_ADMIN]
+[GQL-OP main]
+  query { salesRepCustomers(first: 20, storeId: ""{{store}}"", cultureName: ""{{culture}}"") { totalCount items { organizationId organizationName } } }
+[GQL-EXEC main]","[ERRORS label=main] errors[] empty {OBSERVED}
+[DATA label=main] data.salesRepCustomers.items[?organizationId={{acme_org}}] is null {OBSERVED}","[API] errors[] is empty in the GraphQL response
+[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none (read-only),"VCST-5469, VCST-5304 · Archetype:SCOPE · Technique:EP",Draft
+SR-GQL-121,"salesRepCustomerOrders — returns orders the rep did NOT place (creator-agnostic, membership-scoped)",Sales Rep > Customer Orders > salesRepCustomerOrders,Critical,BL-SR-002,,"Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY), a member of @td(ORG_TECHFLOW.id). TechFlow (ORG-002) hosts two AGENT-TEST orders that hold every field but authorship equal (VCST-5733 authorship matrix): ORDER_REP_PLACED (created by the rep itself) and ORDER_BUYER_PLACED (created by TechFlow buyer USR-007). salesRepOrders (the sibling query) pins criteria.CustomerId to the caller and would show only ORDER_REP_PLACED; this case proves salesRepCustomerOrders does not inherit that clause.","rep=@td(SR_REP_PRIMARY.email), storeId={{STORE_ID}}","[GQL-ENDPOINT /graphql/sales-rep]
+[AUTH role=SALES_REP]
+[GQL-OP main]
+query {
+  salesRepCustomerOrders(organizationId: ""@td(ORG_TECHFLOW.platform_id)"", storeId: ""{{storeId}}"") {
+    totalCount
+    items { id number status statusDisplayValue organizationId organizationName customerId createdDate total { amount formattedAmount currency { code symbol } } }
+  }
+}
+[GQL-EXEC main]","[ERRORS label=main] errors[] empty {OBSERVED}
+[DATA label=main] data.salesRepCustomerOrders.items[?number=@td(ORDER_REP_PLACED.number)] is non-null {OBSERVED}
+[DATA label=main] data.salesRepCustomerOrders.items[?number=@td(ORDER_BUYER_PLACED.number)] is non-null {OBSERVED}
+[DATA label=main] data.salesRepCustomerOrders.items[?number=@td(ORDER_BUYER_PLACED.number)].customerId = @td(ORDER_BUYER_PLACED.customerId) {OBSERVED}","[API] errors[] is empty in the GraphQL response
+[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:SCOPE · Technique:EP | Promoted: REG-2026-09-02-2055 (2026-09-02),Automated
+SR-GQL-122,salesRepCustomerOrders — organizationId narrows to the served org and never widens,Sales Rep > Customer Orders > salesRepCustomerOrders,Critical,BL-SR-002,,"Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY), served org {{orgId}} = @td(ORG_TECHFLOW.id), which holds real orders (ORDER_REP_PLACED / ORDER_BUYER_PLACED). The rep also serves ACME, BuildRight and AcmeWest, so the no-arg cross-customer dashboard is a strict superset of the scoped result.","rep=@td(SR_REP_PRIMARY.email), orgId=@td(ORG_TECHFLOW.platform_id), storeId={{STORE_ID}}","[GQL-ENDPOINT /graphql/sales-rep]
+[AUTH role=SALES_REP]
+[GQL-OP scoped]
+query { salesRepCustomerOrders(organizationId: ""{{orgId}}"", storeId: ""{{storeId}}"") { totalCount items { organizationId } } }
+[GQL-EXEC scoped]
+[GQL-CAPTURE scoped.data.salesRepCustomerOrders.totalCount → SCOPED_COUNT]
+[GQL-OP unscoped]
+query { salesRepCustomerOrders(storeId: ""{{storeId}}"") { totalCount } }
+[GQL-EXEC unscoped]","[ERRORS label=scoped] errors[] empty {OBSERVED}
+[COUNT label=scoped] data.salesRepCustomerOrders.totalCount > 0 {OBSERVED}
+[COUNT label=scoped] data.salesRepCustomerOrders.items[*?organizationId!={{orgId}}].length = 0 {OBSERVED}
+[ERRORS label=unscoped] errors[] empty {OBSERVED}
+[COUNT label=unscoped] data.salesRepCustomerOrders.totalCount >= {{SCOPED_COUNT}} {OBSERVED}","[API] errors[] is empty in the GraphQL response
+[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:SCOPE · Technique:EP | Promoted: REG-2026-09-02-2055 (2026-09-02),Automated
+SR-GQL-123,"salesRepCustomerOrders — an unserved organizationId yields empty, not a fallback to all served orgs",Sales Rep > Customer Orders > salesRepCustomerOrders,Critical,BL-SR-002,,"Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY), who holds NO membership on {{orgId}} = @td(ORG_SUSPENDED.id) (verified live). Proves an unserved org id returns a clean empty result rather than falling back to the caller's full served-org set.","rep=@td(SR_REP_PRIMARY.email), orgId=@td(ORG_SUSPENDED.platform_id), storeId={{STORE_ID}}","[GQL-ENDPOINT /graphql/sales-rep]
+[AUTH role=SALES_REP]
+[GQL-OP unserved]
+query { salesRepCustomerOrders(organizationId: ""{{orgId}}"", storeId: ""{{storeId}}"") { totalCount items { number } } }
+[GQL-EXEC unserved]
+[GQL-OP baseline]
+query { salesRepCustomerOrders(storeId: ""{{storeId}}"") { totalCount } }
+[GQL-EXEC baseline]","[ERRORS label=unserved] errors[] empty {OBSERVED}
+[COUNT label=unserved] data.salesRepCustomerOrders.totalCount = 0 {OBSERVED}
+[ERRORS label=baseline] errors[] empty {OBSERVED}
+[COUNT label=baseline] data.salesRepCustomerOrders.totalCount > 0 {OBSERVED}","[API] errors[] is empty in the GraphQL response
+[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:SCOPE · Technique:EG | Promoted: REG-2026-09-02-2055 (2026-09-02),Automated
+SR-GQL-124,salesRepCustomerOrders — a per-org LOCKED membership excludes that org while unlocked orgs still resolve,Sales Rep > Customer Orders > salesRepCustomerOrders,Critical,"BL-SR-002, BL-SR-011",,"Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller signs in as SR_REP_LOCKED_TFCTX — the org-scoped grant for SR_REP_LOCKED under its UNLOCKED served org {{unlockedOrg}} = @td(ORG_TECHFLOW.id) (a plain password grant against its locked default org ACME returns 400 user_is_locked_in_organization). The per-org lock on {{lockedOrg}} = @td(ORG_ACME.id) still applies regardless of the token's org context. Mirrors 050m SR-GQL-024's single-entity lock, applied here to the creator-agnostic query.","rep=@td(SR_REP_LOCKED.email), lockedOrg=@td(ORG_ACME.platform_id), unlockedOrg=@td(ORG_TECHFLOW.platform_id), storeId={{STORE_ID}}","[GQL-ENDPOINT /graphql/sales-rep]
+[AUTH role=SR_REP_LOCKED_TFCTX]
+[GQL-OP locked]
+query { salesRepCustomerOrders(organizationId: ""{{lockedOrg}}"", storeId: ""{{storeId}}"") { totalCount items { number } } }
+[GQL-EXEC locked]
+[GQL-OP unlocked]
+query { salesRepCustomerOrders(organizationId: ""{{unlockedOrg}}"", storeId: ""{{storeId}}"") { totalCount items { number } } }
+[GQL-EXEC unlocked]","[ERRORS label=locked] errors[] empty {OBSERVED}
+[COUNT label=locked] data.salesRepCustomerOrders.totalCount = 0 {OBSERVED}
+[ERRORS label=unlocked] errors[] empty {OBSERVED}
+[COUNT label=unlocked] data.salesRepCustomerOrders.totalCount > 0 {OBSERVED}","[API] errors[] is empty in the GraphQL response
+[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:SCOPE · Technique:DT | Promoted: REG-2026-09-02-2055 (2026-09-02),Automated
+SR-GQL-125,"salesRepCustomerOrders — facet is whitelisted; a scope-prefixed field name is dropped, never aggregated",Sales Rep > Customer Orders > salesRepCustomerOrders,Critical,BL-SR-002,,"Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY), served org @td(ORG_ACME.id). facet is whitelisted to status and organizationname only (live-probed 2026-09-02); organizationid is NOT whitelisted and also prefix-collides with the organizationId scope filter's own field name — proves passing it as a facet neither errors nor strips the caller's own org scope.","rep=@td(SR_REP_PRIMARY.email), storeId={{STORE_ID}}","[GQL-ENDPOINT /graphql/sales-rep]
+[AUTH role=SALES_REP]
+[GQL-OP baseline]
+query { salesRepCustomerOrders(organizationId: ""@td(ORG_ACME.platform_id)"", storeId: ""{{storeId}}"") { totalCount } }
+[GQL-EXEC baseline]
+[GQL-CAPTURE baseline.data.salesRepCustomerOrders.totalCount → BASELINE_COUNT]
+[GQL-OP faceted]
+query { salesRepCustomerOrders(organizationId: ""@td(ORG_ACME.platform_id)"", storeId: ""{{storeId}}"", facet: ""organizationid"") { totalCount term_facets { name label terms { term label count isSelected } } } }
+[GQL-EXEC faceted]","[ERRORS label=baseline] errors[] empty {OBSERVED}
+[ERRORS label=faceted] errors[] empty {OBSERVED}
+[COUNT label=faceted] data.salesRepCustomerOrders.totalCount = {{BASELINE_COUNT}} {OBSERVED}
+[DATA label=faceted] data.salesRepCustomerOrders.term_facets[?name=organizationid] is null {OBSERVED}","[API] errors[] is empty in the GraphQL response
+[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:SCOPE · Technique:EG | Promoted: REG-2026-09-02-2055 (2026-09-02),Automated
+SR-GQL-126,salesRepCustomerOrders — whitelisted facet counts sum to totalCount and ignore their own axis selection,Sales Rep > Customer Orders > salesRepCustomerOrders,High,BL-SR-013,,"Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY), served org @td(ORG_ACME.id), which per 050m SR-GQL-028/030 holds orders in >=2 distinct statuses including New and Processing. facet=status is whitelisted (live-probed 2026-09-02). Proves the status facet's own axis re-aggregates ignoring its own selected filter — a facet that shrinks under its own selection turns the filter into a one-way door (STALE archetype).","rep=@td(SR_REP_PRIMARY.email), storeId={{STORE_ID}}","[GQL-ENDPOINT /graphql/sales-rep]
+[AUTH role=SALES_REP]
+[GQL-OP unfiltered]
+query { salesRepCustomerOrders(organizationId: ""@td(ORG_ACME.platform_id)"", storeId: ""{{storeId}}"", facet: ""status"") { totalCount term_facets { name label terms { term label count isSelected } } } }
+[GQL-EXEC unfiltered]
+[GQL-CAPTURE unfiltered.data.salesRepCustomerOrders.term_facets[?name=status].terms[?term=Processing].count → PROCESSING_UNFILTERED]
+[GQL-CAPTURE unfiltered.data.salesRepCustomerOrders.totalCount → UNFILTERED_COUNT]
+[GQL-OP filtered]
+query { salesRepCustomerOrders(organizationId: ""@td(ORG_ACME.platform_id)"", storeId: ""{{storeId}}"", facet: ""status"", filter: ""status:\""New\"""") { totalCount term_facets { name label terms { term label count isSelected } } } }
+[GQL-EXEC filtered]","[ERRORS label=unfiltered] errors[] empty {OBSERVED}
+[COUNT label=unfiltered] data.salesRepCustomerOrders.term_facets[?name=status].terms[?term=Processing].count > 0 {OBSERVED}
+[ERRORS label=filtered] errors[] empty {OBSERVED}
+[COUNT label=filtered] data.salesRepCustomerOrders.totalCount < {{UNFILTERED_COUNT}} {OBSERVED}
+[DATA label=filtered] data.salesRepCustomerOrders.term_facets[?name=status].terms[?term=Processing].count = {{PROCESSING_UNFILTERED}} {OBSERVED}","[API] errors[] is empty in the GraphQL response
+[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:STALE · Technique:DT | Promoted: REG-2026-09-02-2055 (2026-09-02),Automated
+SR-GQL-127,"salesRepCustomerOrders — an unrecognized facet name is dropped silently, not rejected",Sales Rep > Customer Orders > salesRepCustomerOrders,Low,,,"Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY), served org @td(ORG_ACME.id). facet names a field that is neither in the whitelist nor indexed at all — proves the storefront orders page degrades to the unfiltered list rather than an error banner when a facet name drifts.","rep=@td(SR_REP_PRIMARY.email), storeId={{STORE_ID}}","[GQL-ENDPOINT /graphql/sales-rep]
+[AUTH role=SALES_REP]
+[GQL-OP baseline]
+query { salesRepCustomerOrders(organizationId: ""@td(ORG_ACME.platform_id)"", storeId: ""{{storeId}}"") { totalCount } }
+[GQL-EXEC baseline]
+[GQL-CAPTURE baseline.data.salesRepCustomerOrders.totalCount → BASELINE_COUNT]
+[GQL-OP bogus_facet]
+query { salesRepCustomerOrders(organizationId: ""@td(ORG_ACME.platform_id)"", storeId: ""{{storeId}}"", facet: ""xyz_not_a_real_facet"") { totalCount term_facets { name } } }
+[GQL-EXEC bogus_facet]","[ERRORS label=baseline] errors[] empty {OBSERVED}
+[ERRORS label=bogus_facet] errors[] empty {OBSERVED}
+[COUNT label=bogus_facet] data.salesRepCustomerOrders.totalCount = {{BASELINE_COUNT}} {OBSERVED}
+[DATA label=bogus_facet] data.salesRepCustomerOrders.term_facets[?name=xyz_not_a_real_facet] is null {OBSERVED}","[API] errors[] is empty in the GraphQL response
+[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:FALLBACK · Technique:EG | Promoted: REG-2026-09-02-2055 (2026-09-02),Automated
+SR-GQL-128,salesRepCustomerOrders — paging boundary: pageInfo.endCursor returns disjoint pages,Sales Rep > Customer Orders > salesRepCustomerOrders,High,PROPOSED-BL-SR-SCOPE,,"Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY), served org @td(ORG_ACME.id), which holds >=3 orders (per 050m SR-GQL-026). Pages with first:2 using pageInfo.endCursor (not the manual after=skip offset SR-GQL-026 uses) and asserts the two pages share no order number. The manual-offset after path is documented as off-by-one by one repeated row (unfixed, shared platform code) — this case exercises the correct endCursor path, not a repro of that defect.","rep=@td(SR_REP_PRIMARY.email), storeId={{STORE_ID}}","[GQL-ENDPOINT /graphql/sales-rep]
+[AUTH role=SALES_REP]
+[GQL-OP page1]
+query { salesRepCustomerOrders(organizationId: ""@td(ORG_ACME.platform_id)"", storeId: ""{{storeId}}"", first: 2) { totalCount pageInfo { hasNextPage endCursor } items { number } } }
+[GQL-EXEC page1]
+[GQL-CAPTURE page1.data.salesRepCustomerOrders.pageInfo.endCursor → END_CURSOR]
+[GQL-CAPTURE page1.data.salesRepCustomerOrders.items.0.number → PAGE1_NUM_0]
+[GQL-CAPTURE page1.data.salesRepCustomerOrders.items.1.number → PAGE1_NUM_1]
+[GQL-OP page2]
+query { salesRepCustomerOrders(organizationId: ""@td(ORG_ACME.platform_id)"", storeId: ""{{storeId}}"", first: 2, after: ""{{END_CURSOR}}"") { pageInfo { hasNextPage } items { number } } }
+[GQL-EXEC page2]","[ERRORS label=page1] errors[] empty {OBSERVED}
+[DATA label=page1] data.salesRepCustomerOrders.pageInfo.hasNextPage = true {OBSERVED}
+[COUNT label=page1] data.salesRepCustomerOrders.items.length = 2 {OBSERVED}
+[ERRORS label=page2] errors[] empty {OBSERVED}
+[DATA label=page2] data.salesRepCustomerOrders.items[?number={{PAGE1_NUM_0}}] is null {OBSERVED}
+[DATA label=page2] data.salesRepCustomerOrders.items[?number={{PAGE1_NUM_1}}] is null {OBSERVED}","[API] errors[] is empty in the GraphQL response
+[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:BOUNDARY · Technique:BVA | Promoted: REG-2026-09-02-2055 (2026-09-02),Automated
+SR-GQL-129,salesRepCustomerOrder — an order outside the rep served organizations resolves null,Sales Rep > Customer Orders > salesRepCustomerOrders,Critical,BL-SR-002,,"Runner-native via [GQL-ENDPOINT /graphql/sales-rep]. Requires the Sales Rep module deployed on the environment. Caller is SALES_REP (= SR_REP_PRIMARY). @td(ORDER_NOT_SERVED.id) lives in ORG-005 (Acme-EU-Operations, Active), which the rep holds NO membership on, even though the rep is that order's own author (VCST-5733 authorship-matrix negative fixture) — isolates the null to ORG SCOPE, not authorship. The oracle is null, not an error: vc-module-sales-rep PR #14 loads the order and only then filters it through IsVisibleAsync.","rep=@td(SR_REP_PRIMARY.email), foreignOrderId=@td(ORDER_NOT_SERVED.id)","[GQL-ENDPOINT /graphql/sales-rep]
+[AUTH role=SALES_REP]
+[GQL-OP control]
+query { salesRepCustomerOrder(id: ""@td(ORDER_REP_PLACED.id)"") { id number } }
+[GQL-EXEC control]
+[GQL-OP foreign]
+query { salesRepCustomerOrder(id: ""{{foreignOrderId}}"") { id number organizationId customerId } }
+[GQL-EXEC foreign]
+[GQL-OP dashboard]
+query { salesRepCustomerOrders(storeId: ""{{STORE_ID}}"") { items { number } } }
+[GQL-EXEC dashboard]","[ERRORS label=control] errors[] empty {OBSERVED}
+[DATA label=control] data.salesRepCustomerOrder.number = @td(ORDER_REP_PLACED.number) {OBSERVED}
+[ERRORS label=foreign] errors[] empty {OBSERVED}
+[DATA label=foreign] data.salesRepCustomerOrder is null {OBSERVED}
+[ERRORS label=dashboard] errors[] empty {OBSERVED}
+[DATA label=dashboard] data.salesRepCustomerOrders.items[?number=@td(ORDER_NOT_SERVED.number)] is null {OBSERVED}","[API] errors[] is empty in the GraphQL response
+[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, errors[] non-empty in GraphQL response, 4xx/5xx on /graphql",none,VCST-5733 · Archetype:SCOPE · Technique:EG | Promoted: REG-2026-09-02-2055 (2026-09-02),Automated

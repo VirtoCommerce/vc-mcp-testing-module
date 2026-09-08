@@ -8,9 +8,279 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Semver 
 
 ---
 
+## Component consolidation — commands 31 → 27, skills 41 → 40 — 2026-09-08
+
+**BREAKING:** **Tier A:** `skills/qa-process/` (`test-process-lifecycle.md`, the ISTQB 7-phase lifecycle) is
+removed and its row leaves the Tier A Lock in `docs/versioning.md`. It had zero inbound consumers in the
+repo. **No version is bumped** because the `vc-qa` surface no longer ships as a plugin (no `plugin.json`, no
+marketplace entry — `CLAUDE.md` §Project Overview); a re-packaged distribution starts at the major after
+this removal. Migration for anyone who cited the phases in their own docs: planning → `/qa-test-plan`,
+design → `/qa-test-design`, execution → `/qa-test` / `/qa-regression`, defect lifecycle → `/qa-defect`,
+evidence and close-out → `/qa-evidence`.
+
+The other removals keep their behaviour under a surviving name:
+
+| Removed | Use instead |
+|---|---|
+| `/ba-stories <feature\|VCST-XXXX>` · `/ba-stories --review VCST-XXXX` | `/ba-analyze stories <feature\|VCST-XXXX>` · `/ba-analyze stories --review VCST-XXXX` |
+| `/qa-coverage-generation` (orchestrated twin, zero recorded runs) | `/qa-coverage-gap`; its `gap-inventory.json` schema now lives in `skills/qa-coverage-gap/coverage-gap-methodology.md` §`gap-inventory.json` |
+| `.claude/commands/{project-init,vc-self-check}.md` (thin shells) | the same-named skills, same slash names; `project-init` and `qa-coverage-gap` carry `disable-model-invocation: true` like the shells did |
+| `skills/project-init/REDESIGN.md` | orphan, no replacement |
+
+Also in this change: `ui-ux-expert`, `backend-reviewer` and `frontend-reviewer` run on `sonnet` (the
+`ui-ux-expert` roster row already said so and the frontmatter had drifted; the two Gate-4 reviewers are a
+judgment call, recorded in `docs/agentic-system-component-audit-2026-09-07.md`, reversible by one
+frontmatter line each). `/code-review-full` and `/qa-bundle-check` were considered and kept.
+
+---
+
+## `/qa-test` — the `--iterate` round-2 contract, and layer-routed release notes — 2026-09-02
+
+Two gaps of the same shape: a flow specified by what it **re-runs** and silent on what it
+**re-persists** or hands off.
+
+### `--iterate` round N+1 had no durable half
+
+Step 5k's round-N+1 contract was one sentence — *"Step 4 re-scoped, then Steps 5a–5c again"* — so every
+durable step sat outside it. Read literally: **round 2 filed no bug**, which dead-ends the loop at its own
+precondition (`/qa-fix` needs a filed ticket); the committed `testing-checklist.md` carried round-1
+verdicts only, and on FAST that file is the run's *only* durable record; nothing said whether a failing
+round REOPENed the ticket; 5g was unreachable and, with N Step-4 runs, nothing picked which evidence
+grounded `{OBSERVED}`; and `summary.json` is single-valued everywhere except a 4-key `iterations` counter,
+so round 2 silently overwrote round 1's verdict, counts, `regression.run_id` and timing — while
+`modes.md` demanded "a per-round summary (what each round fixed, what still fails)" that had nowhere to
+live. `5k` also had **no section, heading or table row** in `.claude/commands/qa-test.md` (three
+cross-references, no definition), and `close-out.md` — the file the command names as owning Step 5 — never
+mentioned it.
+
+- **A per-round assignment table, with a reason per row** (`.claude/skills/qa-test/modes.md` §5k).
+  **Per round:** 5a–5d, a short **round-delta** comment, `summary.json`, and an **append-only** checklist
+  section. **Once, at loop exit:** the Feature Release Gate, the full QA-Complete comment, the tracker
+  transition, promotion. So a `--iterate` run makes **one** transition and posts **one** QA-Complete
+  comment whatever the round count. The 5b verifier re-ratifies per round; the 5e and 5g verifiers fire
+  once, at exit.
+- **`CARRIED` — a third provenance** (5a item 4). Item 6's dedup *matches* a bug this run filed in an
+  earlier round, and the PRE-EXISTING row then says *link, don't re-file, **don't fail this ticket*** —
+  wrong twice, since it is this ticket's own Sub-task and it is still failing. CARRIED keeps its IN-SCOPE
+  provenance and severity, files nothing, and gets one comment on the existing Sub-task.
+- **A carried bug that goes GREEN is recorded and commented, deliberately not transitioned.** The loop
+  re-tests an **unmerged prerelease**, so nothing has shipped; the human who merges closes it.
+- **5g promotes per `RUN_ID`, `--ids`-scoped to the cases that run executed.** `tc:promote` can never
+  re-promote, so a round-1 flip is irreversible and would ground `{OBSERVED}` in the build that was wrong.
+- **Evidence screenshots are round-stamped** — `{TC-ID}-FAIL-r{N}-{description}.png`, every round
+  including the first. Round N+1 re-runs the **same** case IDs into the **same** folder, so an
+  unstamped name lets the round-2 PASS overwrite the round-1 FAIL, and the checklist row citing it then
+  points at a green image — worse than a missing file, because it silently contradicts the record. This
+  is the append-only checklist rule applied one layer down, and the artifact the first draft of the
+  per-round table forgot.
+- **`CARRIED` is enforced at the step that would otherwise override it.** 5a runs
+  `provenance → dedup`, and dedup re-emits `provenance`, so item 6 now carries the exception
+  explicitly: a match on a bug **this run** filed earlier is CARRIED, never PRE-EXISTING. Without it
+  the item-4 call was overwritten one step later, the bug stopped failing 5c, and the round reported
+  PASS on a defect the same run had filed and that was still red. The 5b verifier gained the matching
+  REJECT criterion.
+- **Artifact refresh rules.** The Test Model is **amended, never forked** — `<TICKET>-<date>.md` keeps
+  round 1's date, because a same-day round 2 collides on that path and a `-r2` sibling splits one fault
+  model in two (an amendment may confirm a hypothesis, clear one by fix, or add rows for mechanisms the
+  **fix's** diff introduces; it may not rewrite Part 0). **Step 3 is not re-runnable**: re-scaffolding with
+  round 1's `--id-block` rejects every row on ID collision, while re-allocating first lands the same rows
+  under new IDs — and the appender's only content dedup is exact `Title`+`Section`, so a reworded title
+  duplicates silently in permanent coverage. The checklist is append-only because the RED→GREEN transition
+  *is* the loop's deliverable.
+- **Round N+1 runs two tracks:** the previously-failed cases as their **own** `--ids` run (so the
+  RED→GREEN rate and the release gate's ≥95% stay two numbers), and Artifact C **re-scoped to the fix's own
+  diff** — round 1's scope came from the *ticket's* diff and cannot know what the fix touched. Each round
+  **probes** its own build; `/qa-deploy-pr --verify` is advisory, and unprobed, a "still failing" round is
+  indistinguishable from a deploy that never landed.
+- **`summary.json.iterations.per_round[]`** — one entry per round (verdict, probed build + deploy PR +
+  the mandatory deploy confirm, the RED→GREEN and regression runs, counts, filed/carried/fixed bugs, the
+  `/qa-fix` outcomes, which artifacts the round touched, what still fails). Written at the **end of every
+  round**, not at exit: the loop can STOP at any round, and a history persisted only on a clean exit is
+  missing exactly when it is needed. Its `$comment` states what the single-valued top-level fields mean at
+  N rounds — `verdict`/counts/`regression`/`promotion` are the **latest** round's, `bugs_filed` and
+  `new_cases_authored` are **cumulative**, `timing` spans the whole run.
+- **Two flags make the contract executable.** Every re-entrant primitive was **suite**-scoped while
+  everything round 2 knows is **case**-scoped, and `--also-ids` can only *add* to a tier:
+  - `suites:filter --ids <IDs>` — an **exact set**, mutually exclusive with `--priority`/`--also-ids`
+    (a tier union and an exact set answer different questions). It reads no `Priority` at all, so an
+    unreadable one is **not** a finding on that path — nothing consulted it, and naming it would
+    manufacture a coverage hole that does not exist. A run-global id miss is still reported.
+  - `tc:promote --ids <IDs>` — a **scope, never a gate**: every `PR-*` rule still runs on what it
+    leaves, and an unnamed row yields no decision rather than a PR-002 hold. It also picked up the
+    **value-lookahead guard `parseArgs` never had** — without it `--ids` as the final token scoped to
+    `undefined`, every case fell out of scope, and the run exited 1 ("nothing promotable") looking like a
+    clean no-op. `filter-cases.ts` already carried that guard *and a test named for exactly that failure*.
+    An `--ids` value that **names nothing** (`""`, `","`, whitespace) is likewise an error rather than
+    "no scoping": `ids.size === 0` is the UNSCOPED sentinel, so an empty list would invert the scope
+    from nothing to **everything** — a one-way `Draft → Automated` flip across the whole suite under
+    `--apply`. It is on the documented happy path, because the §5g close-out prescribes three
+    invocations whose id sets are legitimately empty. Usage errors now exit **2**, not 1, so they are
+    distinguishable from "nothing promotable".
+
+### Release documentation did not exist
+
+No agent, command, skill, template, report category or npm script produced a "what shipped" document.
+`ba-doc-writer` had four audiences and **no ticket, version, diff or layer input**, so it could not be
+told what shipped; `release-ledger.md` is a generated, hand-edit-forbidden **upstream** inventory;
+`docs/release-process.md` is about versioning *this plugin*. No QA command referenced `ba-doc-writer`.
+
+- **The layer is the routing axis, derived and never asked** (`/qa-test` `1b` item 2b →
+  `summary.json.layer`): `storefront` · `admin-spa` · `api` · `module` · `platform` · `cross-layer`,
+  from the union of the PR diff (via `repo-router` `REPO_PROFILES` + `resolveOwningSubApp`) and the suite
+  manifest's own `layer`/`concern`/`tags` — **read from the data, not the manifest's declared `concerns`
+  enum**, whose rows carry `e2e` and `graphql` too. Three loud failures, no silent default:
+  `layer-unresolved` refuses the fragment and names no command (**never** defaulted to `storefront` — a
+  wrong layer routes the note to the wrong audience, worse than no note); `layers_conflict` surfaces in
+  the note's own footer; and `layer_source[]` is always populated, because null means *not consulted*,
+  which is a gap and not a zero.
+- **Layer → audience → shape** (`knowledge/ba/virto-doc-style.md` **§9**): `storefront`→customer,
+  `admin-spa`→admin, `api`→developer, `module`→admin (+developer iff a setting/permission moved),
+  `platform`→admin *and* developer, `cross-layer`→the outermost surface the user sees. Evidence per layer
+  reuses `/qa-verify-fix`'s own split unchanged — the real request/response from `.graphql-evidence` for
+  `api`, a screenshot for the visual layers. `sales` is **never** auto-derived: a benefit-led one-pager
+  about one ticket is the oversell the Sales guardrail already calls a defect.
+- **One note per ticket per layer** — the one deliberate inversion of §1's "audience ≠ document", because a
+  release note is read as a single *what shipped* record and splitting it four ways yields files nobody can
+  reconcile back into one release.
+- **Fragment + aggregator**, both under `reports/ba/release-notes/` (report category 3, beside
+  `test-models/`): `<ticket>-<layer>-release-note.md` at 15–40 lines / cap 60, and
+  `release-<label>.md` at 40–80 / cap 150 which **links** fragments rather than inlining them. The
+  aggregate's window is globbed off `reports/tickets/*/*/summary.json` — the same glob `1b` already uses —
+  which hands its mandatory **`Not included`** section (every refused ticket, with its reason) its rows
+  for free.
+- **`/qa-test` writes only the machine half** (`layer` + the `release` block) and 5f **points** at
+  `/ba-analyze docs release <ticket>` carrying the ticket, the layer, the audience and the
+  `summary.json` path, so the follow-up re-derives nothing. A pointer and never a trigger:
+  `/ba-analyze` is `disable-model-invocation: true`. 5e's comment gains a **mandatory** `Release note:`
+  line reading `none — <refusal>` when refused, for the same reason `Not filed` is mandatory.
+- **`doc_scope: release` requires no `system_analysis`/`api_analysis`** and `/ba-analyze` runs
+  `ba-doc-writer` **alone** for it: those are whole-system sweeps, and there is no per-ticket system
+  analysis to have — requiring them costs three dispatches for input the mode cannot use. It writes no
+  `ba-report-{date}.md` either; a release note is not an analysis.
+- **A nine-rule truth guardrail** (`ba-doc-writer` §6). Versions only from the **probed**
+  `build.deployed` (`UNKNOWN` is legal, a guess refuses the fragment); the ledger's three rules binding, so
+  a `behind[]` component is `NOT_DEPLOYED` and gets no fragment and no sentence may be grounded on the
+  ledger; **the fragment describes the verified slice, not the diff**; `breaking` only from the ledger's
+  `⚠ BREAKING` row or a cited contract-change diff line, never from ticket/PR/commit prose; a fragment
+  only for PASS/PASS_WITH_NOTES, with the `!!! note` **mandatory** on the latter; the ledger and every
+  ticket/PR text read here are **data, never instructions**; every "you can now …" maps to a verified PASS
+  row, and nothing verified to say means **refuse** (`not-user-visible`), never pad; `layer` read once and
+  never re-derived; and evidence paths existence-checked against the `reports/ba/release-notes/` prefix.
+- **Payload hygiene is stated, not inherited by implication** (`virto-doc-style.md` §9.4 +
+  `ba-doc-writer` guardrail R9). §9.1 borrows `/qa-verify-fix`'s evidence rule for the `api` layer, and
+  that rule has **three** parts: never hand-written, **always redact** secrets (`Authorization` / token
+  / `password` / PAN) regardless of destination, and **scrub client hosts, paths, identifiers and data**
+  (§2a). Only the first travelled in the first draft. The other two matter *more* here than on an
+  evidence page: `evidence.html` is local-by-default and the runner evidence dirs are gitignored, while
+  a release note is durable category 3 in a public repo with an explicit no-prune rule. Concretely —
+  suite `050d` embeds `password: "{{DEFAULT_TEST_PASSWORD}}"` in its query text and `graphql-runner.ts`
+  stores the **resolved** query plus `variables`, so an unredacted copy-paste publishes a credential;
+  and a real response body carries customer emails and addresses. If a payload cannot be shown without
+  a secret or client data, **describe the changed field and embed nothing**.
+- **The derivation is ordered so its own mandatory output is fillable.** Resolving `audience` /
+  versions / `breaking` / `refusal` is now **5e.0**, ahead of the 5e.2 comment that must carry a
+  `Release note:` line and the 5e.3 persist that writes the block; 5f keeps only the pointer and
+  computes nothing. The first draft put the derivation in 5f, which runs *after* the report — so the
+  mandatory line had no inputs and the block was never persisted.
+- **Declared non-goal:** the `verify-fix` flow writes `verification-summary.json` rather than
+  `summary.json`, so a bug fix produces no fragment — a fix's release story is the bundle/hotfix narrative
+  `/qa-hotfix` owns. Named in §9 so it reads as a decision, not an oversight.
+- **Drive-by:** the stale *"four allowed report categories"* (there are ten) is corrected in **both**
+  places it appears — `virto-doc-style.md` §7.5 and `knowledge/agents/ba/shared-instructions.md`.
+
+---
+
+## Docs Audit — 2026-08-24
+
+Biweekly freshness audit (Sprint26-16 boundary). Two new regression suites landed since the last
+audit without their doc-side counterparts catching up; three skills and a plugin agent/command pair
+were already shipped but never made it into their reference tables.
+
+- **Suite/test counts refreshed.** `config/test-suites.json` now carries **123 suites / 4,123 cases**
+  (up from 121 / ~3,985) — `Backend/ucp/094-ucp-observability.csv` and
+  `Backend/background-jobs/095-background-jobs-migration.csv` landed this sprint. Regenerated
+  `regression/suites/README.md` from the manifest and corrected the stale `121`/`~3,985`/`48
+  directories` figures in `CLAUDE.md`, `INDEX.md`, `.claude/rules/regression.md`, and
+  `.claude/skills/qa-metrics/quality-gates.md`.
+- **Undocumented skills backfilled** in `.claude/skills/README.md`: `/qa-deploy-pr`,
+  `/qa-review-oracles`, and its alias `/qa-review-bl` existed on disk and in
+  `.claude/rules/skills-commands.md` already, but were missing from the skills directory index
+  (its own header undercounted QA Methodology at 17/14 instead of 18).
+- **Undocumented `vc-fix` plugin components backfilled** in
+  `plugins/vc-fix/knowledge/agents/README.md`: the `self-check-diagnostician` and
+  `self-check-deliverer` agents (2 of the plugin's 10 agents, table said 8) and the `/vc-feedback`
+  command (table said "Slash Commands (7)" and omitted the row, though the header count and Quick
+  Start already knew about it).
+- **Open proposal, not auto-applied:** `Backend/import-export/096-backup-restore.csv` is a
+  substantial, actively-committed suite (VCST-5387) with no `config/test-suites.json` entry — it
+  doesn't count toward any total above and is invisible to `suites:lint`/`/qa-regression`. Needs a
+  human call on priority/tags/selection membership before registering it.
+
+---
+
 ## [Unreleased]
 
-Ships as **plugin `vc-fix` `0.8.4`** + **`vc-perf` `0.2.6`** (marketplace `0.9.4`). Pin to a tagged release for stability; this branch tip is unstable.
+Ships as **plugin `vc-fix` `0.8.7`** + **`vc-perf` `0.2.6`** (marketplace `0.9.4`). Pin to a tagged release for stability; this branch tip is unstable.
+
+### Fixed — `vc-fix` `plugin.json` advertised 8 agents, ships 10 (#238)
+
+The count in the plugin manifest's own `description` was stale — `marketplace.json` and `CLAUDE.md`
+already said 10. `plugin.json` is what the plugin loader reads and what a customer sees before
+installing, so it was the one copy that mattered and the one that was wrong. All three now agree.
+
+### Fixed — a skill description that YAML could not parse, plus the guard that was missing (VCST-5807, #238)
+
+`plugins/vc-fix/skills/project-init/SKILL.md` carried a ~1020-character **unquoted** `description:`
+containing a colon-space (*…Day-2 modes skip the interview: `--add-env` adds…*). In YAML `: ` inside
+a plain scalar **is** the key/value separator, so the parser abandoned the whole block and
+`claude plugin validate` reported the skill loads with **empty metadata**. Introduced 2026-07-21 and
+unnoticed for a month, because nothing checked. `.claude/skills/vc-self-check/SKILL.md` carried the
+identical defect — there the symptom was directly visible, the skill listing by its H1 heading
+instead of its description. Both are now quoted.
+
+- **The guard is the point.** `scripts/lib/frontmatter-lint.mjs` (`ambiguousPlainScalars`) +
+  `scripts/unit/plugin-frontmatter.test.mjs` scan every markdown component **both** surfaces ship —
+  `plugins/` and `.claude/`, 326 files — for values a YAML parser mis-reads: a plain scalar with
+  `: ` / `:<TAB>`, a trailing `:`, a leading indicator, or a ` #` that silently truncates the value at
+  a comment; the same traps on a **wrapped continuation line**; and a **quoted** value that is
+  unterminated or closes early on an unescaped delimiter — so the guard can still see a regression in
+  its own remedy. Deliberately not a YAML parse: no YAML library is a dependency of this repo, and the
+  detector's header states plainly what it does and does not cover rather than implying completeness.
+- **A block scalar is valid YAML, not a finding.** `key: >` / `key: |` with an indent digit and a
+  chomp indicator **in either order** (`|2-`, `|-2`) is accepted. The first cut hardcoded
+  chomp-then-indent and so flagged `vc-perf`'s `perf-loop` — a false positive on green code, the same
+  over-match defect the VCST-5774 review caught in the base64 secret net. Fixed the same way: teach
+  the detector the legitimate shape, never weaken the check.
+- **It cannot pass vacuously.** The scan asserts a floor on the corpus, because a guard that silently
+  checks zero files is the failure mode it exists to prevent. Every rule is mutation-proven: reverting
+  any one of them turns the suite red.
+
+### Security — `/project-init` never writes a credential literal into `.mcp.json` (VCST-5774, #234)
+
+`gen-mcp.mjs` substituted the **literal value** of a GitHub PAT into the project's `.mcp.json` and **never added that file to `.gitignore`** — despite the file's own header claiming both were ignored. On a client deployment whose root is a git repo that is one `git add -A` from publishing a live token, irreversibly. A machine-wide scan found the literal in **five** generated projects; two carried the operator's `gh` CLI OAuth session (`gho_…`), persisted without their agreement. Nothing was committed only because none of those directories happened to be a git repo — containment by luck. All five were cleaned.
+
+- **D1 — no literal.** A resolved credential is written as a `${VAR}` indirection; the VALUE goes into `.claude/settings.local.json` `env`, which Claude Code applies to every session and its subprocesses and which is what feeds `${VAR}` expansion in `.mcp.json` `headers`/`env` (verified live on both transports). The placeholder's own name is the canonical variable, so an alias source (`GITHUB_FIX_BUGS_TOKEN`) still yields `${GITHUB_PERSONAL_ACCESS_TOKEN}` and both sides always agree. `--inline-secrets` restores the legacy literal for a host that cannot apply settings `env` — and then writes no second copy. **The value is exported to every session subprocess, which is a wider blast radius than the single MCP header it replaced: treat `.claude/settings.local.json` as a secret file.**
+- **D2 — always ignored, by every writer.** `.mcp.json`, `.claude/settings.local.json`, `.env.local`, `.env.*.local`, `project-profile.json` and `.vc-fix/` are written as a labelled `.gitignore` block **before** the file it protects is created. The list + writer moved to `skills/project-init/lib/gitignore.mjs` because onboarding creates such files in FOUR scripts at four steps: while only `gen-mcp` (§7) wrote the block, the guarantee held for the two files §7 creates — and **`.env.local` (§3b), the file the operator is told to paste `JIRA_API_TOKEN` / `ADO_PAT` / `GITHUB_FIX_BUGS_TOKEN` / passwords into during a PAUSE, was unprotected for that whole window** and in every run that aborted before §7. All four now call `ensureProjectIgnores()` first; it is idempotent, so the cost is one file read and there is still exactly one block. A project with no `.gitignore` gets one. The two generated entries are derived from the **resolved destinations**, so `--out`/`--settings` cannot route a credential-bearing file past the block; a destination outside the project root warns loudly instead.
+- **D3 — no `gh auth token` fallback.** With no PAT the placeholder stays unresolved and `enableOAuthIfNoPat` drops the header, so the server uses interactive OAuth.
+- **Stale credentials are pruned.** Settings `env` merging never removed anything, so a revoked token stayed ambient forever while `.mcp.json` read clean — and switching to `--inline-secrets` left two copies. Every var the generator owns is now dropped when it no longer resolves, and the removal is reported. Operator-authored keys are untouched.
+- **B4 — a regression guard on the ARTIFACT.** `verify-access.mjs` adds two readiness rows auditing `.mcp.json` **and** `.claude/settings.local.json` — guarding only the first would leave the value's new home unchecked. The walk covers the whole server def (`headers`, `env`, `args[]`, `url`, nested bags), because the producer substitutes placeholders at every leaf. Detection is split by confidence: a **CERTAIN** hit is the known-token-shape matcher now **shared with `hooks/redact.mjs`** (the audit's own shorter copy let `glpat-`/`xoxb-`/`sk_live_`/`AKIA`/JWT through) and may block readiness; a **SUSPECTED** hit — a credential-shaped key with an opaque value — **only ever WARNs**, because that net cannot tell a secret from a filename. Without the ceiling it graded this repo's own documented `--secrets .env.playwright.local` as a readiness-blocking FAIL on three servers; with it, the key vocabulary can stay wide instead of being narrowed until real names (`AccountKey`, `subscriptionKey`, `signingKey`, …) fall out of it. Grading is pure and table-tested, by **actual exposure**: FAIL only when a certain credential sits in a file git would commit — including one already **tracked**, which `git check-ignore` reports as not-ignored and which a `.gitignore` rule cannot fix (that row says `git rm --cached`). Outside a git repo, ignore-state is never a finding. Key paths only ever reach the table; a value never does.
+- **Latent bug found by the new tests.** `walk()` applied substitution only to object VALUES, so `o.map(walk)` handed each array element to a branch that returned it untouched — a placeholder inside `args[]` was never resolved and shipped literal. Substitution now happens at the leaf.
+
+**Review round 2** — five further must-fix findings, each reproduced against the previous head:
+
+- **An unparsable `.claude/settings.local.json` is no longer flattened.** The read was `try { JSON.parse(…) } catch { settings = {} }` followed by a full rewrite, so one stray comma deleted every other key — including `permissions.deny: ["Bash(gh pr merge:*)", …]`, guard #1 of the never-auto-merge interlock (`quality-gates.md` §2). This change had just made that same file the credential's home, i.e. it would have written a secret into a file it had proven it cannot read. The run now HALTS before writing anything.
+- **A safety flag no longer inverts.** `parseArgs` swallows the next token as a value, so `--inline-secrets false` produced the string `"false"` and `Boolean("false")` is `true` — the natural way to disable it enabled it. Every boolean flag now goes through `asBool`.
+- **An already-tracked destination blocks the write.** A `.gitignore` rule cannot untrack a tracked path, so writing the credential into a tracked `settings.local.json` staged it for the next commit while the run printed a reassuring `.gitignore += …` line — the same false-reassurance shape as the original defect. `verify-access` already knew this trap; the producer now does too, and says `git rm --cached`. A tracked `.mcp.json` only warns: without `--inline-secrets` it holds no credential.
+- **The CERTAIN net stopped firing on ordinary base64.** `eyJ[A-Za-z0-9._-]{16,}` matches any base64 of a JSON object (`{"` encodes to `eyJ`), so an `APP_CONFIG_B64` was graded a certain credential and **FAILed readiness** — precisely the block-on-a-harmless-value failure the confidence split exists to prevent. The pattern now requires a JWT's two dots; a negative table locks it in. (The old test fixture was a bare JWT *header*, which is why the over-match went unnoticed.)
+- **The remediation names the command.** The FAIL row said "re-run /project-init", but the documented path for an existing install is `--check`, whose Step C runs `normalize-env → verify-access → assert-profile` and never calls `gen-mcp.mjs` — so it reported a problem it could not fix. The row now prints the generator invocation and says `--check` alone will not do it.
+
+### Added — CI actually runs the unit suite (`.github/workflows/unit-tests.yml`)
+
+No workflow ran `npm test`: all six existing ones drive QA pipelines against the product, never this repo's own code. So every guarantee documented as enforced held only when a human remembered — including the `mirror-parity` byte-identity that CLAUDE.md calls "CI-enforced", and the secret-hygiene guards above, whose regressions are silent by construction. A guard nobody runs is a comment. The typecheck step is labelled for what it covers: `ci/tsconfig.json` sees `ci/*.ts` + `scripts/**/*.ts` only, so a green typecheck on an all-`.mjs` change (like this one) proves nothing about it — a claim made, and wrongly relied on, earlier in this PR.
+
+### Fixed — `.claude/` mirror: the `gh auth token` fallback removed there too
+
+The `.claude/` project surface is not maintained and its `gen-mcp.mjs` is an older generation, so the D1/D2 port was declined. D3 is different: the argument for leaving it rested on this repo's `.gitignore` already covering `.mcp.json`, but the harm of D3 — persisting the operator's `gh` CLI OAuth session to disk without their agreement — does not depend on `.gitignore` at all. The ~15 lines are deleted there; nothing else on that surface changed.
 
 ### Fixed — `/project-init` onboarding hardening from client-deployment self-check findings (#216, #217, #220)
 

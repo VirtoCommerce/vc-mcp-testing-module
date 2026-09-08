@@ -166,7 +166,16 @@ export async function auth() {
 }
 
 // A read call is safe to run in --dry-run (GET, or POST to a /search endpoint).
-const isReadCall = (method, path) => method === 'GET' || (method === 'POST' && path.includes('/search'));
+//
+// `POST /api/catalog/listentries` is a SEARCH that simply has no "search" in its path — it is the
+// catalog browse/lookup endpoint, and its sibling `/listentries/delete` is the write. Stubbing it in
+// dry-run made every dry-run catalog lookup return a fake row with no `code`, so a
+// `--teardown --dry-run` reported "nothing to delete" while real orphan products sat in the
+// database. A preview that under-reports residue is the same false-clean the residue guard exists to
+// stop, so the predicate names it explicitly. The trailing-segment test keeps `/listentries/delete`
+// (and `/listentrylinks*`) on the write side, where they belong.
+const isReadCall = (method, path) => method === 'GET'
+  || (method === 'POST' && (path.includes('/search') || /\/listentries(\?|$)/.test(path)));
 
 /**
  * REST wrapper. In --dry-run, writes are skipped and return a fake { _dryRun, id }.
@@ -292,6 +301,51 @@ export function iso3(code) {
 // no-ops (it 200s and deletes nothing). Callers that logged success from the requested count
 // therefore reported clean teardowns while leaving residue. Always route batch id-deletes here.
 export const idsParam = (ids) => [...ids].filter(Boolean).map((id) => `ids=${encodeURIComponent(id)}`).join('&');
+
+// The catalog-wipe guard. `POST /api/catalog/listentries/delete` with an EMPTY `objectIds`
+// does not no-op and does not 400 — it deletes EVERY entry in scope. That is the mechanism
+// behind this project's worst incident (a bulk product deletion), and until now the only
+// thing standing between a caller and it was PROSE: a warning comment in
+// seed-standard-products.mjs, another in seed-configurable.mjs, and a line in the
+// /qa-seed-data skill. Thirteen call sites, each re-deriving the rule from a comment.
+//
+// The dangerous shape is not a typo, it is an ordinary lookup miss: several callers pass
+// `objectIds: ids` or `objectIds: hits.map((h) => h.id)` straight from a search. When the
+// search matches nothing that array is `[]`, and the "delete my fixtures" call becomes
+// "delete the catalog". Nothing in the request looks wrong.
+//
+// So the rule is centralized the same way `idsParam` above was, and for the same reason —
+// a silent-failure invariant that every caller must honour belongs in ONE place. The
+// difference from `idsParam` is deliberate: that one FILTERS falsy ids, this one REFUSES
+// them. Filtering an empty result down to an empty request is precisely the failure.
+//
+// The guard runs BEFORE `api()`, so it fires under `--dry-run` too: a preview that hides an
+// empty-ids bug is the same false-clean the dry-run exists to prevent.
+export const LIST_ENTRY_TYPES = Object.freeze(['CatalogProduct', 'Category']);
+
+export async function deleteListEntries(ids, objectType, { expectStatus = [200, 204, 404] } = {}) {
+  if (!Array.isArray(ids)) {
+    throw new Error(`deleteListEntries: ids must be an array, got ${typeof ids} — refusing to call listentries/delete`);
+  }
+  if (!LIST_ENTRY_TYPES.includes(objectType)) {
+    throw new Error(`deleteListEntries: objectType must be one of ${LIST_ENTRY_TYPES.join(' | ')}, got ${JSON.stringify(objectType)}`);
+  }
+  const bad = ids.filter((id) => typeof id !== 'string' || id.trim() === '');
+  if (bad.length) {
+    // A `[undefined]` is not a narrow delete, it is an unknown-shaped request built from a
+    // variable the caller thought was set. Refuse rather than guess what the platform does.
+    throw new Error(`deleteListEntries: ${bad.length} of ${ids.length} id(s) are not non-empty strings — refusing (an unset id must never reach a bulk delete)`);
+  }
+  if (ids.length === 0) {
+    throw new Error(
+      'deleteListEntries: refusing to POST listentries/delete with an EMPTY objectIds — ' +
+      'that deletes EVERY entry in scope, not none. If the lookup legitimately found nothing, ' +
+      'skip the call (there is nothing to delete); do not send it.',
+    );
+  }
+  return api('POST', '/api/catalog/listentries/delete', { objectIds: ids, objectType }, { expectStatus });
+}
+
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

@@ -53,12 +53,8 @@ const CLASSIFICATIONS: Classification[] = [
     rationale: "Storybook (vc-frontend specific) + critical-ui-scope (vcst coverage matrix). Customer with a different storefront codebase clones for their Storybook." },
   { path: ".claude/agents/regression-orchestrator.md", category: "agent-qa", applicability: "universal",
     rationale: "Parallel execution + retry logic + browser fallback. Pure orchestration mechanism." },
-  { path: ".claude/agents/autonomous-regression-orchestrator.md", category: "agent-qa", applicability: "universal",
-    rationale: "Agent Teams variant of regression-orchestrator. Token-bucket + failure recovery. Mechanism, not domain." },
   { path: ".claude/agents/test-runner-agent.md", category: "agent-qa", applicability: "universal",
     rationale: "Parameterized template ({{SUITE_ID}}, {{BROWSER_SERVER}}, etc.). Template is itself the contract; customer-runnable." },
-  { path: ".claude/agents/autonomous-test-runner.md", category: "agent-qa", applicability: "universal",
-    rationale: "Autonomous variant of test-runner-agent. Same parameterized template pattern." },
 
   // Shared instructions (3) — one per team
   { path: ".claude/knowledge/agents/qa/shared-instructions.md", category: "agent-shared", applicability: "reference",
@@ -121,6 +117,14 @@ const CLASSIFICATIONS: Classification[] = [
     rationale: "VC platform architecture patterns. Same for every VC deployment." },
   { path: ".claude/knowledge/domain/products.md", category: "knowledge", applicability: "reference",
     rationale: "Storefront product types + xAPI fields. Customer's products differ; pattern reusable." },
+  // GENERATED FILE — this script must stay a no-op on it. The generator emits
+  // `applicability: universal` itself, so ensureApplicabilityFrontmatter takes its
+  // "already tagged -> replace" branch and writes nothing. Changing the value below
+  // WITHOUT changing the generator's own emitted value would make this script rewrite a
+  // generated file, which scripts/unit/release-ledger.test.mjs then reports as a hand-edit.
+  // Keep the two in sync: scripts/maintenance/refresh-release-ledger.mjs -> renderDoc().
+  { path: ".claude/knowledge/domain/release-ledger.md", category: "knowledge", applicability: "universal",
+    rationale: "GENERATED (npm run releases:refresh) from the monthly community release digests. Upstream release history is deployment-independent — every deployment ships the same product line, so unlike sitemap.md there is nothing customer-specific to parameterize. Carries NO deployment facts by design: what is DEPLOYED is a live /api/platform/modules probe, not this file." },
   { path: ".claude/knowledge/domain/sitemap.md", category: "knowledge", applicability: "reference",
     rationale: "Full storefront URL map. Customer's sitemap differs by storefront customizations. @td(VIRTUAL_CATALOG_B2B.id) already used in some entries." },
   { path: ".claude/knowledge/domain/store-settings.md", category: "knowledge", applicability: "reference",

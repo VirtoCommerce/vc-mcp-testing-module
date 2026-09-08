@@ -4,8 +4,8 @@ Agentic QA system for the **Virto Commerce B2B e-commerce platform**. Tests are 
 natural language prompts via MCP servers (Playwright, Chrome DevTools, Atlassian, …) — LLM-powered
 browser automation with AI agents, **not** traditional `.spec.js` files.
 
-> **Authoritative counts** (verified 2026-08-07): 19 agents · 40 skills · 31 commands ·
-> 32 knowledge files · 121 regression suites (~3,985 cases). Single sources of truth:
+> **Authoritative counts** (verified 2026-09-08): 17 agents · 40 skills · 27 commands ·
+> 32 knowledge files · 126 regression suites (4,155 cases). Single sources of truth:
 > [`config/test-suites.json`](config/test-suites.json) for suites, [`.claude/rules/`](.claude/rules/) for everything else.
 
 ## Quick Navigation
@@ -16,13 +16,12 @@ browser automation with AI agents, **not** traditional `.spec.js` files.
 | [CLAUDE.md](CLAUDE.md) | Project instructions for Claude Code (overrides defaults) |
 | [.claude/](.claude/) | Agents, skills, commands, rules, knowledge |
 | [config/](config/) | MCP browser configs + `test-suites.json` manifest |
-| [regression/suites/](regression/suites/) | 121 module-aligned CSV suites (Frontend/ + Backend/) |
+| [regression/suites/](regression/suites/) | 126 module-aligned CSV suites (Frontend/ + Backend/) |
 | [test-data/](test-data/) | `@td()` alias registry + CSV fixtures |
 | [reports/](reports/) | Bug reports + regression / monitoring summaries |
 | [tests/](tests/) | Active per-sprint / per-ticket evidence (root = current) |
 | [scripts/](scripts/) | Resolvers, GraphQL runner, sync/lint utilities, seeders |
 | [docs/](docs/) | Plugin distribution / onboarding / runbook docs |
-| [bootstrap/](bootstrap/) | Plugin installer (`install.ts`) |
 | [templates/](templates/) | Customer-facing config templates (`aliases.json.template`) |
 | [vc/](vc/) | **Layer 2** — VC's internal per-env data (`vcst-qa/`, `shared/`); customers ignore |
 | ci/ | CI regression / full-cycle / auto-fix / monitoring pipelines (**gitignored**) |
@@ -37,19 +36,19 @@ vc-mcp-testing-module/
 ├── config.js                       # Layered env loader (TEST_ENV-keyed)
 │
 ├── .claude/
-│   ├── agents/                     # 19 agents — qa/ (11) + ba/ (4) + developers/ (4), each w/ shared-instructions.md
+│   ├── agents/                     # 17 agents — qa/ (9) + ba/ (4) + developers/ (4), each w/ shared-instructions.md
 │   │   └── knowledge/              # 32 shared reference files (business-logic, graphql-schema, sitemap, …)
 │   ├── skills/                     # 40 skills (1 vc-knowledge, 12 testing, 18 qa-methodology, 6 development, 3 root-level)
-│   ├── commands/                   # 31 slash commands
-│   └── rules/                      # agents, regression, skills-commands, mcp-browsers, test-data, quality-gates, reports
+│   ├── commands/                   # 27 slash commands
+│   └── rules/                      # agents, regression, test-data, reports — the always-loaded tier; the rest moved to knowledge/execution/ (2026-09-08)
 │
 ├── config/                         # MCP browser configs + test-suites.json manifest
 │   ├── mcp-playwright-{chrome,firefox,edge}.config.json
-│   └── test-suites.json            # Regression orchestration manifest (_meta.totalSuites: 121)
+│   └── test-suites.json            # Regression orchestration manifest (_meta.totalSuites: 126)
 │
 ├── regression/suites/
 │   ├── Frontend/                   # 56 CSVs in 17 module dirs
-│   └── Backend/                    # 65 CSVs in 31 module dirs
+│   └── Backend/                    # 67 CSVs in 33 module dirs
 │
 ├── test-data/                      # aliases.json registry + CSV fixtures (orgs, addresses, users, products, payment, …)
 ├── reports/                        # bugs/, regression/, monitoring/, ba/, tickets/, …
@@ -83,13 +82,13 @@ Theme preset: **Coffee**. Communication: **Microsoft Teams**.
 
 ## Regression Suites
 
-121 suites (~3,985 cases, 37 selections) in enriched agent-native CSV format, organized into module-aligned
+126 suites (4,155 cases, 37 selections) in enriched agent-native CSV format, organized into module-aligned
 subdirectories under `Frontend/` and `Backend/`. Per-module breakdown:
 [regression/suites/README.md](regression/suites/README.md). Authoritative definitions and selection
 groups: [config/test-suites.json](config/test-suites.json).
 
-**Selection groups:** `smoke` (042, 078) · `critical` (042, 078, 039, 044, 049) ·
-`frontend` · `backend` · `sprint` (plan-driven) · `full` (121) · plus module/feature groups
+**Selection groups:** `smoke` (042, 078, 078b-d) · `critical` (042, 078, 078b-d, 039, 044, 049) ·
+`frontend` · `backend` · `sprint` (plan-driven) · `full` (119) · plus module/feature groups
 (`catalog`, `search`, `orders`, `auth`, `b2b`, `marketing`, `platform`, `bopis`, `payment`,
 `configurable-products`, `whitelabeling`, `purchase-flow`, `loyalty`).
 
@@ -109,8 +108,6 @@ Three teams; full reference in [.claude/rules/agents.md](.claude/rules/agents.md
 | test-management-specialist | sonnet | Test planning, case writing, coverage tracking |
 | ui-ux-expert | sonnet | Storybook, WCAG 2.x AA, design system |
 | regression-orchestrator | sonnet | Parallel regression, retries, consolidated reports |
-| autonomous-regression-orchestrator | sonnet | Agent Teams regression: token bucket, recovery, JIRA |
-| autonomous-test-runner | sonnet | Agent Teams suite-execution template |
 | test-runner-agent | sonnet | Standard suite-execution template |
 | test-data-engineer | opus | Owns test-data end-to-end: designs, authors, and runs seeders/fixtures/validators |
 
@@ -119,12 +116,12 @@ Three teams; full reference in [.claude/rules/agents.md](.claude/rules/agents.md
 API audit, Agile stories, audience-targeted docs (Customer / Admin / Developer / Sales).
 
 ### Developers Team (4) — only write-capable team, driven by `/qa-fix`; never auto-merges
-`fullstack-backend`, `backend-reviewer`, `fullstack-frontend`, `frontend-reviewer` (all opus) — one
-developer + one reviewer per repo kind. Gate ladder: [.claude/rules/quality-gates.md](.claude/rules/quality-gates.md).
+`fullstack-backend`, `backend-reviewer`, `fullstack-frontend`, `frontend-reviewer` (developers opus, Gate-4 reviewers sonnet since 2026-09-08) — one
+developer + one reviewer per repo kind. Gate ladder: [.claude/knowledge/execution/quality-gates.md](.claude/knowledge/execution/quality-gates.md).
 
 ## Commands & Skills
 
-- **31 slash commands** — [commands/](.claude/commands), reference in [.claude/rules/skills-commands.md](.claude/rules/skills-commands.md).
+- **27 slash commands** — [commands/](.claude/commands), reference: each file's frontmatter (the `/` menu).
 - **40 skills** — one level each under [skills/](.claude/skills) (`skills/<name>/SKILL.md`); see [skills/README.md](.claude/skills/README.md).
 
 ## MCP Servers
@@ -132,18 +129,18 @@ developer + one reviewer per repo kind. Gate ladder: [.claude/rules/quality-gate
 Project-level (`.mcp.json`, gitignored — create locally): `playwright-chrome`, `playwright-firefox`,
 `playwright-edge`, `postman`, `github`, `context7`.
 User/IDE-level: Chrome DevTools, Azure, Atlassian, Figma, Microsoft Learn, **VirtoOZ** (primary VC docs).
-Full reference: [.claude/rules/mcp-browsers.md](.claude/rules/mcp-browsers.md).
+Full reference: [.claude/knowledge/execution/browser-lanes.md](.claude/knowledge/execution/browser-lanes.md).
 
 ## Commands (npm)
 
 ```bash
 npm install              # Install dependencies
 npm run env:check        # Validate env vars for active TEST_ENV layer
-npm run ci:smoke         # Smoke selection (042, 078)
-npm run ci:critical      # P0 selection (042, 078, 039, 044, 049)
+npm run ci:smoke         # Smoke selection (042, 078, 078b-d)
+npm run ci:critical      # P0 selection (042, 078, 078b-d, 039, 044, 049)
 npm run ci:frontend      # All Frontend/ suites
 npm run ci:backend       # All Backend/ suites
-npm run ci:full          # Full regression (all 121 suites)
+npm run ci:full          # Full regression (all 119 `full` suites)
 npm run ci:cycle         # Full cycle: sync → review → regression
 npm run ci:monitor       # Online bug monitoring from App Insights
 npm run ci:notify        # Teams notification
@@ -158,4 +155,3 @@ npm run ci:notify        # Teams notification
 - [knowledge/domain/sitemap.md](.claude/knowledge/domain/sitemap.md) — Storefront sitemap
 - [knowledge/domain/products.md](.claude/knowledge/domain/products.md) — Product types, xAPI fields, configurable sections
 - [test-data/README.md](test-data/README.md) — `@td()` resolver + fixture catalog
-- [vc/README.md](vc/README.md) — Layer 2 (VC internal per-env data) layout

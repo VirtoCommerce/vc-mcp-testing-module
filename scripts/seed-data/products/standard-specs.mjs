@@ -172,7 +172,188 @@ export const SPEC_OVERLAYS = {
       { minQuantity: 20, list: 29.99, sale: 23.99 },
     ],
   },
+  // PROD-111 — the three-layer stacking fixture (PRICE-061). Sale AND tier on ONE product, which no
+  // pre-existing fixture had: QA-TIER-001 has tiers but no sale, the Sale Sample Widget has a sale but
+  // no tiers, so "tier overrides sale at the threshold" was unobservable.
+  //
+  // NOTE the shape: buildPrices() returns `tierPrices` VERBATIM when present and IGNORES the row's
+  // sale_price column, so the sale layer has to live INSIDE the tier rows — a qty-1 row carrying
+  // `sale` is the sale layer, and the qty-10 row's lower `sale` is the tier layer. Putting 150 in the
+  // CSV's sale_price column instead would be silently dropped. The drift guard rejects that
+  // combination outright so the trap cannot be re-entered.
+  'PROD-111': {
+    tierPrices: [
+      { minQuantity: 1,  list: 200.00, sale: 150.00 }, // sale layer  — 20% coupon → 30.00/unit
+      { minQuantity: 10, list: 200.00, sale: 120.00 }, // tier layer  — 20% coupon → 24.00/unit
+    ],
+  },
 };
+
+/**
+ * DISCOUNT-STACKING fixtures (PRICE-059 / PRICE-061) — the layer model, declared once.
+ *
+ * Both cases assert WHICH pricing layer a percentage coupon is applied to. That is only observable
+ * when the layers yield DIFFERENT numbers: if list and sale coincide, or sale and tier coincide, the
+ * assertion passes no matter which layer the engine actually used. Every value below therefore exists
+ * to be distinguishable, and `validateStackingShape()` enforces exactly that rather than merely
+ * checking the rows exist.
+ *
+ * `couponPct` is the discount the case applies. The coupons themselves are NOT seeded here — they
+ * already exist as cart-subtotal percentage promotions (`@td(COUPON_10PCT.code)` = QA10OFF,
+ * `@td(COUPON_20PCT.code)` = SUPER, both confirmed live on vcst-qa 2026-08-25). On a single-line cart
+ * a cart-subtotal percentage and a line percentage are arithmetically identical, which is what these
+ * cases measure; the literal `SAVE10` / `SAVE20` codes in the case Steps never existed on any env.
+ */
+export const STACKING_FIXTURES = {
+  'PROD-110': {
+    couponAlias: 'COUPON_10PCT', couponPct: 10, qty: 1,
+    layers: { list: 100.00, sale: 70.00 },
+    // 10% of sale = 7.00 vs 10% of list = 10.00 → extendedPrice 63.00 vs 90.00. Distinct either way.
+    purpose: 'PRICE-059 — a percentage coupon must be computed off the SALE price, not the list price',
+  },
+  'PROD-111': {
+    couponAlias: 'COUPON_20PCT', couponPct: 20, qty: 10,
+    layers: { list: 200.00, sale: 150.00, tier: 120.00 },
+    // 20% of tier = 24.00 → ext 960.00; of sale = 30.00 → 1200.00; of list = 40.00 → 1600.00.
+    purpose: 'PRICE-061 — sale → tier at threshold → coupon on the tier price, all three layers',
+  },
+};
+
+/** Expected per-unit discount + line extended price for a stacking fixture layer. Pure. */
+export function stackingExpectation(fixture, layer = 'effective') {
+  const { layers, couponPct, qty } = fixture;
+  const unit = layer === 'effective' ? (layers.tier ?? layers.sale ?? layers.list) : layers[layer];
+  if (!Number.isFinite(unit)) return null;
+  const discountPerUnit = Math.round(unit * couponPct) / 100;
+  return { unit, discountPerUnit, extendedPrice: Math.round((unit - discountPerUnit) * qty * 100) / 100 };
+}
+
+/**
+ * Shape assertions for the stacking fixtures — shared by the drift guard and the unit tests.
+ * VACUITY-oriented: every check names the way the fixture could still exist and prove nothing.
+ */
+export function validateStackingShape(rowsById = {}) {
+  const problems = [];
+  for (const [id, fx] of Object.entries(STACKING_FIXTURES)) {
+    const { list, sale, tier } = fx.layers;
+
+    // 1. The layers must be genuinely different, and strictly decreasing.
+    const named = Object.entries(fx.layers);
+    for (const [n, v] of named) {
+      if (!Number.isFinite(v) || v <= 0) problems.push(`${id}: layer "${n}" is not a positive number (${v})`);
+    }
+    if (sale != null && list != null && sale >= list) {
+      problems.push(`${id}: sale ${sale} is not below list ${list} — with no real markdown the case cannot tell a sale-price discount from a list-price one`);
+    }
+    if (tier != null && sale != null && tier >= sale) {
+      problems.push(`${id}: tier ${tier} is not below sale ${sale} — "tier overrides sale at the threshold" is then unobservable, which is exactly why no pre-existing fixture could serve PRICE-061`);
+    }
+
+    // 2. The DISCOUNTED outcomes must differ per layer, not just the base prices. Two different base
+    // prices can still round to the same discount, which would re-introduce the ambiguity silently.
+    const outcomes = new Map();
+    for (const [n] of named) {
+      const e = stackingExpectation(fx, n);
+      if (!e) continue;
+      const key = `${e.discountPerUnit}/${e.extendedPrice}`;
+      if (outcomes.has(key)) {
+        problems.push(`${id}: layers "${outcomes.get(key)}" and "${n}" both yield discount ${e.discountPerUnit}/unit and extendedPrice ${e.extendedPrice} — the case cannot attribute the discount to a layer`);
+      }
+      outcomes.set(key, n);
+    }
+
+    // 3. A tiered fixture must not ALSO carry a sale_price column: buildPrices() returns tierPrices
+    // verbatim and drops sale_price, so the column would look meaningful and do nothing.
+    const row = rowsById[id];
+    if (row && SPEC_OVERLAYS[id]?.tierPrices && String(row.sale_price ?? '').trim()) {
+      problems.push(`${id}: has tierPrices AND a sale_price="${row.sale_price}" column — buildPrices() returns tierPrices verbatim and IGNORES sale_price, so that column is silently dropped. Express the sale layer as a \`sale\` on the qty-1 tier row instead.`);
+    }
+
+    // 4. The threshold must be reachable by the quantity the case adds.
+    const tiers = SPEC_OVERLAYS[id]?.tierPrices;
+    if (tiers && tier != null) {
+      const threshold = Math.max(...tiers.map((t) => t.minQuantity));
+      if (fx.qty < threshold) problems.push(`${id}: the case adds qty ${fx.qty} but the tier threshold is ${threshold} — the tier layer would never engage`);
+    }
+  }
+  return problems;
+}
+
+// ---------------------------------------------------------------------------
+// DISCOUNT-RATIO model (VCST-5691) — the exact fraction a price row must expose.
+// ---------------------------------------------------------------------------
+// xAPI `PriceType.discountPercent` is a FRACTION, not a whole percent, and the shipped VCST-5691 fix
+// (vc-module-x-api ProductPrice.GetDiscountPercent) is:
+//
+//     Math.Round((list - sale) / list, 4, MidpointRounding.AwayFromZero)
+//
+// It is NOT the `IMoneyRoundingPolicy` reuse the ticket originally proposed — a reviewer overrode that
+// during review (cash-rounding intervals like Rounding05/Rounding1 would corrupt a ratio). So there is
+// no rounding policy to configure, and a fixture that varies one proves nothing.
+//
+// Two properties make a price fixture able to DETECT a regression here, and neither is visible from the
+// CSV row alone — which is why they are declared here and drift-guarded rather than left to a reader:
+//   * FRACTIONAL   — the raw ratio needs a non-zero 3rd decimal, or a whole-percent implementation
+//                    (the pre-fix behaviour) passes. Every other sale/coupon fixture is an integer %.
+//   * MIDPOINT     — the raw ratio sits exactly on the 4-decimal rounding midpoint, so AwayFromZero
+//                    and banker's/ToEven DISAGREE. Off the midpoint the case is vacuous.
+//
+// `ratio` is the EXACT rational value of (list - sale) / list for the row's committed prices. It is
+// stated here as the intent; the guard re-derives it from the CSV in integer cents (never float
+// subtraction, which turns 200.00 - 175.31 into 24.689999999999998 and the ratio into 0.12344999…).
+export const DISCOUNT_RATIO_FIXTURES = {
+  'PROD-108': { ratio: 0.125,   requireMidpoint: false, purpose: 'fractional (12.5%) discount is not truncated to a whole percent — PRICE-065 / CAT-GQL-140' },
+  'PROD-109': { ratio: 0.12345, requireMidpoint: true,  purpose: 'raw ratio sits ON the 4-decimal midpoint, so AwayFromZero (0.1235) diverges from ToEven (0.1234) — PRICE-066' },
+};
+
+/** The precision `GetDiscountPercent` rounds the fraction to. Not a guess — read off the shipped fix. */
+export const DISCOUNT_PERCENT_DECIMALS = 4;
+
+/**
+ * EXACT (list - sale) / list for two 2-decimal money values, computed in integer cents so no float
+ * artifact can creep in, and returned scaled by 1e9 as an integer. Callers compare integers.
+ * Returns null when either price is not a usable 2-decimal money value.
+ */
+export function discountRatioScaled(list, sale, scale = 1e9) {
+  const cents = (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    const c = Math.round(n * 100);
+    return Math.abs(n * 100 - c) < 1e-6 ? c : null;   // reject sub-cent precision
+  };
+  const l = cents(list), s = cents(sale);
+  if (l == null || s == null || s >= l) return null;
+  return ((l - s) * scale) / l;   // ints well under 2^53 → exact for any 2-decimal money pair
+}
+
+/** Round half AWAY FROM ZERO — what the shipped fix does. */
+export const roundAwayFromZero = (x, decimals = DISCOUNT_PERCENT_DECIMALS) => {
+  const f = 10 ** decimals;
+  return Math.sign(x) * Math.round((Math.abs(x) * f).toFixed(6) * 1) / f;
+};
+
+/** Round half to EVEN (banker's) — the pre-fix behaviour the midpoint fixture must distinguish from. */
+export function roundHalfToEven(x, decimals = DISCOUNT_PERCENT_DECIMALS) {
+  const f = 10 ** decimals;
+  const scaled = Number((Math.abs(x) * f).toFixed(6));
+  const floor = Math.floor(scaled);
+  const diff = scaled - floor;
+  let r;
+  if (diff > 0.5) r = floor + 1;
+  else if (diff < 0.5) r = floor;
+  else r = floor % 2 === 0 ? floor : floor + 1;
+  return Math.sign(x) * r / f;
+}
+
+/**
+ * True when `ratio` lands on the rounding midpoint at `decimals` — i.e. AwayFromZero and ToEven
+ * disagree. This is the property that makes PROD-109 a real boundary case rather than decoration.
+ */
+export const isRoundingMidpoint = (ratio, decimals = DISCOUNT_PERCENT_DECIMALS) =>
+  roundAwayFromZero(ratio, decimals) !== roundHalfToEven(ratio, decimals);
+
+/** The value xAPI must report for a ratio, per the shipped fix. */
+export const expectedDiscountPercent = (ratio) => roundAwayFromZero(ratio, DISCOUNT_PERCENT_DECIMALS);
 
 // Real, IMPORTED catalog products (NOT seedable) that suites reference by GUID. The seeder DISCOVERS
 // them by their stable `code` and captures the runtime id (+ hosting catalogId) to aliases.<env>.json

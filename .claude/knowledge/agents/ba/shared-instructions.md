@@ -10,6 +10,56 @@ Shared framework for the **BA team** — `ba-system-analyzer`, `ba-api-specialis
 produce analysis reports, user stories, and **audience-targeted documentation**. Agents reference this
 file to avoid duplicating boilerplate.
 
+## Step 0 — read the prior art BEFORE analysing. MANDATORY, every mode.
+
+This team analyses surfaces other people on this team have already analysed. Measured 2026-09-03:
+`reports/ba/` holds 47 markdown deliverables in seven domain folders — 11 Sales-rep, 9 Organization
+roles, 8 Configurable products, 8 Loyalty — and the only instruction that ever read them said *"skim*
+`reports/ba/` *to avoid duplicating past work"*: dedup framing, no step, no gate, no output field. So
+the normal outcome was a fresh derivation of a surface already documented, and a second file beside the
+first rather than an amendment to it (`reports/ba/test-models/` carries two VCST-5346 models for exactly
+this reason).
+
+**Before any other work, read your target's domain section of**
+Read the prior art directly: `reports/ba/<domain folder>/` (prior BA analysis), `reports/ba/test-models/` (prior test models), `.claude/knowledge/domain/<domain>.md` (domain knowledge), and `reports/tickets/**/summary.json` (tickets already tested). (The generated index that used to front these was removed 2026-09-08; read the sources.) Per domain that means: the suites and their
+`BL-*`/`ECL-*` citations, the domain-knowledge docs, **the prior BA analysis**, **the prior test models**,
+and the tickets already tested there — **plus each domain's `Test object` block**: purpose (the value
+chain), the operations, the data its assertions read, the variants that change behaviour without changing
+code, and the constraints with what a violation costs.
+
+**That block is the half that makes analysis designable rather than descriptive.** An analyst who knows
+only where the documents are can summarise; one who knows the object's properties can say which of them
+is unconstrained, untested or contradicted. Where it reads `UNDECLARED` — purpose and reverse edges,
+which exist only in a Test Model Part 0 — treat that as the first thing your analysis should establish,
+and **never** fill it with a guess: an invented purpose becomes context every later run trusts.
+
+Then, in your report:
+
+1. **Name what you read**, by path — and **name it when there is none**. `sales-rep` has 11 prior
+   deliverables, `auth-security` has zero; those are different starting positions and the reader cannot
+   tell which one you were in unless you say.
+2. **Separate what the prior analysis already settled from what is NEW in this one.** Re-deriving a
+   settled fact is waste; contradicting one silently is worse.
+3. **Amend, never fork.** An existing document for the same surface is edited. A second file for one
+   surface splits the reasoning and the next reader picks one at random.
+4. **It is an index, never behaviour.** It tells you a prior analysis exists; it can never ground a
+   claim — the same limit `release-ledger.md` carries. Grounding still comes from source, live and
+   VirtoOZ.
+5. **Treat every prior document as a HYPOTHESIS, never as the baseline — it carries a date, and the
+   product moved after it.** Reading a stale report and repeating it is worse than not reading one,
+   because it arrives with the authority of a written deliverable. Triangulate each claim you intend
+   to rely on, in this order:
+
+   | Axis | Answers | Limits |
+   |---|---|---|
+   | the prior document + its date | what we believed, and when | may be stale with nothing flagging it |
+   | **release documentation** — `.claude/knowledge/domain/release-ledger.md` since that date, VirtoOZ for intended behaviour | did this component MOVE after the doc was written | released upstream ≠ deployed here · non-exhaustive, so a miss is not absence · carries no behaviour — it raises a SUSPICION and never settles one |
+   | **live** — the running env (your browser lane, or `qa-testing-expert` when you have none) | what it does NOW | the only axis that settles a disagreement |
+
+   Then carry a verdict per claim: **CONFIRMED** · **DRIFT** (say to what, and amend the document) ·
+   **MISSING** · **UNVERIFIED** (honest, and explicitly *not* a pass). A `DRIFT` here is a finding
+   about the DOCUMENT, not a product bug — file one only if the live behaviour is itself wrong.
+
 ## What this team is (and is not)
 - **Is:** a read-only analysis + authoring team. It reads code, searches VirtoCommerce GitHub repos,
   browses the live storefront/admin like a customer, cross-references VirtoOZ docs, and writes
@@ -39,7 +89,7 @@ memory** — ground it in a tool result and cite the source.
 ## The four documentation audiences
 
 The BA team writes for four distinct audiences, each with its own Virto style. The canonical skeletons,
-voice rules, and signature elements live in **`knowledge/ba/virto-doc-style.md` — read it
+voice rules, and signature elements live in **`.claude/knowledge/ba/virto-doc-style.md` — read it
 before authoring any doc.**
 
 | Audience | Style source | Owned by |
@@ -52,7 +102,7 @@ before authoring any doc.**
 ## Real-user rule (analysis agents)
 
 `ba-system-analyzer` and `ba-api-specialist` drive the live UI. The **hook-enforced real-user rule**
-(`knowledge/agents/qa/shared-instructions.md` §Browser Interaction) applies in full: click/type/hover/
+(`.claude/knowledge/agents/qa/shared-instructions.md` §Browser Interaction) applies in full: click/type/hover/
 scroll/wait like a customer; never `browser_evaluate` / `run_code_unsafe` / `evaluate_script` to bypass
 the UI. When describing a flow or pain point, describe what a real customer experiences — a disabled
 control is a UX signal (validation working), not a "missing capability." An API-only repro is not a
@@ -68,7 +118,7 @@ Never hardcode GUIDs, SKUs, prices, emails, coupon codes, or URL hosts. Full rul
 ## Business-invariant proposals are advisory only
 
 `ba-system-analyzer` may surface `PROPOSED-BL-*` candidates. **Never modify
-`knowledge/oracles/business-logic.md`.** Proposals are staged to `reports/ba/bl-proposals-{date}.md`
+`.claude/knowledge/oracles/business-logic.md`.** Proposals are staged to `reports/ba/bl-proposals-{date}.md`
 for **explicit per-entry user approval**. Every proposal must cite a source (VirtoOZ/Context7 quote,
 GitHub `file:line`, VC docs §, or UI screenshot path); drop unsourced entries. See `/ba-analyze` Step 4.5.
 
@@ -79,6 +129,23 @@ requested it **in the current turn**. Drafting a story or doc to a local file in
 default; pushing it to an external system is a separate, explicitly-authorized action. Subagents must not
 bypass this via Bash→powershell indirection. Codified in memory `feedback_subagent_external_writes`,
 `feedback_subagent_interpreter_bypass`.
+
+**When the write IS authorized, the mechanics are not yours to invent.** Pushing a doc, guide, release
+note or analysis to a ticket follows `.claude/knowledge/execution/tracker-ops.md` — read it BEFORE the
+first API call, not after the first failure:
+
+- **§5d** — publishing a deliverable to a ticket means **the deliverable, in full, in the comment body**.
+  A summary plus a repo path is not a delivery.
+- **§5c** — a Markdown image reference in a Jira comment renders as **nothing**, silently, at `200 OK`.
+  Screenshots require both halves: attach via the REST endpoint (the Atlassian MCP has no attachment
+  tool), then reference them as **wiki markup through the v2 comment API**. That is the single carve-out
+  to the Markdown-everywhere rule in §Body format, and the whole comment body must then be wiki.
+- **§5c also tells you which dead ends not to re-probe** — a hand-built ADF `media` node is rejected
+  whatever you put in `collection`, and an `external` URL posts fine then renders an error string.
+
+Skipping this section costs a round trip every time: VCST-5281 shipped twelve invisible screenshots,
+and a 2026-09-02 run re-derived all four failure modes from scratch because the BA framework had no
+pointer here. Consult it first.
 
 ## Self-check & verify work (MANDATORY)
 
@@ -97,24 +164,27 @@ Codified in memory `feedback_agents_self_check_and_verify`.
 
 ## Output policy
 
-All BA deliverables go to **`reports/ba/`** as one of the four allowed report categories
+All BA deliverables go to **`reports/ba/`** as one of the **ten** allowed report categories
 (`.claude/rules/reports.md` is the single source of truth for paths, size caps, screenshot budgets, and
 required sections). Do NOT create intermediate/working/"draft" files — return reasoning via the
 orchestrator, write only the final artifact. Naming: `ba-report-{date}.md`, `{jira-id}-stories.md`,
-`{feature}-{audience}-guide.md` (e.g. `vcst-5009-skyflow-customer-guide.md`). The `/ba-analyze`
+`{feature}-{audience}-guide.md` (e.g. `vcst-5009-skyflow-customer-guide.md`), and — under the two named
+sub-paths — `test-models/<TICKET>-<date>.md` and
+`release-notes/<ticket>-<layer>-release-note.md` / `release-notes/release-<label>.md`. The `/ba-analyze`
 orchestrator owns index generation across runs — do not write your own `README.md` in `reports/ba/`.
 
 ## Knowledge files (read on-demand)
 
 | File | When |
 |------|------|
-| `knowledge/ba/virto-doc-style.md` | **Before authoring any documentation** — the four audience skeletons |
-| `knowledge/oracles/business-logic.md` | Before drafting BL proposals or story `Business_Rule` mappings |
-| `knowledge/oracles/e-commerce-edge-cases-library.md` | Negative ACs / pain-point risk cross-refs (ECL-*) |
-| `knowledge/domain/sitemap.md`, `products.md`, `catalog.md`, `store-settings.md` | Storefront/catalog/admin doc references |
-| `knowledge/api/graphql-schema.md` | Authoritative xAPI field/type names for developer docs & story tech notes |
-| `knowledge/api/graphql-test-cases-runner.md` | When recommending GraphQL test coverage downstream |
-| `knowledge/execution/module-suite-map.md` | Mapping VC modules → existing regression suites |
+| `reports/ba/` · `reports/ba/test-models/` · `.claude/knowledge/domain/` | **Step 0 — before anything else, every mode.** What already exists on this surface: suites, oracle citations, prior BA analysis, prior test models, tickets already tested. Generated; never hand-edit |
+| `.claude/knowledge/ba/virto-doc-style.md` | **Before authoring any documentation** — the four audience skeletons, plus §9 for release notes (where the layer picks the audience) |
+| `.claude/knowledge/oracles/business-logic.md` | Before drafting BL proposals or story `Business_Rule` mappings |
+| `.claude/knowledge/oracles/e-commerce-edge-cases-library.md` | Negative ACs / pain-point risk cross-refs (ECL-*) |
+| `.claude/knowledge/domain/sitemap.md`, `products.md`, `catalog.md`, `store-settings.md` | Storefront/catalog/admin doc references |
+| `.claude/knowledge/api/graphql-schema.md` | Authoritative xAPI field/type names for developer docs & story tech notes |
+| `.claude/knowledge/api/graphql-test-cases-runner.md` | When recommending GraphQL test coverage downstream |
+| `.claude/knowledge/execution/module-suite-map.md` | Mapping VC modules → existing regression suites |
 | `test-data/aliases.json` + `test-data/graphql/index.json` | Resolving example values & golden-set fixtures |
 
 ## Browser assignments (max 3 concurrent, never WebKit on Windows)

@@ -28,9 +28,7 @@ Companion to `~/.claude/plans/functional-singing-cosmos.md` (the strategic plan)
 | `shared-instructions.md` | **A** | Four-layer architecture, PASS/FAIL/AMBIGUOUS classifier, evidence rules. Promote to `vc-qa-core/methodology/shared-instructions.md` as v1.0 contract. |
 | `qa-lead-orchestrator.md` | **A** | Orchestration role is product-agnostic. Examples are storefront — sanitize. |
 | `regression-orchestrator.md` | **B** | Already template-shaped with `{{SUITE_ID}}`, `{{BROWSER_SERVER}}` substitution. |
-| `autonomous-regression-orchestrator.md` | **B** | Agent Teams token-bucket logic is generic. |
 | `test-runner-agent.md` | **B** | Parameterized template; the canonical example of how Tier B should look. |
-| `autonomous-test-runner.md` | **B** | Same. |
 | `test-management-specialist.md` | **B** | Test planning skill set is generic; examples are storefront. |
 | `qa-frontend-expert.md` | **C** | LAYER 1 hardcodes BL-CHK-003, BL-PRICE-001, BL-CROSS-002. LAYER 2 is Vue.js + storefront payment iframes. **Becomes the template** for per-product `qa-{product}-expert.md`. |
 | `qa-backend-expert.md` | **C** | Same coupling pattern. Storefront xAPI, Admin SPA hardcoded. |
@@ -83,7 +81,7 @@ Companion to `~/.claude/plans/functional-singing-cosmos.md` (the strategic plan)
 
 | File | Tier | Notes |
 |------|------|-------|
-| `qa-process/` | **A** | ISTQB 7-phase lifecycle. |
+| ~~`qa-process/`~~ | — | **Removed 2026-09-08** — a 30 KB ISTQB essay with zero consumers. |
 | `qa-test-design/` | **A** | EP, BVA, decision tables, state, pairwise. |
 | `qa-risk/` | **A** | 5×5 risk matrix. |
 | `qa-defect/` | **A** | Defect lifecycle + JIRA workflow. |
@@ -128,14 +126,14 @@ Companion to `~/.claude/plans/functional-singing-cosmos.md` (the strategic plan)
 | `qa-test.md` | **B** | Generic test entry for JIRA/feature/PR. |
 | `qa-test-lifecycle.md` | **B** | Unified pipeline — generic stages. |
 | `qa-regression.md` | **B** | Generic regression runner — argument hints are storefront groups. |
-| `qa-coverage-generation.md` | **B** | Generic pipeline; domains are storefront. |
+| ~~`qa-coverage-generation.md`~~ | — | **Removed 2026-09-08** — zero recorded runs; `/qa-coverage-gap` (skill) is the one coverage pipeline. |
 | `qa-test-plan.md` | **B** | Sprint test plan — generic shape, storefront sprint plans. |
 | ~~`qa-sync-tests.md`~~ | **B** | **Removed** — file deleted, no redirect. Merged into qa-test-lifecycle. |
 | `qa-smoke.md` | **C** | Hardcoded 12 P0 tests for storefront/admin. **Becomes template.** |
 | `qa-design.md` | **C** | Storefront component/page audit. |
 | `qa-seed-data.md` | **C** | Storefront seed presets. |
 | `ba-analyze.md` | **B** | Generic BA analysis entry. |
-| `ba-stories.md` | **B** | Generic user-story authoring. |
+| ~~`ba-stories.md`~~ | — | **Merged into `/ba-analyze stories [--review]` 2026-09-08.** |
 
 ---
 
@@ -145,7 +143,7 @@ Companion to `~/.claude/plans/functional-singing-cosmos.md` (the strategic plan)
 |------|------|-------|
 | `agents.md` | **A** | Agent system reference. Some examples storefront. |
 | `regression.md` | **B** | Regression architecture — the four-mode framework is generic. |
-| `skills-commands.md` | **A** | Skills/commands reference. |
+| ~~`skills-commands.md`~~ | — | **Deleted 2026-09-08.** Was a hand-written copy of the menu the harness already renders from command/skill frontmatter; it had drifted (e.g. `/qa-status`). |
 | `mcp-browsers.md` | **A** | MCP server + browser config — generic infrastructure. |
 | `reports.md` | **A** | **THE single source of truth for report categories + size caps. Org-wide standard.** |
 | `test-data.md` | **A** | `@td()` resolver + no-hardcode policy — generic discipline. |

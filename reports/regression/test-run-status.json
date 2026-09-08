@@ -1,41 +1,30 @@
 {
-  "runId": "REG-2026-08-06-1956",
+  "runId": "REG-2026-09-08-0931",
   "status": "completed",
-  "environment": "https://vcst-qa.govirto.com",
-  "selection": "VCST-5486 resume: 020+031 pending cases, then 078",
-  "startedAt": "2026-08-06T17:56:42.544Z",
-  "finishedAt": "2026-08-06T19:57:23.349Z",
-  "resumeNote": "Resume of REG-2026-08-06-1803 (marked stalled after an individual spend-limit abort killed the orchestrator and the 031 runner). 042 already COMPLETE (34/34) and is NOT re-run. Scoped to the 8 pending cases of 020 and the 21 pending of 031; 078 (115, never started) queued last as it is the least ticket-relevant per case.",
-  "context": {
-    "ticket": "VCST-5486",
-    "build": "3.1058.0-pr-3077-8295",
-    "priorRun": "REG-2026-08-06-1803"
-  },
+  "startedAt": "2026-09-08T07:32:13Z",
+  "finishedAt": "2026-09-08T07:39:59Z",
+  "selection": "001 --ids CAT-049 — round 3 re-verification after the marketplace-cache hook patch",
+  "env": "vcst",
+  "sprint": "Sprint26-17",
+  "note": "Round 3, CAT-049 only. Round 2 (REG-2026-09-07-2255) BLOCKED it: the hook that executes is C:/Users/mutyk/.claude/plugins/cache/vc-tools/vc-fix/0.8.7/hooks/enforce-real-user.mjs, not either repo copy, and it lacked the og:/twitter: allowlist entry. That cache copy has now been patched locally (backup .bak-pre-og-20260908-0930) and verified ALLOW by direct invocation. CAT-040/CAT-041 results stay in REG-2026-09-07-2255 and are not re-run.",
   "suites": [
     {
-      "id": "020",
-      "name": "Platform Users Roles & Settings (pending 8)",
-      "status": "done",
-      "browser": "playwright-edge",
-      "testCount": 8
-    },
-    {
-      "id": "031",
-      "name": "Auth Login & Register (pending 21)",
+      "id": "001",
+      "name": "Catalog Navigation",
+      "file": "regression/suites/Frontend/catalog/001-catalog-navigation.csv",
       "status": "done",
       "browser": "playwright-chrome",
-      "testCount": 21
-    },
-    {
-      "id": "078",
-      "name": "Backend Smoke Tests",
-      "status": "deferred",
-      "browser": null,
-      "testCount": 115,
-      "deferReason": "Operator decision (VCST-5486): 115 cases of broad backend smoke, minority touching CustomUserManager; skipped for budget after a spend-limit abort killed the prior run. Gap disclosed in the tracker comment."
+      "agent": "qa-frontend-expert",
+      "testCount": 1,
+      "layer": "Frontend",
+      "pass": 0,
+      "fail": 1,
+      "blocked": 0,
+      "skipped": 0,
+      "attempts": 1,
+      "scopedIds": [
+        "CAT-049"
+      ]
     }
-  ],
-  "stalledAt": "2026-08-06T19:39:06.767Z",
-  "stalledReason": "no progress for 45 min (REG-2026-08-06-1956:in_progress:2:29:29)",
-  "coverageNote": "125 of the 240-case selection evaluated. 042 (34/34) + 020 (54/54) + 031 (37/37) complete; 078 (115) DEFERRED, never run. Pass rate 94.6% on executed cases is therefore PARTIAL."
+  ]
 }

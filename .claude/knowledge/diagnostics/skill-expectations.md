@@ -11,7 +11,7 @@ in **lock-step with the collector's inline consts** (Tier 1 uses them); the pros
 the diagnostician's judgment guide (Tier 2).
 
 > **Reference, don't restate.** Gate IDs (`G0`–`G7`) are defined once in
-> [`../../.claude/rules/quality-gates.md`](../../.claude/rules/quality-gates.md); report
+> [`../../.claude/knowledge/execution/quality-gates.md`](../../.claude/knowledge/execution/quality-gates.md); report
 > size caps live once in [`../../.claude/rules/reports.md`](../../.claude/rules/reports.md).
 > This file cites them by ID/name and never re-defines them.
 
@@ -314,7 +314,7 @@ Each entry lists the **expected phases/gates**, the **required outputs**, and
 Step-1 collector's signals can actually surface.
 
 ### `/project-init` — onboard the plugin onto a deployment
-- **Expected phases** (`commands/project-init.md` → the `/project-init` skill): install deps → ask *only* env name + tracker (Jira/Azure Boards) + code host (GitHub/Azure Repos) + auth-per-axis → **derive** projectType/client-org/contribution-mode/fork-account from token + live module/repo scan → write `project-profile.json` + `.env.<env>` + `.env.local` + `.mcp.json` → **verify access** (readiness table).
+- **Expected phases** (`plugins/vc-fix/commands/project-init.md` → the `/project-init` skill): install deps → ask *only* env name + tracker (Jira/Azure Boards) + code host (GitHub/Azure Repos) + auth-per-axis → **derive** projectType/client-org/contribution-mode/fork-account from token + live module/repo scan → write `project-profile.json` + `.env.<env>` + `.env.local` + `.mcp.json` → **verify access** (readiness table).
 - **Required outputs:** `project-profile.json` (valid JSON, at the project root — never under the plugin dir), `.env.<env>` + `.env.local`, `.mcp.json`, and a printed readiness table.
 - **Anti-patterns:**
   - **S1** — the run ends with no `project-profile.json` written (or it landed under the plugin install dir instead of `outputRoot`), or the verify-access step never ran. *Signal:* required-output missing; `permission_denied`/`tool_error` on the token probe with no recovery.
@@ -398,7 +398,7 @@ the diagnostician still confirms the root cause and names the fix:
 
 ## 6. References
 
-- Gate ladder G0–G7 + no-auto-merge + client-code containment: [`../../.claude/rules/quality-gates.md`](../../.claude/rules/quality-gates.md)
+- Gate ladder G0–G7 + no-auto-merge + client-code containment: [`../../.claude/knowledge/execution/quality-gates.md`](../../.claude/knowledge/execution/quality-gates.md)
 - Report categories + size caps + bloat patterns: [`../../.claude/rules/reports.md`](../../.claude/rules/reports.md)
 - Signal source + record schema: [`../../hooks/session-telemetry.mjs`](../../hooks/session-telemetry.mjs)
 - **Upstream contribution schema (default-deny, closed vocabulary):** [`upstream-schema.md`](./upstream-schema.md) + ADR [`adr-upstream-default-deny.md`](./adr-upstream-default-deny.md). The `deliver` step builds its outbound artifact ONLY from the structured jsonl reduced to this closed schema — the LLM DIAG free text (`signal`/`rootcause`/`fix`) never leaves the machine.

@@ -38,14 +38,14 @@ Show a table: Key | Summary | Status | Priority | Assignee | Updated
 
 ### 3. Environment Health (quick, no browser needed)
 Run these checks via Bash/curl (not Playwright — avoids browser overhead):
-- `curl -s {BACK_URL}/api/platform/healthcheck` — platform health
+- `curl -s -o /dev/null -w "%{http_code}" {BACK_URL}/health` — platform health. **Use `/health`, not `/api/platform/healthcheck`** — the latter returns **404** on this platform, so following it reports a healthy platform as DOWN (verified 2026-08-25 against `3.1061.0`). Note `/health` returns 200 even mid-restart, so it is a liveness check, not a build check — read the live version from the login-page HTML instead.
 - `curl -s -o /dev/null -w "%{http_code}" {FRONT_URL}` — storefront responds
 - `curl -s -o /dev/null -w "%{http_code}" {BACK_URL}` — admin responds
 
 Report: UP/DOWN for each endpoint.
 
 ### 4. Recent Bug Reports
-List files in `reports/bugs/open` sorted by date (newest first, max 10):
+List files in `reports/bugs/open/**` — **recurse**, it is foldered `critical-high/`/`medium/`/`low/` (`.claude/rules/reports.md` §1a), so a one-level listing reads as an empty backlog — sorted by date (newest first, max 10):
 - Show filename, severity (from filename or first lines), date
 
 ---

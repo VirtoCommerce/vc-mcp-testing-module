@@ -9,7 +9,7 @@ disable-model-invocation: true
 Pick up a bug **already filed by `/qa-bug`** and drive it through the auto-fix lifecycle to an open PR,
 then **STOP for human review**. This is the **interactive twin** of the headless `ci/run-fix-cycle.ts`
 (the same relationship `/qa-regression` has with `ci/run-regression.ts`). It **reuses** that pipeline's
-infra and the shared gate ladder in `.claude/rules/quality-gates.md`.
+infra and the shared gate ladder in `.claude/knowledge/execution/quality-gates.md`.
 
 **Designed to generalize.** The pipeline is repo-kind- and project-agnostic: it routes to **one**
 allowed product repo of any kind and delegates the fix to the developer agent that matches that kind.
@@ -70,7 +70,7 @@ description/STR/attachments as the repro context. Once invoked it **auto-continu
    `getJiraIssue`; Azure Boards → `az boards work-item show` / ADO REST (see
    [`tracker-ops.md`](../knowledge/execution/tracker-ops.md) §2). Use the ticket **key format the
    tracker gave you** verbatim (`ABC-123` for Jira, a bare `12345` for Azure Boards — not always `VCST-`).
-   Confirm it's a Bug in a workable status. Load the linked `/qa-bug` report from `reports/bugs/open/`
+   Confirm it's a Bug in a workable status. Load the linked `/qa-bug` report from `reports/bugs/open/**` (recurse the severity folders — §1a)
    (or `fixed/`) **if one exists** — it's the preferred input, not a hard requirement. (Match the report
    to the ticket by the tracker's key format: for Azure Boards' bare numeric ids match `AB#<n>` / `#<n>`,
    NOT a bare `<n>` substring — `521` would otherwise false-match `VCST-5218`.)
@@ -82,7 +82,7 @@ description/STR/attachments as the repro context. Once invoked it **auto-continu
      the ticket description/STR/attachments; the Fix Routing block is absent, so Gate 1 derives the route
      via `suggestRepo()` (it already handles a missing block), and the live reproduction is done in the
      Phase 1 root-cause step by the routed QA expert. On PASS this writes the standard
-     `reports/bugs/open/*.md` so all downstream gates see the usual report.
+     `reports/bugs/open/<severity>/*.md` so all downstream gates see the usual report.
    - **Report, no ticket** (rare) → proceed off the report.
 3. `/qa-env-check endpoints`; **build verify — source depends on `projectType`:** native platform →
    deployed versions via GitHub MCP from `vc-deploy-dev` (branch matching `TEST_ENV`, default `vcst-qa`);
@@ -261,7 +261,7 @@ available for CI-on-PR; the routine is the lighter scheduled trigger.
 
 ## Rules
 - Single repo of any allowed kind; a STOP at any gate leaves the ticket filed for human handoff (see
-  `.claude/rules/quality-gates.md`).
+  `.claude/knowledge/execution/quality-gates.md`).
 - Code review (Gate 4) delegates the mechanical bug/cleanup pass to the built-in **`/code-review`**
   skill; `backend-reviewer` adds only the VC-specific gate checklist on top.
 - Reuse `ci/config/fix-repos.json` + `ci/lib/repo-router.ts` + `ci/lib/module-registry.ts` — do not

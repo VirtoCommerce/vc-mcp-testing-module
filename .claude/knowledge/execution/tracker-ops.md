@@ -168,6 +168,8 @@ note) MUST be:
 
 ## 5c. Screenshots in a Jira comment — attach first, then wiki markup (2026-08-07)
 
+> **This section is the MECHANISM. That screenshots MUST be embedded inline is policy — `.claude/rules/reports.md` §5.0 — and it binds documentation, bug reports and fix verification alike. Posting a UI claim with no inline image, or with a Markdown/prose file reference, is a non-delivery, not a cosmetic miss. The `?expand=renderedBody` check below is part of the posting step, not an optional follow-up.**
+
 A Markdown image reference in a Jira comment **silently renders as nothing**. `![alt](path)` pointing
 at a repo path, or at a bare filename, is dropped by the Markdown→ADF conversion with no error and no
 warning — the comment posts `200 OK` and simply has no image. Naming the file in prose ("Screenshot:
@@ -196,6 +198,35 @@ Images live in a Jira comment only if **both** steps happen:
 **Do not** hand-build an ADF `media` node with the numeric attachment id — Jira rejects it with
 `400 ATTACHMENT_VALIDATION_ERROR`. The `media.attrs.id` must be a media-service **UUID**, which the
 attachment REST API does not expose; the wiki-markup path is what resolves it for you.
+
+**The three ADF dead ends, measured 2026-09-02 on VCST-5319 — do not re-probe them:**
+
+| Attempt | Result |
+|---|---|
+| `media.attrs` `{type:"file", id:"<attachmentId>", collection:""}` | `400 ATTACHMENT_VALIDATION_ERROR` |
+| same, `collection` omitted | `400 INVALID_INPUT` — the field is required |
+| same, `collection:"jira-attachments"` | `400 ATTACHMENT_VALIDATION_ERROR` |
+| `media.attrs` `{type:"external", url:"…/attachment/content/<id>"}` | **`201 Created`, then renders `Can only create thumbnails for attached images`** |
+
+The last one is the trap: it is the only variant that *posts successfully*, so a run that stops at the
+status code concludes it worked. `GET /rest/api/3/issue/<KEY>/comment/<id>?expand=renderedBody` is what
+distinguishes them — a rendered `<span class="error">` means the images are invisible whatever the POST
+returned.
+
+**Read the POSITIVE signal off the `<img>`, not off `file-preview-id`.** That attribute was the marker on
+the 2026-09-02 VCST-5319 measurement and it does **not** appear on a working wiki render: verified
+2026-09-03 on VCST-5868, where a correct `!file.png|width=700!` renders as
+`<span class="image-wrap"><img src=".../rest/api/3/attachment/content/<attachmentId>" width=…>` with
+**zero** `file-preview-id` occurrences. A check gated on that attribute would have called three correctly
+rendered images a failure. The three signals that did hold: one `<img src=…/attachment/content/…>` per
+image in `renderedBody`; via the v3 read below, one ADF `media` node per image whose `attrs.id` is a
+36-char UUID with `type: "file"`; and **zero** surviving literal `!…png!` in `renderedBody`, which proves
+the wiki markup was converted rather than printed.
+
+**Probe on a throwaway comment, never on the deliverable.** Post a one-line test comment, iterate the
+variants against it, then write the real comment once with the form that rendered — and delete the probe
+(`DELETE /rest/api/2/issue/<KEY>/comment/<id>` → `204`). Iterating on the deliverable itself means
+repeatedly overwriting a comment other people may already be reading.
 
 **Verify, don't assume.** Re-read the comment through the **v3** API and confirm each `media` node's
 `attrs.id` is a 36-char UUID:

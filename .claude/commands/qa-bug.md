@@ -2,7 +2,11 @@
 description: "Reproduce a bug, capture evidence, write a structured report, and optionally create a JIRA ticket."
 argument-hint: "bug description | <ticket-key> | screenshot path"
 
+disable-model-invocation: true
 ---
+
+> **MANDATORY — screenshots go INLINE in the comment.** A UI claim posted without its image embedded is not delivered: Markdown `![](path)` and prose file paths both post `200 OK` and render nothing. Attach, then reference `!file.png|width=700!` via the **v2** comment API, then VERIFY from `?expand=renderedBody` (one `<img …/attachment/content/N>` per image, zero surviving `!….png!`, zero `<span class="error">`). Mechanism + the ADF dead ends: `knowledge/execution/tracker-ops.md` §5c. Policy + the verification gate: `.claude/rules/reports.md` §5.0. A non-visual claim says so explicitly rather than silently shipping no image.
+
 
 # /qa-bug — File a Bug Report
 
@@ -23,7 +27,7 @@ Create a structured bug report from a description, screenshot, or observed issue
    - Use GitHub MCP to read `backend/packages.json` and `theme/artifact.json` from `VirtoCommerce/vc-deploy-dev` (branch `vcst-qa` by default; use the branch matching `TEST_ENV` for other envs)
    - Record platform version, theme version, and modules relevant to the bug area — include in the bug report (Step 3)
 2. **Context7 query** — resolve `/virtocommerce/vc-docs`, query the affected area (e.g., `"cart pricing calculations"`, `"order status workflow"`) with `tokens: 8000`. Verify expected behavior before concluding it's a bug — the observed behavior may be by design.
-3. **Duplicate check** — scan `reports/bugs/open/` and `reports/bugs/fixed/` for existing bug reports with the same component/title. If found in `open/`, warn user and show existing report. If found in `fixed/`, check whether it's a regression (same bug resurfaced).
+3. **Duplicate check** — scan `reports/bugs/open/**` (**recurse** — it is foldered `critical-high/`/`medium/`/`low/`, `.claude/rules/reports.md` §1a; a one-level scan finds nothing and reports "no duplicate") and `reports/bugs/fixed/` for existing bug reports with the same component/title. If found in `open/`, warn user and show existing report. If found in `fixed/`, check whether it's a regression (same bug resurfaced).
 
 ## Step 1 — Gather Bug Details
 
@@ -174,8 +178,9 @@ routing confidence LOW and say why — `/qa-fix` will still re-validate, but an 
 
 > **Skills:** Use `/qa-evidence compact|detailed` for report verbosity tier. Use `/qa-defect classify` for defect type taxonomy and root cause categories.
 
-Generate a report in `reports/bugs/open/` using this naming convention:
+Generate a report in the severity folder its own **Severity** matches — `reports/bugs/open/critical-high/` (Critical/P0 · High/P1), `reports/bugs/open/medium/` (Medium/P2) or `reports/bugs/open/low/` (Low/P3), per `.claude/rules/reports.md` §1a — using this naming convention:
 `BUG-{Short-Description}.md` or `BUG-{Short-Description}-VCST-XXXX.md` (if a JIRA ticket is known)
+The severity stated in the report is the source of truth and the folder mirrors it, so write the report first and file it second; a straddling grade (`Low–Medium`) files at the LOWER bucket and says so in the report.
 
 ### Bug Report Folder Structure
 
@@ -206,6 +211,28 @@ Valid statuses:
 - `FIXED` — fix verified (move file to `fixed/`)
 - `CLOSED` — won't fix / cannot reproduce / false positive / duplicate (move file to `closed/`)
 
+### Provenance Convention (line 4)
+
+Immediately after the status line, every bug report MUST carry a provenance line. It is what makes
+"did a test case catch this?" answerable — today ~8 of 128 reports name a case, in free text, and
+nothing can read them.
+
+```markdown
+**Found by:** <RUN_ID | exploratory | monitoring | manual> · suite <ID> (<CASE-ID>[, <CASE-ID>…]) · <triage verdict>
+**Archetype:** <TOKEN>
+```
+
+- The `Found by:` shape is **what `/qa-triage-results` already emits** — this codifies it, it does
+  not invent it. Example:
+  `**Found by:** REG-2026-07-30-1040 · suite 027 (CUST-090) · triaged REAL_BUG`
+- **`— none (not case-attributable)` is the explicit answer when no case found it.** A bug found by
+  always-on monitoring or by exploration is real signal about where cases *aren't* — record it as
+  unattributed, never omit the line.
+- `Archetype:` is one token from the **Defect archetypes** table in
+  [`knowledge/oracles/vc-bug-catalog.md`](../knowledge/oracles/vc-bug-catalog.md) — the shape of the
+  failure, not its domain or root cause. It is what lets the gap between "where bugs are" and
+  "where cases are" be recomputed instead of re-argued.
+
 When moving to `fixed/`, add a Resolution block below the status:
 
 ```markdown
@@ -218,7 +245,7 @@ When moving to `fixed/`, add a Resolution block below the status:
 
 ### Report Template
 
-> **Scope: local markdown report only** (`reports/bugs/open/BUG-*.md`). For the JIRA ticket payload (Severity / Priority / Labels / Component / Affects Version / Assignee / Linked Issues), use the Frontend + Backend templates in [`skills/qa-defect/defect-report-templates.md`](../skills/qa-defect/defect-report-templates.md) — invoked via `/qa-defect classify` in Step 5. The two templates intentionally diverge: this one adds VC-specific **Status lifecycle**, **4-Layer Validation**, **Module Versions**, **Root Cause Analysis**, and the **Fix Routing** block below; the `/qa-defect` templates carry the JIRA fields.
+> **Scope: local markdown report only** (`reports/bugs/open/<severity>/BUG-*.md`). For the JIRA ticket payload (Severity / Priority / Labels / Component / Affects Version / Assignee / Linked Issues), use the Frontend + Backend templates in [`skills/qa-defect/defect-report-templates.md`](../skills/qa-defect/defect-report-templates.md) — invoked via `/qa-defect classify` in Step 5. The two templates intentionally diverge: this one adds VC-specific **Status lifecycle**, **4-Layer Validation**, **Module Versions**, **Root Cause Analysis**, and the **Fix Routing** block below; the `/qa-defect` templates carry the JIRA fields.
 
 ### Fix Routing block (REQUIRED — the `/qa-fix` handoff contract)
 
@@ -241,7 +268,7 @@ instead of re-deriving it. Fill it from Step 2 (owning layer) + Step 3a (exact r
 > **Scope boundary — report every bug, route honestly.** `/qa-bug` files **all** confirmed defects and
 > determines routing for each; it does **not** decide auto-fix eligibility or filter bugs out. Whether a
 > bug is auto-fixable (by-design / config-gated / breaking / multi-repo, etc.) is decided downstream by
-> `/qa-fix` **Gate 0** (`.claude/rules/quality-gates.md`). If routing genuinely spans multiple repos, just
+> `/qa-fix` **Gate 0** (`.claude/knowledge/execution/quality-gates.md`). If routing genuinely spans multiple repos, just
 > say so in **Routing confidence: LOW** + a one-line note — still file the bug.
 
 ---
@@ -280,41 +307,38 @@ relationship was actually used (a fallback downgrade must be stated, not silent)
 A filename in the body is not evidence a reviewer will look at. Upload the screenshots **and** render
 them inline in the ticket body, so the defect is visible without opening the Attachments panel.
 
-**This is a 4-call sequence, and step 2 is the one everyone gets wrong.**
+**Single source of truth: [`knowledge/execution/tracker-ops.md`](../knowledge/execution/tracker-ops.md) §5c.**
+Follow it; do not re-derive the mechanism here. The short form:
 
 1. **Upload** — the Atlassian MCP has **no attachment tool**; use the REST API (multipart, and the
    `X-Atlassian-Token: no-check` header is mandatory). Multiple files per request are allowed.
    `POST {JIRA_BASE_URL}/rest/api/3/issue/{key}/attachments` → `200` + an array of `{id, filename}`.
-2. **Resolve each attachment's Media Services ID.** ADF `media.attrs.id` is a **Media Services UUID**,
-   **NOT the numeric Jira attachment id** — passing the attachment id fails the whole request with
-   `400 ATTACHMENT_VALIDATION_ERROR`. The UUID is not in the attachment metadata; get it from the
-   content endpoint's redirect:
-   `GET /rest/api/3/attachment/content/{attachmentId}` with `redirect: 'manual'` → **`303`** whose
-   `Location` is `https://api.media.atlassian.com/file/<UUID>/binary?token=…` → take `<UUID>`.
-3. **PUT the description as ADF** with a `mediaSingle` wrapper per image. `width`/`height` are
-   **required** or the image will not display; read them from the PNG's IHDR chunk rather than guessing
-   (`buf.readUInt32BE(16)` / `buf.readUInt32BE(20)`). `collection` is the empty string — verified against
-   a Jira-authored node.
-   ```js
-   { type: 'mediaSingle', attrs: { width, widthType: 'pixel', layout: 'align-start' },
-     content: [{ type: 'media', attrs: { type: 'file', id: '<UUID>', alt: '<filename>',
-                                         collection: '', width, height } }] }
-   ```
-   Simplest safe pattern: `GET …/issue/{key}?fields=description` (already ADF), push the new nodes onto
-   `description.content`, then `PUT …/issue/{key}` with `{fields:{description}}` → `204`. That preserves
-   the markdown-converted body instead of hand-authoring the whole doc as ADF.
-4. **Verify it renders** — persisted is not the same as rendered. Read back with
-   `?fields=description&expand=renderedFields` and assert the HTML contains
-   `<img src="…/rest/api/3/attachment/content/{attachmentId}" …>`. If there is no `<img>`, the media node
-   is wrong; do not report success.
+   Check what already landed before retrying — a broken output pipe does not mean the upload failed,
+   and a blind retry duplicates every attachment.
+2. **Reference each file as wiki markup through a v2 endpoint** — `!filename.png|width=700!`. Jira
+   resolves the filename against the issue's attachments and converts it to a real ADF media node.
+   For a **comment**, `POST`/`PUT` `/rest/api/2/issue/{key}/comment[/{id}]` with a plain-string `body`.
+   For the **description** (use this when the images belong in Actual Result, where a reviewer reads
+   them), `PUT` `/rest/api/2/issue/{key}` with `{fields:{description: "<wiki>"}}` → `204`.
+   **Either way the WHOLE body becomes wiki markup** — `h2.` headings, `*bold*`, `_italic_`,
+   `{{mono}}`, `||header||`/`|cell|` tables, `#`/`*` lists, `[text|url]` links, `{code}…{code}`.
+   This is the one carve-out to Markdown-everywhere.
+3. **Verify it renders** — persisted is not rendered. Read back with
+   `?fields=description&expand=renderedFields` (or the comment's `renderedBody`) and assert: one
+   `<img src="…/rest/api/3/attachment/content/{attachmentId}">` per image · **zero** surviving literal
+   `!…png!` (proves the markup converted rather than printed) · zero `<span class="error">`. Via the
+   v3 read, each ADF `media` node's `attrs.id` must be a 36-char UUID. Do not gate on
+   `file-preview-id` — it does **not** appear on a working wiki render.
 
-**What does NOT work** (all three were tried and failed — don't repeat them):
+**What does NOT work** — see §5c for the full table, including the four ADF dead ends measured on
+VCST-5319 (`ATTACHMENT_VALIDATION_ERROR` / `INVALID_INPUT`, and the `type:"external"` variant that
+returns `201` and then renders `Can only create thumbnails for attached images` — the trap that passes
+a status-code check). Do not re-probe them.
 
 | Attempt | Result |
 |---|---|
-| Markdown `![alt](file.png)` in the description/comment | Silently dropped — the MD→ADF converter has no way to resolve a filename to an attachment |
-| Jira wiki `!file.png!` or `!file.png\|thumbnail!` | Renders literally as text (same class as VCST-5212) |
-| ADF `media.attrs.id` = the numeric attachment id | `400 ATTACHMENT_VALIDATION_ERROR` on the whole request |
+| Markdown `![alt](file.png)` in the description/comment | Silently dropped — the MD→ADF converter cannot resolve a filename to an attachment |
+| Hand-built ADF `media`/`mediaSingle` node, any `id`/`collection` combination | Rejected, or posts and renders an error span. The `media.attrs.id` must be a media-service UUID the attachment REST API does not expose — **the wiki-markup path is what resolves it for you** |
 
 **Budget:** embed the 1–3 images that actually show the defect (per `.claude/rules/reports.md` §5), not
 the whole evidence folder. Attach-only (no inline) is acceptable for supporting shots.

@@ -173,7 +173,7 @@ Logged in user who is a member of a B2B organization, on My Lists page","url={{F
 [DOM] List created with 'Shared' badge or indicator
 [DOM] List appears in My Lists with Shared status
 [DOM] Other org members can see this list (validated in B2C-LIST-017)","[API] mutation errors[] is empty
-[CONSOLE] no uncaught JS errors","Shared visibility option missing; list created without Shared badge; Shared list not visible to other org members","delete created list","Coverage Gap Analysis; Blocked: live verify needs an org-capable login (ORG_USER at failed-attempt count 3) — sharing/org surfaces unverified on a customer account (2026-08-05)","Draft"
+[CONSOLE] no uncaught JS errors","Shared visibility option missing; list created without Shared badge; Shared list not visible to other org members","delete created list",Coverage Gap Analysis; Blocked: live verify needs an org-capable login (ORG_USER at failed-attempt count 3) — sharing/org surfaces unverified on a customer account (2026-08-05) | Promoted: REG-2026-08-25-1128 (2026-08-26),Automated
 "B2C-LIST-017","Org Member Sees Shared List","B2C Features > Shared Lists","High","BL-B2B-002","ECL-14.3","[PRE:SIGNIN_AS:USER_DEFAULT]
 Shared list 'Team Supplies' created by User A; User B is a member of the same organization","url={{FRONT_URL}},user={{USER_EMAIL}},password={{USER_PASSWORD}}","1. [NAV] Log in as User B (different org member from User A)
 2. [NAV] Navigate to My Lists (/account/lists)
@@ -192,14 +192,14 @@ Shared list 'Team Supplies' visible to User B (org member)","url={{FRONT_URL}},u
 [DOM] Product added by User B appears in the shared list immediately
 [DOM] When User A views the list, item added by User B is present
 [DOM] Added item shows who added it (if attribution is supported)","[API] mutation errors[] is empty
-[CONSOLE] no uncaught JS errors","User B cannot add to shared list owned by another user; product added by User B not visible to User A; attribution missing","none","Coverage Gap Analysis; Blocked: live verify needs an org-capable login (ORG_USER at failed-attempt count 3) — sharing/org surfaces unverified on a customer account (2026-08-05)","Draft"
+[CONSOLE] no uncaught JS errors","User B cannot add to shared list owned by another user; product added by User B not visible to User A; attribution missing","none",Coverage Gap Analysis; Blocked: live verify needs an org-capable login (ORG_USER at failed-attempt count 3) — sharing/org surfaces unverified on a customer account (2026-08-05) | Promoted: REG-2026-08-25-1128 (2026-08-26),Automated
 "B2C-LIST-019","Private List Not Visible to Org Members","B2C Features > Shared Lists","Medium","BL-B2B-002","ECL-14.3","[PRE:SIGNIN_AS:USER_DEFAULT]
 User A has created a Private list; User B is a member of the same org","url={{FRONT_URL}},user={{USER_EMAIL}},password={{USER_PASSWORD}}","1. [ASSERT] Verify User A has a list set to 'Private'
 2. [NAV] Log in as User B (different org member)
 3. [NAV] Navigate to My Lists
 4. [ASSERT] Verify User A's private list is NOT visible to User B","[DOM] User A's Private list does not appear in User B's My Lists view
 [DOM] No mechanism allows User B to discover or access User A's private list
-[DOM] User B only sees their own lists and explicitly shared org lists","[CONSOLE] no uncaught JS errors","Private list visible to other org members; private list accessible via guessed URL","none","Coverage Gap Analysis; Synced: lifecycle lists/SFL (2026-08-05); Blocked: live verify needs an org-capable login (ORG_USER at failed-attempt count 3) — sharing/org surfaces unverified on a customer account (2026-08-05)","Draft"
+[DOM] User B only sees their own lists and explicitly shared org lists","[CONSOLE] no uncaught JS errors","Private list visible to other org members; private list accessible via guessed URL","none",Coverage Gap Analysis; Synced: lifecycle lists/SFL (2026-08-05); Blocked: live verify needs an org-capable login (ORG_USER at failed-attempt count 3) — sharing/org surfaces unverified on a customer account (2026-08-05) | Promoted: REG-2026-08-25-1128 (2026-08-26),Automated
 "B2C-LIST-020","Saved for Later Page - View and Move Items Back to Cart","B2C Features > Lists","Medium","BL-B2B-002","ECL-7.3","[PRE:SIGNIN_AS:USER_DEFAULT]
 [PRE:RESET_CART]
 User logged in; at least one product has been saved for later from the cart (appears in /account/saved-for-later)","url={{FRONT_URL}},user={{USER_EMAIL}},password={{USER_PASSWORD}}","1. [NAV] {{FRONT_URL}}/account/saved-for-later
@@ -249,7 +249,7 @@ Shared list created by User A with products; User B is a member of the same orga
 [DOM] Shared list shows shared indicator (icon or label)
 [DOM] Products in shared list visible with name and price and image
 [STATE] User B can view all items added by User A","[API] shared list query returns items for User B
-[CONSOLE] no uncaught JS errors","Shared list not visible to team member; products missing from shared list; shared indicator absent","none","Coverage Gap Analysis; Synced: lifecycle lists/SFL (2026-08-05); Blocked: live verify needs an org-capable login (ORG_USER at failed-attempt count 3) — sharing/org surfaces unverified on a customer account (2026-08-05)","Draft"
+[CONSOLE] no uncaught JS errors","Shared list not visible to team member; products missing from shared list; shared indicator absent","none",Coverage Gap Analysis; Synced: lifecycle lists/SFL (2026-08-05); Blocked: live verify needs an org-capable login (ORG_USER at failed-attempt count 3) — sharing/org surfaces unverified on a customer account (2026-08-05) | Promoted: REG-2026-08-25-1128 (2026-08-26),Automated
 "B2C-LIST-024","Shared List - Edit Items Visible to Other Members","B2C Features > Shared Lists","High","BL-B2B-002","ECL-14.3","[PRE:SIGNIN_AS:USER_DEFAULT]
 Shared list accessible to both User A and User B","url={{FRONT_URL}},user={{USER_EMAIL}},password={{USER_PASSWORD}},sku={{TEST_SKU}}","1. [NAV] Log in as User A (list owner)
 2. [NAV] Open the shared list
@@ -260,7 +260,7 @@ Shared list accessible to both User A and User B","url={{FRONT_URL}},user={{USER
 7. [NAV] Open the same shared list
 8. [ASSERT] Verify newly added product is visible to User B","[DOM] Product added by User A appears in shared list for User B
 [STATE] Changes to shared list are visible to other members on refresh
-[DOM] Product details (name and price) match across both users","[CONSOLE] no uncaught JS errors","New product not visible to User B; changes not syncing between users; shared list showing stale data","none","Coverage Gap Analysis; Synced: lifecycle lists/SFL (2026-08-05); Blocked: live verify needs an org-capable login (ORG_USER at failed-attempt count 3) — sharing/org surfaces unverified on a customer account (2026-08-05)","Draft"
+[DOM] Product details (name and price) match across both users","[CONSOLE] no uncaught JS errors","New product not visible to User B; changes not syncing between users; shared list showing stale data","none",Coverage Gap Analysis; Synced: lifecycle lists/SFL (2026-08-05); Blocked: live verify needs an org-capable login (ORG_USER at failed-attempt count 3) — sharing/org surfaces unverified on a customer account (2026-08-05) | Promoted: REG-2026-08-25-1128 (2026-08-26),Automated
 "B2C-LIST-025","Shared List - Remove Shared Access","B2C Features > Shared Lists","Medium","BL-B2B-002","ECL-14.3","[PRE:SIGNIN_AS:USER_DEFAULT]
 Shared list with User B having access; User A is list owner","url={{FRONT_URL}},user={{USER_EMAIL}},password={{USER_PASSWORD}}","1. [NAV] Log in as User A (list owner)
 2. [NAV] Open the shared list settings
@@ -271,14 +271,14 @@ Shared list with User B having access; User A is list owner","url={{FRONT_URL}},
 7. [NAV] Navigate to /account/lists
 8. [ASSERT] Verify the list is NO longer visible to User B","[STATE] After changing to Private: list removed from User B's view
 [DOM] User B's lists page does not show the now-private list
-[STATE] List still accessible to User A (owner)","[CONSOLE] no uncaught JS errors","List still visible to User B after making private; access revocation not taking effect; list disappearing for owner too","none","Coverage Gap Analysis; Synced: lifecycle lists/SFL (2026-08-05); Blocked: live verify needs an org-capable login (ORG_USER at failed-attempt count 3) — sharing/org surfaces unverified on a customer account (2026-08-05)","Draft"
+[STATE] List still accessible to User A (owner)","[CONSOLE] no uncaught JS errors","List still visible to User B after making private; access revocation not taking effect; list disappearing for owner too","none",Coverage Gap Analysis; Synced: lifecycle lists/SFL (2026-08-05); Blocked: live verify needs an org-capable login (ORG_USER at failed-attempt count 3) — sharing/org surfaces unverified on a customer account (2026-08-05) | Promoted: REG-2026-08-25-1128 (2026-08-26),Automated
 "B2C-LIST-026","Shared List - Shared Indicator Displayed","B2C Features > Shared Lists","Medium","BL-B2B-002",,"[PRE:SIGNIN_AS:USER_DEFAULT]
 User has both shared and private lists","url={{FRONT_URL}},user={{USER_EMAIL}},password={{USER_PASSWORD}}","1. [NAV] Log in and navigate to /account/lists
 2. [ASSERT] Verify shared lists have a shared indicator (icon or badge or label)
 3. [ASSERT] Verify private lists do NOT have the shared indicator
 4. [ASSERT] Verify indicator styling is distinct and readable","[DOM] Shared lists display shared icon or Shared label
 [DOM] a private (personal-account) list card shows only its name link, item-count badge, and 'Last modified: <date>' — no shared-badge/icon element is present
-[FORMAT] Indicators are visually distinct between shared and private","[CONSOLE] no uncaught JS errors","No visual distinction between shared and private lists; shared indicator missing; wrong indicator on private list","none","Coverage Gap Analysis; Blocked: live verify needs an org-capable login (ORG_USER at failed-attempt count 3) — the shared-list-indicator half of this case is unverified on a customer account (2026-08-05); private-list half (no indicator shown) confirmed live","Draft"
+[FORMAT] Indicators are visually distinct between shared and private","[CONSOLE] no uncaught JS errors","No visual distinction between shared and private lists; shared indicator missing; wrong indicator on private list","none",Coverage Gap Analysis; Blocked: live verify needs an org-capable login (ORG_USER at failed-attempt count 3) — the shared-list-indicator half of this case is unverified on a customer account (2026-08-05); private-list half (no indicator shown) confirmed live | Promoted: REG-2026-08-25-1128 (2026-08-26),Automated
 "B2C-LIST-032","Add Entire List to Cart - All Items Added","B2C Features > Lists","High","BL-B2B-002",,"[PRE:SIGNIN_AS:USER_DEFAULT]
 [PRE:RESET_CART]
 User logged in; list exists with 3+ products all in stock","url={{FRONT_URL}},user={{USER_EMAIL}},password={{USER_PASSWORD}}","1. [NAV] {{FRONT_URL}}/account/lists
@@ -304,7 +304,7 @@ User logged in; list contains mix of in-stock and out-of-stock products","url={{
 [DOM] Notification or warning about out-of-stock items shown
 [DOM] Cart contains only in-stock items from the list
 [STATE] Out-of-stock items NOT in cart","[API] cart contains only in-stock items
-[CONSOLE] no uncaught JS errors","Out-of-stock items added to cart; no notification about skipped items; all items blocked due to one OOS item","clear cart after test","Coverage Gap Analysis; Synced: lifecycle lists/SFL (2026-08-05)","Draft"
+[CONSOLE] no uncaught JS errors","Out-of-stock items added to cart; no notification about skipped items; all items blocked due to one OOS item","clear cart after test",Coverage Gap Analysis; Synced: lifecycle lists/SFL (2026-08-05) | Promoted: REG-2026-08-25-1128 (2026-08-26),Automated
 "B2C-LIST-034","Add List to Cart - Preserves Quantities","B2C Features > Lists","Medium","BL-B2B-002",,"[PRE:SIGNIN_AS:USER_DEFAULT]
 [PRE:RESET_CART]
 User logged in; list with products that have set quantities","url={{FRONT_URL}},user={{USER_EMAIL}},password={{USER_PASSWORD}}","1. [NAV] {{FRONT_URL}}/account/lists
@@ -343,7 +343,7 @@ User logged in; list with products that have set quantities","url={{FRONT_URL}},
 [DOM] ariaLabel contains a contextual label prefix (e.g. 'Last modified:' or equivalent i18n key — not a bare date string)
 [DOM] ariaLabel includes the same date value present in visibleText
 [STATE] Screen reader would announce the date WITH semantic context, not just the bare date string (was 'May 6, 2026' with no label before fix; fixed form: 'Last modified: May 6, 2026')","[CONSOLE] no JS errors; no axe missing-label violation for .wishlist-card__date
-[NETWORK] no failed i18n locale file requests","ariaLabel is null or empty string (VCST-5067 regression re-introduced); ariaLabel present but equals visibleText only (bare date, no contextual prefix); i18n key last_modified_label missing from en-US locale (would render as key name fallback)","none","VCST-5067; WCAG 1.3.1","Draft"
+[NETWORK] no failed i18n locale file requests","ariaLabel is null or empty string (VCST-5067 regression re-introduced); ariaLabel present but equals visibleText only (bare date, no contextual prefix); i18n key last_modified_label missing from en-US locale (would render as key name fallback)","none",VCST-5067; WCAG 1.3.1 | Promoted: REG-2026-08-25-1128 (2026-08-26),Automated
 "B2C-LIST-037","Shared List — Non-Member Cannot Access via Direct URL (Negative)","B2C Features > Shared Lists","High","BL-B2B-002","ECL-14.3","[PRE:SIGNIN_AS:USER_DEFAULT]
 Shared list created by an org member (User A) with at least 1 product; a second user (User C) exists who is NOT a member of User A's organization","url={{FRONT_URL}},user={{USER_EMAIL}},password={{USER_PASSWORD}}","[PRE:SIGNIN_AS:USER_DEFAULT]
 [NAV] {{FRONT_URL}}/account/lists
@@ -375,7 +375,7 @@ User logged in; at least one product saved for later from the cart so /account/s
 [NETWORK] wishlist details page still issues GetWishlist - the decoupling did not remove the wishlist page's own query {SPEC}
 [DOM] wishlist details page line items and its 'Add all to cart' action button are visible {SPEC}","[API] GraphQL response errors[] empty on GetSavedForLater
 [CONSOLE] no uncaught JS errors on either page
-[NETWORK] no 4xx/5xx on saved-for-later or wishlist page load","GetWishlist still fires on the saved-for-later page (duplicate coupled request not removed); GetSavedForLater fires more than once; saved-for-later page renders empty or errors while the list is non-empty; wishlist details page stops issuing GetWishlist or fails to render","none - read-only navigation","VCST-4855; vc-frontend PR #2418","Draft"
+[NETWORK] no 4xx/5xx on saved-for-later or wishlist page load","GetWishlist still fires on the saved-for-later page (duplicate coupled request not removed); GetSavedForLater fires more than once; saved-for-later page renders empty or errors while the list is non-empty; wishlist details page stops issuing GetWishlist or fails to render","none - read-only navigation",VCST-4855; vc-frontend PR #2418 | Promoted: REG-2026-08-25-1128 (2026-08-26),Automated
 B2C-LIST-039,"Create List — Name Length Boundary (25 chars accepted, 26 rejected)",B2C Features > Lists,Medium,BL-B2B-002,ECL-7.2,"[PRE:SIGNIN_AS:USER_DEFAULT]
 User logged in, no precondition on existing lists. Discovered live 2026-08-05 (playwright-edge, vcst-qa Platform 3.1055.0/theme 2.55.0-pr-2412): the name field (`[data-test-id=""wishlist-name-input""]`) enforces a hard 25-character cap client-side, with error 'This field must not contain more than 25 characters'.","name_25='AAAAAAAAAAAAAAAAAAAAAAAAA' (25 chars), name_26='AAAAAAAAAAAAAAAAAAAAAAAAAA' (26 chars)","1. [NAV] {{FRONT_URL}}/account/lists
 2. [ACT] click 'CREATE LIST' (`[data-test-id=""create-wishlist-button""]`)
@@ -386,7 +386,7 @@ User logged in, no precondition on existing lists. Discovered live 2026-08-05 (p
 7. [ASSERT] verify the field rejects the 26th character or shows a length-validation error","[DOM] a 25-character name is accepted and the list is created with the name intact (no truncation) {OBSERVED}
 [DOM] a 26-character name triggers the validation error 'This field must not contain more than 25 characters' {OBSERVED}
 [STATE] the 26-character attempt does not create a list (Save is blocked while the validation error is showing) {OBSERVED}","[CONSOLE] no uncaught JS errors on either attempt
-[NETWORK] no createWishlist mutation is sent while the 26-char validation error is showing (client-side gate)",25-character name is truncated or rejected (boundary enforced on the wrong side); 26-character name is silently accepted or silently truncated instead of showing the validation error; error text differs from 'This field must not contain more than 25 characters',delete the created 25-character-name list,"Coverage Gap Analysis; Verified: live selector pass (2026-08-05) — boundary discovered live, not from spec/docs",Draft
+[NETWORK] no createWishlist mutation is sent while the 26-char validation error is showing (client-side gate)",25-character name is truncated or rejected (boundary enforced on the wrong side); 26-character name is silently accepted or silently truncated instead of showing the validation error; error text differs from 'This field must not contain more than 25 characters',delete the created 25-character-name list,"Coverage Gap Analysis; Verified: live selector pass (2026-08-05) — boundary discovered live, not from spec/docs | Promoted: REG-2026-08-25-1128 (2026-08-26)",Automated
 B2C-LIST-040,Publish List to a Customer — rep shares a list with scope Customer,B2C Features > Lists > Sales Rep sharing,High,BL-SR-002,ECL-7.2,"[PRE:SIGNIN_AS:SALES_REP]
 Signed in as a sales rep that serves at least one customer organization, with at least one own list holding >=1 in-stock item. Requires VirtoCommerce.SalesRep >= 3.1001.0-pr-8 and the XCart customer-wishlist-sharing-scope build.","rep={{SALES_REP_EMAIL}} / [AUTH role=SALES_REP]; customer_a = the FIRST organization returned by the share dialog's customer picker (live-discover — never hardcode an org name, the picker contains duplicates); list = any own list with >=1 in-stock item","1. [NAV] {{FRONT_URL}}/account/lists
 2. [ACT] open the list's kebab menu (`[data-test-id=""wishlist-card-menu-button""]`) and click 'Edit'
@@ -430,7 +430,7 @@ A list already shared with customer_a, and the rep serves at least two distinct 
 [DOM] changing the customer surfaces the warning 'The previously selected customer will lose access to this list.' BEFORE save {OBSERVED}
 [STATE] after save and reopen, only customer_b is retained {OBSERVED}
 [NETWORK] ChangeWishlist sends the single new sharedWithId {OBSERVED}","[CONSOLE] no uncaught JS errors
-[NETWORK] /graphql 200 with empty errors[]",the customer is swapped with NO warning (silent revocation — the originally reported VCST-5332 finding #1 behaviour); customer_a retains access after the swap; both customers are shown as retained while only one is persisted,set the list's sharing scope back to Private,VCST-5332 review finding #1 (multi-customer support -> follow-up story; silent revocation already mitigated by the disclosure warning); verified live vcptcore-qa 2026-08-07,Draft
+[NETWORK] /graphql 200 with empty errors[]",the customer is swapped with NO warning (silent revocation — the originally reported VCST-5332 finding #1 behaviour); customer_a retains access after the swap; both customers are shown as retained while only one is persisted,set the list's sharing scope back to Private,VCST-5332 review finding #1 (multi-customer support -> follow-up story; silent revocation already mitigated by the disclosure warning); verified live vcptcore-qa 2026-08-07 | Promoted: REG-2026-08-25-1128 (2026-08-26),Automated
 B2C-LIST-044,Shared list — customer sees the rep-recommendation banner and can add an item to cart,B2C Features > Lists > Sales Rep sharing,High,BL-SR-002,ECL-7.2,"[PRE:SIGNIN_AS:SALES_REP]
 A list shared with a customer organization the signed-in account belongs to, holding at least one in-stock item. Covers VCST-5332 AC2 and AC3.",the shared-list URL captured from the share dialog's Link field; an in-stock item on the list (live-discover — never hardcode a SKU),"1. [NAV] the shared-list URL
 2. [ASSERT] verify the list renders with its name and items
@@ -441,7 +441,7 @@ A list shared with a customer organization the signed-in account belongs to, hol
 [NETWORK] the add issues the cart addItem mutation and the returned itemsQuantity increases by one {OBSERVED}
 [STATE] the header cart badge reflects the new quantity {OBSERVED}","[CONSOLE] no uncaught JS errors
 [NETWORK] /graphql 200 with empty errors[]
-[ANALYTICS] GA4 add_to_cart fires with ep.source_route='SharedList' {OBSERVED}",the recommendation banner is missing; 'Add to cart' is inert or errors; the cart quantity does not change; an out-of-stock row offers an enabled Add to cart,remove the added line from the cart,VCST-5332 AC2 + AC3; verified live vcptcore-qa 2026-08-07,Draft
+[ANALYTICS] GA4 add_to_cart fires with ep.source_route='SharedList' {OBSERVED}",the recommendation banner is missing; 'Add to cart' is inert or errors; the cart quantity does not change; an out-of-stock row offers an enabled Add to cart,remove the added line from the cart,VCST-5332 AC2 + AC3; verified live vcptcore-qa 2026-08-07 | Promoted: REG-2026-08-25-1128 (2026-08-26),Automated
 B2C-LIST-045,Shared list — the order-summary panel exposes a list-level purchase action,B2C Features > Lists > Sales Rep sharing,Medium,BL-B2B-002,ECL-7.2,"[PRE:SIGNIN_AS:SALES_REP]
 Same shared list as B2C-LIST-044. Behaviour NOT yet implemented as of 2026-08-07 — carved out of the VCST-5332 review into its own story; expected to FAIL until that story ships.",the shared-list URL; the list's item subtotal as rendered in the order-summary card,"1. [NAV] the shared-list URL
 2. [ASSERT] verify the order-summary card renders a subtotal
@@ -456,7 +456,7 @@ A list shared with organization A. Signed in as an account that is neither the l
 2. [NAV] the shared-list URL
 3. [ASSERT] verify access is denied and no list content is rendered","[DOM] the storefront lands on the /403 route rendering the heading 'Access denied', and the document contains no list name, no product row and no Subtotal element {OBSERVED}
 [STATE] no part of the shared list leaks to a non-recipient organization (BL-SR-002) {OBSERVED}","[CONSOLE] no uncaught JS errors
-[NETWORK] no /graphql response returns the wishlist payload to the unauthorized caller","any list content renders for a non-recipient (name, items, subtotal or even the item count) — a BL-SR-002 cross-org leak; the page renders a blank shell instead of an explicit access-denied state",none — read-only,VCST-5332; BL-SR-002 negative control; verified live vcptcore-qa 2026-08-07,Draft
+[NETWORK] no /graphql response returns the wishlist payload to the unauthorized caller","any list content renders for a non-recipient (name, items, subtotal or even the item count) — a BL-SR-002 cross-org leak; the page renders a blank shell instead of an explicit access-denied state",none — read-only,VCST-5332; BL-SR-002 negative control; verified live vcptcore-qa 2026-08-07 | Promoted: REG-2026-08-25-1128 (2026-08-26),Automated
 B2C-LIST-047,Publish List to a Customer — a failed notification is surfaced to the rep,B2C Features > Lists > Sales Rep sharing,High,BL-SR-002,ECL-7.2,"[PRE:SIGNIN_AS:SALES_REP]
 A customer organization with no reachable notification recipient (for example an org whose only member is the sending rep). Behaviour NOT yet implemented as of 2026-08-07 — carved out of the VCST-5332 review into its own story; expected to FAIL until that story ships.",rep={{SALES_REP_EMAIL}} / [AUTH role=SALES_REP]; a served organization with zero effective recipients (see the SR_REP_ONLY_ORG fixture concept in test-data/aliases.json),"1. [NAV] {{FRONT_URL}}/account/lists
 2. [ACT] share a list with the zero-recipient organization, message filled, both channels checked
@@ -524,3 +524,65 @@ Requires a recipient who is a member of at least TWO organizations the rep can s
 [STATE] access is therefore gated on the ACTIVE organization, not on the recipient's membership set — the identical user and identical URL flip on the org switch alone {OBSERVED}
 [DOM] the /403 'Access denied' page names the cause — that the list belongs to a different organization — and offers an organization switcher or a direct link to switch, instead of only a 'Home page' button {SPEC}","[CONSOLE] no uncaught JS errors on either attempt
 [NETWORK] the org_X attempt returns the wishlist payload; the org_Y attempt returns no wishlist payload {OBSERVED}","the 403 page offers only a 'Home page' link with no explanation and no org switcher, so a legitimate recipient who happens to be signed in under another of their own organizations reads a working share as a broken link (observed on vcptcore-qa 2026-08-07); the list renders under org_Y too (the scope grant is not enforced at all — a BL-SR-002 leak); the recipient's active org silently changes on navigation",set the list's sharing scope back to Private,"VCST-5332 review finding #2 — CONFIRMED live vcptcore-qa 2026-08-07 with a genuine non-owner recipient, after an earlier attempt was invalidated by the list-owner bypass. The access-gating behaviour is observed; the 403-page UX assertion is the follow-up story's scope",Draft
+B2C-LIST-052,"Shared List Appears in the Customer's Own Lists, Flagged Recommended by Rep",B2C Features > Lists > Sales Rep sharing,High,BL-SR-002,ECL-7.2,"[PRE:CLEAR_SESSION]
+[PRE:SIGNIN_AS:SALES_REP]
+Rep serves at least one customer organization with a reachable, notifiable member. This case shares with AT LEAST ONE notification channel enabled — distinct from B2C-LIST-050's zero-channel 'silent grant' share, which found the shared list does NOT surface in the recipient's own /account/lists. State from B2C-LIST-040 (rep opens a list's Edit dialog, sets Sharing options to Customer, selects a served organization).","rep={{SALES_REP_EMAIL}} / [AUTH role=SALES_REP]; customer_a = an organization from the share dialog's customer picker with >=1 notifiable member (live-discover — never hardcode an org name, the picker contains duplicates); recipient = a member of customer_a who is neither the rep nor the list owner","1. [NAV] {{FRONT_URL}}/account/lists
+2. [ACT] open a list's 'Edit' dialog, set 'Sharing options' to 'Customer', select customer_a
+3. [ACT] leave at least one of the 'Email' / 'Push notification' checkboxes CHECKED
+4. [ACT] click 'Save'
+5. [ACT] sign out and sign in as recipient, confirming the active organization is customer_a
+6. [NAV] {{FRONT_URL}}/account/lists
+7. [ASSERT] verify whether the shared list appears among the recipient's own lists
+8. [ASSERT] if present, inspect the list card for a rep-recommendation marker","[DOM] the shared list appears as a card in the recipient's own /account/lists index, alongside (not replacing) any lists the recipient created themselves {SPEC}
+[DOM] the shared list's card carries a visible marker identifying it as recommended by the sales rep {SPEC}
+[STATE] the rep-recommendation marker appears ONLY on rep-shared lists, never on a list the recipient created themselves {SPEC}","[API] the recipient's own-lists query returns the rep-shared list with sharedWithId matching the recipient's active organization, errors[] empty {OBSERVED}
+[CONSOLE] no uncaught JS errors on /account/lists
+[NETWORK] /graphql 200 with an empty errors[]","the shared list is absent from the recipient's own /account/lists index (matches B2C-LIST-050's zero-channel finding — but that case deliberately used zero channels; if this ALSO reproduces with a channel selected, VCST-5335 AC1 is unimplemented for the normal path and should be filed as a new bug, not folded into B2C-LIST-050); the list appears but carries no distinguishing rep-recommendation marker, indistinguishable from a self-created list",set the list's sharing scope back to Private,"VCST-5335 (Story AC1: ""See this list in my shopping lists with the sign it was recommended by my Rep""); VCST-5332 (parent/duplicate story). CAUTION: B2C-LIST-050 in this same suite found — for a ZERO-CHANNEL share — that the shared list does NOT appear in the recipient's own /account/lists (link-only access). This case deliberately uses a channel-selected share to test AC1 under the documented happy path; a repeat of B2C-LIST-050's finding here is a NEW, unreported gap, not something 050 already covers.",Draft
+B2C-LIST-053,Customer Opens a Shared List From the In-App Push Notification and Adds an Item to Cart,B2C Features > Lists > Sales Rep sharing,High,BL-SR-002,ECL-7.2,"[PRE:CLEAR_SESSION]
+[PRE:SIGNIN_AS:SALES_REP]
+State from B2C-LIST-052 (a list shared with customer_a with at least one notification channel enabled, containing >=1 in-stock item) — the recipient has NOT yet interacted with the notification. Requires the storefront's in-app 'Notifications' icon in the main nav icon bar (per sitemap.md — opens a dropdown, shows an unread-count badge; no dedicated inbox page link is documented, so this case discovers the entry point live rather than assuming a fixed selector).",rep={{SALES_REP_EMAIL}} / [AUTH role=SALES_REP]; customer_a = an organization from the share dialog's customer picker with >=1 notifiable member (live-discover); recipient = a member of customer_a who is neither the rep nor the list owner,"1. [NAV] {{FRONT_URL}}/account/lists
+2. [ACT] open a list's 'Edit' dialog, set 'Sharing options' to 'Customer', select customer_a, leave 'Push notification' CHECKED
+3. [ACT] click 'Save'
+4. [ACT] sign out and sign in as recipient, confirming the active organization is customer_a
+5. [ACT] click the 'Notifications' icon/button in the main nav icon bar
+6. [WAIT] the notifications dropdown opens
+7. [ASSERT] verify an entry announcing the list share, naming the list and the rep
+8. [ACT] click the list-name link inside that notification entry
+9. [WAIT] the shared list page loads
+10. [ACT] click 'Add to cart' on an in-stock item in the list
+11. [ASSERT] verify the cart line count increments","[DOM] the notifications dropdown contains an entry whose text names the shared list and identifies the sharing rep {SPEC}
+[DOM] the list name inside that notification entry renders as a clickable link, not plain text {SPEC}
+[NAV] clicking the notification's list-name link navigates directly to the shared list page, not to a generic notifications/account landing page {SPEC}
+[DOM] the opened list renders the same rep-recommendation banner and per-item 'Add to cart' controls verified via the direct Link in B2C-LIST-044 {SPEC}
+[STATE] the cart line count increments after 'Add to cart' on an in-stock item reached through the notification path {SPEC}","[API] the push-message payload delivered for this share carries a URL/deep-link resolving to the shared list, mirroring the xAPI push-delivery contract exercised in 050l {SPEC}
+[NETWORK] the add-to-cart action issues the addItem mutation with errors[] empty {OBSERVED}
+[CONSOLE] no uncaught JS errors opening the notification or the list",no notification entry appears for the share within a reasonable wait (a delivery/projection gap — 050l PUSH-027 notes per-recipient projection can be asynchronous); the notification text has no clickable list-name link; clicking the link 404s or lands on a generic page instead of the list; add-to-cart fails from this entry path though the SAME list works via the direct Link (B2C-LIST-044),remove the added line from the cart; set the list's sharing scope back to Private,"VCST-5335 (Story AC2: push notification naming the list and rep, clickable to open and edit the list); distinct from B2C-LIST-044 (opens via the direct Link field, not the in-app notification) and 050l PUSH-027 (xAPI-only delivery proof, no storefront UI click-through)",Draft
+B2C-LIST-054,Customer Edits a Rep-Shared List — Removed Item Persists After Reload,B2C Features > Lists > Sales Rep sharing,High,BL-SR-002,ECL-7.2,"[PRE:CLEAR_SESSION]
+[PRE:SIGNIN_AS:SALES_REP]
+State from B2C-LIST-044 (a list shared with a customer organization the signed-in account belongs to, holding >=2 items — at least one to remove and at least one to remain, so this edit does not also drive the list into its empty state). This case performs the edit AS THE RECIPIENT throughout — VCST-5335 confirms lists shared with a customer 'can be edited' by that customer, not only by the rep.",rep={{SALES_REP_EMAIL}} / [AUTH role=SALES_REP]; customer_a = an organization from the share dialog's customer picker (live-discover); recipient = a member of customer_a who is neither the rep nor the list owner,"1. [NAV] {{FRONT_URL}}/account/lists
+2. [ACT] open a list's 'Edit' dialog, set 'Sharing options' to 'Customer', select customer_a, leave a channel checked, click 'Save'
+3. [ACT] sign out and sign in as recipient, confirming the active organization is customer_a
+4. [NAV] the shared list (via /account/lists or the copied Link, whichever entry point the environment currently surfaces)
+5. [ASSERT] record the current item count and SKUs on the list
+6. [ACT] click the remove control (`[data-test-id=""remove-item-button""]`, glyph '×') on one row
+7. [WAIT] the row disappears and the item count decrements
+8. [NAV] reload the shared list page
+9. [ASSERT] verify the removed item stays absent and the item count matches the post-removal count","[DOM] the recipient (not the rep) can invoke the remove control on a shared list's row without a permission error {SPEC}
+[DOM] the removed item is absent from the list immediately after the action {SPEC}
+[STATE] after a full page reload, the removed item remains absent and the item count still reflects the removal — the edit is server-persisted, not a client-only optimistic state {SPEC}
+[DOM] the remaining item(s) and the rep-recommendation banner are unaffected by the edit {SPEC}","[API] the edit issues a wishlist item-removal mutation scoped to the shared list's id, returning errors[] empty {OBSERVED}
+[API] a subsequent read of the same list (post-reload) reflects the removal — the mutation is round-tripped, not merely reflected client-side {OBSERVED}
+[CONSOLE] no uncaught JS errors during the edit or the reload","the remove control is disabled or hidden for the recipient (edit permission not actually granted to the customer, contradicting the ticket's own 'Lists can be edited' note); the item reappears after reload (edit not persisted server-side); a 403/permission error is returned on the removal mutation; the rep-recommendation banner or remaining items are lost as a side effect of the edit",re-add the removed item to the list (or have the rep re-share a fresh copy) to restore state for future runs; set the list's sharing scope back to Private,"VCST-5335 (Story description: ""Lists can be edited""); VCST-5332 (parent story — review findings there are unrelated to editability)",Draft
+B2C-LIST-055,Publish List to a Customer — org maintainer without sales-rep:access has no Customer scope,B2C Features > Lists > Sales Rep sharing,Critical,BL-SR-002,ECL-7.2,"[PRE:CLEAR_SESSION]
+[PRE:SIGNIN_AS:ACME_ADMIN]
+1. ACME_ADMIN (USR-001, AcmeCorp / ORG-001, org role 'Organization maintainer') holds no sales-rep:access permission.
+2. ACME_ADMIN owns >=1 own list containing >=1 item, reachable from My Lists.","front_url={{FRONT_URL}}, admin=@td(ACME_ADMIN.email) / @td(ACME_ADMIN.password) — org maintainer, no sales-rep:access; list = any own list with >=1 item","1. [NAV] {{FRONT_URL}}/account/lists
+2. [WAIT] My Lists page loaded with >=1 own list belonging to ACME_ADMIN
+3. [ACT] open the list's kebab menu (`[data-test-id=""wishlist-card-menu-button""]`) and click 'Edit'
+4. [WAIT] 'List settings' dialog opens
+5. [ACT] open the 'Sharing options' dropdown without selecting an option
+6. [ASSERT] snapshot the full set of options the dropdown renders, and whether any customer-picker control is present elsewhere in the dialog","[DOM] verify whether the 'Sharing options' dropdown still offers the scopes a maintainer legitimately holds — Private, the public 'Anyone (readonly)' link, and Organization {OBSERVED}
+[DOM] verify whether 'Customer' is absent from the 'Sharing options' dropdown's rendered option set {OBSERVED}
+[DOM] verify whether no searchable customer picker, 'Message' field, or 'Send via' group mounts anywhere in the 'List settings' dialog for this user {OBSERVED}
+[REL] verify whether the option set rendered to ACME_ADMIN equals the rep's set from B2C-LIST-040 minus exactly 'Customer' — no other scope gained or lost {OBSERVED}","[CONSOLE] no TypeError or JS error on the page under test
+[NETWORK] no 4xx/5xx on /graphql","Spinner visible >5s, console.error with TypeError, 4xx/5xx on /graphql",none,VCST-5332 · Archetype:SCOPE · Technique:EP; Verified: live vcst-qa 2026-09-02 (Platform 3.1063.0 · SalesRep 3.1006.0 · theme 2.57.0-pr-2396-80d1) — ACME_ADMIN List-settings scopes = Private / Anyone (readonly) / Organization; rep control on the same env + same dialog shows those three PLUS Customer,Draft
