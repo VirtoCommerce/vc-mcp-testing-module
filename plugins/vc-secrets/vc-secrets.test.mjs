@@ -667,6 +667,15 @@ test("the UTF-16 test requires non-zero even bytes and an even length", () => {
     assert.equal(m.decodeCredBlobHex("650079").encoding, "utf8", "an odd length is never UTF-16");
 });
 
+test("the UTF-16 detector reaches ASCII and no further, which is what the ASCII premise buys", () => {
+    // "€" as UTF-16LE is `ac 20`: the odd byte is not zero, so the detector calls it UTF-8 and the
+    // value comes back mojibake with nothing raised. No detector can do better — UTF-16 text and
+    // UTF-8 bytes are not separable in general — so the guarantee has to come from the data, and it
+    // does: the stored credentials were checked to be ASCII. This test is that check's teeth.
+    assert.equal(m.decodeCredBlobHex("ac20").encoding, "utf8");
+    assert.notEqual(m.decodeCredBlobHex("ac20").value, "\u20ac");
+});
+
 test("buildLocalRead/buildLocalWrite: reject keys outside vc-secrets:<scope>:<name> (path traversal guard)", () => {
     assert.throws(() => m.buildLocalRead("gpg", "../evil", { HOME: "/h" }), m.VcSecretsError);
     assert.throws(() => m.buildLocalWrite("gpg", "../evil", { HOME: "/h" }), m.VcSecretsError);
