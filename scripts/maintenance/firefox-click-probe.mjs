@@ -18,12 +18,19 @@
  *      the MCP's default 5 s action timeout fires. Pref: `widget.windows.window_occlusion_tracking.enabled`.
  *   3. `fill()` waits for visible + enabled + editable and **not** stable, so typing works either way.
  *
- * Probe run 1 (2026-09-08, Windows): rAF kept ticking under the cover (121/2 s, hidden=false) and the click
- * timed out even UNCOVERED, in both firefox variants → occlusion alone is NOT the mechanism. This v2 adds
- * what run 1 lacked: a VISIBLE target (run 1 took the first `a[href]` in DOM order, which can be an
- * off-screen skip-link), the FULL Playwright call log (which actionability state stalls), a per-frame
- * rect-jitter measurement of the target, a Chromium control on the same element, and a
- * `reducedMotion: 'reduce'` variant (the fix candidate if jitter comes from CSS animations).
+ * Probe runs 1–2 (2026-09-08, the team's Windows machine) taught the probe two things:
+ *   - `a[href]:visible` matched the storefront's `skip-link` at y = −29 — Playwright calls it visible, then
+ *     reports "element is outside of the viewport" forever, on EVERY engine including Chromium. So v1/v2's
+ *     click timeouts were the probe's, not Firefox's. v3 picks the first link whose box lies INSIDE the
+ *     viewport (`data-ff-probe` marker set from the page), and a Chromium control that fails means "bad
+ *     target", never "Firefox bug".
+ *   - The machine has two monitors (Firefox reported a 3440×1440 screen, Chromium 1920×1080). The cover
+ *     window opened on the other monitor, so Firefox kept ticking (121 rAF/2 s) — except once, when the
+ *     cover happened to land on Firefox's monitor: rAF fell to 0 and the click stalled at "waiting for
+ *     element to be visible, enabled and stable" — the original symptom, reproduced by accident. Rect jitter
+ *     was 1/12 (still) everywhere, so the 5-frame rule alone is ruled out; OCCLUSION is the mechanism to
+ *     prove. v3 places the kiosk cover on Firefox's own monitor (screen origin from `screen.availLeft/Top`)
+ *     and marks a covered run whose rAF stayed high as COVER MISSED so it cannot be misread.
  *
  * Variants (default: all):
  *   firefox-default        — as the MCP lane launches it
@@ -37,13 +44,12 @@
  * rAF ticks + `document.hidden` + jitter + trial click, uncover, trial click again.
  *
  * Reading the table:
- *   - chromium passes, every firefox variant fails in the FOREGROUND, jitter distinct-rects > 1
- *       → rect jitter × the 5-frame rule. Fix candidates: reducedMotion (if that variant passes), else a
- *         `timeouts.action` raise buys nothing — the rect never settles — so the lane needs a different
- *         actionability strategy (report it).
- *   - firefox fails only COVERED and pref-off passes covered → occlusion; the config pref is the fix.
- *   - everything passes → the failure needs the MCP's own topology (3 headed browsers); report and stop.
- * Exit 0 when at least one firefox variant passes foreground + covered + uncovered; 1 otherwise.
+ *   - chromium-control must pass everywhere; if it does not, the target is wrong — fix the probe, not Firefox.
+ *   - firefox-default: covered rAF ≈ 0 and covered click TIMEOUT stalled at "visible, enabled and stable",
+ *     foreground + uncovered OK → occlusion reproduced.
+ *   - firefox-pref-off: covered rAF stays ≈ 120 and covered click OK → the config pref is the fix. Exit 0.
+ *   - a covered row with rAF > 20 on firefox-default is marked COVER MISSED — re-run; nothing was tested.
+ * Exit 0 when firefox-pref-off passes foreground + covered + uncovered AND its cover was not missed.
  *
  * Usage:
  *   node scripts/maintenance/firefox-click-probe.mjs --url <storefront> [--variant all|<a,b,...>]
@@ -88,8 +94,24 @@ if (!URL_) {
   await import('../../config.js');
   URL_ = process.env.FRONT_URL;
 }
-// `:visible` is Playwright's pseudo-class: the first link that is actually rendered, not the first in DOM order.
-const TARGET = arg('target', 'header a[href]:visible, a[href]:visible');
+// Default target: the first <a href> whose box lies fully inside the viewport (chosen in-page, marked with
+// `data-ff-probe`). Playwright's `:visible` is NOT enough — an off-viewport skip-link passes it (runs 1–2).
+const TARGET = arg('target', '[data-ff-probe]');
+async function markTarget(page) {
+  return page.evaluate(() => {
+    document.querySelectorAll('[data-ff-probe]').forEach((el) => el.removeAttribute('data-ff-probe'));
+    for (const a of document.querySelectorAll('a[href]')) {
+      const r = a.getBoundingClientRect();
+      const cs = getComputedStyle(a);
+      if (r.width < 8 || r.height < 8) continue;
+      if (r.left < 0 || r.top < 0 || r.right > innerWidth || r.bottom > innerHeight) continue;
+      if (cs.visibility === 'hidden' || cs.opacity === '0' || cs.pointerEvents === 'none') continue;
+      a.setAttribute('data-ff-probe', '1');
+      return true;
+    }
+    return false;
+  });
+}
 const SETTLE_MS = Number(arg('settle', '12000'));
 const JSON_OUT = argv.includes('--json');
 const OCCLUSION_PREF = 'widget.windows.window_occlusion_tracking.enabled';
@@ -166,13 +188,21 @@ for (const name of variantNames) {
     const page = await ctx.newPage();
     await page.goto(URL_, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     row.ua = await page.evaluate(() => navigator.userAgent);
-    row.screen = await page.evaluate(() => ({ w: screen.width, h: screen.height, dpr: devicePixelRatio, inner: `${innerWidth}x${innerHeight}` }));
+    row.screen = await page.evaluate(() => ({ w: screen.width, h: screen.height, left: screen.availLeft ?? 0, top: screen.availTop ?? 0, dpr: devicePixelRatio, inner: `${innerWidth}x${innerHeight}`, win: `${screenX},${screenY} ${outerWidth}x${outerHeight}` }));
 
+    // Let the SPA render before choosing a target: wait for any in-viewport link, up to 30 s.
+    let marked = false;
+    for (let i = 0; i < 30 && !marked; i++) {
+      if (TARGET === '[data-ff-probe]') marked = await markTarget(page).catch(() => false);
+      else marked = (await page.locator(TARGET).count().catch(() => 0)) > 0;
+      if (!marked) await new Promise((r) => setTimeout(r, 1000));
+    }
     const target = page.locator(TARGET).first();
     try {
-      await target.waitFor({ state: 'visible', timeout: 30_000 });
+      if (!marked) throw new Error(`no link inside the ${row.screen.inner} viewport after 30 s`);
+      await target.waitFor({ state: 'visible', timeout: 10_000 });
     } catch (e) {
-      row.targetError = `target never became visible: ${firstLine(e)}`;
+      row.targetError = `target never became usable: ${firstLine(e)}`;
     }
     if (!row.targetError) {
       row.target = await target.evaluate((el) => {
@@ -184,13 +214,17 @@ for (const name of variantNames) {
       row.foregroundJitter = await rectJitter(target);
       row.foregroundClick = await trialClick(target);
 
-      // Occlude with a kiosk Chromium window sized to the real screen — full-screen, above the taskbar,
-      // launched AFTER the subject so it lands on top. Occlusion tracking needs FULL coverage.
-      cover = await chromium.launch({ headless: false, args: ['--kiosk', '--window-position=0,0', `--window-size=${row.screen.w},${row.screen.h}`] });
+      // Occlude with a kiosk Chromium window on the SUBJECT'S monitor (its screen origin), sized to that
+      // screen — full-screen, above the taskbar, launched AFTER the subject so it lands on top. Occlusion
+      // tracking needs FULL coverage; on a two-monitor desk a cover at 0,0 lands on the wrong screen (run 2).
+      cover = await chromium.launch({ headless: false, args: ['--kiosk', `--window-position=${row.screen.left},${row.screen.top}`, `--window-size=${row.screen.w},${row.screen.h}`] });
       const coverPage = await (await cover.newContext({ viewport: null })).newPage();
       await coverPage.goto('about:blank');
       await new Promise((r) => setTimeout(r, SETTLE_MS));
       row.coveredRaf = await rafStats(page);
+      // A firefox window that is really covered stops ticking (runs 1–2: 121 when the cover missed, 0 when it
+      // landed). With the occlusion pref OFF it keeps ticking by design, so the check applies to the others.
+      row.coverMissed = v.engine === 'firefox' && !v.prefs[OCCLUSION_PREF] && (row.coveredRaf.ticks ?? 0) > 20;
       row.coveredJitter = await rectJitter(target);
       row.coveredClick = await trialClick(target);
 
@@ -209,24 +243,24 @@ for (const name of variantNames) {
 
 const fmtClick = (c) => (!c ? '—' : c.ok ? `OK ${c.ms} ms` : `TIMEOUT ${c.ms} ms`);
 const fmtJ = (j) => (!j ? '—' : j.error ? 'err' : `${j.distinct}/${j.frames}`);
-const fmtRaf = (r) => (!r ? '—' : r.error ? 'err' : `${r.ticks}${r.hidden ? ' hidden' : ''}`);
+const fmtRaf = (r, missed) => (!r ? '—' : r.error ? 'err' : `${r.ticks}${r.hidden ? ' hidden' : ''}${missed ? ' COVER MISSED' : ''}`);
 
 if (JSON_OUT) {
   console.log(JSON.stringify({ url: URL_, target: TARGET, platform: process.platform, playwright: pwVersion, playwrightSource: pwSource, settleMs: SETTLE_MS, results }, null, 2));
 } else {
-  console.log(`firefox-click-probe v2 — ${URL_} — ${process.platform} — playwright ${pwVersion} (${pwSource}) — target "${TARGET}" — settle ${SETTLE_MS} ms\n`);
+  console.log(`firefox-click-probe v3 — ${URL_} — ${process.platform} — playwright ${pwVersion} (${pwSource}) — target "${TARGET}" — settle ${SETTLE_MS} ms\n`);
   console.log('variant                | fg click        | fg jitter | anim | covered rAF/2s | cov jitter | covered click   | uncovered click');
   console.log('-----------------------|-----------------|-----------|------|----------------|------------|-----------------|----------------');
   for (const r of results) {
     if (r.fatal) { console.log(`${r.variant.padEnd(22)} | FATAL: ${r.fatal}`); continue; }
     if (r.targetError) { console.log(`${r.variant.padEnd(22)} | ${r.targetError}`); continue; }
-    console.log(`${r.variant.padEnd(22)} | ${fmtClick(r.foregroundClick).padEnd(15)} | ${fmtJ(r.foregroundJitter).padEnd(9)} | ${String(r.animations).padEnd(4)} | ${fmtRaf(r.coveredRaf).padEnd(14)} | ${fmtJ(r.coveredJitter).padEnd(10)} | ${fmtClick(r.coveredClick).padEnd(15)} | ${fmtClick(r.uncoveredClick)}`);
+    console.log(`${r.variant.padEnd(22)} | ${fmtClick(r.foregroundClick).padEnd(15)} | ${fmtJ(r.foregroundJitter).padEnd(9)} | ${String(r.animations).padEnd(4)} | ${fmtRaf(r.coveredRaf, r.coverMissed).padEnd(14)} | ${fmtJ(r.coveredJitter).padEnd(10)} | ${fmtClick(r.coveredClick).padEnd(15)} | ${fmtClick(r.uncoveredClick)}`);
   }
   console.log('\n(jitter = distinct rects / frames sampled; 1/12 is a still element. anim = document.getAnimations().length)');
   for (const r of results) {
     if (r.fatal || r.targetError) continue;
     console.log(`\n[${r.variant}] ${r.ua}`);
-    console.log(`  screen ${r.screen.w}x${r.screen.h} @${r.screen.dpr} inner ${r.screen.inner} | target <${r.target?.tag}> "${r.target?.text}" href=${r.target?.href} rect=${r.target?.rect}`);
+    console.log(`  screen ${r.screen.w}x${r.screen.h} at ${r.screen.left},${r.screen.top} @${r.screen.dpr} | window ${r.screen.win} | inner ${r.screen.inner} | target <${r.target?.tag}> "${r.target?.text}" href=${r.target?.href} rect=${r.target?.rect}`);
     if (r.foregroundJitter && r.foregroundJitter.distinct > 1) console.log(`  jitter fg: first ${r.foregroundJitter.first} → last ${r.foregroundJitter.last}`);
     for (const [label, c] of [['foreground', r.foregroundClick], ['covered', r.coveredClick], ['uncovered', r.uncoveredClick]]) {
       if (c && !c.ok) { console.log(`  ${label} click call log:`); for (const l of c.log) console.log(`    ${l}`); }
@@ -234,15 +268,21 @@ if (JSON_OUT) {
   }
 }
 
-const ff = results.filter((r) => r.engine === 'firefox' && !r.fatal && !r.targetError);
-const cr = results.find((r) => r.engine === 'chromium' && !r.fatal && !r.targetError);
-const passAll = (r) => r.foregroundClick?.ok && r.coveredClick?.ok && r.uncoveredClick?.ok;
-const good = ff.filter(passAll);
+const byName = Object.fromEntries(results.map((r) => [r.variant, r]));
+const ok3 = (r) => !!r && !r.fatal && !r.targetError && r.foregroundClick?.ok && r.coveredClick?.ok && r.uncoveredClick?.ok;
+const cr = byName['chromium-control'];
+const dflt = byName['firefox-default'];
+const prefOff = byName['firefox-pref-off'];
+const controlOk = !cr || ok3(cr);
+const occlusionReproduced = !!dflt && !dflt.coverMissed && dflt.foregroundClick?.ok && !dflt.coveredClick?.ok && (dflt.coveredRaf?.ticks ?? 99) <= 20;
+const fixProven = controlOk && ok3(prefOff) && (prefOff.coveredRaf?.ticks ?? 0) > 20;
 if (!JSON_OUT) {
   console.log('');
-  if (good.length) console.log(`RESULT: firefox clicks under every condition with: ${good.map((r) => r.variant).join(', ')}${good.some((r) => r.variant === 'firefox-default') ? ' (including the default — the lane failure needs the MCP topology to reproduce)' : ' → that variant is the config fix candidate'}.`);
-  else if (ff.length && cr?.foregroundClick?.ok && ff.every((r) => !r.foregroundClick?.ok)) console.log('RESULT: Firefox fails in the FOREGROUND on an element Chromium clicks — read the call logs above: "waiting for element to be visible, enabled and stable" + jitter > 1 means the 5-frame rule × rect jitter; occlusion is not the mechanism.');
-  else if (ff.length) console.log('RESULT: mixed — attach the full table + call logs to the finding; do not change any lane rule.');
-  else console.log('RESULT: no firefox variant completed — see FATAL / target lines.');
+  if (cr && !controlOk) console.log('RESULT: chromium-control failed — the TARGET is wrong (see its call log); nothing about Firefox was tested. Pass --target <css> for a link you can see.');
+  else if (dflt?.coverMissed) console.log('RESULT: the cover MISSED the firefox window (rAF kept ticking) — re-run; if it keeps missing, drag nothing, just tell me the two monitor layouts.');
+  else if (occlusionReproduced && fixProven) console.log('RESULT: CONFIRMED — covered firefox-default stops ticking and stalls at "visible, enabled and stable"; firefox-pref-off keeps ticking and clicks. The config pref is the fix.');
+  else if (occlusionReproduced) console.log('RESULT: occlusion REPRODUCED on firefox-default, but firefox-pref-off did not pass every condition — read its rows; the pref alone is not enough.');
+  else if (ok3(dflt)) console.log('RESULT: firefox-default clicks under every condition here — the lane failure needs the MCP topology to reproduce; report and stop.');
+  else console.log('RESULT: mixed — attach the full table + call logs to the finding; do not change any lane rule.');
 }
-process.exit(good.length ? 0 : 1);
+process.exit(fixProven && occlusionReproduced ? 0 : 1);

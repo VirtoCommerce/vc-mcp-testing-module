@@ -33,14 +33,22 @@ and stable"* wait — on fully visible, non-moving elements (CLS 0, fixed rect).
 navigation work. Raw `playwright-core` + firefox in a single foreground window clicks the same element,
 headed and headless. A browser-revision re-install changed nothing.
 
-**Probe run 1 (2026-09-08, the team's Windows machine, `firefox-click-probe` v1):** under a covering window
-Firefox kept ticking rAF (121 per 2 s, `document.hidden` false) **and the trial click timed out even
-uncovered, in both variants**. So the occlusion mechanism below is **not confirmed** — it may still be a
-second contributor under the MCP's three-window topology, but it is not what the probe reproduced. What v1
-could not tell (it took the first `a[href]` in DOM order, possibly an off-screen skip-link, and cut the call
-log) is *which* actionability state stalled. Probe v2 targets a visible link, prints the full call log,
-measures per-frame rect jitter of the target, and adds a Chromium control and a `reducedMotion` variant.
-The 5-ticks-in-a-row rule (fact 1) with any frame-to-frame rect jitter is now the leading candidate.
+**Probe runs 1–2 (2026-09-08, the team's Windows machine).** Both runs were dominated by two defects in the
+probe itself, and correcting them is what makes the third run worth trusting:
+
+- **The target was unclickable for every engine.** `a[href]:visible` matched the storefront's `skip-link` at
+  `y = −29`. Playwright calls it visible, then loops on *"element is outside of the viewport"* until the
+  timeout — on Firefox **and on Chromium**. So the click timeouts in runs 1–2 were the probe's, not the
+  lane's. A Chromium control that fails now means *bad target*, never *Firefox bug*.
+- **The cover landed on the wrong monitor.** The machine is dual-head (Firefox reported a 3440×1440 screen,
+  Chromium 1920×1080); the cover opened at 0,0 and missed, so Firefox kept ticking at **121 rAF/2 s**.
+  **Except once** — in the `reduced-motion` run the cover happened to land on Firefox's monitor, rAF fell to
+  **0**, and the click stalled at exactly *"waiting for element to be visible, enabled and stable"* with no
+  further progress. That is the reported symptom, reproduced by accident.
+
+**What those runs did settle:** rect jitter is **1 distinct rect in 12 frames** on every engine, so the
+storefront is still and the 5-frames-in-a-row rule (fact 1) **cannot be the whole mechanism on its own**.
+Occlusion (fact 2) is the candidate to prove, and the one accidental full cover is consistent with it.
 
 **Shipped facts the candidates rest on:**
 
@@ -69,14 +77,24 @@ firefox lane headless would also avoid it (a headless window is never occluded);
 headed like the other two.
 
 **Prove any fix before touching a lane rule:** `node scripts/maintenance/firefox-click-probe.mjs --url <storefront>`
-on a Windows machine that showed the bug. v2 runs `firefox-default`, `firefox-pref-off`,
-`firefox-reduced-motion` and `chromium-control` against the same visible link: per variant a foreground
-`trial: true` click (full actionability wait, no real click), 12-frame rect jitter, running-animation count,
-then the same under a kiosk cover window, then uncovered. Exit 0 only when a firefox variant clicks under
-every condition; the RESULT line names it. Only on that result: drop `NOT ON playwright-firefox` from the
-click-driven suites' plan marking, restore firefox as a real third slot, and rewrite the box in
-`.claude/rules/agents.md` §Parallel Execution. Until then the box stands — the rule was measured, and no
-fix is yet.
+on a Windows machine that showed the bug. v3 runs `firefox-default`, `firefox-pref-off`,
+`firefox-reduced-motion` and `chromium-control` against the first link **inside the viewport** (marked in-page;
+`--target <css>` overrides): per variant a foreground `trial: true` click (full actionability wait, no real
+click), 12-frame rect jitter, running-animation count, then the same under a kiosk cover placed on the
+subject's **own monitor**, then uncovered. A covered firefox row still ticking above 20 rAF is printed as
+**COVER MISSED** — that run tested nothing, re-run it.
+
+Exit 0 requires both halves: `firefox-default` stops ticking under the cover **and** stalls at *"visible,
+enabled and stable"*, while `firefox-pref-off` keeps ticking **and** clicks. Only on that result: drop
+`NOT ON playwright-firefox` from the click-driven suites' plan marking, restore firefox as a real third slot,
+and rewrite the box in `.claude/rules/agents.md` §Parallel Execution. Until then the box stands — the rule was
+measured, and no fix is yet.
+
+**And note what a confirmation would mean for the lane, not just for the probe.** The MCP runs three headed
+browsers on one desktop, so *some* window is always covered; if occlusion is the mechanism, the pref fixes
+firefox specifically, but any future engine with the same power-saving behaviour would need the same
+treatment. Running the firefox lane **headless** avoids the class entirely (a headless window is never
+occluded) and is the fallback if the pref does not hold up.
 
 ## Edge
 

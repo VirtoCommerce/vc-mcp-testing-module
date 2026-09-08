@@ -17,11 +17,14 @@ covered by other windows — which three headed 1920×1080 browsers on one deskt
 no stable wait, so typing kept working. `config/mcp-playwright-firefox.config.json` now sets
 `widget.windows.window_occlusion_tracking.enabled=false` (Playwright already disables Firefox's
 background *timer* throttling, not occlusion). `scripts/maintenance/firefox-click-probe.mjs` A/B-tests
-it on a Windows desktop with `trial: true` clicks (read-only). **Run 1 did not confirm occlusion**: rAF kept
-ticking under a cover and the click failed uncovered too. v2 of the probe targets a visible link, prints
-the full call log, measures per-frame rect jitter (the 5-ticks-in-a-row rule is the leading candidate)
-and adds Chromium and `reducedMotion` variants. The "never schedule a click-driven suite on firefox"
-rule stays until the probe exits 0 on a machine that showed the bug.
+it on a Windows desktop with `trial: true` clicks (read-only). **Runs 1–2 were invalid** — the target was the
+storefront's off-viewport `skip-link` (every engine, Chromium included, looped on "element is outside of the
+viewport") and the cover window landed on the other monitor of a dual-head desk. They did rule out rect
+jitter (1 distinct rect in 12 frames everywhere), and one accidental full cover reproduced the symptom
+exactly: rAF 0 and a stall at "visible, enabled and stable". v3 marks the first link inside the viewport,
+places the cover on the subject's own monitor, flags a missed cover, and requires both halves — default
+stalls covered, pref-off clicks covered — to exit 0. The "never schedule a click-driven suite on firefox"
+rule stays until it does.
 
 ---
 
