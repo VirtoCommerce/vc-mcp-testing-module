@@ -1038,20 +1038,14 @@ async function cmdSet(name, cfg) {
     process.stderr.write(`vc-secrets: stored "${name}" (${decl.scope}) in ${backend}\n`);
 }
 
-async function cmdUnlock(cfg) {
-    if (detectLocalBackend() !== "gpg") {
-        process.stderr.write("vc-secrets: unlock is a no-op on this platform\n");
-        return;
-    }
-    if (!process.env.GPG_TTY) {
-        // Guarded form on purpose: in a non-interactive shell `tty` prints "not a tty", and exporting
-        // that hands gpg a bogus terminal path instead of leaving the variable unset.
-        process.stderr.write("vc-secrets: GPG_TTY is not set — pinentry may fail; add `if [ -t 0 ]; then export GPG_TTY=$(tty); fi` to your shell rc\n");
-    }
-    // Legacy paths count. `migrate` documents `unlock` as its prerequisite, and before a migration NO
-    // secret exists under a new key — so looking only there left the agent cold, and migrate then failed
-    // on the very run it was supposed to enable. One decrypt warms the agent for all of them; the first
-    // file that exists is enough.
+// Two sources feed the list: a sign-in's cache entries live beside the declared secrets and never
+// appear in `cfg.secrets`. Sign-ins have no legacy path — they never existed under the old naming.
+//
+// Legacy paths count for declared secrets. `migrate` documents `unlock` as its prerequisite, and
+// before a migration NO secret exists under a new key — so looking only there left the agent cold,
+// and migrate then failed on the very run it was supposed to enable. One decrypt warms the agent for
+// all of them; the first file that exists is enough.
+function unlockTargets(cfg, exists = fs.existsSync) {
     const files = [];
     for (const [name, decl] of Object.entries(cfg.secrets)) {
         if (decl.backend !== "local") {
@@ -1059,22 +1053,49 @@ async function cmdUnlock(cfg) {
         }
         const current = keyToPath(keyFor(name, decl, cfg));
         const legacy = legacyKeyToPath(name);
-        if (fs.existsSync(current)) {
+        if (exists(current)) {
             files.push({ name, file: current });
-        } else if (fs.existsSync(legacy)) {
+        } else if (exists(legacy)) {
             files.push({ name: `${name} (legacy)`, file: legacy });
         }
     }
+    for (const [name, decl] of Object.entries(cfg.oauth ?? {})) {
+        const entryNames = { refresh: `oauth-${name}-refresh`, access: `oauth-${name}-access` };
+        for (const entryName of Object.values(entryNames)) {
+            const file = keyToPath(keyFor(entryName, decl, cfg));
+            if (exists(file)) {
+                files.push({ name: entryName, file });
+            }
+        }
+    }
+
+    return files;
+}
+
+async function cmdUnlock(cfg, opts = {}) {
+    const { exists = fs.existsSync, run = runTool, write = (s) => process.stderr.write(s) } = opts;
+    if (detectLocalBackend() !== "gpg") {
+        write("vc-secrets: unlock is a no-op on this platform\n");
+        return;
+    }
+    if (!process.env.GPG_TTY) {
+        // Guarded form on purpose: in a non-interactive shell `tty` prints "not a tty", and exporting
+        // that hands gpg a bogus terminal path instead of leaving the variable unset.
+        write("vc-secrets: GPG_TTY is not set — pinentry may fail; add `if [ -t 0 ]; then export GPG_TTY=$(tty); fi` to your shell rc\n");
+    }
+    const files = unlockTargets(cfg, exists);
     if (files.length === 0) {
-        process.stderr.write("vc-secrets: no stored local secrets to unlock\n");
+        write("vc-secrets: nothing stored on the gpg backend to unlock\n");
         return;
     }
     for (const { file } of files) {
         // interactive: pinentry gets the TTY; -o /dev/null: plaintext never enters vc-secrets or the terminal
-        await runTool({ cmd: "gpg", args: ["--quiet", "--decrypt", "-o", "/dev/null", file],
+        await run({ cmd: "gpg", args: ["--quiet", "--decrypt", "-o", "/dev/null", file],
             interactive: true, timeoutMs: null, captureStdout: false });
     }
-    process.stderr.write(`vc-secrets: gpg agent warmed (${files.map((f) => f.name).join(", ")})\n`);
+    // A count, not the names: the agent is warm for everything on this key, and naming a single
+    // entry read as "only that one was affected".
+    write(`vc-secrets: gpg agent warmed (${files.length} ${files.length === 1 ? "entry" : "entries"})\n`);
 }
 
 // Pre-rename storage: wcm/keychain credential name was `mcpw:<name>` (no scope, no projectId —
@@ -1848,7 +1869,7 @@ export {
     COMMAND_ON_STDIN, quoteForSecurityInteractive,
     runTool, resolveSpawnCommand, buildSpawnInvocation, makeSecretResolver, cmdRun, cmdTask, cmdLaunch,
     validateLaunchables, LEGACY_ENV_VARS, LEGACY_SECRET_ENV_VARS,
-    mapResolveError, applyKeystrokes, promptHidden, cmdSet, cmdUnlock, cmdDoctor, cmdMigrate, newKeyPresent,
+    mapResolveError, applyKeystrokes, promptHidden, cmdSet, cmdUnlock, unlockTargets, cmdDoctor, cmdMigrate, newKeyPresent,
     SECRET_NAME_RE, LAUNCHABLE_NAME_RE, doctorReport,
     readEnableLists, readWiredServers, readWiredElsewhere, DANGEROUS_ENV_VARS, sanitizeEnv,
     consumerShape, shapeDifferences, validateAuthorized, validateVaults, authorizationFor, crossingProblem, own,

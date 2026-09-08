@@ -672,6 +672,39 @@ test("cmdUnlock: must keep showing pinentry interactively — no --pinentry-mode
     assert.deepEqual(loggedArgs, ["--quiet", "--decrypt", "-o", "/dev/null", keyPath]);
 });
 
+test("unlock finds the entries of a machine whose only stored material is a sign-in", async () => {
+    // The failure this replaces: "no stored local secrets to unlock" on a machine that HAS
+    // decryptable entries, leaving the cache unreadable and naming no way forward.
+    const cfg = { secrets: {}, oauth: { ado: { scope: "user" } }, projectId: "p", files: {} };
+    const targets = m.unlockTargets(cfg, () => true);
+    assert.equal(targets.length, 2, "a sign-in is two entries: refresh and access");
+});
+
+test("unlock still finds ordinary local secrets, and prefers the current key over the legacy one", () => {
+    const cfg = { secrets: { a: { backend: "local", scope: "user" } }, oauth: {}, projectId: "p", files: {} };
+    assert.equal(m.unlockTargets(cfg, (f) => !/mcpw/.test(f)).length, 1);
+
+    // With only one of the two paths present, either branch yields one target — so the line above
+    // cannot see the preference its name claims. Present both; the assertion is WHICH one wins.
+    const both = m.unlockTargets(cfg, () => true);
+    assert.equal(both.length, 1);
+    assert.equal(both[0].file, m.keyToPath(m.keyFor("a", cfg.secrets.a, cfg)));
+    assert.equal(both[0].name, "a");
+});
+
+test("a keyvault secret is not an unlock target, since there is no local file to decrypt", () => {
+    const cfg = { secrets: { a: { backend: "keyvault", scope: "user" } }, oauth: {}, projectId: "p", files: {} };
+    assert.deepEqual(m.unlockTargets(cfg, () => true), []);
+});
+
+test("unlock reports a count, since naming one entry reads as only that one being affected", async () => {
+    const cfg = { secrets: { a: { backend: "local", scope: "user" }, b: { backend: "local", scope: "user" } },
+        oauth: {}, projectId: "p", files: {} };
+    const err = [];
+    await m.cmdUnlock(cfg, { exists: () => true, run: async () => {}, write: (s) => err.push(s) });
+    assert.match(err.join(""), /2 entries/);
+});
+
 test("runTool: stdout capture, stdin pass, timeout, redacted stderr, toolExitCode", async () => {
     const echo = { cmd: process.execPath, args: ["-e", "process.stdin.pipe(process.stdout)"],
         stdinData: m.VALUE_ON_STDIN, timeoutMs: 10_000, captureStdout: true };
