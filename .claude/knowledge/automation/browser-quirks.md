@@ -25,7 +25,7 @@ applicability_rationale: "Per-browser rendering differences. Cross-VC universal.
 - Subgrid support varies
 - `gap` may not work in older flexbox contexts
 
-### "playwright-firefox cannot click here" — root cause (2026-09-08) and the fix
+### "playwright-firefox cannot click here" — candidate mechanisms (2026-09-08) and the probe
 
 **Symptom (confirmed 6× on the team's Windows machines, 2026-06 → 2026-08):** `browser_click` on the
 `playwright-firefox` MCP lane resolves the element, then times out on Playwright's *"visible, enabled
@@ -33,7 +33,16 @@ and stable"* wait — on fully visible, non-moving elements (CLS 0, fixed rect).
 navigation work. Raw `playwright-core` + firefox in a single foreground window clicks the same element,
 headed and headless. A browser-revision re-install changed nothing.
 
-**Mechanism — four shipped facts that together predict exactly that split:**
+**Probe run 1 (2026-09-08, the team's Windows machine, `firefox-click-probe` v1):** under a covering window
+Firefox kept ticking rAF (121 per 2 s, `document.hidden` false) **and the trial click timed out even
+uncovered, in both variants**. So the occlusion mechanism below is **not confirmed** — it may still be a
+second contributor under the MCP's three-window topology, but it is not what the probe reproduced. What v1
+could not tell (it took the first `a[href]` in DOM order, possibly an off-screen skip-link, and cut the call
+log) is *which* actionability state stalled. Probe v2 targets a visible link, prints the full call log,
+measures per-frame rect jitter of the target, and adds a Chromium control and a `reducedMotion` variant.
+The 5-ticks-in-a-row rule (fact 1) with any frame-to-frame rect jitter is now the leading candidate.
+
+**Shipped facts the candidates rest on:**
 
 1. Playwright's *stable* check samples the element rect on consecutive `requestAnimationFrame` ticks and
    on **Windows + Firefox demands 5 identical ticks** (`rafCountForStablePosition()` is
@@ -53,19 +62,21 @@ headed and headless. A browser-revision re-install changed nothing.
 It is not a Firefox rendering bug, not the storefront, and not the MCP's click code — it is the MCP's
 *headed, three-windows-at-once* topology meeting a Windows-only Firefox power-saving feature.
 
-**Fix (in the repo):** `config/mcp-playwright-firefox.config.json` → `launchOptions.firefoxUserPrefs`
+**Config change (in the repo, harmless, not yet shown to matter):** `config/mcp-playwright-firefox.config.json` → `launchOptions.firefoxUserPrefs`
 `{ "widget.windows.window_occlusion_tracking.enabled": false }`. The MCP spreads `launchOptions` into
 `browserType.launch()`, so the pref reaches Firefox. Restart the MCP server after the change. Running the
 firefox lane headless would also avoid it (a headless window is never occluded); the pref keeps the lane
 headed like the other two.
 
-**Prove it before touching any lane rule:** `node scripts/maintenance/firefox-click-probe.mjs` on a
-Windows machine that showed the bug. It A/B-launches headed Firefox with and without the pref, covers it
-with a Chromium window, and reports rAF ticks / `document.hidden` / a `trial: true` click (full
-actionability wait, no real click). Expected: default → 0 ticks, hidden, TIMEOUT; pref off → ~120 ticks,
-OK; exit 0. Only on that result: drop `NOT ON playwright-firefox` from the click-driven suites' plan
-marking, restore firefox as a real third slot, and rewrite the box in `.claude/rules/agents.md`
-§Parallel Execution. Until then the box stands — the rule was measured, and the fix is not yet.
+**Prove any fix before touching a lane rule:** `node scripts/maintenance/firefox-click-probe.mjs --url <storefront>`
+on a Windows machine that showed the bug. v2 runs `firefox-default`, `firefox-pref-off`,
+`firefox-reduced-motion` and `chromium-control` against the same visible link: per variant a foreground
+`trial: true` click (full actionability wait, no real click), 12-frame rect jitter, running-animation count,
+then the same under a kiosk cover window, then uncovered. Exit 0 only when a firefox variant clicks under
+every condition; the RESULT line names it. Only on that result: drop `NOT ON playwright-firefox` from the
+click-driven suites' plan marking, restore firefox as a real third slot, and rewrite the box in
+`.claude/rules/agents.md` §Parallel Execution. Until then the box stands — the rule was measured, and no
+fix is yet.
 
 ## Edge
 

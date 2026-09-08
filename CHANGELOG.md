@@ -8,7 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Semver 
 
 ---
 
-## `playwright-firefox` click timeouts — root cause and config fix (confirmation pending) — 2026-09-08
+## `playwright-firefox` click timeouts — candidate mechanisms, config change, A/B probe (open) — 2026-09-08
 
 The lane's `browser_click` timing out on visible, non-moving elements while `browser_type` worked is
 explained by two shipped facts: Playwright's *stable* wait needs **5** identical `requestAnimationFrame`
@@ -16,9 +16,12 @@ ticks on Windows + Firefox (1 everywhere else), and Windows Firefox (≥ 102) st
 covered by other windows — which three headed 1920×1080 browsers on one desktop guarantee. `fill()` has
 no stable wait, so typing kept working. `config/mcp-playwright-firefox.config.json` now sets
 `widget.windows.window_occlusion_tracking.enabled=false` (Playwright already disables Firefox's
-background *timer* throttling, not occlusion). `scripts/maintenance/firefox-click-probe.mjs` A/B-proves
-it on a Windows desktop with `trial: true` clicks (read-only). The "never schedule a click-driven suite
-on firefox" rule stays until that probe exits 0 on a machine that showed the bug.
+background *timer* throttling, not occlusion). `scripts/maintenance/firefox-click-probe.mjs` A/B-tests
+it on a Windows desktop with `trial: true` clicks (read-only). **Run 1 did not confirm occlusion**: rAF kept
+ticking under a cover and the click failed uncovered too. v2 of the probe targets a visible link, prints
+the full call log, measures per-frame rect jitter (the 5-ticks-in-a-row rule is the leading candidate)
+and adds Chromium and `reducedMotion` variants. The "never schedule a click-driven suite on firefox"
+rule stays until the probe exits 0 on a machine that showed the bug.
 
 ---
 

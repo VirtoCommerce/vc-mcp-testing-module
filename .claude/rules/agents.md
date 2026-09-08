@@ -90,7 +90,7 @@ Each agent MUST use its own separate browser session. Agents sharing a browser w
 > `recordHar`/viewport/locale context options (probed 2026-08-05); a browser-revision re-install was
 > tried and did **not** fix it. Detail: `feedback_firefox_cart_dropdown_quirk` memory.
 >
-> **Root cause found 2026-09-08, fix in config, live confirmation pending:** Windows Firefox treats a window covered by the other two browser windows as hidden and stops `requestAnimationFrame`; Playwright's Windows-Firefox *stable* wait needs 5 rAF ticks, so every click times out while `fill` (no stable wait) keeps working. `config/mcp-playwright-firefox.config.json` now sets `widget.windows.window_occlusion_tracking.enabled=false`. **This rule stays until `node scripts/maintenance/firefox-click-probe.mjs` exits 0 on a machine that showed the bug** — mechanism, evidence and the flip procedure: `knowledge/automation/browser-quirks.md` §Firefox.
+> **Investigation 2026-09-08 (open):** Playwright's Windows-Firefox *stable* wait needs **5 identical rAF ticks in a row** (1 elsewhere) while `fill` has no stable wait — that is why only clicks die. Probe run 1 ruled out window occlusion as the sole cause (rAF ticked under a cover; the click failed uncovered too); the leading candidate is per-frame rect jitter × the 5-tick rule. `config/mcp-playwright-firefox.config.json` carries the occlusion pref anyway (harmless). **This rule stays until `node scripts/maintenance/firefox-click-probe.mjs` exits 0 on a machine that showed the bug** — mechanism, run log and the flip procedure: `knowledge/automation/browser-quirks.md` §Firefox.
 
 ### QA Team Browsers
 | Agent | Playwright MCP Server | Alternative |
