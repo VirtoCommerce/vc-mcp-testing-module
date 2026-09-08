@@ -95,7 +95,7 @@ Each agent MUST use its own separate browser session. Agents sharing a browser w
 |-------|----------------------|-------------|
 | **qa-frontend-expert** | `playwright-chrome` | |
 | **qa-backend-expert** | `playwright-edge` | or `Chrome DevTools MCP` for Admin SPA |
-| **qa-testing-expert** | `playwright-firefox` | |
+| **qa-testing-expert** | the next free Chromium slot — `playwright-chrome` or `playwright-edge` — **queued** behind the owner of that slot; never firefox for interactive work (the box above: firefox cannot click here, confirmed 6×) | `playwright-firefox` **only** for a read-only, navigation-light pass; no fixed third click-capable lane exists — 3 slots, 2 of them Chromium |
 | **ui-ux-expert** | `Chrome DevTools MCP` | (no webkit on Windows) |
 | **test-management-specialist** | `playwright-chrome` (sequential, not parallel with frontend) | |
 | **test-data-engineer** | none — authors AND runs seeders live (Node + Platform-API); delegates only browser-based storefront/suite verification to qa-backend/frontend-expert | |
