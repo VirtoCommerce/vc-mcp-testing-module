@@ -925,6 +925,11 @@ test("cmdRun: unknown server → exit 1, single-line stderr without stack", () =
     assert.equal(r.stdout, "");
 });
 
+// Source-text assertions below read a function body, and a body carries comments. Matching the raw
+// text lets a comment stand in for the code it describes: `// was: spawnSyncProcess = spawnSync` and
+// `// killProcessTree(child, signal)` each satisfied the guard for the thing they replaced.
+const STRIP_COMMENTS = /\/\/[^\n]*|\/\*[\s\S]*?\*\//g;
+
 test("killProcessTree on win32 kills the whole tree, because a plain kill reaches only the top", () => {
     const spawned = [];
     const signalled = [];
@@ -942,7 +947,7 @@ test("the win32 default is spawnSync, since a kill-then-exit caller loses the ra
     // return — is invisible to a seam: an injected spy is called synchronously either way. Match the
     // BINDING, not the parameter name: the name reads `spawnSyncProcess` whatever the default is, so
     // /spawnSyncProcess/ alone passes against `= spawn`, which is the defect this test is named for.
-    assert.match(m.killProcessTree.toString(), /spawnSyncProcess = spawnSync\b/);
+    assert.match(m.killProcessTree.toString().replace(STRIP_COMMENTS, ""), /spawnSyncProcess = spawnSync\b/);
 });
 
 test("killProcessTree on posix signals the process GROUP, not the child", () => {
@@ -980,8 +985,17 @@ test("killProcessTree's 5-second follow-up sends SIGKILL to whichever target the
 test("cmdLaunch calls the extracted helper rather than keeping its own copy", () => {
     // The tests above exercise the helper in isolation, so reverting the call site would leave
     // every one of them green. This is the only test that observes the actual deliverable.
-    assert.match(m.cmdLaunch.toString(), /killProcessTree/);
-    assert.doesNotMatch(m.cmdLaunch.toString(), /taskkill/);
+    // Comments stripped first, and the paren required: `/killProcessTree/` against the raw source is
+    // satisfied by a comment naming the helper, so the assertion would survive the call site being
+    // put back — the one thing this test exists to notice.
+    const source = m.cmdLaunch.toString();
+    const body = source.replace(STRIP_COMMENTS, "");
+    assert.match(body, /killProcessTree\(/);
+    assert.doesNotMatch(body, /function killProcessTree/, "a shadowing local definition is not delegation");
+    // Absence is checked on the RAW source on purpose: over-stripping can only turn a match into a
+    // loud miss, but it turns a doesNotMatch into a silent pass — a re-inlined kill hidden behind a
+    // string literal the stripper mistook for a comment.
+    assert.doesNotMatch(source, /taskkill/);
 });
 
 test("mapResolveError: wcm exit 3 → Credential Manager advice", () => {

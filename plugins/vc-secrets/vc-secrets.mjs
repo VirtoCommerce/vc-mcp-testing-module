@@ -1768,7 +1768,8 @@ async function cmdDoctor(cfg, flags = []) {
 // A signal reaches the direct child only. On Windows that leaves a grandchild running: `dnx` spawns
 // dotnet.exe, which survives, orphans, and keeps a lock on the package file it was reading — so the
 // NEXT run fails with "the process cannot access the file" instead of the clean timeout it deserved.
-// Measured on Windows, and it cost a manual taskkill between attempts.
+// Measured on Windows while building the previous launcher, where it cost a manual taskkill
+// between attempts; this package inherits the finding, not the experiment.
 //
 // SYNCHRONOUS on the win32 branch on purpose: a caller that kills and exits on the next line races its
 // own teardown, and an async spawn loses. Not cmdLaunch, which exits from the child's `close` handler
