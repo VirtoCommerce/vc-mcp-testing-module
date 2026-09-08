@@ -86,7 +86,7 @@ Use the Task tool to run specialist agents. Agent types match the `agents/` defi
 Launch agents 1 and 2 **in parallel** (single message with 2 Task calls). Agent 3 runs after 1 completes. Agent 4 runs last.
 
 **Conditional execution:**
-- If scope is `stories` or `stories <flow>`: run **ba-system-analyzer** then **ba-story-writer** only
+- If scope is `stories`, `stories <flow>` or `stories <TICKET>`: run **ba-system-analyzer** then **ba-story-writer** only. A ticket key (`VCST-XXXX`) is the story SOURCE, not a review target: fetch it via Atlassian MCP (`getJiraIssue`) and pass its summary / description / existing ACs to both agents; at the end **offer** (never auto-create) sub-tasks from the generated stories — this is the former `/ba-stories VCST-XXXX` write path.
 - If scope is `stories --review <TICKET>`: **review mode** — `ba-story-writer` **Mode B** only (see §Stories review mode below); analyze only, no JIRA/GitHub writes, no replacement story
 - If scope is `flows`: run **ba-system-analyzer** (with UI analysis) + **ba-story-writer** (skip api specialist)
 - If scope is `api`: run **ba-api-specialist** only (with GitHub search + Swagger UI)

@@ -76,10 +76,9 @@ top-level session performs it directly), `ui-ux-expert`, `regression-orchestrato
 | `/vc-feedback` | Attach an explicit 👍/👎 verdict (with optional note) to the current session's telemetry trace — the main detector of SILENT failures (a task done wrong with no error). Local + silent: recorded by the `UserPromptSubmit` hook; nothing is sent until the separate consent-gated `deliver` step |
 
 **Dropped from the full `vc-qa` crew:** `/qa-smoke`, `/qa-test`, `/qa-regression`,
-`/qa-coverage-generation`, `/qa-test-lifecycle`, `/qa-test-plan`, `/qa-sync-tests`,
+`/qa-coverage-gap`, `/qa-test-lifecycle`, `/qa-test-plan`, `/qa-sync-tests`,
 `/qa-seed-data`, `/qa-design`, `/qa-exploratory`, `/qa-status`,
-`/qa-onboarding`, `/qa-hotfix`, `/qa-bundle-check`, `/qa-local-env`, `/ba-analyze`,
-`/ba-stories` — full `vc-qa` plugin only, not shipped here.
+`/qa-onboarding`, `/qa-hotfix`, `/qa-bundle-check`, `/qa-local-env`, `/ba-analyze` — the in-repo `vc-qa` toolset only, not shipped here.
 
 ---
 

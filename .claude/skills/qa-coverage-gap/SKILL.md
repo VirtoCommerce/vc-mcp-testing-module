@@ -2,6 +2,7 @@
 name: qa-coverage-gap
 description: "[Testing] Autonomous test coverage gap analysis and generation — identifies missing test cases, generates enriched CSV test cases, validates P0 cases via browser, and reports improvements."
 argument-hint: "analyze | generate | validate | full | domain <name> | suite <ID>"
+disable-model-invocation: true
 
 ---
 

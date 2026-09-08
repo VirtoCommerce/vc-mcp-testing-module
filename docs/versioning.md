@@ -58,6 +58,8 @@ These are the artifacts customers will reference in their own docs, training, an
 | `.claude/rules/test-data.md` | `@td()` syntax, no-hardcode rule, four data layers. |
 | `knowledge/agents/qa/shared-instructions.md` | Four-layer agent architecture, PASS/FAIL/AMBIGUOUS classifier, evidence standards. |
 | BL ID convention | `BL-{DOMAIN}-{NNN}` format. Severity tags. |
+
+> **Removed from this lock 2026-09-08:** `skills/qa-process/test-process-lifecycle.md` (zero inbound consumers). Recorded as `**BREAKING:** **Tier A:**` in [`CHANGELOG.md`](../CHANGELOG.md) §Component consolidation, with the phase → command migration; no version bump because the `vc-qa` surface currently ships as project-scoped components, not as a versioned plugin.
 | Severity tags | `[P0-revenue]`, `[P0-security]`, `[P1-data]`, `[P1-ux]`, `[P2-ux]`. |
 
 ## Changelog Discipline

@@ -159,27 +159,22 @@ The decision tree is in [`knowledge/execution/live-discovery.md`](../../knowledg
 
 ## `gap-inventory.json` — record schema and Step-1 contract
 
-> Moved verbatim on 2026-09-08 from the removed `/qa-coverage-generation` command (its orchestrated multi-agent mode had zero recorded runs; `/qa-coverage-gap` is now the one coverage pipeline). The heading below keeps its original step number.
+> Carried over on 2026-09-08 from the removed `/qa-coverage-generation` command (its orchestrated
+> multi-agent mode had zero recorded runs; `/qa-coverage-gap` is now the one coverage pipeline) and
+> rewritten for a single-agent skill: the `MAX_BUDGET_USD` guard, the `sprint` scope and the
+> orchestrator / sub-agent split went with the command. What survives is the source order and the record
+> shape, because every later step reads this file instead of re-reading the suites.
 
-## Pre-Flight (run before Step 1)
-
-Per `.claude/templates/agent-dispatch.md` § Pre-Flight Checklist:
+**Before Step 1 (pre-flight):**
 
 1. **Duplicate-run guard** — read `reports/coverage/` for runs in the last 7 days matching the requested scope. If a match exists, warn the user and ask before continuing.
-2. **Environment health** — `curl -sk {BACK_URL}/health` (CI may skip; record verdict).
-3. **Manifest sanity** — confirm `config/test-suites.json` loads, `_meta.version >= 3.0`, and selection rule for the requested scope resolves (use `npm run suites:sync --dry-run` if available).
-4. **Budget guard (CI mode)** — fail-fast if `MAX_BUDGET_USD` is unset or `< 5.0`. Default cap: $10 for `p0`, $25 for `p1`, $50 for `full`.
-5. **Sprint-plan resolution (`sprint` scope only)** — read the latest `vc/shared/docs/Sprint plans/sprint-*-summary.json` and extract `domainsAffected[]` and `suitesActivated[]`. Treat those as the gap-analysis scope filter.
+2. **Environment health** — `curl -sk {BACK_URL}/health` (CI may skip; record the verdict).
+3. **Manifest sanity** — confirm `config/test-suites.json` loads, `_meta.version >= 3.0`, and the selection rule for the requested scope resolves.
 
-If any check fails, surface the failure to the user with a one-line summary and ask whether to proceed.
+If any check fails, surface it with a one-line summary and ask whether to proceed.
 
----
-
-## Execution Pipeline
-
-### Step 1 — Centralized Gap Analysis (NEVER delegate)
-
-Gap analysis runs once in the orchestrator. Sub-agents consume the inventory; they do **not** re-read suites.
+**Step 1 — gap analysis runs ONCE, up front, in this skill's own session.** Generation, validation and
+reporting all consume `gap-inventory.json`; none of them re-reads the suites.
 
 **Sources (read in this order):**
 
