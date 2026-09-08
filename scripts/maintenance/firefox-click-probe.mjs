@@ -319,6 +319,13 @@ const anyFail = (r) => usable(r) && [r.foregroundClick, r.coveredClick, r.uncove
 const control = byName['chromium-control'];
 const repro = byName['ff-repro-reducedmotion'];
 const candidates = ['ff-repro+keepalive', 'ff-repro+headless', 'ff-repro+pref-off'];
+// The control has THREE outcomes, not two, and conflating them sends the operator the wrong way:
+//   - absent / crashed (`fatal`, `targetError`) → nothing was measured; say so, do not blame the target.
+//   - ran and could not click → the TARGET is wrong (an off-viewport link is how runs 1–2 wasted
+//     themselves), so no Firefox conclusion is available either.
+//   - ran and clicked → the page and the target are sound; read the firefox rows.
+const controlRan = usable(control);
+const controlClickFailed = controlRan && !allOk(control);
 const controlOk = !control || allOk(control);
 const reproFailed = anyFail(repro);
 const winners = candidates.filter((n) => allOk(byName[n]) && !byName[n].coverMissed);
@@ -331,7 +338,8 @@ const passesDead = all.filter((a) => a.ok && a.preRaf >= 0 && a.preRaf <= 2).len
 if (!JSON_OUT) {
   console.log('');
   console.log(`rAF↔click correlation: ${failsDead}/${failsTotal} failing attempts had a DEAD rAF (≤2 ticks/500 ms) beforehand; ${passesDead} passing attempts did.`);
-  if (control && !controlOk) console.log('RESULT: chromium-control failed — the TARGET is wrong (see its call log); nothing about Firefox was tested. Pass --target <css>.');
+  if (control && !controlRan) console.log(`RESULT: chromium-control did NOT RUN (${control.fatal ?? control.targetError}) — the control never exercised the target, so nothing here is evidence either way. Fix that first (browsers installed? storefront reachable?), then re-run.`);
+  else if (controlClickFailed) console.log('RESULT: chromium-control RAN and could not click — the TARGET is wrong (see its call log), so nothing about Firefox was tested. Pass --target <css> for a link you can see.');
   else if (!usable(repro)) console.log(`RESULT: the reproducer did NOT RUN (${repro?.fatal ?? repro?.targetError ?? 'variant not selected'}) — nothing was tested. Fix that first; a crashed reproducer is not a passing one.`);
   else if (!reproFailed) console.log('RESULT: the reproducer PASSED — reducedMotion no longer stalls this page (storefront changed?). Nothing to fix against; re-derive the reproducer before trusting any candidate.');
   else if (winners.length) console.log(`RESULT: CONFIRMED — the reproducer stalls at "visible, enabled and stable" and these clear it every attempt: ${winners.join(', ')}. Apply the first one to config/mcp-playwright-firefox.config.json.`);
