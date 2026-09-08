@@ -182,7 +182,7 @@ cross-product-reuse change) and `.claude/templates/` (`test-model.md`, `qa-test-
 | Report categories, size caps, what stays terminal-only | `.claude/rules/reports.md` |
 | Testing modes, suite manifest, selection groups | `.claude/rules/regression.md` |
 | Agents, browser assignments, delegation rules | `.claude/rules/agents.md` |
-| Full command + skill argument reference | `.claude/rules/skills-commands.md` |
+| Full command + skill argument reference | the frontmatter of each `commands/*.md` and `skills/*/SKILL.md` (rendered as the `/` menu) |
 | Test-data resolution + the no-hardcode GOLDEN RULE | `.claude/rules/test-data.md` |
 
 ## Cross-References

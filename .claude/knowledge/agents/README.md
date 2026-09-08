@@ -61,7 +61,7 @@ one reviewer per repo kind**, picked by the routed repo's `kind`. Gate ladder:
 
 ## Slash Commands (28)
 
-Full argument reference: [`.claude/rules/skills-commands.md`](../../rules/skills-commands.md).
+Full argument reference: each command and skill file's own frontmatter (`description` + `argument-hint`), which the harness renders as the `/` menu.
 
 ### QA & Setup Commands
 
