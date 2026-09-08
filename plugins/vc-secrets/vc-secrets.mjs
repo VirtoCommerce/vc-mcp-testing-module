@@ -669,6 +669,25 @@ $c=[System.Runtime.InteropServices.Marshal]::PtrToStructure($ptr,[type][CredMan+
 [Console]::Out.Write([System.Runtime.InteropServices.Marshal]::PtrToStringUni($c.CredentialBlob,$c.CredentialBlobSize/2))
 `;
 
+// 1168 is ERROR_NOT_FOUND, and ONLY that may read as "already absent". Exiting 3 for every
+// failure would let logout report success while the refresh token is still in the store —
+// the single outcome logout exists to prevent.
+const PS_CRED_DELETE = `
+$ErrorActionPreference='Stop'
+Add-Type -TypeDefinition @'
+using System; using System.Runtime.InteropServices;
+public static class CredManDel {
+  [DllImport("advapi32", CharSet=CharSet.Unicode, SetLastError=true)]
+  public static extern bool CredDelete(string target, int type, int flags);
+}
+'@
+if(-not [CredManDel]::CredDelete("$env:VC_SECRETS_NAME",1,0)){
+  $e=[System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+  if($e -eq 1168){ exit 3 }
+  [Console]::Error.Write("CredDelete failed win32err=$e"); exit 1
+}
+`;
+
 const PS_CRED_WRITE = `
 $ErrorActionPreference='Stop'
 [Console]::InputEncoding=[System.Text.Encoding]::UTF8
@@ -771,6 +790,55 @@ function buildLocalWrite(backend, key, env = process.env, { tmp = false, value =
 
     return { cmd: "gpg", args: ["--quiet", "--batch", "--yes", ...recipientArgs, "--encrypt", "-o", target],
         stdinData: VALUE_ON_STDIN, timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: false };
+}
+
+function buildLocalDelete(backend, key, env = process.env) {
+    if (!KEY_RE.test(key)) {
+        throw new VcSecretsError(`invalid secret key "${key}" — expected vc-secrets:<scope>:<name>`);
+    }
+    if (backend === "wcm") {
+        return { cmd: psCommand(env), args: psArgs(PS_CRED_DELETE),
+            extraEnv: { VC_SECRETS_NAME: key }, timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: false };
+    }
+    if (backend === "keychain") {
+        return { cmd: "security", args: ["delete-generic-password", "-a", env.USER || os.userInfo().username, "-s", key],
+            timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: false };
+    }
+    // gpg entries are files, removed by deleteEntryIo directly. Falling through to the keychain
+    // command would answer a Linux caller with "security: not found on PATH" instead of the
+    // truth, which reads as a broken machine rather than a builder used on the wrong backend.
+    throw new VcSecretsError(`no delete command for backend "${backend}"`);
+}
+
+// One meaning of "already absent" for logout to check, assembled here because each backend
+// signals it differently: the PowerShell branch exits 3 by construction, security(1) answers 44,
+// and gpg entries are files whose absence is ENOENT rather than any exit code at all.
+function deleteEntryIo(backend = detectLocalBackend(), env = process.env, { run = runTool, rm = fs.rmSync } = {}) {
+    return async (key) => {
+        if (backend === "gpg") {
+            if (!KEY_RE.test(key)) {
+                throw new VcSecretsError(`invalid secret key "${key}" — expected vc-secrets:<scope>:<name>`);
+            }
+            try {
+                rm(keyToPath(key, env));
+            } catch (e) {
+                if (e.code === "ENOENT") {
+                    throw Object.assign(new VcSecretsError(`no stored entry "${key}"`), { toolExitCode: 3 });
+                }
+                throw new VcSecretsError(`could not remove "${key}": ${e.code ?? e.message}`);
+            }
+
+            return;
+        }
+        try {
+            await run(buildLocalDelete(backend, key, env));
+        } catch (e) {
+            if (backend === "keychain" && e.toolExitCode === 44) {
+                throw Object.assign(e, { toolExitCode: 3 });
+            }
+            throw e;
+        }
+    };
 }
 
 // Shared by cmdSet's non-interactive branch and cmdMigrate: runs a write `spec` built with a
@@ -1865,7 +1933,8 @@ export {
     VcSecretsError, REF_RE, parseReference, parseLiteral, LITERAL_PREFIX, CONFIG_NAME, LOCAL_CONFIG_NAME, KEY_PREFIX,
     SCHEMA_VERSION, SCOPE_ORDER, configPaths, parseConfigFile, loadConfig, keyFor, keyToPath, legacyKeyToPath,
     resolveEnvEntries, detectLocalBackend, redactSecrets, secretsDir, psEncode, psCommand, PS_CRED_READ, PS_CRED_WRITE,
-    buildLocalRead, buildLocalWrite, buildKeyvaultRead, TIMEOUT_LOCAL_MS, TIMEOUT_AZ_MS, VALUE_ON_STDIN,
+    PS_CRED_DELETE, buildLocalRead, buildLocalWrite, buildLocalDelete, deleteEntryIo,
+    buildKeyvaultRead, TIMEOUT_LOCAL_MS, TIMEOUT_AZ_MS, VALUE_ON_STDIN,
     COMMAND_ON_STDIN, quoteForSecurityInteractive,
     runTool, resolveSpawnCommand, buildSpawnInvocation, makeSecretResolver, cmdRun, cmdTask, cmdLaunch,
     validateLaunchables, LEGACY_ENV_VARS, LEGACY_SECRET_ENV_VARS,

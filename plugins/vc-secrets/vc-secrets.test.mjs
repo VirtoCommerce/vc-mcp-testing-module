@@ -648,6 +648,67 @@ test("buildLocalWrite: gpg tmp target for atomic write", () => {
     assert.ok(finalTarget.endsWith("ado-pat.gpg") && !finalTarget.endsWith(".tmp"), "default (no tmp option) targets the final path");
 });
 
+test("buildLocalDelete refuses a key that is not three segments", () => {
+    assert.throws(() => m.buildLocalDelete("wcm", "oauth-x-refresh"), /invalid secret key/);
+});
+
+test("buildLocalDelete names the same key the read builder would read", () => {
+    const key = "vc-secrets:user:oauth-ado-refresh";
+    const env = { SystemRoot: "C:\\Windows" };
+    const del = m.buildLocalDelete("wcm", key, env);
+    assert.equal(del.extraEnv.VC_SECRETS_NAME, m.buildLocalRead("wcm", key, env).extraEnv.VC_SECRETS_NAME);
+    assert.equal(del.extraEnv.VC_SECRETS_NAME, key);
+    assert.equal(del.captureStdout, false);
+
+    // The env var is only half the address: the script decides what it hands CredDelete.
+    // Reinstating the source's `mcpw:` prefix there targets a credential that does not exist,
+    // and on a missing name CredDelete sets 1168 — the code this script exits 3 for, which
+    // deleteEntryIo passes on as "already absent". Logout would report a removal it never made.
+    assert.match(m.PS_CRED_DELETE, /CredDelete\("\$env:VC_SECRETS_NAME",1,0\)/);
+    assert.doesNotMatch(m.PS_CRED_DELETE, /mcpw:/);
+});
+
+test("buildLocalDelete on keychain passes the key as the service, not as the account", () => {
+    const del = m.buildLocalDelete("keychain", "vc-secrets:user:oauth-ado-refresh", { USER: "u" });
+    assert.deepEqual(del.args.slice(0, 2), ["delete-generic-password", "-a"]);
+    assert.equal(del.args[del.args.indexOf("-s") + 1], "vc-secrets:user:oauth-ado-refresh");
+});
+
+test("only ERROR_NOT_FOUND may read as already-absent", () => {
+    // Exiting "already gone" for EVERY win32 error would let logout report success while the
+    // refresh token is still in the store — the single outcome logout exists to prevent.
+    assert.match(m.PS_CRED_DELETE, /\$e -eq 1168/);
+    assert.match(m.PS_CRED_DELETE, /GetLastWin32Error/);
+
+    // Presence is not exclusivity. Adding `if($e -eq 5){ exit 3 }` — ACCESS_DENIED — beside the
+    // 1168 branch satisfies both matches above, and a locked store then reads as an empty one.
+    assert.equal(m.PS_CRED_DELETE.match(/exit 3/g).length, 1, "exactly one condition may exit 3");
+});
+
+test("an already-absent keychain entry is normalised to one exit code, not swallowed", async () => {
+    // Each backend signals absence differently; deleteEntryIo gives logout ONE meaning to check.
+    // It rethrows — a resolved call would hide the difference from the only caller that needs it.
+    const del = m.deleteEntryIo("keychain", {}, {
+        run: async () => { throw Object.assign(new m.VcSecretsError("not found"), { toolExitCode: 44 }); },
+    });
+    await assert.rejects(() => del("vc-secrets:user:oauth-ado-refresh"),
+        (e) => e.toolExitCode === 3);
+});
+
+test("an already-absent gpg entry is normalised to the same exit code", async () => {
+    const del = m.deleteEntryIo("gpg", { HOME: "/nonexistent-for-this-test" });
+    await assert.rejects(() => del("vc-secrets:user:oauth-ado-refresh"),
+        (e) => e.toolExitCode === 3);
+});
+
+test("a gpg removal that fails for any other reason is not reported as absent", async () => {
+    // EACCES is a broken machine, not an empty one. Collapsing the two is how logout reports
+    // success over a credential it could not remove.
+    const del = m.deleteEntryIo("gpg", {}, { rm: () => { throw Object.assign(new Error("x"), { code: "EACCES" }); } });
+    await assert.rejects(() => del("vc-secrets:user:oauth-ado-refresh"),
+        (e) => e.toolExitCode !== 3);
+});
+
 test("cmdUnlock: must keep showing pinentry interactively — no --pinentry-mode reaches the gpg it runs", { skip: process.platform === "win32" && "gpg backend is not selected on win32" }, async () => {
     const secretsHome = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-unlock-"));
     tmpDirs.push(secretsHome);
