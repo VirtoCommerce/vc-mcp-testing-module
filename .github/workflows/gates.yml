@@ -35,8 +35,6 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0        # map:refresh dates documents by last-commit date; a shallow clone would date them all "today"
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -55,8 +53,6 @@ jobs:
         run: npm run td:validate
       - name: bl:lint / ecl:lint — oracle citation integrity
         run: npm run bl:lint && npm run ecl:lint
-      - name: map:check — functionality map matches its sources
-        run: npm run map:check
       - name: suites:executability:check — determinism ratchet
         run: npm run suites:executability:check
 

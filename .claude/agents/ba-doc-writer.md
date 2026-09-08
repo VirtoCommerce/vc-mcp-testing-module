@@ -56,7 +56,7 @@ Read `CLAUDE.md` and `.claude/rules/agents.md` before generating documentation. 
 
 | File | When |
 |------|------|
-| `.claude/knowledge/domain/functionality-map.md` | **Step 0, always** — the existing guides, prior BA analysis and suites for this surface. An existing guide for the same surface is **amended, never forked** |
+| `reports/ba/` + `reports/ba/test-models/` + `.claude/knowledge/domain/` | **Step 0, always** — the existing guides, prior BA analysis and suites for this surface. An existing guide for the same surface is **amended, never forked** |
 | `.claude/knowledge/domain/sitemap.md` | Storefront URL/page references for customer + admin docs |
 | `.claude/knowledge/domain/products.md` | Product type vocabulary (configurable, variations, etc.) |
 | `.claude/knowledge/domain/catalog.md` | Catalog/category structure for admin docs |
