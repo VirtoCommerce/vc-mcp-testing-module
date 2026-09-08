@@ -631,6 +631,42 @@ test("builders: no secret and no raw script in argv, timeouts per spec", () => {
     assert.equal(kv.timeoutMs, 20_000);
 });
 
+test("the write script sizes the blob in BYTES, which is what doubles the usable length", () => {
+    // 1280 chars at UTF-16 against 2560 at UTF-8, against a 2560-byte ceiling. The measured
+    // refresh entry is 2010 bytes; as UTF-16 that is 4020 and does not fit at all.
+    assert.match(m.PS_CRED_WRITE, /UTF8\.GetBytes/);
+    assert.doesNotMatch(m.PS_CRED_WRITE, /StringToCoTaskMemUni/);
+
+    // The size field is the half that must agree with the buffer. Keeping UTF8.GetBytes while
+    // restoring `$value.Length*2` satisfies both lines above and is WORSE than the original
+    // defect: CredWrite is then handed a length twice the allocation and marshals past it.
+    assert.match(m.PS_CRED_WRITE, /CredentialBlobSize=\$bytes\.Length/);
+});
+
+test("the read script prints hex, because the encoding has to be decided from the bytes", () => {
+    // Reverting this to PtrToStringUni would read a UTF-8 blob as UTF-16 and yield mojibake with
+    // no error anywhere.
+    assert.match(m.PS_CRED_READ, /ToString\("x2"\)/);
+    assert.doesNotMatch(m.PS_CRED_READ, /PtrToStringUni/);
+});
+
+test("a blob written by the pre-UTF-8 launcher still reads, since it cannot be re-entered", () => {
+    // `set` needs the plaintext and the keystore does not give it back, so asking a teammate to
+    // retype would mean minting a new credential.
+    assert.deepEqual(m.decodeCredBlobHex("650079006400"), { encoding: "utf16le", value: "eyd" });
+    assert.equal(m.decodeCredBlobHex("65794a64").encoding, "utf8");
+});
+
+test("the UTF-16 test requires non-zero even bytes and an even length", () => {
+    // A zero in an EVEN position is not UTF-16 ASCII; treating it as such would decode a
+    // legitimate UTF-8 blob containing a NUL into garbage.
+    assert.equal(m.decodeCredBlobHex("0000").encoding, "utf8");
+    // Three bytes, not one: `65` is turned away by the length >= 2 floor, so it never reaches the
+    // even-length test it is named for. `650079` passes the floor and the every() predicate, so
+    // dropping `% 2 === 0` decodes it as UTF-16 and silently loses the third byte.
+    assert.equal(m.decodeCredBlobHex("650079").encoding, "utf8", "an odd length is never UTF-16");
+});
+
 test("buildLocalRead/buildLocalWrite: reject keys outside vc-secrets:<scope>:<name> (path traversal guard)", () => {
     assert.throws(() => m.buildLocalRead("gpg", "../evil", { HOME: "/h" }), m.VcSecretsError);
     assert.throws(() => m.buildLocalWrite("gpg", "../evil", { HOME: "/h" }), m.VcSecretsError);
@@ -885,6 +921,21 @@ test("mapResolveError: wcm exit 3 → Credential Manager advice", () => {
     const mapped = m.mapResolveError("wcm", "ado-pat", e);
     assert.ok(mapped instanceof m.VcSecretsError);
     assert.match(mapped.message, /not found in Credential Manager — run "vc-secrets set ado-pat"/);
+});
+
+test("an oversize value is named as a size problem, with the entry that overflowed", () => {
+    // The write path is the ONLY producer of exit 4, so without a consumer the mapping for it is
+    // unreachable and a raw win32err=1783 reaches the developer instead.
+    const bare = m.mapResolveError("wcm", "ado", Object.assign(new Error("x"), { toolExitCode: 4 }));
+    assert.match(bare.message, /too large for Credential Manager/);
+    assert.match(bare.message, /"ado"/);
+
+    // The measured size is the number a developer can act on, and it survives only if the regex
+    // still matches what the PowerShell branch writes. Asserting the bare case alone leaves the
+    // extraction unexercised, so a reworded script drops the figure with the suite green.
+    const measured = m.mapResolveError("wcm", "ado",
+        Object.assign(new Error("value too large for Credential Manager (4020 bytes; limit 2560)"), { toolExitCode: 4 }));
+    assert.match(measured.message, /\(4020 bytes\)/);
 });
 
 test("mapResolveError: keychain exit 44 → Keychain advice", () => {
@@ -1563,6 +1614,53 @@ esac
     assert.equal(calls.length, 1, `expected only the new-key probe, no legacy read or write: ${JSON.stringify(calls)}`);
     assert.ok(!calls.some((c) => c.includes("add-generic-password")),
         "must never write — the value already in the keystore has to survive an unreadable read");
+});
+
+test("migrating a legacy wcm entry stores the plaintext, not the hex it was read as", async () => {
+    // readLegacyLocalValue is the second consumer of PS_CRED_READ. Missing it makes cmdMigrate
+    // write the hex string as the value — and the read-back compare is keychain-only, so on
+    // Windows nothing catches it.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-migrate-wcm-"));
+    tmpDirs.push(dir);
+    fs.writeFileSync(path.join(dir, m.CONFIG_NAME),
+        JSON.stringify({ projectId: "demo", secrets: { tok: { backend: "local" } }, servers: {}, tasks: {} }));
+
+    const plaintext = "sekret-value";
+    // The pre-UTF-8 launcher wrote UTF-16LE, so this is what a legacy wcm entry's PS_CRED_READ
+    // hex-dump looks like — decodeCredBlobHex must turn it back into the plaintext below.
+    const legacyHex = Buffer.from(plaintext, "utf16le").toString("hex");
+    const writeLogPath = path.join(dir, "wcm-write.log");
+
+    // powershell.exe stub: runTool closes stdin with nothing written for a read and with the value
+    // for a write (see runTool's spec.stdinData branch), so "$(cat)" tells the two apart without
+    // needing to decode the real -EncodedCommand payload. The new key's read must report "not
+    // found" (exit 3) so migrate proceeds to the legacy one.
+    const binDir = stubBinary("powershell.exe", `#!/bin/sh
+value=$(cat)
+if [ -n "$value" ]; then
+  printf '%s=%s\\n' "$VC_SECRETS_NAME" "$value" >> "$WCM_WRITE_LOG"
+  exit 0
+fi
+case "$VC_SECRETS_NAME" in
+  vc-secrets:demo:tok) exit 3 ;;
+  *) printf '%s' '${legacyHex}'; exit 0 ;;
+esac
+`);
+
+    const r = spawnSync(process.execPath, [LAUNCHER_PATH, "migrate"], {
+        env: {
+            ...process.env, VC_SECRETS_CONFIG_DIR: dir, VC_SECRETS_LOCAL_BACKEND: "wcm",
+            PATH: `${binDir}${path.delimiter}${process.env.PATH}`, WCM_WRITE_LOG: writeLogPath,
+        },
+        encoding: "utf8",
+    });
+
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /tok: migrated/);
+    const writes = fs.existsSync(writeLogPath) ? fs.readFileSync(writeLogPath, "utf8").trim().split("\n").filter(Boolean) : [];
+    assert.equal(writes.length, 1, `expected exactly one write: ${JSON.stringify(writes)}`);
+    assert.equal(writes[0], `vc-secrets:demo:tok=${plaintext}`,
+        "the stored value must be the decoded plaintext, not the hex readLegacyLocalValue got back");
 });
 
 test("cmdRun: identifiers (AZURE_TENANT_ID, AZURE_CLIENT_ID) survive into the child — only credentials are stripped", () => {

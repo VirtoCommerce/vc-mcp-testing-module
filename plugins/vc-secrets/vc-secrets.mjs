@@ -666,7 +666,10 @@ public static class CredMan {
 $ptr=[IntPtr]::Zero
 if(-not [CredMan]::CredRead("$env:VC_SECRETS_NAME",1,0,[ref]$ptr)){ exit 3 }
 $c=[System.Runtime.InteropServices.Marshal]::PtrToStructure($ptr,[type][CredMan+CREDENTIAL])
-[Console]::Out.Write([System.Runtime.InteropServices.Marshal]::PtrToStringUni($c.CredentialBlob,$c.CredentialBlobSize/2))
+$n=$c.CredentialBlobSize
+$b=New-Object byte[] $n
+[System.Runtime.InteropServices.Marshal]::Copy($c.CredentialBlob,$b,0,$n)
+[Console]::Out.Write((($b | ForEach-Object { $_.ToString("x2") }) -join ''))
 `;
 
 // 1168 is ERROR_NOT_FOUND, and ONLY that may read as "already absent". Exiting 3 for every
@@ -703,11 +706,17 @@ public static class CredManW {
     public int AttributeCount; public IntPtr Attributes; public string TargetAlias; public string UserName; }
 }
 '@
-$blob=[System.Runtime.InteropServices.Marshal]::StringToCoTaskMemUni($value)
+$bytes=[System.Text.Encoding]::UTF8.GetBytes($value)
+$blob=[System.Runtime.InteropServices.Marshal]::AllocCoTaskMem($bytes.Length)
+[System.Runtime.InteropServices.Marshal]::Copy($bytes,0,$blob,$bytes.Length)
 $c=New-Object CredManW+CREDENTIAL
 $c.Type=1; $c.TargetName="$env:VC_SECRETS_NAME"; $c.UserName=$env:USERNAME; $c.Persist=2
-$c.CredentialBlob=$blob; $c.CredentialBlobSize=$value.Length*2
-if(-not [CredManW]::CredWrite([ref]$c,0)){ exit 3 }
+$c.CredentialBlob=$blob; $c.CredentialBlobSize=$bytes.Length
+if(-not [CredManW]::CredWrite([ref]$c,0)){
+  $e=[System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+  if($e -eq 1783){ [Console]::Error.Write("value too large for Credential Manager ($($bytes.Length) bytes; limit 2560)"); exit 4 }
+  [Console]::Error.Write("CredWrite failed win32err=$e"); exit 3
+}
 `;
 
 function psEncode(script) {
@@ -720,6 +729,19 @@ function psCommand(env = process.env) {
 
 function psArgs(script) {
     return ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", psEncode(script)];
+}
+
+// A value written by the pre-UTF-8 launcher is UTF-16LE, and tokens are ASCII, so every
+// second byte is zero. Detecting rather than versioning keeps `run` read-only: a developer
+// whose secret exists only in the keystore cannot re-enter it, so we must read what is there.
+function decodeCredBlobHex(hex) {
+    const bytes = Buffer.from(hex.replace(/\s+/g, ""), "hex");
+    const utf16 = bytes.length >= 2 && bytes.length % 2 === 0
+        && bytes.every((b, i) => (i % 2 === 1 ? b === 0 : b !== 0));
+
+    return utf16
+        ? { encoding: "utf16le", value: bytes.toString("utf16le") }
+        : { encoding: "utf8", value: bytes.toString("utf8") };
 }
 
 // grammar: "vc-secrets:" scope ":" name; scope and name both [a-z0-9-]+ (scope is "user" or a
@@ -846,7 +868,19 @@ function deleteEntryIo(backend = detectLocalBackend(), env = process.env, { run 
 // partially-written or empty file; the other backends write in one shot.
 async function writeLocalValue(backend, key, spec, value, env = process.env) {
     if (backend !== "gpg") {
-        await runTool(spec, { stdinValue: value, redactValues: [value] });
+        try {
+            await runTool(spec, { stdinValue: value, redactValues: [value] });
+        } catch (e) {
+            // Only the size error. mapResolveError reads wcm exit 3 as "not found — run set", a
+            // READ-path diagnosis: on a write it names a failure that did not happen and
+            // prescribes the command that just failed. Name segment, not the whole key: the
+            // message it builds says `secret "X"`, and X is what the declaration calls it.
+            if (e.toolExitCode !== 4) {
+                throw e;
+            }
+            throw mapResolveError(backend, key.split(":")[2], e);
+        }
+
         return;
     }
     fs.mkdirSync(path.dirname(keyToPath(key, env)), { recursive: true, mode: 0o700 });
@@ -990,11 +1024,22 @@ function buildSpawnInvocation(resolved, args) {
 
 // Pure mapping so the advice contract can be unit-tested without spawning real
 // backends: wcm "not found" (exit 3) / keychain "not found" (exit 44) both point at "vc-secrets set";
+// wcm exit 4 is the oversize write, and carries the measured size out of the script's stderr;
 // any other gpg failure gets the "vc-secrets unlock" hint (file exists but decrypt failed, e.g. cold agent);
 // everything else passes through unchanged.
+// Read AND write reach this: writeLocalValue routes exit 4 here and nothing else, because the two
+// "not found" rewrites above are advice for a read.
 function mapResolveError(backend, name, e) {
     if (backend === "wcm" && e.toolExitCode === 3) {
         return new VcSecretsError(`secret "${name}" not found in Credential Manager — run "vc-secrets set ${name}"`);
+    }
+    if (backend === "wcm" && e.toolExitCode === 4) {
+        // Keep the measured size, drop win32err=1783: the number a developer can act on is
+        // how far over the limit the value is, not the API's code for "too big".
+        const size = /(\d+) bytes/.exec(e.message)?.[1];
+        const measured = size ? ` (${size} bytes)` : "";
+
+        return new VcSecretsError(`secret "${name}" is too large for Credential Manager${measured} — the blob limit is 2560 bytes`);
     }
     if (backend === "keychain" && e.toolExitCode === 44) {
         return new VcSecretsError(`secret "${name}" not found in Keychain — run "vc-secrets set ${name}"`);
@@ -1020,6 +1065,12 @@ function makeSecretResolver(cfg, env = process.env) {
             value = await runTool(spec, { redactValues: resolvedValues });
         } catch (e) {
             throw mapResolveError(backend, name, e);
+        }
+        if (backend === "wcm") {
+            // Decode before the empty check and before resolvedValues: that list is what
+            // redacts secrets out of later tool output, so holding the hex there would make
+            // redaction search for a string the output never contains.
+            value = decodeCredBlobHex(value).value;
         }
         if (value === "") {
             throw new VcSecretsError(`secret "${name}": backend returned empty value — run "vc-secrets set ${name}" (or check az login)`);
@@ -1185,7 +1236,9 @@ async function readLegacyLocalValue(backend, name, env = process.env) {
         : { cmd: "security", args: ["find-generic-password", "-a", env.USER || os.userInfo().username, "-s", legacyName, "-w"],
             timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: true };
     try {
-        return await runTool(spec);
+        const value = await runTool(spec);
+
+        return backend === "wcm" ? decodeCredBlobHex(value).value : value;
     } catch (e) {
         // exit 3 (wcm) / 44 (keychain) both mean "not found" — same codes mapResolveError reads.
         if ((backend === "wcm" && e.toolExitCode === 3) || (backend === "keychain" && e.toolExitCode === 44)) {
@@ -1933,7 +1986,7 @@ export {
     VcSecretsError, REF_RE, parseReference, parseLiteral, LITERAL_PREFIX, CONFIG_NAME, LOCAL_CONFIG_NAME, KEY_PREFIX,
     SCHEMA_VERSION, SCOPE_ORDER, configPaths, parseConfigFile, loadConfig, keyFor, keyToPath, legacyKeyToPath,
     resolveEnvEntries, detectLocalBackend, redactSecrets, secretsDir, psEncode, psCommand, PS_CRED_READ, PS_CRED_WRITE,
-    PS_CRED_DELETE, buildLocalRead, buildLocalWrite, buildLocalDelete, deleteEntryIo,
+    PS_CRED_DELETE, decodeCredBlobHex, buildLocalRead, buildLocalWrite, buildLocalDelete, deleteEntryIo,
     buildKeyvaultRead, TIMEOUT_LOCAL_MS, TIMEOUT_AZ_MS, VALUE_ON_STDIN,
     COMMAND_ON_STDIN, quoteForSecurityInteractive,
     runTool, resolveSpawnCommand, buildSpawnInvocation, makeSecretResolver, cmdRun, cmdTask, cmdLaunch,
