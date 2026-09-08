@@ -1,7 +1,8 @@
 # Routing Guide — When to Use What
 
-Quick decision tree for the project-scoped `vc-qa` surface under `.claude/` — **31 commands, 41 skills,
-17 agents**, auto-discovered in this repo with no plugin manifest.
+Quick decision tree for the project-scoped `vc-qa` surface under `.claude/` — commands, skills and
+agents auto-discovered in this repo with no plugin manifest (`ls .claude/{commands,skills,agents}` for the
+live counts; they are never transcribed here — `CLAUDE.md` §Where the rules live).
 
 **Standing up a deployment?** `/project-init` → `/qa-env-check` → `/qa-smoke`.
 **New to the repo, already configured?** `/qa-onboarding` → `/qa-env-check` → `/qa-smoke`.
