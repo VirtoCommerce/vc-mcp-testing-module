@@ -1,30 +1,28 @@
 {
-  "runId": "REG-2026-09-07-2255",
-  "status": "in_progress",
-  "startedAt": "2026-09-07T20:55:02.965Z",
-  "finishedAt": null,
-  "selection": "001 --ids CAT-040,CAT-041,CAT-049 — re-verification after selector + hook-mirror fixes",
+  "runId": "REG-2026-09-08-0931",
+  "status": "completed",
+  "startedAt": "2026-09-08T07:32:13Z",
+  "finishedAt": "2026-09-08T07:39:59Z",
+  "selection": "001 --ids CAT-049 — round 3 re-verification after the marketplace-cache hook patch",
   "env": "vcst",
   "sprint": "Sprint26-17",
-  "note": "Round 2 of repair verification. Round 1 (REG-2026-09-07-2225) BLOCKED all three: CAT-040/041 on an invalid unquoted CSS selector meta[property=og:url]; CAT-049 on a stale duplicate hook copy in plugins/vc-fix/hooks/ that AND-gated against the patched .claude/ copy. Both fixed.",
+  "note": "Round 3, CAT-049 only. Round 2 (REG-2026-09-07-2255) BLOCKED it: the hook that executes is C:/Users/mutyk/.claude/plugins/cache/vc-tools/vc-fix/0.8.7/hooks/enforce-real-user.mjs, not either repo copy, and it lacked the og:/twitter: allowlist entry. That cache copy has now been patched locally (backup .bak-pre-og-20260908-0930) and verified ALLOW by direct invocation. CAT-040/CAT-041 results stay in REG-2026-09-07-2255 and are not re-run.",
   "suites": [
     {
       "id": "001",
       "name": "Catalog Navigation",
       "file": "regression/suites/Frontend/catalog/001-catalog-navigation.csv",
-      "status": "running",
+      "status": "done",
       "browser": "playwright-chrome",
       "agent": "qa-frontend-expert",
-      "testCount": 3,
+      "testCount": 1,
       "layer": "Frontend",
       "pass": 0,
-      "fail": 0,
+      "fail": 1,
       "blocked": 0,
       "skipped": 0,
       "attempts": 1,
       "scopedIds": [
-        "CAT-040",
-        "CAT-041",
         "CAT-049"
       ]
     }
