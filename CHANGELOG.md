@@ -8,6 +8,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Semver 
 
 ---
 
+## The `playwright-firefox` lane is open to click-driven work again — 2026-09-08
+
+Follows the root cause in the entry below. The ban that stood since 2026-06 — *"never schedule a
+click-driven suite on firefox"* — is lifted, and the lane is a full third browser slot.
+
+**One switch, not a scattered edit.** `defaults.firefoxClickOk: true` in `config/test-suites.json` is the
+only thing that decides it. `browserDenyListFor` in `ci/lib/suite-manifest.ts` is the single consumer, and
+`regression:plan`, `ci/run-regression.ts` and `regression:select` all read it instead of re-deriving the
+rule. **Rollback is that one line set to `false`** — no code change, the deny-list returns for every
+click-driven suite, and `scripts/unit/run-plan.test.ts` pins both directions so neither answer can be
+hard-coded again. `clickDriven` stays derived per suite: it is the input to the decision, not the decision.
+
+**PREREQUISITE.** The MCP server must be restarted after `config/mcp-playwright-firefox.config.json` gained
+`widget.windows.window_occlusion_tracking.enabled=false`; the config is read at server start and an
+un-restarted server behaves exactly as before the fix.
+
+Agent-facing instructions updated in step: the firefox box in `.claude/rules/agents.md`,
+`qa-testing-expert` back on `playwright-firefox`, and the exploratory / charter / visual / triage lane
+rules in `qa-exploratory`, `qa-test-plan`, `qa-sbtm`, `qa-test` (SKILL, modes, visual-axis,
+exploratory-lane), `qa-triage-results` and `ROUTING.md` — none of which now excludes the lane.
+
+**What is proven and what is not:** the probe proves the browser (covered rAF 121 vs 0, 6/6 clicks); no
+regression suite has run on the lane since the fix. The first click-driven suite scheduled onto firefox is
+the real confirmation — if clicks time out at "visible, enabled and stable", check the MCP restart first,
+then flip the flag.
+
+---
+
 ## `playwright-firefox` click timeouts — root cause found and fixed in config — 2026-09-08
 
 The lane's `browser_click` timing out on visible, non-moving elements while `browser_type` worked is

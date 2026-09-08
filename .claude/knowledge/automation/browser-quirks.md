@@ -128,12 +128,21 @@ ones did.
 Exit 0 requires the control to pass, the reproducer to stall, and at least one candidate to clear it on every
 attempt — the RESULT line names the winner. **That bar is met (run 4): the pref wins.**
 
-**One step remains before the lane rule changes** — the probe proves the browser, not the pipeline. Restart
-the MCP server, then run ONE click-driven suite on `playwright-firefox` (e.g. `002-product-detail`) with the
-other two lanes busy, so the firefox window is genuinely covered by a real run. If it passes: drop
-`NOT ON playwright-firefox` from the click-driven suites' plan marking, restore firefox as a real third slot,
-reorder `defaults.fallbackChain`, and rewrite the box in `.claude/rules/agents.md` §Parallel Execution.
-Until that suite is green the box stands — a probe is not a run.
+**THE LANE IS OPEN (2026-09-08).** `defaults.firefoxClickOk: true` in `config/test-suites.json`, a rewritten
+firefox box in `.claude/rules/agents.md` (§Parallel Execution), `qa-testing-expert` back on
+`playwright-firefox`, and the exploratory / charter / triage lane rules no longer exclude it. The deny-list
+is not deleted, only switched off: `browserDenyListFor` (`ci/lib/suite-manifest.ts`) is the single consumer
+and `scripts/unit/run-plan.test.ts` pins both directions of the flag.
+
+**What is proven, and what is not.** The probe proves the BROWSER: with the pref, a covered firefox window
+keeps ticking and clicks 6/6. It does not prove the PIPELINE — no regression suite has yet run on the lane
+since the fix. So the first click-driven suite scheduled onto firefox is the real confirmation. Watch it,
+and if clicks time out at *"visible, enabled and stable"*:
+
+1. **Check the MCP restart first.** The config is read at server start; an un-restarted server behaves
+   exactly as before the fix. This is the likeliest cause by far.
+2. **Then flip `defaults.firefoxClickOk` to `false`** — one line, no code change, the deny-list returns for
+   every click-driven suite — and reopen this section with the run id.
 
 **If no candidate clears the reproducer, the fix is not a launch option.** The remaining lever is the
 actionability wait itself — a force-click skips the stable check entirely — which is an `@playwright/mcp`
