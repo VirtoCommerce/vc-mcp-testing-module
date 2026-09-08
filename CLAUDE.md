@@ -88,6 +88,8 @@ Registration/Auth, Catalog/Facets, Cart (variations, BOPIS), Search, Addresses, 
 - **On demand** (`.claude/knowledge/**`, `.claude/skills/*/` supporting files, `.claude/commands/*.md`): loaded when a step reads it. Task-conditional rules live here and are **cited** from the tier above, never restated.
 - **Never loaded** (`docs/decisions/`): the measured rationale, incident post-mortems and retired designs. Read by humans deciding whether to change something.
 
+**Enforced, not advisory:** `npm run context:check` (`scripts/maintenance/lint-claude-docs.mjs`) caps this file + `.claude/rules/` at 80,000 chars and any single line at 2,500, and ratchets dangling paths / missing scripts / missing `§` headings across all of `.claude/`; it runs on every PR via `.github/workflows/gates.yml` and inside `npm test`. A breach means *move something down a tier*, never *raise the budget*.
+
 A fact stated once and cited elsewhere does not drift; every contradiction the 2026-09-07 audit found was in a fact that had been restated. Counts (suites, cases, agents…) are never transcribed into prose — run the script that prints them.
 
 ## Detailed References — single sources of truth

@@ -73,6 +73,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const ROOT = process.cwd();
 const OUT = '.claude/knowledge/domain/functionality-map.md';
@@ -364,6 +365,12 @@ const h1 = (text) => (text.match(/^#\s+(.+)$/m) || text.match(/^([A-Z][^\n]{3,80
 function docDate(rel) {
   const m = path.basename(rel).match(/(20[0-9][0-9])-([0-9][0-9])-([0-9][0-9])/);
   if (m) return m[1] + "-" + m[2] + "-" + m[3];
+  // Last-commit date first: an mtime is rewritten by every fresh checkout / line-ending pass, so two
+  // machines refresh the same tree to two different maps (measured 2026-09-08). Git is deterministic.
+  try {
+    const d = execFileSync('git', ['log', '-1', '--format=%cs', '--', rel], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    if (/^20\d\d-\d\d-\d\d$/.test(d)) return d;
+  } catch { /* not a git checkout, or an uncommitted file — fall through */ }
   try {
     return fs.statSync(abs(rel)).mtime.toISOString().slice(0, 10);
   } catch {
@@ -837,7 +844,11 @@ if (MODE === 'check') {
   process.exit(0);
 }
 
-fs.writeFileSync(abs(OUT), rendered, 'utf8');
+const renderedLF = rendered.replace(/\r\n/g, '\n');
+const previous = readIf(OUT);
+// Same content ⇒ keep the existing Rev stamp: a refresh that changed nothing must not produce a diff.
+const output = previous !== null && strip(previous) === strip(renderedLF) ? previous.replace(/\r\n/g, '\n') : renderedLF;
+fs.writeFileSync(abs(OUT), output, 'utf8');
 console.log(
   `map:refresh — wrote ${OUT}\n` +
     `  ${domains.length} domains · ${suites.length} suites · ${baDocs.length} BA docs ` +
