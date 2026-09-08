@@ -1,6 +1,6 @@
 # Coverage Gap Methodology
 
-Contract for `/qa-coverage-gap` and `/qa-coverage-generation`. Defines gap detection, scoring, and generation rules. The format contract for generated cases lives in [`test-case-template.md`](../qa-test-cases-generator/test-case-template.md) — this file does not redefine columns or tags.
+Contract for `/qa-coverage-gap`. Defines gap detection, scoring, and generation rules. The format contract for generated cases lives in [`test-case-template.md`](../qa-test-cases-generator/test-case-template.md) — this file does not redefine columns or tags.
 
 ## Gap Detection Heuristics
 
@@ -154,3 +154,83 @@ Per `.claude/rules/test-data.md`:
 | `random-data` | `scripts/lib/random-data.ts` | Unique inputs (emails, org names, comments) — `AGENT-TEST-` prefix by default |
 
 The decision tree is in [`knowledge/execution/live-discovery.md`](../../knowledge/execution/live-discovery.md) — consult before authoring any case that touches a product, address, cart, coupon, or user entity.
+
+---
+
+## `gap-inventory.json` — record schema and Step-1 contract
+
+> Moved verbatim on 2026-09-08 from the removed `/qa-coverage-generation` command (its orchestrated multi-agent mode had zero recorded runs; `/qa-coverage-gap` is now the one coverage pipeline). The heading below keeps its original step number.
+
+## Pre-Flight (run before Step 1)
+
+Per `.claude/templates/agent-dispatch.md` § Pre-Flight Checklist:
+
+1. **Duplicate-run guard** — read `reports/coverage/` for runs in the last 7 days matching the requested scope. If a match exists, warn the user and ask before continuing.
+2. **Environment health** — `curl -sk {BACK_URL}/health` (CI may skip; record verdict).
+3. **Manifest sanity** — confirm `config/test-suites.json` loads, `_meta.version >= 3.0`, and selection rule for the requested scope resolves (use `npm run suites:sync --dry-run` if available).
+4. **Budget guard (CI mode)** — fail-fast if `MAX_BUDGET_USD` is unset or `< 5.0`. Default cap: $10 for `p0`, $25 for `p1`, $50 for `full`.
+5. **Sprint-plan resolution (`sprint` scope only)** — read the latest `vc/shared/docs/Sprint plans/sprint-*-summary.json` and extract `domainsAffected[]` and `suitesActivated[]`. Treat those as the gap-analysis scope filter.
+
+If any check fails, surface the failure to the user with a one-line summary and ask whether to proceed.
+
+---
+
+## Execution Pipeline
+
+### Step 1 — Centralized Gap Analysis (NEVER delegate)
+
+Gap analysis runs once in the orchestrator. Sub-agents consume the inventory; they do **not** re-read suites.
+
+**Sources (read in this order):**
+
+1. **Current regression coverage** — every suite CSV referenced in `config/test-suites.json` (`suites[*].file`). Routing fields: `domain`, `layer`, `concern`, `priority`.
+2. **Baseline TestRail exports** — `test-suites ( export from Test-rail )/` (Frontend26-02, frontend-26-01, suites/, Backend (admin site)/, E2E/) — flag `MIGRATION_GAP` / `SHALLOW_MIGRATION` per `coverage-gap-methodology.md` §1b.
+3. **Feature inventory** — all of:
+   - `knowledge/oracles/business-logic.md` (`BL-*` invariants)
+   - `knowledge/oracles/e-commerce-edge-cases-library.md` (`ECL-*`)
+   - `knowledge/domain/sitemap.md`
+   - `knowledge/execution/module-suite-map.md`
+   - `knowledge/api/graphql-schema.md`
+   - `knowledge/domain/products.md`, `catalog.md`, `store-settings.md`
+   - `skills/qa-plan/e2e-scenario-catalog.md` (105 E2E scenarios)
+   - `skills/qa-checklist/domain-checklists.md` (UI/UX)
+   - `skills/qa-checklist/backend-admin-checklists.md`
+   - `skills/qa-checklist/graphql-checklist.md`
+   - `skills/qa-api/xapi-query-ref.md`
+   - `skills/qa-api/test-cases-api-graphql.md`
+   - `skills/qa-coverage-gap/feature-domain-map.md`
+4. **Live VC documentation (VirtoOZ MCP — primary)** — for each manifest domain in scope, pick the narrowest topic-scoped tool:
+   - `mcp__claude_ai_VirtoOZ_for_virtocommerce_com_docs__PlatformUserGuide` — admin/back-office flows (catalog, marketing, customer, order management)
+   - `mcp__claude_ai_VirtoOZ_for_virtocommerce_com_docs__PlatformDeveloperGuide` — REST/GraphQL APIs, modules, extensibility, CLI, VC Cloud
+   - `mcp__claude_ai_VirtoOZ_for_virtocommerce_com_docs__StorefrontUserGuide` — shopper-facing flows (browse, search, cart, checkout, account)
+   - `mcp__claude_ai_VirtoOZ_for_virtocommerce_com_docs__StorefrontDeveloperGuide` — vc-frontend (Vue 3 / TS / Tailwind / GraphQL) implementation
+   - `mcp__claude_ai_VirtoOZ_for_virtocommerce_com_docs__B2BExperts` — B2B-specific guidance (orgs, approval workflows, quotes, quick-order)
+   - `mcp__claude_ai_VirtoOZ_for_virtocommerce_com_docs__MarketplaceUserGuide` / `…__MarketplaceDeveloperGuide` — marketplace ops/dev
+   - `mcp__claude_ai_VirtoOZ_for_virtocommerce_com_docs__DeploymentGuide` — deployment, infra, Azure, Docker, Kubernetes
+   - `mcp__claude_ai_VirtoOZ_for_virtocommerce_com_docs__PlatformBackendSourceCode` / `…__PlatformFrontendSourceCode` / `…__FrontendSourceCode` — source-code lookup
+   - `mcp__claude_ai_VirtoOZ_for_virtocommerce_com_docs__VirtoCommerce` — general fallback (product/architecture/case-study questions)
+   - All tools accept `{ query, top_k: 3-5 }`. See `agent-dispatch.md` § "Sample Queries by Domain" for query stems and full routing rules in `skills/vc-docs/SKILL.md`.
+   - **Context7 fallback** — if VirtoOZ returns thin/off-topic chunks: `mcp__context7__resolve-library-id { libraryName: "virtocommerce" }` → `/virtocommerce/vc-docs`, then `mcp__context7__query-docs { libraryId, query, tokens: 8000 }`.
+   - Flag features documented in VC docs but absent from current regression coverage.
+
+**Output (Definition of Done for Step 1):**
+
+- `reports/coverage/{RUN_ID}/gap-inventory.json` — one record per gap:
+  ```json
+  {
+    "gapId": "GAP-001",
+    "manifestDomain": "purchase-flow",
+    "feature": "Cart line-item quantity stepper",
+    "gapCategory": "SHALLOW_HAPPY|MISSING_NEGATIVE|MIGRATION_GAP|...",
+    "priorityScore": 8.4,
+    "priority": "P0|P1|P2",
+    "applicableLayers": ["storefront","graphql","e2e"],
+    "targetSuites": ["028","029","050b1"],
+    "businessRules": ["BL-CART-003"],
+    "edgeCases": ["ECL-PAY-002"],
+    "context7Findings": "…",
+    "source": "live-coverage|testrail-export|knowledge-file|vc-docs"
+  }
+  ```
+- A short markdown digest at `reports/coverage/{RUN_ID}/gap-analysis.md` (top 20 gaps, totals per priority, per manifest domain, per gap category).
+

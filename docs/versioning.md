@@ -50,7 +50,6 @@ These are the artifacts customers will reference in their own docs, training, an
 
 | Artifact | Contract |
 |----------|----------|
-| `skills/qa-process/test-process-lifecycle.md` | The 7 phases, their entry/exit criteria, and the phase-to-skill mapping table. |
 | `skills/qa-test-cases-generator/test-case-template.md` | The 15-column Enriched CSV format. Column names, semantics, order. |
 | `skills/qa-evidence/evidence-capture-policy.md` | Evidence capture rules, retention, naming. |
 | `skills/qa-defect/defect-lifecycle-workflow.md` | JIRA Bug Workflow states + transitions, severity-to-priority mapping. |
