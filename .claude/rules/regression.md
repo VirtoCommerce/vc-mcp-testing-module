@@ -176,8 +176,9 @@ Suite selection accepts group names (`smoke`, `critical`, `catalog`, `orders`, e
 
 **Note:** The CI `run-regression.ts` dynamically loads suite definitions from `config/test-suites.json` at startup. Selection groups are also defined in the manifest's `selections` block.
 
-**Pipeline triggers (GitHub Actions - `.github/workflows/regression.yml`):**
-- **Manual only, today.** Every run is a `workflow_dispatch` (any selection, environment, budget). The two `cron:` lines — daily smoke Mon-Fri 06:00 UTC on suite 042 ($5), weekly full Sunday 02:00 UTC ($80; the derived budget is $144, see `ci/lib/suite-caps.ts`) — are **commented out** in the workflow, as are the schedules in `suite-audit.yml`, `monitor.yml`, `auto-fix.yml` and `full-cycle.yml`. No headless run has ever completed unattended (audit 2026-09-07 §4b, D9). Re-enabling a schedule means uncommenting its `cron:` line, nothing else; until then do not describe these runs as happening.
+**There is no regression GitHub Actions workflow.** `regression.yml` was **removed 2026-09-08** — it ran exactly once, on 2026-02-11, from a schedule that was later commented out, and that run **failed** after 72 s. It never ran manually and never succeeded, so it documented a capability the team does not have. **The RUNNER is unaffected:** `ci/run-regression.ts` is invoked by `npm run ci:regression`, by the Docker image above, and by `full-cycle.yml` Phase 2.
+
+The remaining pipelines (`suite-audit.yml`, `monitor.yml`, `auto-fix.yml`, `full-cycle.yml`) still have every `cron:` **commented out**, so nothing in `ci/` runs unattended (audit 2026-09-07 §4b, D9). Re-enabling one means uncommenting its `cron:` line; until then do not describe those runs as happening.
 
 **Teams Notifications:** After each pipeline run, `ci/notify-teams.ts` sends an Adaptive Card to the configured Teams webhook. Requires `TEAMS_WEBHOOK_URL` secret.
 
