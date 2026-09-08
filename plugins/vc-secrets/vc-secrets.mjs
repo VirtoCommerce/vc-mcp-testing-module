@@ -598,6 +598,15 @@ async function resolveEnvEntries(name, cfg, resolveSecret, kind = "servers") {
             entries.push({ envVar, literal: parseLiteral(value) });
             continue;
         }
+        if (ref.kind === "oauth") {
+            // Before the secrets lookup, not after: the two kinds share one name space and nothing
+            // refuses a name held by both, so falling through would resolve the same-named secret and
+            // hand its value to a variable that asked for a token.
+            if (!Object.hasOwn(cfg.oauth, ref.name)) {
+                throw new VcSecretsError(`env ${envVar}: undeclared oauth entry "${ref.name}" — declare it in the "oauth" section of ${CONFIG_NAME}`);
+            }
+            throw new VcSecretsError(`env ${envVar}: oauth entry "${ref.name}" cannot be resolved — this build declares oauth entries but does not yet acquire tokens for them`);
+        }
         if (!Object.hasOwn(cfg.secrets, ref.name)) {
             throw new VcSecretsError(`env ${envVar}: undeclared secret "${ref.name}"`);
         }
@@ -1687,7 +1696,9 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
                 try {
                     ref = parseReference(value);
                 } catch { /* reported as a FAIL above */ }
-                if (ref === null || reported.has(ref.name)) {
+                // An oauth reference is filtered by kind rather than by the lookup below: a name held
+                // by both kinds would find the secret and report a grant the reference never needed.
+                if (ref === null || ref.kind !== "secret" || reported.has(ref.name)) {
                     continue;
                 }
                 const sdecl = cfg.secrets[ref.name];

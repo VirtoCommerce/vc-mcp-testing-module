@@ -121,12 +121,16 @@ environment does not help there; that case wants a git credential helper, not th
 
 - A pinned version belongs here, not in `.mcp.json` — this file is the single source of a wrapped
   server's argv.
-- **Every `env` value carries its kind**: `secret:<name>` for a reference, `literal:<value>` for a
-  constant. Anything else is refused when the declaration loads. A pasted credential has no shape it can
-  hide in — the reader who forgets the prefix gets an error, not a plaintext token in the file this tool
-  exists to empty. It also ends the near-miss family: `secrets:<name>` with the plural no longer means
-  anything, so it cannot be silently accepted as a constant.
+- **Every `env` value carries its kind**: `secret:<name>` for a reference, `oauth:<name>` for a token
+  acquired by signing in, `literal:<value>` for a constant. Anything else is refused when the
+  declaration loads. A pasted credential has no shape it can hide in — the reader who forgets the prefix
+  gets an error, not a plaintext token in the file this tool exists to empty. It also ends the near-miss
+  family: `secrets:<name>` with the plural no longer means anything, so it cannot be silently accepted
+  as a constant.
 - `secret:<name>` resolves the whole value; `secret:<name>.<field>` needs `"format": "json"`.
+- `oauth:<name>` takes no `.<field>` — a token is not a JSON document. **This build accepts and
+  validates `oauth` declarations but does not yet acquire tokens**, so launching a server that
+  references one fails with a message saying exactly that.
 - `literal:` is stripped once: `literal:literal:x` sets the value `literal:x`.
 - The rule covers `env`, which is where a credential belongs if it must be given to a process at all.
   `args` stay free text — a token there would be visible in the machine's process list anyway, so it is

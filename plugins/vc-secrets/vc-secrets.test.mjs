@@ -1339,6 +1339,47 @@ test("readEnableLists: non-object env (null / array) yields no key names", () =>
     }
 });
 
+// A name held by BOTH kinds. Nothing refuses one, and every site that reaches for cfg.secrets by a
+// reference's name alone finds the secret — which is why each of them is asserted against this shape
+// rather than against an oauth-only config, where the lookup misses and the bug hides.
+function collidingPaths(envValue) {
+    return scopedPaths({
+        user: { secrets: { ado: { backend: "local" } } },
+        project: {
+            projectId: "proj-x",
+            oauth: { ado: OAUTH_DECL },
+            servers: { s: { command: "npx", args: [], env: { ADO_TOKEN: envValue } } },
+        },
+    });
+}
+
+test("resolveEnvEntries: an oauth reference never resolves a same-named secret", async () => {
+    let asked = 0;
+    const cfg = m.loadConfig(collidingPaths("oauth:ado"));
+    await assert.rejects(() => m.resolveEnvEntries("s", cfg, async () => { asked += 1; return "PLAINTEXT"; }),
+        /oauth entry "ado" cannot be resolved/);
+    assert.equal(asked, 0, "the secret resolver is never reached");
+});
+
+test("resolveEnvEntries: an undeclared oauth reference is named as an oauth entry, not as a secret", async () => {
+    // The name is a declared SECRET here, so a kind-blind lookup would accept it and resolve that
+    // secret; the message has to say which section the missing declaration belongs in.
+    const cfg = m.loadConfig(collidingPaths("oauth:nope"));
+    await assert.rejects(() => m.resolveEnvEntries("s", cfg, async () => "PLAINTEXT"),
+        /undeclared oauth entry "nope"/);
+});
+
+test("doctorReport: an oauth reference sharing a user-scope secret's name reports no grant", () => {
+    // The crossing loop looked the name up in cfg.secrets, found the user-scope secret, and printed
+    // the authorization FAIL for it — advising a grant for a reference that needs none, and exiting 1
+    // on a legal config.
+    const lines = crossingReport(m.loadConfig(collidingPaths("oauth:ado"))).join("\n");
+    assert.doesNotMatch(lines, /not authorized/);
+    // The positive control: the same fixture with a secret reference DOES report the crossing, so a
+    // loop that reported nothing at all would not satisfy this pair.
+    assert.match(crossingReport(m.loadConfig(collidingPaths("secret:ado"))).join("\n"), /not authorized/);
+});
+
 const CONSUMED_LISTS = { enabled: ["srv"], disabled: [], envKeys: [] };
 
 function consumedFixture(envValue) {
@@ -1361,6 +1402,16 @@ test("consumedSecrets: an oauth reference does not consume a same-named secret, 
 test("consumedSecrets: a secret reference on an enabled server is still consumed", () => {
     // The positive control: without it an empty body satisfies the test above.
     assert.deepEqual([...m.consumedSecrets(consumedFixture("secret:ado"), CONSUMED_LISTS, new Set())], ["ado"]);
+});
+
+test("consumedSecrets: a wired server counts as enabled without appearing in the enable list", () => {
+    // The two routes into `enabled` are independent: a server wired through this launcher is not
+    // necessarily in settings.local.json, and dropping that half returns its Key Vault secret to SKIP.
+    // The fixture carries no task, because the task route passes enabled unconditionally and would
+    // supply the name on its own — leaving nothing for `wired` to decide.
+    const cfg = { ...consumedFixture("secret:ado"), tasks: {} };
+    const lists = { enabled: [], disabled: [], envKeys: [] };
+    assert.deepEqual([...m.consumedSecrets(cfg, lists, new Set(["srv"]))], ["ado"]);
 });
 
 test("doctorReport: a legacy token in settings.local.json is reported even when absent from the session env", () => {
