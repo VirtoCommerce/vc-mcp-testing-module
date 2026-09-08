@@ -56,3 +56,11 @@ test('THIS checkout: always-loaded set within budget, no line over the cap, no r
   assert.ok(r.ratchet.ok, `doc-integrity ratchet regressed: ${JSON.stringify(r.ratchet.over)} — fix the new findings (npm run context:check) or, if deliberate, explain and raise BASELINE`);
   for (const k of Object.keys(BASELINE)) assert.ok(r.counts[k] <= BASELINE[k], k);
 });
+
+test('every path the linter emits is posix — no path.sep leaks (the 2026-09-08 windows-latest red leg)', () => {
+  const r = lint(ROOT);
+  const all = [...alwaysLoadedFiles(ROOT), ...r.budget.perFile.map((p) => p.file), ...r.skillsOver.map((s) => s.file), ...r.findings.map((x) => x.file)];
+  assert.ok(all.length > 0);
+  for (const p of all) assert.ok(!p.includes('\\'), `backslash in emitted path: ${p}`);
+  assert.ok(alwaysLoadedFiles(ROOT).slice(1).every((f) => f.startsWith('.claude/rules/')));
+});

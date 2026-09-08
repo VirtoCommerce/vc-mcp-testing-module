@@ -39,10 +39,12 @@ export const BASELINE = { 'DOC-002': 4, 'DOC-003': 45, 'DOC-004': 22 };
 export const GENERIC_SCRIPTS = new Set(['build', 'dev', 'lint', 'test', 'start', 'typecheck', 'storybook', 'preview', 'format', 'install', 'serve', 'watch']);
 export const PLACEHOLDER_RE = /XX|YYYY|NNN|<[^>]*>|\*|\{|Sprint-current|\.\.\.|…/;
 
+export const posix = (p) => p.split(path.sep).join('/');
+
 export function alwaysLoadedFiles(root = '.') {
   const rules = path.join(root, '.claude', 'rules');
   const list = ['CLAUDE.md'];
-  if (fs.existsSync(rules)) for (const f of fs.readdirSync(rules).sort()) if (f.endsWith('.md')) list.push(path.join('.claude', 'rules', f));
+  if (fs.existsSync(rules)) for (const f of fs.readdirSync(rules).sort()) if (f.endsWith('.md')) list.push(`.claude/rules/${f}`);
   return list;
 }
 
@@ -81,7 +83,7 @@ function walkMd(dir) {
   const out = [];
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) out.push(...walkMd(p)); else if (e.name.endsWith('.md')) out.push(p);
+    if (e.isDirectory()) out.push(...walkMd(p)); else if (e.name.endsWith('.md')) out.push(posix(p));
   }
   return out;
 }
@@ -117,7 +119,7 @@ export function lint(root = '.') {
         }
         for (const m of l.matchAll(SEC_RE)) {
           let t = m[1];
-          if (!/^(\.claude|docs|scripts|ci|config)\//.test(t)) t = path.normalize(path.join(path.dirname(f), t));
+          if (!/^(\.claude|docs|scripts|ci|config)\//.test(t)) t = posix(path.normalize(path.join(path.dirname(f), t)));
           const hs = headsOf(t);
           if (!hs) continue;                                      // DOC-003 owns a missing file
           const q = norm(m[2]).slice(0, 25);
