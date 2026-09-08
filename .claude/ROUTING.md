@@ -26,7 +26,7 @@ Quick decision tree for the project-scoped `vc-qa` surface under `.claude/` — 
 | **Autonomously fix a filed bug** | `/qa-fix VCST-XXXX` | Command |
 | **Verify a bug fix** | `/qa-verify-fix VCST-XXXX` | Command |
 | **Deploy a PR's prerelease artifacts to a test env** | `/qa-deploy-pr <ticket-key> [--apply] [--verify]` | Command |
-| **Check a stable bundle for missed hotfixes** | `/qa-bundle-check vN \| <package.json-url>` | Skill |
+| **Check a stable bundle for missed hotfixes** | `/qa-bundle-check vN \| <package.json-url>` | Command |
 | **Release a hotfix into stable bundles** | `/qa-hotfix VCST-XXXX [bundles] [--dry-run]` | Command |
 | **Deliver a released hotfix onto the deployed envs** | `/qa-hotfix-check VCST-XXXX [--envs=…] [--dry-run]` | Command |
 | **Monitor live errors (App Insights)** | `/qa-monitoring [frontend\|backend\|both] [--since=MIN] [--dry-run]` | Command |
@@ -104,7 +104,7 @@ Quick decision tree for the project-scoped `vc-qa` surface under `.claude/` — 
 - `/qa-design` — Dual Storybook + Storefront BL-UI audit, design-system consistency, UX heuristics, and the **`vs. DESIGN` axis** (tokens / control geometry / icon name→glyph parity vs a Claude Design project via `DesignSync`; reports `SKIPPED`, never PASS, where `/design-login` is unavailable)
 - `/qa-api` — REST + GraphQL xAPI: reference lookup, execution, case generation
 - `/code-review-full` — 9 parallel review agents over a diff **of this repo** — not a QA flow against the VC platform
-- `/qa-perf-measure`, `/qa-monitoring`, `/qa-triage-results`, `/qa-deploy-pr`, `/qa-hotfix`, `/qa-hotfix-check`, `/qa-local-env` — the skills backing the same-named commands above; `/qa-bundle-check` is skill-only
+- `/qa-perf-measure`, `/qa-monitoring`, `/qa-triage-results`, `/qa-deploy-pr`, `/qa-hotfix`, `/qa-hotfix-check`, `/qa-bundle-check`, `/qa-local-env` — the skills backing the same-named commands above
 
 ### Development (Skills — used by the `developers/` team in `/qa-fix`)
 - `/dotnet-unit-test` — Reproduce a backend bug as a failing xUnit test (red → green)
