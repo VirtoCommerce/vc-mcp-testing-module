@@ -91,6 +91,24 @@ const BT = String.fromCharCode(96); // backtick, kept out of template literals
 const argv = process.argv.slice(2);
 const MODE = argv.includes('--check') ? 'check' : argv.includes('--json') ? 'json' : 'refresh';
 
+/*
+ * Document dates come from `git log -1 -- <path>`. On a SHALLOW clone that returns the shallow-boundary
+ * commit, not the true last touch — plausible, wrong, and different from every other machine. Measured
+ * 2026-09-08: a 91-commit clone dated one BA doc 2026-08-20 (CI, full history: 2026-08-19) and another
+ * 2026-08-10 (the clone's horizon; truth 2026-06-08), so `map:check` was green locally and red in CI with
+ * nothing to point at. Refuse rather than guess — exit 2 is the repo's "source unreadable" code.
+ */
+function assertFullHistory() {
+  let shallow = 'false';
+  try { shallow = execFileSync('git', ['rev-parse', '--is-shallow-repository'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
+  catch { return; } // not a git checkout at all: docDate() already falls back to mtime and says nothing about history
+  if (shallow === 'true') {
+    console.error(`map:${MODE === 'check' ? 'check' : 'refresh'} — this is a SHALLOW clone, so document dates cannot be derived reliably (git log stops at the clone horizon). Run \`git fetch --unshallow\` (CI: actions/checkout fetch-depth: 0) and retry.`);
+    process.exit(2);
+  }
+}
+assertFullHistory();
+
 /** A source that cannot be read is exit 2 — never a silent pass. */
 function die(msg) {
   console.error(`map: ${msg}`);
