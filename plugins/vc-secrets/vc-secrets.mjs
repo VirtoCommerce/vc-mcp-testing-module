@@ -51,8 +51,9 @@ function sanitizeEnv(env) {
     return out;
 }
 
-// grammar: "secret:" name [ "." field ]; name [a-z0-9-]+, field [A-Za-z0-9_]+
-const REF_RE = /^secret:([a-z0-9-]+)(?:\.([A-Za-z0-9_]+))?$/;
+// grammar: ("secret" | "oauth") ":" name [ "." field ]; name [a-z0-9-]+, field [A-Za-z0-9_]+
+const REF_RE = /^(secret|oauth):([a-z0-9-]+)(?:\.([A-Za-z0-9_]+))?$/;
+const REF_PREFIXES = ["secret:", "oauth:"];
 // A secret's declared name must be referenceable, so it obeys the same charset REF_RE does.
 const SECRET_NAME_RE = /^[a-z0-9-]+$/;
 // Launchable names are looser (they mirror MCP server names, which do carry dots and capitals), but a
@@ -66,15 +67,19 @@ const PACKAGE_NAME_RE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 const BIN_NAME_RE = /^[a-z0-9][a-z0-9._-]*$/;
 
 function parseReference(value) {
-    if (typeof value !== "string" || !value.startsWith("secret:")) {
+    if (typeof value !== "string" || !REF_PREFIXES.some((prefix) => value.startsWith(prefix))) {
         return null;
     }
     const match = REF_RE.exec(value);
     if (!match) {
-        throw new VcSecretsError(`invalid secret reference syntax: "${value}"`);
+        throw new VcSecretsError(`invalid reference syntax: "${value}"`);
+    }
+    const [, kind, name, field = null] = match;
+    if (kind === "oauth" && field !== null) {
+        throw new VcSecretsError(`invalid reference "${value}": an oauth entry has no fields to select`);
     }
 
-    return { name: match[1], field: match[2] ?? null };
+    return { kind, name, field };
 }
 
 // Every env value carries its kind. The alternative — "anything that is not a `secret:` reference is a
@@ -312,8 +317,8 @@ function validateLaunchables(label, map) {
             if (isDangerousEnvKey(envKey)) {
                 throw new VcSecretsError(`${label} "${name}": env key "${envKey}" is not allowed (code-injection vector)`);
             }
-            if (!value.startsWith("secret:") && parseLiteral(value) === null) {
-                throw new VcSecretsError(`${label} "${name}": env ${envKey} must be "secret:<name>" or "literal:<value>" — an unprefixed value cannot be told apart from a pasted credential`);
+            if (!REF_PREFIXES.some((prefix) => value.startsWith(prefix)) && parseLiteral(value) === null) {
+                throw new VcSecretsError(`${label} "${name}": env ${envKey} must be "secret:<name>", "oauth:<name>" or "literal:<value>" — an unprefixed value cannot be told apart from a pasted credential`);
             }
         }
     }
@@ -1657,8 +1662,9 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
             for (const [envVar, value] of Object.entries(srv.env)) {
                 try {
                     const ref = parseReference(value);
-                    if (ref !== null && !Object.hasOwn(cfg.secrets, ref.name)) {
-                        lines.push(`FAIL ${label} "${srvName}" env ${envVar}: undeclared secret "${ref.name}"`);
+                    const declared = ref === null || Object.hasOwn(ref.kind === "oauth" ? cfg.oauth ?? {} : cfg.secrets, ref.name);
+                    if (!declared) {
+                        lines.push(`FAIL ${label} "${srvName}" env ${envVar}: undeclared ${ref.kind} "${ref.name}"`);
                     }
                 } catch (e) {
                     lines.push(`FAIL ${label} "${srvName}" env ${envVar}: ${e.message}`);

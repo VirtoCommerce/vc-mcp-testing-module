@@ -51,11 +51,11 @@ function scopedPaths({ user, project, local } = {}) {
 }
 
 test("parseReference: plain name", () => {
-    assert.deepEqual(m.parseReference("secret:ado-pat"), { name: "ado-pat", field: null });
+    assert.deepEqual(m.parseReference("secret:ado-pat"), { kind: "secret", name: "ado-pat", field: null });
 });
 
 test("parseReference: name with field", () => {
-    assert.deepEqual(m.parseReference("secret:azure-monitor-sp.tenantId"), { name: "azure-monitor-sp", field: "tenantId" });
+    assert.deepEqual(m.parseReference("secret:azure-monitor-sp.tenantId"), { kind: "secret", name: "azure-monitor-sp", field: "tenantId" });
 });
 
 test("parseReference: non-reference is null (literal passthrough)", () => {
@@ -555,6 +555,46 @@ test("the same oauth name in two scopes is reported as a collision, not silently
     const paths = scopedPaths({ project: decl, local: decl });
     const cfg = m.loadConfig(paths);
     assert.ok(cfg.collisions.some((c) => c.kind === "oauth" && c.name === "ado"));
+});
+
+test("an oauth reference parses to its own kind", () => {
+    assert.deepEqual(m.parseReference("oauth:ado"), { kind: "oauth", name: "ado", field: null });
+});
+
+test("a field accessor on an oauth reference is refused", () => {
+    // A token is not a JSON document; .field on it would silently resolve to undefined.
+    assert.throws(() => m.parseReference("oauth:ado.token"), /no fields to select/);
+});
+
+test("a config carrying an oauth env reference LOADS", () => {
+    // The gate that decides this is validateLaunchables, not parseReference. Constructing cfg by
+    // hand would pass while every real config still failed at load.
+    const cfg = m.loadConfig(scopedPaths({ project: { projectId: "proj-x", oauth: { ado: OAUTH_DECL },
+        servers: { s: { command: "npx", args: [], env: { ADO_TOKEN: "oauth:ado" } } } } }));
+    assert.equal(cfg.servers.s.env.ADO_TOKEN, "oauth:ado");
+});
+
+test("an unprefixed env value is still refused, and so are the near-misses", () => {
+    // parseReference RETURNS NULL for these — it does not throw. The refusal lives in
+    // validateLaunchables, which is where this must be asserted.
+    for (const v of ["oauths:ado", "OAuth:ado", "oauth ado", "plain-value"]) {
+        assert.equal(m.parseReference(v), null, `${v} parses to null`);
+        assert.throws(() => m.loadConfig(scopedPaths({ project: { projectId: "proj-x",
+            servers: { s: { command: "x", args: [], env: { E: v } } } } })), /must be "secret:<name>"/, v);
+    }
+});
+
+test("doctor does not report a valid oauth reference as an undeclared secret", () => {
+    // The undeclared-reference check looked only in cfg.secrets; an oauth ref must be looked up in
+    // cfg.oauth or every correct config reports a FAIL.
+    const cfg = m.loadConfig(scopedPaths({ project: { projectId: "proj-x", oauth: { ado: OAUTH_DECL },
+        servers: { s: { command: "npx", args: [], env: { ADO_TOKEN: "oauth:ado" } } } } }));
+    const lines = crossingReport(cfg);
+    assert.doesNotMatch(lines.join("\n"), /undeclared/);
+    // And the positive control: an oauth ref to a name NOT declared is reported under its own kind.
+    const bad = m.loadConfig(scopedPaths({ project: { projectId: "proj-x", oauth: { ado: OAUTH_DECL },
+        servers: { s: { command: "npx", args: [], env: { ADO_TOKEN: "oauth:nope" } } } } }));
+    assert.match(crossingReport(bad).join("\n"), /undeclared oauth "nope"/);
 });
 
 test("loadConfig: schemaVersion above what the launcher supports → VcSecretsError names the version", () => {
@@ -1928,7 +1968,7 @@ test("an env value that is neither prefix is refused, so a pasted credential can
         assert.throws(() => m.loadConfig(projectPaths({
             secrets: { "ado-pat": { backend: "local" } },
             servers: { s: { command: "x", args: [], env: { TOKEN: value } } } })),
-        /must be "secret:<name>" or "literal:<value>"/, JSON.stringify(value));
+        /must be "secret:<name>", "oauth:<name>" or "literal:<value>"/, JSON.stringify(value));
     }
 });
 
