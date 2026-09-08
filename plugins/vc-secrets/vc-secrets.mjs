@@ -602,7 +602,7 @@ async function resolveEnvEntries(name, cfg, resolveSecret, kind = "servers") {
             // Before the secrets lookup, not after: the two kinds share one name space and nothing
             // refuses a name held by both, so falling through would resolve the same-named secret and
             // hand its value to a variable that asked for a token.
-            if (!Object.hasOwn(cfg.oauth, ref.name)) {
+            if (!Object.hasOwn(cfg.oauth ?? {}, ref.name)) {
                 throw new VcSecretsError(`env ${envVar}: undeclared oauth entry "${ref.name}" — declare it in the "oauth" section of ${CONFIG_NAME}`);
             }
             throw new VcSecretsError(`env ${envVar}: oauth entry "${ref.name}" cannot be resolved — this build declares oauth entries but does not yet acquire tokens for them`);
