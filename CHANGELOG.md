@@ -17,14 +17,15 @@ covered by other windows — which three headed 1920×1080 browsers on one deskt
 no stable wait, so typing kept working. `config/mcp-playwright-firefox.config.json` now sets
 `widget.windows.window_occlusion_tracking.enabled=false` (Playwright already disables Firefox's
 background *timer* throttling, not occlusion). `scripts/maintenance/firefox-click-probe.mjs` A/B-tests
-it on a Windows desktop with `trial: true` clicks (read-only). **Runs 1–2 were invalid** — the target was the
-storefront's off-viewport `skip-link` (every engine, Chromium included, looped on "element is outside of the
-viewport") and the cover window landed on the other monitor of a dual-head desk. They did rule out rect
-jitter (1 distinct rect in 12 frames everywhere), and one accidental full cover reproduced the symptom
-exactly: rAF 0 and a stall at "visible, enabled and stable". v3 marks the first link inside the viewport,
-places the cover on the subject's own monitor, flags a missed cover, and requires both halves — default
-stalls covered, pref-off clicks covered — to exit 0. The "never schedule a click-driven suite on firefox"
-rule stays until it does.
+it on a Windows desktop with `trial: true` clicks (read-only). **Runs 1–2 were invalid** (the target was the storefront's
+off-viewport `skip-link`; the cover landed on the other monitor of a dual-head desk). **Run 3 was valid and
+overturned the occlusion theory**: plain Firefox clicked in 96 ms while fully covered with rAF at 0, so the
+pref is not the fix — it stays only as one fewer way to stop the refresh driver. The same run found a
+deterministic reproducer: `reducedMotion: 'reduce'` idles the storefront's animations and every click then
+stalls at "waiting for element to be visible, enabled and stable", covered and uncovered, on an element
+Chromium clicks in 40 ms. Probe v4 is built around it — controls, the reproducer, and three candidate fixes
+(keepalive animation, headless, the pref), each clicked 3× with the rAF rate recorded before every attempt.
+The "never schedule a click-driven suite on firefox" rule stays until a candidate clears the reproducer.
 
 ---
 

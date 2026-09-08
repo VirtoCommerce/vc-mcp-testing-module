@@ -116,12 +116,31 @@ const SETTLE_MS = Number(arg('settle', '12000'));
 const JSON_OUT = argv.includes('--json');
 const OCCLUSION_PREF = 'widget.windows.window_occlusion_tracking.enabled';
 
+// v4 is built around the run-3 REPRODUCER. `reducedMotion: 'reduce'` makes the storefront drop its 3
+// animations, the refresh driver goes idle, rAF stops — and the click stalls at "visible, enabled and
+// stable" forever, covered AND uncovered, on an element Chromium clicks in 40 ms. That is the lane's exact
+// signature, on demand, in ONE window. Every row below is that reproducer plus one candidate fix, so a
+// candidate that clears it is a real fix and not a lucky window placement.
+const KEEPALIVE = `@keyframes ffProbeKeepalive{from{opacity:.999}to{opacity:1}}
+html::after{content:"";position:fixed;left:0;top:0;width:1px;height:1px;pointer-events:none;
+animation:ffProbeKeepalive 1s linear infinite}`;
 const VARIANTS = {
-  'firefox-default': { engine: 'firefox', prefs: {}, context: {} },
-  'firefox-pref-off': { engine: 'firefox', prefs: { [OCCLUSION_PREF]: false }, context: {} },
-  'firefox-reduced-motion': { engine: 'firefox', prefs: {}, context: { reducedMotion: 'reduce' } },
-  'chromium-control': { engine: 'chromium', prefs: {}, context: {} },
+  // Controls: what "working" looks like on this machine.
+  'chromium-control': { engine: 'chromium', context: {} },
+  'firefox-default': { engine: 'firefox', context: {} },
+  // THE REPRODUCER — expected to FAIL. If it passes, the storefront changed; re-derive before trusting v4.
+  'ff-repro-reducedmotion': { engine: 'firefox', context: { reducedMotion: 'reduce' } },
+  // Candidate A — keep the refresh driver alive with a 1px infinite animation injected before any page JS.
+  // If the mechanism is "rAF stops", this is the fix that does not depend on WHY it stopped.
+  'ff-repro+keepalive': { engine: 'firefox', context: { reducedMotion: 'reduce' }, keepalive: true },
+  // Candidate B — headless: no window, so no occlusion and no compositor idling tied to a visible surface.
+  'ff-repro+headless': { engine: 'firefox', context: { reducedMotion: 'reduce' }, headless: true },
+  // Candidate C — the occlusion pref now in config/mcp-playwright-firefox.config.json, ON TOP of the
+  // reproducer. Run 3 already showed it is not the lane fix (default clicked fine fully covered, rAF 0);
+  // this row says whether it helps at all.
+  'ff-repro+pref-off': { engine: 'firefox', context: { reducedMotion: 'reduce' }, prefs: { [OCCLUSION_PREF]: false } },
 };
+const REPEAT = Number(arg('repeat', '3'));
 const wanted = arg('variant', 'all');
 const variantNames = wanted === 'all' ? Object.keys(VARIANTS) : wanted.split(',').map((s) => s.trim()).filter(Boolean);
 for (const v of variantNames) if (!VARIANTS[v]) { console.error(`Unknown variant "${v}". Known: ${Object.keys(VARIANTS).join(', ')}`); process.exit(2); }
@@ -166,14 +185,34 @@ async function rectJitter(target) {
     .catch((e) => ({ error: firstLine(e) }));
 }
 
-async function trialClick(target) {
-  const t0 = Date.now();
-  try {
-    await target.click({ trial: true, timeout: 5000 });
-    return { ok: true, ms: Date.now() - t0 };
-  } catch (e) {
-    return { ok: false, ms: Date.now() - t0, log: callLog(e) };
+// rAF ticks in a 500 ms window — sampled immediately BEFORE each click so the two are correlated per
+// attempt, not per phase. Run 3's covered firefox-default measured 0 ticks in one phase and clicked fine
+// in the next, which a per-phase number cannot explain and a per-attempt one can.
+async function rafBurst(page) {
+  return page.evaluate(() => new Promise((resolve) => {
+    let n = 0;
+    const t0 = performance.now();
+    const step = () => { n++; if (performance.now() - t0 < 500) requestAnimationFrame(step); else resolve(n); };
+    requestAnimationFrame(step);
+    setTimeout(() => resolve(n), 1500);
+  })).catch(() => -1);
+}
+
+// Repeat the trial click: the lane failure was reported as intermittent, so one attempt cannot separate
+// "fixed" from "got lucky". Each attempt carries the rAF rate that preceded it.
+async function clickPhase(page, target, n = REPEAT) {
+  const attempts = [];
+  for (let i = 0; i < n; i++) {
+    const preRaf = await rafBurst(page);
+    const t0 = Date.now();
+    try {
+      await target.click({ trial: true, timeout: 5000 });
+      attempts.push({ ok: true, ms: Date.now() - t0, preRaf });
+    } catch (e) {
+      attempts.push({ ok: false, ms: Date.now() - t0, preRaf, log: callLog(e) });
+    }
   }
+  return { attempts, allOk: attempts.every((a) => a.ok), anyOk: attempts.some((a) => a.ok) };
 }
 
 const results = [];
@@ -183,8 +222,9 @@ for (const name of variantNames) {
   let browser, cover;
   try {
     const type = v.engine === 'firefox' ? firefox : chromium;
-    browser = await type.launch({ headless: false, ...(v.engine === 'firefox' ? { firefoxUserPrefs: v.prefs } : {}) });
+    browser = await type.launch({ headless: !!v.headless, ...(v.engine === 'firefox' ? { firefoxUserPrefs: v.prefs ?? {} } : {}) });
     const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 }, locale: 'en-US', ...v.context });
+    if (v.keepalive) await ctx.addInitScript(`document.addEventListener('DOMContentLoaded',()=>{const s=document.createElement('style');s.textContent=${JSON.stringify(KEEPALIVE)};document.head.appendChild(s);});`);
     const page = await ctx.newPage();
     await page.goto(URL_, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     row.ua = await page.evaluate(() => navigator.userAgent);
@@ -212,8 +252,9 @@ for (const name of variantNames) {
       row.animations = await page.evaluate(() => document.getAnimations().length).catch(() => 'n/a');
       row.foregroundRaf = await rafStats(page);
       row.foregroundJitter = await rectJitter(target);
-      row.foregroundClick = await trialClick(target);
+      row.foregroundClick = await clickPhase(page, target);
 
+      if (v.headless) { row.coveredRaf = { ticks: -1 }; row.coveredJitter = undefined; }
       // Occlude with a kiosk Chromium window on the SUBJECT'S monitor (its screen origin), sized to that
       // screen — full-screen, above the taskbar, launched AFTER the subject so it lands on top. Occlusion
       // tracking needs FULL coverage; on a two-monitor desk a cover at 0,0 lands on the wrong screen (run 2).
@@ -221,16 +262,16 @@ for (const name of variantNames) {
       const coverPage = await (await cover.newContext({ viewport: null })).newPage();
       await coverPage.goto('about:blank');
       await new Promise((r) => setTimeout(r, SETTLE_MS));
-      row.coveredRaf = await rafStats(page);
+      if (!v.headless) row.coveredRaf = await rafStats(page);
       // A firefox window that is really covered stops ticking (runs 1–2: 121 when the cover missed, 0 when it
       // landed). With the occlusion pref OFF it keeps ticking by design, so the check applies to the others.
-      row.coverMissed = v.engine === 'firefox' && !v.prefs[OCCLUSION_PREF] && (row.coveredRaf.ticks ?? 0) > 20;
-      row.coveredJitter = await rectJitter(target);
-      row.coveredClick = await trialClick(target);
+      row.coverMissed = !v.headless && v.engine === 'firefox' && !(v.prefs ?? {})[OCCLUSION_PREF] && (row.coveredRaf?.ticks ?? 0) > 20;
+      if (!v.headless) row.coveredJitter = await rectJitter(target);
+      row.coveredClick = v.headless ? undefined : await clickPhase(page, target);
 
       await cover.close(); cover = undefined;
       await new Promise((r) => setTimeout(r, 1500));
-      row.uncoveredClick = await trialClick(target);
+      row.uncoveredClick = await clickPhase(page, target);
     }
   } catch (e) {
     row.fatal = firstLine(e);
@@ -241,48 +282,59 @@ for (const name of variantNames) {
   results.push(row);
 }
 
-const fmtClick = (c) => (!c ? '—' : c.ok ? `OK ${c.ms} ms` : `TIMEOUT ${c.ms} ms`);
+// e.g. "OK OK OK (raf 60/61/60)" or "TO TO TO (raf 0/0/0)" — the rAF rate that preceded each attempt.
+const fmtClick = (c) => (!c ? 'n/a' : `${c.attempts.map((a) => (a.ok ? 'OK' : 'TO')).join(' ')} (raf ${c.attempts.map((a) => a.preRaf).join('/')})`);
 const fmtJ = (j) => (!j ? '—' : j.error ? 'err' : `${j.distinct}/${j.frames}`);
 const fmtRaf = (r, missed) => (!r ? '—' : r.error ? 'err' : `${r.ticks}${r.hidden ? ' hidden' : ''}${missed ? ' COVER MISSED' : ''}`);
 
 if (JSON_OUT) {
   console.log(JSON.stringify({ url: URL_, target: TARGET, platform: process.platform, playwright: pwVersion, playwrightSource: pwSource, settleMs: SETTLE_MS, results }, null, 2));
 } else {
-  console.log(`firefox-click-probe v3 — ${URL_} — ${process.platform} — playwright ${pwVersion} (${pwSource}) — target "${TARGET}" — settle ${SETTLE_MS} ms\n`);
-  console.log('variant                | fg click        | fg jitter | anim | covered rAF/2s | cov jitter | covered click   | uncovered click');
-  console.log('-----------------------|-----------------|-----------|------|----------------|------------|-----------------|----------------');
+  console.log(`firefox-click-probe v4 — ${URL_} — ${process.platform} — playwright ${pwVersion} (${pwSource}) — target "${TARGET}" — settle ${SETTLE_MS} ms\n`);
+  console.log('variant                 | fg click                | fg jit | covered rAF/2s   | covered click           | uncovered click');
+  console.log('------------------------|-------------------------|--------|------------------|-------------------------|------------------------');
   for (const r of results) {
     if (r.fatal) { console.log(`${r.variant.padEnd(22)} | FATAL: ${r.fatal}`); continue; }
     if (r.targetError) { console.log(`${r.variant.padEnd(22)} | ${r.targetError}`); continue; }
-    console.log(`${r.variant.padEnd(22)} | ${fmtClick(r.foregroundClick).padEnd(15)} | ${fmtJ(r.foregroundJitter).padEnd(9)} | ${String(r.animations).padEnd(4)} | ${fmtRaf(r.coveredRaf, r.coverMissed).padEnd(14)} | ${fmtJ(r.coveredJitter).padEnd(10)} | ${fmtClick(r.coveredClick).padEnd(15)} | ${fmtClick(r.uncoveredClick)}`);
+    console.log(`${r.variant.padEnd(23)} | ${fmtClick(r.foregroundClick).padEnd(23)} | ${fmtJ(r.foregroundJitter).padEnd(6)} | ${fmtRaf(r.coveredRaf, r.coverMissed).padEnd(16)} | ${fmtClick(r.coveredClick).padEnd(23)} | ${fmtClick(r.uncoveredClick)}`);
   }
-  console.log('\n(jitter = distinct rects / frames sampled; 1/12 is a still element. anim = document.getAnimations().length)');
+  console.log('\n(click cells: one OK/TO per attempt + the rAF ticks in the 500 ms before it. jitter = distinct rects / frames; 1/12 = still.)');
   for (const r of results) {
     if (r.fatal || r.targetError) continue;
     console.log(`\n[${r.variant}] ${r.ua}`);
     console.log(`  screen ${r.screen.w}x${r.screen.h} at ${r.screen.left},${r.screen.top} @${r.screen.dpr} | window ${r.screen.win} | inner ${r.screen.inner} | target <${r.target?.tag}> "${r.target?.text}" href=${r.target?.href} rect=${r.target?.rect}`);
     if (r.foregroundJitter && r.foregroundJitter.distinct > 1) console.log(`  jitter fg: first ${r.foregroundJitter.first} → last ${r.foregroundJitter.last}`);
     for (const [label, c] of [['foreground', r.foregroundClick], ['covered', r.coveredClick], ['uncovered', r.uncoveredClick]]) {
-      if (c && !c.ok) { console.log(`  ${label} click call log:`); for (const l of c.log) console.log(`    ${l}`); }
+      const failed = c?.attempts?.find((a) => !a.ok);
+      if (failed) { console.log(`  ${label} click call log (first failing attempt, rAF ${failed.preRaf} in 500 ms):`); for (const l of failed.log) console.log(`    ${l}`); }
     }
   }
 }
 
 const byName = Object.fromEntries(results.map((r) => [r.variant, r]));
-const ok3 = (r) => !!r && !r.fatal && !r.targetError && r.foregroundClick?.ok && r.coveredClick?.ok && r.uncoveredClick?.ok;
-const cr = byName['chromium-control'];
-const dflt = byName['firefox-default'];
-const prefOff = byName['firefox-pref-off'];
-const controlOk = !cr || ok3(cr);
-const occlusionReproduced = !!dflt && !dflt.coverMissed && dflt.foregroundClick?.ok && !dflt.coveredClick?.ok && (dflt.coveredRaf?.ticks ?? 99) <= 20;
-const fixProven = controlOk && ok3(prefOff) && (prefOff.coveredRaf?.ticks ?? 0) > 20;
+const usable = (r) => !!r && !r.fatal && !r.targetError;
+// A candidate passes only if EVERY attempt in every phase it ran passed. `covered` is skipped headless.
+const allOk = (r) => usable(r) && r.foregroundClick?.allOk && (r.coveredClick ? r.coveredClick.allOk : true) && r.uncoveredClick?.allOk;
+const anyFail = (r) => usable(r) && [r.foregroundClick, r.coveredClick, r.uncoveredClick].some((c) => c && !c.allOk);
+const control = byName['chromium-control'];
+const repro = byName['ff-repro-reducedmotion'];
+const candidates = ['ff-repro+keepalive', 'ff-repro+headless', 'ff-repro+pref-off'];
+const controlOk = !control || allOk(control);
+const reproFailed = anyFail(repro);
+const winners = candidates.filter((n) => allOk(byName[n]));
+// The mechanism claim: every failing attempt was preceded by a dead rAF, and no passing one was.
+const attemptsOf = (r) => [r?.foregroundClick, r?.coveredClick, r?.uncoveredClick].filter(Boolean).flatMap((c) => c.attempts);
+const all = results.filter(usable).flatMap(attemptsOf);
+const failsDead = all.filter((a) => !a.ok && a.preRaf >= 0 && a.preRaf <= 2).length;
+const failsTotal = all.filter((a) => !a.ok).length;
+const passesDead = all.filter((a) => a.ok && a.preRaf >= 0 && a.preRaf <= 2).length;
 if (!JSON_OUT) {
   console.log('');
-  if (cr && !controlOk) console.log('RESULT: chromium-control failed — the TARGET is wrong (see its call log); nothing about Firefox was tested. Pass --target <css> for a link you can see.');
-  else if (dflt?.coverMissed) console.log('RESULT: the cover MISSED the firefox window (rAF kept ticking) — re-run; if it keeps missing, drag nothing, just tell me the two monitor layouts.');
-  else if (occlusionReproduced && fixProven) console.log('RESULT: CONFIRMED — covered firefox-default stops ticking and stalls at "visible, enabled and stable"; firefox-pref-off keeps ticking and clicks. The config pref is the fix.');
-  else if (occlusionReproduced) console.log('RESULT: occlusion REPRODUCED on firefox-default, but firefox-pref-off did not pass every condition — read its rows; the pref alone is not enough.');
-  else if (ok3(dflt)) console.log('RESULT: firefox-default clicks under every condition here — the lane failure needs the MCP topology to reproduce; report and stop.');
-  else console.log('RESULT: mixed — attach the full table + call logs to the finding; do not change any lane rule.');
+  console.log(`rAF↔click correlation: ${failsDead}/${failsTotal} failing attempts had a DEAD rAF (≤2 ticks/500 ms) beforehand; ${passesDead} passing attempts did.`);
+  if (control && !controlOk) console.log('RESULT: chromium-control failed — the TARGET is wrong (see its call log); nothing about Firefox was tested. Pass --target <css>.');
+  else if (!usable(repro)) console.log(`RESULT: the reproducer did NOT RUN (${repro?.fatal ?? repro?.targetError ?? 'variant not selected'}) — nothing was tested. Fix that first; a crashed reproducer is not a passing one.`);
+  else if (!reproFailed) console.log('RESULT: the reproducer PASSED — reducedMotion no longer stalls this page (storefront changed?). Nothing to fix against; re-derive the reproducer before trusting any candidate.');
+  else if (winners.length) console.log(`RESULT: CONFIRMED — the reproducer stalls at "visible, enabled and stable" and these clear it every attempt: ${winners.join(', ')}. Apply the first one to config/mcp-playwright-firefox.config.json.`);
+  else console.log('RESULT: reproducer stalls, no candidate clears it — the fix is not a launch option. Report the table; the lane needs a different actionability strategy (e.g. force-click) and the rule stands.');
 }
-process.exit(fixProven && occlusionReproduced ? 0 : 1);
+process.exit(controlOk && reproFailed && winners.length ? 0 : 1);

@@ -33,8 +33,36 @@ and stable"* wait — on fully visible, non-moving elements (CLS 0, fixed rect).
 navigation work. Raw `playwright-core` + firefox in a single foreground window clicks the same element,
 headed and headless. A browser-revision re-install changed nothing.
 
-**Probe runs 1–2 (2026-09-08, the team's Windows machine).** Both runs were dominated by two defects in the
-probe itself, and correcting them is what makes the third run worth trusting:
+**Probe run 3 (2026-09-08, valid) — occlusion is NOT the lane cause, and there is now a reproducer.**
+
+| variant | foreground | covered (rAF) | uncovered |
+|---|---|---|---|
+| `chromium-control` | OK 44 ms | OK (121) | OK |
+| `firefox-default` | OK 102 ms | **OK 96 ms (rAF 0)** | OK |
+| `firefox-reduced-motion` | OK 102 ms | **TIMEOUT (rAF 0)** | **TIMEOUT** |
+
+Two results, both load-bearing:
+
+1. **Firefox clicked fine while fully covered with rAF at 0**, so the occlusion pref in
+   `config/mcp-playwright-firefox.config.json` **is not the fix** for this lane. It stays only because it
+   removes one known way to stop the refresh driver; do not cite it as the cause.
+2. **`reducedMotion: 'reduce'` stalls the click deterministically** — covered *and* uncovered, on an element
+   Chromium clicks in 40 ms — at exactly the reported signature: *"waiting for element to be visible, enabled
+   and stable"* with none of the `scrolling into view` lines that follow it on a healthy click. Under reduced
+   motion the storefront drops its 3 animations, nothing needs painting, the refresh driver idles, and the
+   Windows-Firefox **5-consecutive-rAF-ticks** stability check can never complete. Playwright emulates
+   `reducedMotion: 'no-preference'` by default, so this is not what the MCP lane sets — but it is a
+   **one-window, on-demand reproduction of the lane's failure mode**, which is what a fix can be tested
+   against without three browsers and a monitor layout.
+
+**Working hypothesis:** the stall signature means *the refresh driver stopped ticking*, whatever stopped it.
+Occlusion is one trigger (and Firefox recovered from it here); an idle page under reduced motion is another.
+Probe v4 tests candidate fixes against the reproducer: a 1 px infinite CSS animation injected before page JS
+(keeps the driver alive regardless of cause), headless, and the occlusion pref. It also records the rAF rate
+in the 500 ms before **each** click attempt, so "dead rAF ⇒ stall" is measured per attempt rather than inferred.
+
+**Probe runs 1–2 (2026-09-08, invalid).** Two defects in the probe itself, kept here because they explain the
+numbers in those logs:
 
 - **The target was unclickable for every engine.** `a[href]:visible` matched the storefront's `skip-link` at
   `y = −29`. Playwright calls it visible, then loops on *"element is outside of the viewport"* until the
@@ -47,8 +75,7 @@ probe itself, and correcting them is what makes the third run worth trusting:
   further progress. That is the reported symptom, reproduced by accident.
 
 **What those runs did settle:** rect jitter is **1 distinct rect in 12 frames** on every engine, so the
-storefront is still and the 5-frames-in-a-row rule (fact 1) **cannot be the whole mechanism on its own**.
-Occlusion (fact 2) is the candidate to prove, and the one accidental full cover is consistent with it.
+storefront is still and rect movement is not the trigger — what matters is whether the rAF ticks arrive at all.
 
 **Shipped facts the candidates rest on:**
 
@@ -70,31 +97,29 @@ Occlusion (fact 2) is the candidate to prove, and the one accidental full cover 
 It is not a Firefox rendering bug, not the storefront, and not the MCP's click code — it is the MCP's
 *headed, three-windows-at-once* topology meeting a Windows-only Firefox power-saving feature.
 
-**Config change (in the repo, harmless, not yet shown to matter):** `config/mcp-playwright-firefox.config.json` → `launchOptions.firefoxUserPrefs`
-`{ "widget.windows.window_occlusion_tracking.enabled": false }`. The MCP spreads `launchOptions` into
-`browserType.launch()`, so the pref reaches Firefox. Restart the MCP server after the change. Running the
-firefox lane headless would also avoid it (a headless window is never occluded); the pref keeps the lane
-headed like the other two.
+**Config change (in the repo, kept, NOT the fix — measured):** `config/mcp-playwright-firefox.config.json` →
+`launchOptions.firefoxUserPrefs` `{ "widget.windows.window_occlusion_tracking.enabled": false }`. The MCP
+spreads `launchOptions` into `browserType.launch()`, so the pref does reach Firefox, and it removes one way
+the refresh driver can stop. Run 3 showed it is not what the lane needs — plain Firefox clicked fine while
+fully covered. Restart the MCP server after any config change.
 
 **Prove any fix before touching a lane rule:** `node scripts/maintenance/firefox-click-probe.mjs --url <storefront>`
-on a Windows machine that showed the bug. v3 runs `firefox-default`, `firefox-pref-off`,
-`firefox-reduced-motion` and `chromium-control` against the first link **inside the viewport** (marked in-page;
-`--target <css>` overrides): per variant a foreground `trial: true` click (full actionability wait, no real
-click), 12-frame rect jitter, running-animation count, then the same under a kiosk cover placed on the
-subject's **own monitor**, then uncovered. A covered firefox row still ticking above 20 rAF is printed as
-**COVER MISSED** — that run tested nothing, re-run it.
+on a Windows machine (v4, ~5 min). It runs `chromium-control` and `firefox-default` as controls, then the
+**reproducer** (`ff-repro-reducedmotion`) and three candidates on top of it — `+keepalive` (a 1 px infinite
+CSS animation injected before page JS), `+headless`, `+pref-off`. Each phase clicks `--repeat` times
+(default 3) with `trial: true` (full actionability wait, no real click) and records the rAF ticks in the
+500 ms before each attempt; the footer prints how many failing attempts had a dead rAF and how many passing
+ones did.
 
-Exit 0 requires both halves: `firefox-default` stops ticking under the cover **and** stalls at *"visible,
-enabled and stable"*, while `firefox-pref-off` keeps ticking **and** clicks. Only on that result: drop
+Exit 0 requires the control to pass, the reproducer to stall, and at least one candidate to clear it on every
+attempt — the RESULT line names the winner. Apply that candidate to
+`config/mcp-playwright-firefox.config.json`, re-run the lane for real, and only then: drop
 `NOT ON playwright-firefox` from the click-driven suites' plan marking, restore firefox as a real third slot,
-and rewrite the box in `.claude/rules/agents.md` §Parallel Execution. Until then the box stands — the rule was
-measured, and no fix is yet.
+and rewrite the box in `.claude/rules/agents.md` §Parallel Execution. Until then the box stands.
 
-**And note what a confirmation would mean for the lane, not just for the probe.** The MCP runs three headed
-browsers on one desktop, so *some* window is always covered; if occlusion is the mechanism, the pref fixes
-firefox specifically, but any future engine with the same power-saving behaviour would need the same
-treatment. Running the firefox lane **headless** avoids the class entirely (a headless window is never
-occluded) and is the fallback if the pref does not hold up.
+**If no candidate clears the reproducer, the fix is not a launch option.** The remaining lever is the
+actionability wait itself — a force-click skips the stable check entirely — which is an `@playwright/mcp`
+capability question, not a config one. Report that rather than inventing a pref.
 
 ## Edge
 
