@@ -39,7 +39,7 @@ Quick decision tree for the project-scoped `vc-qa` surface under `.claude/` — 
 | **Seed / teardown test data** | `/qa-seed-data [bootstrap\|minimal\|catalog\|b2b\|pricing\|inventory\|loyalty\|promotions\|bopis\|configurable\|users\|full\|teardown]` | Command |
 | **Audit an oracle (BL / ECL) against docs+live+source** | `/qa-review-oracles [bl\|ecl\|all] <scope> [--dry-run]` (alias `/qa-review-bl`) | Command |
 | **Refresh the storefront sitemap knowledge file** | `/qa-sitemap [--check] [--no-browser]` | Command |
-| **Review THIS repo's own code diff** | the harness's own `/code-review`, `/security-review`, `/simplify` | Built-in |
+| **Review THIS repo's own code diff** | `/code-review-full [branch \| SHA \| PR \| path]` (or the harness's own `/code-review`, `/security-review`, `/simplify`) | Command |
 | **Self-diagnose the plugin from session telemetry** | `/vc-self-check [latest \| <session-id>] \| deliver` | Command |
 | **Run business analysis** | `/ba-analyze [full\|flows\|api\|docs\|stories\|ui\|module <name>]` | Command |
 | **Generate or review user stories** | `/ba-analyze stories <feature> \| stories --review VCST-XXXX` | Command |
@@ -103,6 +103,7 @@ Quick decision tree for the project-scoped `vc-qa` surface under `.claude/` — 
 - `/qa-accessibility` — WCAG 2.2 AA audits (POUR + the 2.2 additions, axe-core, Lighthouse, keyboard walk)
 - `/qa-design` — Dual Storybook + Storefront BL-UI audit, design-system consistency, UX heuristics, and the **`vs. DESIGN` axis** (tokens / control geometry / icon name→glyph parity vs a Claude Design project via `DesignSync`; reports `SKIPPED`, never PASS, where `/design-login` is unavailable)
 - `/qa-api` — REST + GraphQL xAPI: reference lookup, execution, case generation
+- `/code-review-full` — 9 parallel review agents over a diff **of this repo** — not a QA flow against the VC platform
 - `/qa-perf-measure`, `/qa-monitoring`, `/qa-triage-results`, `/qa-deploy-pr`, `/qa-hotfix`, `/qa-hotfix-check`, `/qa-local-env` — the skills backing the same-named commands above; `/qa-bundle-check` is skill-only
 
 ### Development (Skills — used by the `developers/` team in `/qa-fix`)
