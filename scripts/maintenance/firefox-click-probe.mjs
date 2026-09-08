@@ -49,6 +49,8 @@
  * Read-only against the storefront (trial clicks only). Not wired to CI — it needs a desktop.
  */
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+import { readFileSync } from 'node:fs';
 
 // Use the SAME Playwright the MCP lane runs, not the repo's top-level one: `@playwright/mcp` bundles its own
 // `playwright` (a newer alpha with its own Firefox revision), while `import 'playwright'` here resolves the
@@ -59,9 +61,10 @@ let pwPath = 'playwright';
 try {
   pwPath = createRequire(rootRequire.resolve('@playwright/mcp/package.json')).resolve('playwright');
 } catch { /* @playwright/mcp not installed — use the top-level playwright */ }
-const pwModule = await import(pwPath);
+// `import()` of an absolute path must be a file:// URL — on Windows a bare `C:\...` is read as a `c:` scheme.
+const pwModule = await import(pathToFileURL(pwPath).href);
 const { firefox, chromium } = pwModule.default ?? pwModule; // playwright's entry is CJS: named exports live on `default`
-const pwVersion = JSON.parse(await import('node:fs').then((fs) => fs.readFileSync(pwPath.replace(/index\.(m?js)$/, 'package.json'), 'utf8'))).version;
+const pwVersion = JSON.parse(readFileSync(pwPath.replace(/index\.(m?js)$/, 'package.json'), 'utf8')).version;
 
 const argv = process.argv.slice(2);
 const arg = (name, dflt) => {
