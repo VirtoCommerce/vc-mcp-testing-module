@@ -268,7 +268,7 @@ instead of re-deriving it. Fill it from Step 2 (owning layer) + Step 3a (exact r
 > **Scope boundary — report every bug, route honestly.** `/qa-bug` files **all** confirmed defects and
 > determines routing for each; it does **not** decide auto-fix eligibility or filter bugs out. Whether a
 > bug is auto-fixable (by-design / config-gated / breaking / multi-repo, etc.) is decided downstream by
-> `/qa-fix` **Gate 0** (`.claude/rules/quality-gates.md`). If routing genuinely spans multiple repos, just
+> `/qa-fix` **Gate 0** (`.claude/knowledge/execution/quality-gates.md`). If routing genuinely spans multiple repos, just
 > say so in **Routing confidence: LOW** + a one-line note — still file the bug.
 
 ---

@@ -312,7 +312,7 @@ different surface than the one under test, which **reads as a pass**. That is th
 exists to prevent: check the target before minting, and sign out when the pass ends (the profile
 persists, so a throwaway silently becomes the lane's standing identity).
 
-Conditions, cleanup obligations and the measured evidence: [`.claude/rules/mcp-browsers.md`](../rules/mcp-browsers.md)
+Conditions, cleanup obligations and the measured evidence: [`.claude/knowledge/execution/browser-lanes.md`](../knowledge/execution/browser-lanes.md)
 §Browser login secrets. Cite it — do not restate it here.
 
 ### Action Space
