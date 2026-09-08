@@ -22,9 +22,10 @@ const USER_SCOPE = "user";
 // that this field, not the key check, is what reports a genuine skew.
 const SCHEMA_VERSION = 1;
 const BACKENDS = ["local", "keyvault"];
-const TOP_LEVEL_KEYS = ["schemaVersion", "projectId", "secrets", "servers", "tasks", "vaults"];
+const TOP_LEVEL_KEYS = ["schemaVersion", "projectId", "secrets", "servers", "tasks", "vaults", "oauth"];
 const SECRET_DECL_KEYS = ["backend", "vault", "secret", "format", "authorized"];
 const SERVER_DECL_KEYS = ["command", "args", "env"];
+const OAUTH_DECL_KEYS = ["tenantId", "clientId", "scopes", "targetPackage", "binName", "authorized"];
 
 // Env vars that inject code/libraries into any child process we spawn — must never
 // reach a tool we invoke, whether inherited from the operator's shell (sanitizeEnv, below) or
@@ -57,6 +58,12 @@ const SECRET_NAME_RE = /^[a-z0-9-]+$/;
 // Launchable names are looser (they mirror MCP server names, which do carry dots and capitals), but a
 // path separator or a control character in one has no legitimate use and several bad ones.
 const LAUNCHABLE_NAME_RE = /^[A-Za-z0-9._-]+$/;
+// Azure AD tenant ids are GUIDs, and arrive mixed-case.
+const TENANT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// npm package-name grammar (scoped or unscoped), reused by a later runtime matcher for the same
+// targetPackage/binName grammar — keep this the one copy.
+const PACKAGE_NAME_RE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
+const BIN_NAME_RE = /^[a-z0-9][a-z0-9._-]*$/;
 
 function parseReference(value) {
     if (typeof value !== "string" || !value.startsWith("secret:")) {
@@ -325,7 +332,8 @@ function parseConfigFile(file, warnings) {
     cfg.secrets ??= {};
     cfg.servers ??= {};
     cfg.tasks ??= {};
-    for (const key of ["secrets", "servers", "tasks"]) {
+    cfg.oauth ??= {};
+    for (const key of ["secrets", "servers", "tasks", "oauth"]) {
         if (typeof cfg[key] !== "object" || cfg[key] === null || Array.isArray(cfg[key])) {
             throw new VcSecretsError(`${file}: "${key}" must be an object`);
         }
@@ -373,6 +381,44 @@ function parseConfigFile(file, warnings) {
         }
         validateAuthorized(name, decl.authorized);
     }
+    for (const [name, decl] of Object.entries(cfg.oauth)) {
+        // Same reasoning as the secret name check above: this reaches a keystore key
+        // ("oauth-<name>-refresh"/"-access", see unlockTargets/keyFor) — the secret charset, not the
+        // looser launchable one, which admits dots and capitals a keystore key cannot round-trip.
+        if (!SECRET_NAME_RE.test(name)) {
+            throw new VcSecretsError(`oauth "${name}": name must match ${SECRET_NAME_RE.source}`);
+        }
+        if (!decl || typeof decl !== "object") {
+            throw new VcSecretsError(`oauth "${name}": declaration must be an object`);
+        }
+        for (const key of Object.keys(decl)) {
+            if (!OAUTH_DECL_KEYS.includes(key)) {
+                throw new VcSecretsError(`oauth "${name}": unknown key "${key}" (expected only ${OAUTH_DECL_KEYS.join("/")})`);
+            }
+        }
+        // One operand, not two: the config comes from JSON.parse, and `test` coerces every value JSON
+        // can produce — number, null, object, array — to a string that cannot match. A typeof guard
+        // beside this one would look undeletable and decide nothing.
+        if (!TENANT_ID_RE.test(decl.tenantId)) {
+            throw new VcSecretsError(`oauth "${name}": tenantId must be a GUID matching ${TENANT_ID_RE.source}`);
+        }
+        if (typeof decl.clientId !== "string" || decl.clientId.trim() === "") {
+            throw new VcSecretsError(`oauth "${name}": clientId must be a non-empty string`);
+        }
+        if (!Array.isArray(decl.scopes) || decl.scopes.length === 0 || !decl.scopes.every((s) => typeof s === "string" && s.trim() !== "")) {
+            throw new VcSecretsError(`oauth "${name}": scopes must be a non-empty array of non-empty strings (a bare "/.default" still needs "offline_access" to refresh)`);
+        }
+        // Required, not optional: a preload that reads this to decide what to prime needs every input
+        // before it acts. Left optional, a declaration missing it produces a preload that silently does
+        // nothing and a session that loses its token at the one-hour boundary with nothing red anywhere.
+        if (typeof decl.targetPackage !== "string" || !PACKAGE_NAME_RE.test(decl.targetPackage)) {
+            throw new VcSecretsError(`oauth "${name}": targetPackage is required and must match ${PACKAGE_NAME_RE.source}`);
+        }
+        if (decl.binName !== undefined && (typeof decl.binName !== "string" || !BIN_NAME_RE.test(decl.binName))) {
+            throw new VcSecretsError(`oauth "${name}": binName must match ${BIN_NAME_RE.source}`);
+        }
+        validateAuthorized(name, decl.authorized);
+    }
     validateLaunchables("server", cfg.servers);
     validateLaunchables("task", cfg.tasks);
     validateVaults(cfg.vaults);
@@ -398,6 +444,7 @@ function loadConfig(paths = configPaths()) {
     const secrets = Object.create(null);
     const servers = Object.create(null);
     const tasks = Object.create(null);
+    const oauth = Object.create(null);
     const collisions = [];
     const files = {};
     let projectId = null;
@@ -479,16 +526,36 @@ function loadConfig(paths = configPaths()) {
             }
             tasks[name] = { ...task, scope, home: scope };
         }
+        for (const [name, decl] of Object.entries(cfg.oauth)) {
+            if (oauth[name]) {
+                collisions.push({ kind: "oauth", name, from: oauth[name].home, to: scope });
+            }
+            if (decl.authorized !== undefined && scope !== USER_SCOPE) {
+                // Same rule the secret merge states: authorizationFor honours the block only at user
+                // scope, so accepting one here in silence leaves a grant that reads as effective and
+                // is not.
+                warnings.push(`${file}: oauth "${name}": "authorized" only authorizes at user scope — ignored`);
+            }
+            // `declaredName` is stamped here (unlike the secret merge above) because a later task's
+            // authorizationFor needs the name to build its `where` pointer, and unlike secrets there is no
+            // ad-hoc call site that already adds it.
+            oauth[name] = { ...decl, kind: "oauth", scope: scope === "local" ? "project" : scope, home: scope, declaredName: name };
+        }
     }
 
     if (Object.keys(files).length === 0) {
         throw new VcSecretsError(`no declaration file found — looked for ${[paths.user, paths.project, paths.local].filter(Boolean).join(", ")}`);
     }
-    // Demanded whenever a project-scope secret exists at all, including Key Vault ones that do not
-    // touch the keystore: a rule that only bites once someone adds a local-backend secret would fail
-    // late, in a repo that had been working.
-    if (projectId === null && Object.values(secrets).some((d) => d.scope === "project")) {
-        throw new VcSecretsError(`a project-scope secret is declared but projectId is not — add "projectId" to ${files.project ?? files.local} (it namespaces the keystore entries, so it cannot be derived)`);
+    // Demanded whenever a project-scope secret or oauth declaration exists at all, including Key Vault
+    // secrets that do not touch the keystore: a rule that only bites once someone adds a local-backend
+    // declaration would fail late, in a repo that had been working. For oauth specifically: without
+    // projectId, keyFor's fallback stringifies a missing projectId into the literal segment "null" —
+    // four characters that all satisfy SECRET_NAME_RE — so the refresh/access tokens would land in a
+    // namespace shared by every project on the machine that also omits it, with no guard, test, or log
+    // line noticing.
+    if (projectId === null
+        && (Object.values(secrets).some((d) => d.scope === "project") || Object.values(oauth).some((d) => d.scope === "project"))) {
+        throw new VcSecretsError(`a project-scope secret or oauth declaration is declared but projectId is not — add "projectId" to ${files.project ?? files.local} (it namespaces the keystore entries, so it cannot be derived)`);
     }
 
     // A project-declared server MAY reference a user-scope secret: one personal PAT used from several
@@ -497,7 +564,7 @@ function loadConfig(paths = configPaths()) {
     // bought. What replaces the ban is visibility: `doctor` reports each crossing, so it is a fact the
     // developer can see rather than one nobody mentions.
 
-    return { secrets, servers, tasks, vaults, projectId, collisions, warnings, files };
+    return { secrets, servers, tasks, oauth, vaults, projectId, collisions, warnings, files };
 }
 
 // The keystore key. Project and local declarations share one namespace on purpose — they are the
@@ -2020,7 +2087,7 @@ export {
     runTool, resolveSpawnCommand, buildSpawnInvocation, makeSecretResolver, cmdRun, cmdTask, cmdLaunch, killProcessTree,
     validateLaunchables, LEGACY_ENV_VARS, LEGACY_SECRET_ENV_VARS,
     mapResolveError, applyKeystrokes, promptHidden, cmdSet, cmdUnlock, unlockTargets, cmdDoctor, cmdMigrate, newKeyPresent,
-    SECRET_NAME_RE, LAUNCHABLE_NAME_RE, doctorReport,
+    SECRET_NAME_RE, LAUNCHABLE_NAME_RE, PACKAGE_NAME_RE, BIN_NAME_RE, doctorReport,
     readEnableLists, readWiredServers, readWiredElsewhere, DANGEROUS_ENV_VARS, sanitizeEnv,
     consumerShape, shapeDifferences, validateAuthorized, validateVaults, authorizationFor, crossingProblem, own,
     emitConfig, cmdEmitConfig,

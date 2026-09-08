@@ -452,6 +452,111 @@ test("loadConfig: projectId at user scope → warning, ignored", () => {
     assert.ok(cfg.warnings.some((w) => w.includes("projectId is meaningless at user scope")));
 });
 
+const OAUTH_TENANT_ID = "12345678-1234-1234-1234-123456789012";
+const OAUTH_DECL = {
+    tenantId: OAUTH_TENANT_ID,
+    clientId: "my-client-id",
+    scopes: ["https://example.com/.default", "offline_access"],
+    targetPackage: "some-oauth-package",
+};
+
+test("an oauth declaration is stamped with the scope, the home and its kind", () => {
+    // kind is what a later task's authorizationFor discriminates on; without it that function falls
+    // through to "needs no authorization".
+    const cfg = m.loadConfig(projectPaths({ projectId: "proj-x", oauth: { ado: OAUTH_DECL } }));
+    assert.equal(cfg.oauth.ado.home, "project");
+    assert.equal(cfg.oauth.ado.scope, "project");
+    assert.equal(cfg.oauth.ado.kind, "oauth");
+    // Stamped here rather than added by a call site, unlike a secret's. Dropping it breaks
+    // authorizationFor's pointer, and nothing else in the suite would notice.
+    assert.equal(cfg.oauth.ado.declaredName, "ado");
+});
+
+test("a LOCAL-scope oauth declaration takes the project namespace, and still demands projectId", () => {
+    // `scope === "local" ? "project" : scope` is what puts a local declaration in the project's
+    // keystore namespace, and the projectId demand keys off `scope === "project"`. Drop the
+    // normalisation and a local declaration keeps scope "local": the demand stops firing, keyFor
+    // falls through to the project branch anyway, and the tokens land under the literal segment
+    // "null" — the shared namespace this whole check exists to prevent, with the suite green.
+    const withId = m.loadConfig(scopedPaths({ project: { projectId: "proj-x" }, local: { oauth: { ado: OAUTH_DECL } } }));
+    assert.equal(withId.oauth.ado.scope, "project", "the keystore namespace");
+    assert.equal(withId.oauth.ado.home, "local", "the file that declared it");
+
+    assert.throws(() => m.loadConfig(scopedPaths({ local: { oauth: { ado: OAUTH_DECL } } })), /projectId/);
+});
+
+test("an unknown key inside an oauth declaration is refused, not ignored", () => {
+    // Closed schema: a typo fails loudly. Note the asymmetry with the TOP level, where unknown keys are
+    // only a warning because schemaVersion is what reports genuine skew.
+    const cfg = { projectId: "proj-x", oauth: { ado: { ...OAUTH_DECL, tenantid: OAUTH_TENANT_ID } } };
+    assert.throws(() => m.loadConfig(projectPaths(cfg)), /unknown key "tenantid"/);
+});
+
+test("a tenantId that is not a GUID is refused at parse time", () => {
+    const cfg = { projectId: "proj-x", oauth: { ado: { ...OAUTH_DECL, tenantId: "contoso" } } };
+    assert.throws(() => m.loadConfig(projectPaths(cfg)), /tenantId/);
+});
+
+test("an empty scope list is refused, because /.default alone still needs offline_access", () => {
+    const cfg = { projectId: "proj-x", oauth: { ado: { ...OAUTH_DECL, scopes: [] } } };
+    assert.throws(() => m.loadConfig(projectPaths(cfg)), /scopes/);
+});
+
+test("an authorized block on a project-scope oauth declaration is reported, not silently dropped", () => {
+    // authorizationFor honours the block only at user scope, so a project one is inert. The secret
+    // merge warns about exactly this; accepting it in silence here would leave a grant that reads as
+    // effective in the file and is not.
+    const cfg = m.loadConfig(projectPaths({ projectId: "proj-x",
+        oauth: { ado: { ...OAUTH_DECL, authorized: { servers: {} } } } }));
+    assert.ok(cfg.warnings.some((w) => /oauth "ado".*only authorizes at user scope/.test(w)),
+        `expected a scope warning, got: ${cfg.warnings.join(" | ")}`);
+});
+
+test("a whitespace-only clientId or scope is empty, and is refused as one", () => {
+    // `!== ""` and `.trim() !== ""` differ on exactly this input, and the difference is invisible
+    // until sign-in: a blank clientId reaches Entra as a request for an app registration that does
+    // not exist, and the error names the tenant rather than the field that was blank.
+    assert.throws(() => m.loadConfig(projectPaths({ projectId: "proj-x",
+        oauth: { ado: { ...OAUTH_DECL, clientId: "   " } } })), /clientId/);
+    assert.throws(() => m.loadConfig(projectPaths({ projectId: "proj-x",
+        oauth: { ado: { ...OAUTH_DECL, scopes: ["  "] } } })), /scopes/);
+});
+
+test("an oauth name is constrained to the secret charset, not the launchable one", () => {
+    // The name becomes part of a keystore key, and SECRET_NAME_RE admits [a-z0-9-] only. A launchable
+    // name like claude_ai_Microsoft_365 is legal as a SERVER and would produce an unusable key.
+    const cfg = { projectId: "proj-x", oauth: { Ado_Mcp: OAUTH_DECL } };
+    // The charset itself, not just the word "name": any later check that fires earlier and happens to
+    // say "name" would otherwise satisfy this and the charset choice would go unguarded.
+    assert.throws(() => m.loadConfig(projectPaths(cfg)),
+        (e) => /name must match/.test(e.message) && e.message.includes(m.SECRET_NAME_RE.source));
+});
+
+test("a project-scope oauth declaration without projectId is refused", () => {
+    // Measured: "vc-secrets:" + null + ":oauth-ado-refresh" PASSES the keystore-key charset, because
+    // null stringifies to four characters that are all [a-z0-9-]. Without this refusal the refresh
+    // token lands in a null namespace shared by every project on the machine that omits projectId — and
+    // no guard, no test and no log line notices.
+    const cfg = { oauth: { ado: OAUTH_DECL } };
+    assert.throws(() => m.loadConfig(projectPaths(cfg)), /projectId/);
+});
+
+test("a declaration with no targetPackage is refused", () => {
+    // Optional here means a later preload that requires all its inputs takes no action, and the session
+    // dies at the one-hour boundary with nothing red anywhere.
+    const cfg = { projectId: "proj-x", oauth: { ado: { ...OAUTH_DECL, targetPackage: undefined } } };
+    assert.throws(() => m.loadConfig(projectPaths(cfg)), /targetPackage/);
+});
+
+test("the same oauth name in two scopes is reported as a collision, not silently overwritten", () => {
+    // Secrets, servers and tasks all push one. For a credential declaration a silent overwrite means
+    // signing in against coordinates nobody can see in the file they are reading.
+    const decl = { projectId: "proj-x", oauth: { ado: OAUTH_DECL } };
+    const paths = scopedPaths({ project: decl, local: decl });
+    const cfg = m.loadConfig(paths);
+    assert.ok(cfg.collisions.some((c) => c.kind === "oauth" && c.name === "ado"));
+});
+
 test("loadConfig: schemaVersion above what the launcher supports → VcSecretsError names the version", () => {
     const paths = scopedPaths({ project: { schemaVersion: 999, secrets: {}, servers: {}, tasks: {} } });
     assert.throws(() => m.loadConfig(paths), /schemaVersion 999/);
