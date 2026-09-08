@@ -916,6 +916,65 @@ test("cmdRun: unknown server → exit 1, single-line stderr without stack", () =
     assert.equal(r.stdout, "");
 });
 
+test("killProcessTree on win32 kills the whole tree, because a plain kill reaches only the top", () => {
+    const spawned = [];
+    const signalled = [];
+    m.killProcessTree({ pid: 4242, kill: (s) => signalled.push(["child", s]) }, "SIGTERM", {
+        platform: "win32",
+        spawnSyncProcess: (cmd, args) => spawned.push([cmd, args]),
+        killProcess: (pid, s) => signalled.push([pid, s]),
+    });
+    assert.deepEqual(spawned, [["taskkill", ["/PID", "4242", "/T", "/F"]]]);
+    assert.deepEqual(signalled, [], "the win32 branch signals nothing itself");
+});
+
+test("the win32 default is spawnSync, since a kill-then-exit caller loses the race against an async one", () => {
+    // Asserted on the source text because the property — the taskkill has been reaped before we
+    // return — is invisible to a seam: an injected spy is called synchronously either way. Match the
+    // BINDING, not the parameter name: the name reads `spawnSyncProcess` whatever the default is, so
+    // /spawnSyncProcess/ alone passes against `= spawn`, which is the defect this test is named for.
+    assert.match(m.killProcessTree.toString(), /spawnSyncProcess = spawnSync\b/);
+});
+
+test("killProcessTree on posix signals the process GROUP, not the child", () => {
+    const signalled = [];
+    m.killProcessTree({ pid: 4242, kill: (s) => signalled.push(["child", s]) }, "SIGTERM",
+        { platform: "linux", killProcess: (pid, s) => signalled.push([pid, s]) });
+    assert.deepEqual(signalled, [[-4242, "SIGTERM"]], "the whole call list, so an extra call fails");
+});
+
+test("killProcessTree falls back to the child when the group is already gone", () => {
+    const signalled = [];
+    m.killProcessTree({ pid: 4242, kill: (s) => signalled.push(["child", s]) }, "SIGTERM",
+        { platform: "linux", killProcess: () => { throw new Error("ESRCH"); } });
+    assert.deepEqual(signalled, [["child", "SIGTERM"]]);
+});
+
+test("killProcessTree's 5-second follow-up sends SIGKILL to whichever target the immediate kill actually reached", (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+
+    const fallback = [];
+    m.killProcessTree({ pid: 4242, kill: (s) => fallback.push(["child", s]) }, "SIGTERM",
+        { platform: "linux", killProcess: () => { throw new Error("ESRCH"); } });
+    t.mock.timers.tick(5000);
+    assert.deepEqual(fallback, [["child", "SIGTERM"], ["child", "SIGKILL"]],
+        "the group kill already threw, so the follow-up must reach the child directly, never killProcess(-4242, ...)");
+
+    const group = [];
+    m.killProcessTree({ pid: 4242, kill: (s) => group.push(["child", s]) }, "SIGTERM",
+        { platform: "linux", killProcess: (pid, s) => group.push([pid, s]) });
+    t.mock.timers.tick(5000);
+    assert.deepEqual(group, [[-4242, "SIGTERM"], [-4242, "SIGKILL"]],
+        "the group kill succeeded, so the follow-up escalates the same group");
+});
+
+test("cmdLaunch calls the extracted helper rather than keeping its own copy", () => {
+    // The tests above exercise the helper in isolation, so reverting the call site would leave
+    // every one of them green. This is the only test that observes the actual deliverable.
+    assert.match(m.cmdLaunch.toString(), /killProcessTree/);
+    assert.doesNotMatch(m.cmdLaunch.toString(), /taskkill/);
+});
+
 test("mapResolveError: wcm exit 3 → Credential Manager advice", () => {
     const e = Object.assign(new Error("CredRead failed"), { toolExitCode: 3 });
     const mapped = m.mapResolveError("wcm", "ado-pat", e);

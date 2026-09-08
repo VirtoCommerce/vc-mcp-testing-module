@@ -1762,6 +1762,46 @@ async function cmdDoctor(cfg, flags = []) {
     }
 }
 
+// A signal reaches the direct child only. On Windows that leaves a grandchild running: `dnx` spawns
+// dotnet.exe, which survives, orphans, and keeps a lock on the package file it was reading — so the
+// NEXT run fails with "the process cannot access the file" instead of the clean timeout it deserved.
+// Measured on Windows, and it cost a manual taskkill between attempts.
+//
+// SYNCHRONOUS on the win32 branch on purpose: a caller that kills and exits on the next line races its
+// own teardown, and an async spawn loses. Not cmdLaunch, which exits from the child's `close` handler
+// once the kill has landed. The POSIX path needs no such care — kill(2) has been delivered on return.
+//
+// The child must have been spawned DETACHED, or `-child.pid` names a group it is not in: usually
+// absent, but a recycled pid makes it someone else's, and that group takes the SIGKILL five seconds
+// later. cmdLaunch spawns detached; vc-secrets-probe.mjs does not.
+function killProcessTree(child, signal, { platform = process.platform, spawnSyncProcess = spawnSync,
+    killProcess = (pid, sig) => process.kill(pid, sig) } = {}) {
+    if (platform === "win32") {
+        spawnSyncProcess("taskkill", ["/PID", String(child.pid), "/T", "/F"],
+            { stdio: "ignore", windowsHide: true });
+
+        return;
+    }
+    let group = true;
+    try {
+        killProcess(-child.pid, signal);   // the group, which is why cmdLaunch spawns detached
+    } catch {
+        // No group of its own, so escalating to the group below would signal a pgid this child is not
+        // in -- and pids are recycled, so in principle somebody else's.
+        group = false;
+        child.kill(signal);
+    }
+    setTimeout(() => {
+        try {
+            if (group) {
+                killProcess(-child.pid, "SIGKILL");
+            } else {
+                child.kill("SIGKILL");
+            }
+        } catch { /* already gone */ }
+    }, 5000).unref();
+}
+
 // One launch path for both kinds. A `task` is not an MCP server, but everything that matters here is
 // the same: resolve, strip the inherited legacy vars, inject into this child only, forward stdio, and
 // take the whole process group down on a signal. Giving tasks their own copy of this is how the two
@@ -1792,24 +1832,8 @@ async function cmdLaunch(kind, name, cfg) {
     });
     resolver.resolvedValues.length = 0;   // shrink the in-heap window
 
-    const killTree = (signal) => {
-        if (process.platform === "win32") {
-            spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
-            return;
-        }
-        try {
-            process.kill(-child.pid, signal);
-        } catch {
-            child.kill(signal);
-        }
-        setTimeout(() => {
-            try {
-                process.kill(-child.pid, "SIGKILL");
-            } catch { /* group already gone */ }
-        }, 5000).unref();
-    };
     for (const signal of ["SIGINT", "SIGTERM"]) {
-        process.on(signal, () => killTree(signal));
+        process.on(signal, () => killProcessTree(child, signal));
     }
     child.on("error", (e) => {
         // sync write: stderr is an async pipe on Windows, and process.exit abandons pending writes
@@ -1989,7 +2013,7 @@ export {
     PS_CRED_DELETE, decodeCredBlobHex, buildLocalRead, buildLocalWrite, buildLocalDelete, deleteEntryIo,
     buildKeyvaultRead, TIMEOUT_LOCAL_MS, TIMEOUT_AZ_MS, VALUE_ON_STDIN,
     COMMAND_ON_STDIN, quoteForSecurityInteractive,
-    runTool, resolveSpawnCommand, buildSpawnInvocation, makeSecretResolver, cmdRun, cmdTask, cmdLaunch,
+    runTool, resolveSpawnCommand, buildSpawnInvocation, makeSecretResolver, cmdRun, cmdTask, cmdLaunch, killProcessTree,
     validateLaunchables, LEGACY_ENV_VARS, LEGACY_SECRET_ENV_VARS,
     mapResolveError, applyKeystrokes, promptHidden, cmdSet, cmdUnlock, unlockTargets, cmdDoctor, cmdMigrate, newKeyPresent,
     SECRET_NAME_RE, LAUNCHABLE_NAME_RE, doctorReport,
