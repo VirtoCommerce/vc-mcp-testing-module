@@ -204,7 +204,7 @@ function validateRegistrations(registrations) {
     for (const [tenantId, clients] of Object.entries(registrations)) {
         const lower = tenantId.toLowerCase();
         const prior = seenTenantIds.get(lower);
-        if (prior !== undefined && prior !== tenantId) {
+        if (prior !== undefined) {
             throw new VcSecretsError(`registrations has both "${prior}" and "${tenantId}" — tenant ids are matched without regard to case, so pick one spelling`);
         }
         seenTenantIds.set(lower, tenantId);
@@ -265,7 +265,9 @@ function validateAuthorized(label, authorized) {
 // be read by another project — the namespacing itself is what stands in for authorization. A sign-in is
 // not namespaced that way: the token it mints is not confined to one project, so it cannot stand in for
 // a per-project grant the way a namespaced keystore entry can.
-// Every lookup below reads parsed JSON, not one of the null-prototype maps this module builds — and a
+// Every lookup below reads parsed JSON, except the registrations outer level, which the merge rebuilds
+// null-prototype while canonicalising its keys — the client level under it is still parsed JSON, which is
+// where `own` earns its place. And a
 // launchable may legally be named `toString` or `constructor` (LAUNCHABLE_NAME_RE allows both). A plain
 // bracket read would return the inherited builtin instead of undefined, which then reaches
 // shapeDifferences as an object with no envKeys and throws where a refusal belongs. Measured: one such
