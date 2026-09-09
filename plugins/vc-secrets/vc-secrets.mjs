@@ -22,7 +22,7 @@ const USER_SCOPE = "user";
 // that this field, not the key check, is what reports a genuine skew.
 const SCHEMA_VERSION = 1;
 const BACKENDS = ["local", "keyvault"];
-const TOP_LEVEL_KEYS = ["schemaVersion", "projectId", "secrets", "servers", "tasks", "vaults", "oauth"];
+const TOP_LEVEL_KEYS = ["schemaVersion", "projectId", "secrets", "servers", "tasks", "vaults", "oauth", "registrations"];
 const SECRET_DECL_KEYS = ["backend", "vault", "secret", "format", "authorized"];
 const SERVER_DECL_KEYS = ["command", "args", "env"];
 const OAUTH_DECL_KEYS = ["tenantId", "clientId", "scopes", "targetPackage", "binName", "authorized"];
@@ -190,6 +190,25 @@ function validateVaults(vaults) {
     }
 }
 
+function validateRegistrations(registrations) {
+    if (registrations === undefined) {
+        return;
+    }
+    if (typeof registrations !== "object" || registrations === null || Array.isArray(registrations)) {
+        throw new VcSecretsError(`"registrations" must be an object keyed by tenant id`);
+    }
+    for (const [tenantId, clients] of Object.entries(registrations)) {
+        if (typeof clients !== "object" || clients === null || Array.isArray(clients)) {
+            throw new VcSecretsError(`registrations."${tenantId}" must be an object keyed by client id`);
+        }
+        for (const [clientId, block] of Object.entries(clients)) {
+            // Same validator as a secret's own `authorized` block: one shape rule, so a change to one
+            // cannot leave the other authorizing something it no longer understands.
+            validateAuthorized(`${tenantId}/${clientId}`, block);
+        }
+    }
+}
+
 function validateAuthorized(secretName, authorized) {
     if (authorized === undefined) {
         return;
@@ -223,14 +242,18 @@ function validateAuthorized(secretName, authorized) {
 
 // null when the reference needs no authorization; otherwise what is wrong with it, ready to be reported by
 // `doctor` or thrown at launch. Both callers must agree, so the decision lives in one place.
-// The condition is "nothing in the repository authorizes this read", which covers two cases and not a
-// third. A user-scope declaration: the value is yours, so the authorization sits on it. A keyvault
-// declaration at ANY scope: the read is paid for by whatever identity `az` is logged in as, which the
-// repository does not own — while the vault and the secret name it reads DO come from the repository, so
-// the authorization cannot live there either and is keyed by that pair in the user file. A project-declared
+// The condition is "nothing in the repository authorizes this read", which covers four cases and not a
+// fifth. A user-scope declaration — secret or oauth — needs no help: the value, or the delegated grant, is
+// yours, so the authorization sits on the declaration itself (only the `where` pointer differs by kind). A
+// keyvault declaration at ANY scope: the read is paid for by whatever identity `az` is logged in as, which
+// the repository does not own — while the vault and the secret name it reads DO come from the repository, so
+// the authorization cannot live there either and is keyed by that pair in the user file. A project-scope
+// oauth declaration is the same shape: the token is minted against whatever identity the developer signs in
+// as, which the repository does not own — while the tenantId and clientId it signs in against DO come from
+// the repository, so the authorization is keyed by that pair in the user file too. A project-declared
 // `local` secret needs nothing: its key is namespaced to the project, so it reads what you set for that
 // project and nothing else — the `set` you ran IS the authorization, and there is no equivalent act behind
-// a vault read.
+// a vault read or an oauth sign-in.
 // Every lookup below reads parsed JSON, not one of the null-prototype maps this module builds — and a
 // launchable may legally be named `toString` or `constructor` (LAUNCHABLE_NAME_RE allows both). A plain
 // bracket read would return the inherited builtin instead of undefined, which then reaches
@@ -241,6 +264,9 @@ function own(map, key) {
 }
 
 function authorizationFor(cfg, decl) {
+    if (decl.kind === "oauth" && decl.home === USER_SCOPE) {
+        return { block: decl.authorized, where: `oauth."${decl.declaredName}".authorized` };
+    }
     if (decl.home === USER_SCOPE) {
         return { block: decl.authorized, where: `secrets."${decl.declaredName}".authorized` };
     }
@@ -248,6 +274,12 @@ function authorizationFor(cfg, decl) {
         return {
             block: own(own(cfg.vaults, decl.vault), decl.secret),
             where: `vaults."${decl.vault}"."${decl.secret}"`,
+        };
+    }
+    if (decl.kind === "oauth") {
+        return {
+            block: own(own(cfg.registrations, decl.tenantId), decl.clientId),
+            where: `registrations."${decl.tenantId}"."${decl.clientId}"`,
         };
     }
 
@@ -427,6 +459,7 @@ function parseConfigFile(file, warnings) {
     validateLaunchables("server", cfg.servers);
     validateLaunchables("task", cfg.tasks);
     validateVaults(cfg.vaults);
+    validateRegistrations(cfg.registrations);
 
     return cfg;
 }
@@ -461,6 +494,7 @@ function loadConfig(paths = configPaths()) {
     // namespace) and every name in it collides with itself.
     const seen = new Set();
     let vaults = Object.create(null);
+    let registrations = Object.create(null);
     for (const scope of SCOPE_ORDER) {
         const file = paths[scope];
         if (!file || !fs.existsSync(file)) {
@@ -503,6 +537,15 @@ function loadConfig(paths = configPaths()) {
                 // A repository authorizing the vault reads it asks for would be the grant written by the
                 // party requesting it — the same reason `authorized` is user-scope only.
                 warnings.push(`${file}: "vaults" only authorizes at user scope — ignored`);
+            }
+        }
+        if (cfg.registrations !== undefined) {
+            if (scope === USER_SCOPE) {
+                registrations = cfg.registrations;
+            } else {
+                // A repository authorizing the app registration it names would be the grant written by the
+                // party requesting it — the same reason `authorized` and `vaults` are user-scope only.
+                warnings.push(`${file}: "registrations" only authorizes at user scope — ignored`);
             }
         }
         for (const [name, decl] of Object.entries(cfg.secrets)) {
@@ -569,7 +612,7 @@ function loadConfig(paths = configPaths()) {
     // bought. What replaces the ban is visibility: `doctor` reports each crossing, so it is a fact the
     // developer can see rather than one nobody mentions.
 
-    return { secrets, servers, tasks, oauth, vaults, projectId, collisions, warnings, files };
+    return { secrets, servers, tasks, oauth, vaults, registrations, projectId, collisions, warnings, files };
 }
 
 // The keystore key. Project and local declarations share one namespace on purpose — they are the

@@ -566,6 +566,62 @@ test("a field accessor on an oauth reference is refused", () => {
     assert.throws(() => m.parseReference("oauth:ado.token"), /no fields to select/);
 });
 
+const REGISTRATION_BLOCK = { servers: { s: { command: "npx", args: ["-y", "some-oauth-package"], envKeys: ["ADO_TOKEN"] } } };
+const OAUTH_CLIENT_ID = OAUTH_DECL.clientId;
+
+test("a project-scope oauth declaration is unauthorized until the user file says otherwise", () => {
+    const cfg = m.loadConfig(scopedPaths({
+        user: {},
+        project: { projectId: "proj-x", oauth: { ado: OAUTH_DECL } },
+    }));
+    const source = m.authorizationFor(cfg, cfg.oauth.ado);
+    assert.notEqual(source, null, "a merged project-scope oauth decl must reach the registrations branch");
+    assert.equal(source.where, `registrations."${OAUTH_TENANT_ID}"."${OAUTH_CLIENT_ID}"`);
+    assert.equal(source.block, undefined);
+});
+
+test("the authorization is keyed by the registration, not by the declaration name", () => {
+    // Two projects naming the same registration are one decision, and renaming a declaration must
+    // not silently revoke it.
+    const cfg = m.loadConfig(scopedPaths({
+        user: { registrations: { [OAUTH_TENANT_ID]: { [OAUTH_CLIENT_ID]: REGISTRATION_BLOCK } } },
+        project: { projectId: "proj-x", oauth: { anything: OAUTH_DECL } },
+    }));
+    const source = m.authorizationFor(cfg, cfg.oauth.anything);
+    // Stated rather than presupposed: without it this test crashes on `.block` of null when the
+    // branch is absent, which is test 53's invariant reported as a stack trace under test 54's name.
+    assert.notEqual(source, null, "the registrations branch must exist for this test to say anything");
+    assert.deepEqual(source.block, REGISTRATION_BLOCK);
+});
+
+test("a registrations block in a project file is not honoured", () => {
+    // Otherwise the repository authorizes itself, which is the whole hole.
+    const cfg = m.loadConfig(scopedPaths({
+        user: {},
+        project: {
+            projectId: "proj-x",
+            oauth: { ado: OAUTH_DECL },
+            registrations: { [OAUTH_TENANT_ID]: { [OAUTH_CLIENT_ID]: REGISTRATION_BLOCK } },
+        },
+    }));
+    const source = m.authorizationFor(cfg, cfg.oauth.ado);
+    // Stated rather than presupposed: without it this test crashes on `.block` of null when the
+    // branch is absent, which is test 53's invariant reported as a stack trace under test 55's name.
+    assert.notEqual(source, null, "the registrations branch must exist for this test to say anything");
+    assert.equal(source.block, undefined);
+    assert.ok(cfg.warnings.some((w) => /"registrations" only authorizes at user scope/.test(w)),
+        `expected a scope warning, got: ${cfg.warnings.join(" | ")}`);
+});
+
+test("a user-scope oauth declaration is authorized on the declaration, as a secret is", () => {
+    // It is your own file, so the grant sits on the declaration. The `where` must name where it
+    // actually lives — under oauth, not under secrets.
+    const cfg = m.loadConfig(scopedPaths({ user: { oauth: { ado: { ...OAUTH_DECL, authorized: REGISTRATION_BLOCK } } } }));
+    const a = m.authorizationFor(cfg, cfg.oauth.ado);
+    assert.deepEqual(a.block, REGISTRATION_BLOCK);
+    assert.equal(a.where, `oauth."ado".authorized`);
+});
+
 test("a config carrying an oauth env reference LOADS", () => {
     // The gate that decides this is validateLaunchables, not parseReference. Constructing cfg by
     // hand would pass while every real config still failed at load.
