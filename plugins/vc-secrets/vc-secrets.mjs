@@ -1365,7 +1365,7 @@ function unlockTargets(cfg, exists = fs.existsSync) {
     }
     for (const [name, decl] of Object.entries(cfg.oauth ?? {})) {
         for (const key of Object.values(oauthEntryKeys(name, decl, cfg))) {
-            const entryName = key.slice(key.lastIndexOf(":") + 1);   // KEY_RE: prefix:scope:name
+            const entryName = key.slice(key.lastIndexOf(":") + 1);   // SECRET_NAME_RE bars ":" from a name
             const file = keyToPath(key);
             if (exists(file)) {
                 files.push({ name: entryName, file });

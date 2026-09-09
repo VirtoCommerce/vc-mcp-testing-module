@@ -795,6 +795,31 @@ test("a keyvault secret holds no keystore slot, so its spelling is not a clash",
     assert.deepEqual(m.oauthKeyClashes(cfg), []);
 });
 
+test("both entries of one sign-in clashing are both reported", () => {
+    const cfg = m.loadConfig(scopedPaths({ project: { projectId: "proj-x",
+        oauth: { ado: OAUTH_DECL },
+        secrets: { "oauth-ado-refresh": { backend: "local" }, "oauth-ado-access": { backend: "local" } } } }));
+    const clashes = m.oauthKeyClashes(cfg);
+    // Every other fixture collides on exactly one entry, so "length === 1" elsewhere pins
+    // "no more than one" and never "all of them".
+    assert.equal(clashes.length, 2);
+    assert.ok(clashes.some((c) => /refresh entry/.test(c)));
+    assert.ok(clashes.some((c) => /access entry/.test(c)));
+});
+
+test("doctorReport: a clash is a finding, so the run cannot also say it has nothing to report", () => {
+    // Hand-built with no `files`, the only shape in which the nothing-to-report gate can fire at all —
+    // which makes this the one test that pins the clash loop's PLACEMENT before that gate.
+    const cfg = { projectId: "p", servers: {}, oauth: { ado: { scope: "project" } },
+        secrets: { "oauth-ado-refresh": { backend: "local", scope: "project" } } };
+    const lines = m.doctorReport(cfg, {
+        env: {}, platform: "linux", enableLists: { enabled: [], disabled: [], envKeys: [] },
+        resolvable: {}, skipped: [], toolsMissing: [], wired: new Set(),
+    });
+    assert.match(lines.join("\n"), /^WARN oauth "ado" /m);
+    assert.doesNotMatch(lines.join("\n"), /nothing to report/);
+});
+
 test("doctorReport: a colliding oauth entry key is a WARN and does not fail the run", () => {
     const cfg = m.loadConfig(scopedPaths({ project: { projectId: "proj-x",
         oauth: { ado: OAUTH_DECL },
