@@ -41,102 +41,37 @@ Derived, not documented here — `config/test-suites.json` is the source of trut
 **FIRST AND STRONGEST: never run a git command that changes repository or working-tree state.**
 No `stash` (push/pop/apply/drop), no `checkout` / `restore` / `switch` on paths or branches, no
 `reset`, `clean`, `revert`, `rebase`, `merge`, `commit` — by any agent, in any session, for any reason,
-including "recovery". Read-only git is always fine (`status`, `diff`, `log`, `show HEAD:<path>`);
-for a baseline, copy the file to the scratchpad or read `git show HEAD:<path>`.
+**including "recovery"**. Read-only git is always fine (`status`, `diff`, `log`, `show HEAD:<path>`);
+for a baseline, copy the file to the scratchpad or read `git show HEAD:<path>`. A command that
+"failed silently" is the signal to stop and report, never to escalate to a broader one — that
+escalation is exactly how 2026-08-28's `git checkout --theirs -- .` reverted **every tracked file** to
+HEAD and destroyed three sessions' uncommitted work.
 
-This is stated **before** the one-author rule below because it is the stronger of the two, and the
-2026-08-28 loss proves it: one author's `git checkout --theirs -- .` reached files it had no interest
-in and reverted **every tracked file** to HEAD, destroying a completed 161-insertion suite
-re-pointing and 14 rule edits belonging to other sessions. Single authorship would not have
-prevented that — the command was run by the file's own author, and its blast radius was the whole
-tree. Several sessions hold uncommitted work here at any time, and a tree-wide git operation is
-unrecoverable for all of them. A `git stash` that "failed silently" is the signal to stop and
-report, never to escalate to a broader command.
+**`git add -A` in a shared tree commits OTHER sessions' unfinished work.** Nothing is lost, but their
+half-finished work is published under your commit message and pushed where others build on it. Say
+what you are about to sweep up and let the other authors say whether their half is committable.
+**Calibrate, or this becomes "never run `git add -A`" and gets ignored:** the failure is publishing
+another session's unfinished WORK — half-written source, a suite mid-edit, an unverified fixture. It
+is *not* every file you did not personally author; sweeping up an already-tracked transient artifact
+(a run-status file, a generated report) is untidiness, not the failure.
 
-**A commit is not exempt just because it is not destructive: `git add -A` in a shared tree commits
-OTHER sessions' uncommitted work.** The risk is the opposite of the git prohibition above — nothing
-is lost, but someone else's unfinished work is **published under your commit message**, attributed to
-your change, and pushed where others will build on it. So a tree-wide commit needs the same *ping
-first* discipline as a destructive operation: say what you are about to sweep up, and let the other
-authors say whether their half is in a committable state.
-
-Measured 2026-08-28: one session's user authorised `commit all`, and the commit carried a second
-session's fixture work, suite fix, aliases and bug reports — without that session's user being asked.
-It landed cleanly only because that half happened to be gate-green at that minute; a patched assertion
-had landed moments earlier and the same command could as easily have caught the file mid-edit. Treat
-the good outcome as luck, not as evidence the practice is safe.
-
-**Calibrate what this rule is about, or it becomes "never run `git add -A`" and gets ignored.** The
-failure is **publishing another session's unfinished WORK** — half-written source, a suite mid-edit, a
-fixture that has not been verified — under your commit message and your name. It is **not** every file
-you did not personally author. Sweeping up an already-tracked transient artifact — a run-status file, a
-generated report — is untidiness, not the failure: it was in git before you touched it and the next
-commit records its final state. Measured 2026-09-01: `reports/regression/test-run-status.json` was
-committed mid-run and read as a repeat of this mistake, until checking showed it has been tracked for
-100+ commits and matches no ignore rule, so every commit touching that path has always recorded
-whatever state it was in. Keep the distinction sharp; a rule that flags everything flags nothing.
-
-**And once it is pushed, it stays.** Do not offer to rewrite history to fix attribution on a shared
-branch: a force-push breaks the branch for every session that has pulled it, which is a real loss
-traded for a cosmetic one. Attribution lives in the reports, the code comments and the audit trail —
-which is where anyone actually looks.
+**Once it is pushed, it stays.** Never rewrite history on a shared branch to fix attribution: a
+force-push breaks the branch for every session that has pulled it — a real loss traded for a cosmetic
+one.
 
 **SECOND: a suite CSV has exactly one author for the duration of a change.** Not one author per file
-forever — one author per *change*: whoever is restructuring, culling or re-pointing a suite owns
-every row in it until they hand it back. A second writer on the same CSV is forbidden even when the
-two are editing "different rows", and even when both are careful.
+forever — one author per *change*: whoever is restructuring, culling or re-pointing a suite owns every
+row in it until they hand it back. A second writer is forbidden even when the two are editing
+"different rows", and even when both are careful. **A suite conflict is never resolved with git** —
+hand it to a human or to the other author.
 
-This is the same discipline `/qa-review-oracles` already applies to `business-logic.md` and
-`e-commerce-edge-cases-library.md` — triangulation fans out, the **apply is single-writer** — and it
-exists here for the same reason plus two that are specific to suites:
-
-- **A CSV is not mergeable in practice.** Rows are multi-line, quoted, and the safe writers
-  (`suites:append`, the surgical byte-level edit `promote-cases.ts` uses) all read-modify-write the
-  whole file. Two such writes interleave into a file that parses but is wrong — and `suites:lint`
-  cannot tell you which half was intended.
-- **The disposition is the artifact, not the diff.** A restructure is a set of coupled decisions —
-  this case is culled *because* that journey now crosses its link, these two merge *because* they
-  test one rule. Splitting the file between two authors splits the reasoning, and the second author
-  cannot see why the first kept what they kept.
-- **Concurrency here has a measured cost.** 2026-08-28: two `test-management-specialist` agents in
-  two sessions were given the same suite (`083d`) minutes apart; earlier the same day a subagent's
-  `git checkout --theirs -- .` — reached for as "recovery" after a stash collision in the shared
-  tree — reverted every tracked file to HEAD and destroyed a completed 161-insertion re-pointing of
-  that same suite plus 14 rule edits. Neither loss was a merge conflict; both were two writers where
-  the tree assumed one.
-
-**How to work concurrently anyway** — the fan-out is fine, the *write* is what serialises:
-
-| Want | Do |
-|---|---|
-| Two people analysing one suite | Both analyse; **one** applies. The other hands over a staged rows CSV + a disposition table |
-| Two suites, two authors | Fine — ownership is per file, and `config/test-suites.json` is written by `suites:sync`, not by hand. **It is shared state**: agree who runs sync, or exchange the per-suite delta and let one side apply it |
-| Handing a suite over mid-change | Say so explicitly and stop writing. The successor re-reads the file from disk before their first edit |
-| You find a suite already modified in the tree | **Do not overwrite and do not revert.** Someone else is mid-change; report the conflict and wait |
-
-**A mid-write invalid CSV blocks every concurrent author, not just you.** `suites:sync` and
-`suites:lint` hard-fail on a parse error anywhere in the corpus, so a suite left transiently
-unparsable — a half-written quoted field, an unbalanced closing quote — takes the manifest gate down
-for everyone in the tree until it is fixed. Measured 2026-08-28: a `CSV_INVALID_CLOSING_QUOTE` at
-line 871 of one suite blocked both sessions' gates for ~15 minutes, and the author who caused it did
-not know it was blocking anything — it looked like a local parse failure. So the
-surgical-edit discipline (`promote-cases.ts`: locate the record by its own raw text, replace only the
-changed bytes, **re-parse and compare field-by-field**) is not merely about diff hygiene during a
-shared-tree window — re-parse after EVERY write, not once at the end.
-
-**A fact relayed to another session's SUBAGENT does not arrive — it is lost silently.** Cross-session
-messages land in a subagent's context as system-reminder blocks and (correctly) trip the harness's
-prompt-injection handling: the receiving agent treats them as untrusted, declines to act, and may
-refuse to open files the message points at. Measured 2026-08-28: two coordination messages carrying
-load-bearing environment facts were dropped this way, and neither side saw a rejection. **The relay
-path that works is session → session → the receiving session RE-ISSUES the fact, in its own words, in
-the subagent's dispatch brief.** That re-statement is also what makes the fact reviewable, so it is
-the right shape independent of the transport. Never assume a forwarded fact landed; if it matters,
-it belongs in the brief.
-
-**A suite conflict is never resolved with git** — see the prohibition at the head of this section.
-Hand the conflict to a human or to the other author; there is no git command that makes two writers
-safe, and every one of them makes the loss bigger.
+Why a CSV is not mergeable in practice, the disposition-is-the-artifact argument, how to fan out
+analysis while serialising the write, the re-parse-after-every-write discipline (a mid-write
+unparsable suite takes the manifest gate down for *everyone*), and the cross-session relay rule (a
+fact sent to another session's SUBAGENT is dropped silently — the receiving session must re-issue it
+in its own dispatch brief): [`knowledge/execution/regression-suites.md`](../knowledge/execution/regression-suites.md)
+§Working concurrently on suites. The four measured 2026-08-28 losses behind all of it:
+[`docs/decisions/regression-history.md`](../../docs/decisions/regression-history.md) §Shared-tree losses.
 
 ### Selection Groups
 
