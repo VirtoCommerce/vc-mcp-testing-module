@@ -20,6 +20,7 @@ import {
   FORKS,
   REASONS,
   CONTAINMENT_CORE,
+  BYTE_IDENTICAL,
 } from "../maintenance/mirror-check.mjs";
 
 // ---- the live corpus ---------------------------------------------------------------------------
@@ -51,7 +52,7 @@ test("every declared reason is in the closed vocabulary", () => {
 });
 
 test("the registry cannot rot — a declared fork that is no longer forked must be removed", () => {
-  assert.deepEqual(audit.staleDeclarations, []);
+  assert.deepEqual(audit.resyncedDeclarations, []);
 });
 
 test("the mirror has not silently shrunk", () => {
@@ -60,7 +61,7 @@ test("the mirror has not silently shrunk", () => {
   // registry cannot see (it only compares paths present in both).
   assert.ok(audit.shared.length >= 92, `shared paths dropped to ${audit.shared.length}`);
   assert.ok(
-    audit.identical.length + audit.structural.length >= 39,
+    audit.identical.length + audit.structural.length >= 40,
     `gated pairs dropped to ${audit.identical.length + audit.structural.length}`,
   );
 });
@@ -103,7 +104,7 @@ test("identical text classifies as identical, not structural", () => {
 
 test("driftSize counts lines on each side, ignoring blank lines", () => {
   const d = driftSize("keep\nonly-root\n\n", "keep\nonly-plugin\nalso-plugin\n");
-  assert.deepEqual(d, { rootOnly: 1, pluginOnly: 2 });
+  assert.deepEqual(d, { rootOnly: 1, pluginOnly: 2, reordered: false });
 });
 
 test("canonicalise is idempotent", () => {
@@ -120,4 +121,84 @@ test('"undecided" is a burn-down list, not a resting place', () => {
     audit.undecided.length <= 10,
     `undecided forks rose to ${audit.undecided.length}; declare a real reason instead of adding one`,
   );
+});
+
+// ---- regression tests for the 2026-09-09 review findings -------------------------------------
+//
+// Every test below reproduces a defect the first cut of this gate actually had. They are grouped
+// because the shape they share is the one that matters: a gate that reports OK for a state it was
+// built to catch is worse than no gate, since it also stops anyone looking.
+
+test("F1 — --json emits parseable JSON and nothing else", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const out = execFileSync("node", ["scripts/maintenance/mirror-check.mjs", "--json"], {
+    encoding: "utf-8",
+  });
+  assert.doesNotThrow(() => JSON.parse(out), "the OK banner must not be appended to machine output");
+  assert.ok(JSON.parse(out).shared.length > 0);
+});
+
+test("F2 — a declared fork whose plugin copy VANISHED is an orphan, not a re-sync", () => {
+  // The remedies are opposite: a re-sync says "delete the FORKS entry", and following that advice
+  // on a deleted file turns a fork-by-omission green.
+  assert.deepEqual(audit.orphanedDeclarations, [], "every declared fork must exist in both trees");
+  assert.deepEqual(audit.resyncedDeclarations, []);
+  assert.ok(
+    Object.keys(audit).includes("orphanedDeclarations") && Object.keys(audit).includes("resyncedDeclarations"),
+    "the two must stay separate fields — conflating them is the defect",
+  );
+});
+
+test("F3 — the AND-gated allowlist hook is byte-gated, not declared a permanent fork", () => {
+  assert.ok(CONTAINMENT_CORE.includes("hooks/enforce-real-user.mjs"));
+  assert.ok(
+    !Object.hasOwn(FORKS, "hooks/enforce-real-user.mjs"),
+    "a FORKS entry would exempt it from drift detection — the exact shape of REG-2026-09-07-2225",
+  );
+});
+
+test("F4 — a line-ending flip on a shared path is a failure, not invisible", () => {
+  assert.deepEqual(audit.eolDrift, [], "canonicalise folds CRLF, so nothing else here can see this");
+});
+
+test("F5 — the walk skips symlinks and vendor/worktree dirs", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join: j } = await import("node:path");
+  const root = mkdtempSync(j(tmpdir(), "mirror-walk-"));
+  for (const side of [".claude", "plugins/vc-fix"]) {
+    mkdirSync(j(root, side, "knowledge"), { recursive: true });
+    writeFileSync(j(root, side, "knowledge/a.md"), "same\n");
+    mkdirSync(j(root, side, "node_modules/.bin"), { recursive: true });
+    writeFileSync(j(root, side, "node_modules/pkg.json"), "{}");
+    symlinkSync(j(root, "does-not-exist"), j(root, side, "node_modules/.bin/dangling.mjs"));
+  }
+  const r = auditMirror(root);
+  assert.deepEqual(r.shared, ["knowledge/a.md"], "node_modules must not enter the mirror");
+  // The real point: a dangling symlink used to throw ENOENT out of statSync and kill the gate.
+});
+
+test("F6 — a reordered or re-duplicated fork does not report as zero drift", () => {
+  assert.deepEqual(driftSize("a\nb\n", "b\na\n"), { rootOnly: 0, pluginOnly: 0, reordered: true });
+  assert.equal(driftSize("a\na\nb\n", "a\nb\n").rootOnly, 1, "a duplicate is drift; Set membership hid it");
+});
+
+test("F7 — a pair that is byte-identical today is on the ratchet", () => {
+  assert.deepEqual(audit.unratcheted, [], "add it to BYTE_IDENTICAL — the ratchet only tightens");
+  assert.deepEqual(audit.byteDrift, []);
+  assert.deepEqual(audit.byteOrphaned, []);
+  for (const p of CONTAINMENT_CORE) assert.ok(BYTE_IDENTICAL.includes(p), `${p} must be on the ratchet`);
+});
+
+test("F8 — the same target cited at different depths is not a fork", () => {
+  assert.equal(classify("[x](knowledge/foo.md)", "[x](../../knowledge/foo.md)"), "structural");
+  assert.equal(classify("see `knowledge/a.md`", "see `../../../knowledge/a.md`"), "structural");
+  // ...but stripping `../` must not merge genuinely different targets.
+  assert.equal(classify("[x](knowledge/foo.md)", "[x](../../knowledge/bar.md)"), "forked");
+});
+
+test("F9 — a reason inherited from Object.prototype is not in the vocabulary", () => {
+  for (const name of ["toString", "constructor", "valueOf", "hasOwnProperty"]) {
+    assert.ok(!Object.hasOwn(REASONS, name), `"${name}" must not pass the closed-vocabulary check`);
+  }
 });

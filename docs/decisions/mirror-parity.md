@@ -24,9 +24,10 @@ things to sync. Opening them one at a time says otherwise:
 | paths that MUST differ between the trees | 11 | the root cites `plugins/vc-fix/commands/qa-fix.md`; inside the plugin that is `commands/qa-fix.md` |
 | the plugin deliberately omits surface it does not ship | 25 | `vc-bug-catalog.md` de-links `skills/qa-sbtm/*`; `sign-off-templates.md` replaces `@qa-lead-orchestrator` with *"assign in your tracker"* |
 | the **plugin** is canonical and the root copy is a fossil | 12 | every `skills/project-init/*` file — `verify-access.mjs` is 481 lines ahead in the plugin |
-| plugin-only frontmatter / a mirror-warning comment | 4 | `disable-model-invocation: true` |
+| plugin-only frontmatter | 3 | `disable-model-invocation: true` |
 | the plugin must be tracker-neutral where the root is JIRA-specific | 1 | Azure Boards slot mapping in `defect-report-templates.md` |
 | the **root** is canonical and the plugin copy is a frozen snapshot | 1 | `graphql-schema.md` — plugin introspection dated 2026-08-27 vs the root's 2026-09-04 |
+| the AND-gated allowlist hook, comment-only | 1 | `enforce-real-user.mjs` — **resolved**, see below |
 | nobody has decided | 10 | `tracker-ops.md`, `vc-self-check/SKILL.md` |
 
 **So a bulk re-sync would break the plugin**, not fix it. It would reintroduce references a client
@@ -49,7 +50,29 @@ exception. Checking for it is one `diff` per file and it was not done before gen
   vocabulary. An **undeclared fork fails**; so does a declared fork that has since become identical,
   so the ledger cannot rot. Same burn-down shape as `XREF_BASELINE` and `CSV_LINT_BASELINE`.
 
-Gated pairs went from **28 → 39**, and the other 53 stopped being invisible.
+Gated pairs went from **28 → 40** (29 identical + 11 structural), and the other 52 stopped being
+invisible.
+
+**Three ratchets, not one**, because the buckets alone turned out to be too weak — every one of
+these was a review finding against the first cut:
+
+- `BYTE_IDENTICAL` pins the pairs that match today. Without it a byte-gated pair could slide
+  quietly into `structural` on a one-sided path edit, and the predecessor of this file *did*
+  assert byte equality for 23 of them — losing that would have been a regression, not a rewrite.
+  A pair leaves the list only in the commit that deliberately forks it.
+- **Line-ending parity on every shared path.** `canonicalise` folds CRLF to LF so a structural
+  comparison is possible at all, which means a line-ending flip is invisible to everything else
+  here — and that is exactly what hid the `business-logic.md` drift until the audit found 81
+  missing invariants (§4.3).
+- **A declared fork that no longer exists in both trees is an ORPHAN, not a re-sync.** These were
+  one field at first, and the message said *"delete the FORKS entry"* — advice that, followed on a
+  file whose plugin copy had been deleted, turns a fork **by omission** green.
+
+**`hooks/enforce-real-user.mjs` is no longer a declared fork.** It differed only by a comment, so
+it was filed as `plugin-note` — which left the claim *"the executable content is in lock-step"*
+asserted by nobody, on an AND-gated hook whose own MIRROR NOTE records a 6-week one-sided drift
+(`REG-2026-09-07-2225`). The note is now worded to hold on both surfaces, the copies are
+byte-identical, and the file sits in `CONTAINMENT_CORE`.
 
 `scripts/unit/mirror-parity.test.mjs` no longer keeps its own list — it derives everything from that
 registry, so the two cannot disagree. The security argument for byte-identity on the
