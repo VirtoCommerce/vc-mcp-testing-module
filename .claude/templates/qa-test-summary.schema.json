@@ -5,6 +5,20 @@
   "flow": "feature-test|verify-fix|hotfix-verify",
   "path": "fast|full",
   "layer": "storefront|admin-spa|api|module|platform|cross-layer|null",
+  "domain_map": {
+    "$comment": "The sixth pre-flight axis, derived at 1b item 2g, both paths (it dispatches nothing — one local frontmatter read). Resolves whether a DOMAIN MAP exists for this ticket's domain: .claude/knowledge/domain/<name>.md whose `domain_slug` matches. It triggers no lane — when a map is missing AND the chain is all-layer it RECOMMENDS /qa-domain-map <slug> and proceeds. Nothing here ever blocks a run: 12 of 13 domains have no map. Four states because absence and staleness are different facts — a STALE map is the more dangerous one, read as current and carrying a written deliverable's authority. Contract + fail direction: skills/qa-test/axes.md §2g. `null` means the axis never ran (a gap), not that no map exists — that is ABSENT.",
+    "state": "PRESENT|STALE|ABSENT|unresolved|null",
+    "slug": "<bl:extract domain slug, e.g. b2b>",
+    "path": ".claude/knowledge/domain/<name>.md|null",
+    "rev": null,
+    "generated": "YYYY-MM-DD|null",
+    "age_days": null,
+    "all_layer_chain": null,
+    "all_layer_confirmed_at": "1b-provisional|1e-confirmed|null",
+    "recommended": false,
+    "sources": [],
+    "unmapped_surfaces": []
+  },
   "verdict": "PASS|PASS_WITH_NOTES|FAIL|BLOCKED",
   "date": "YYYY-MM-DD",
   "timing": {
