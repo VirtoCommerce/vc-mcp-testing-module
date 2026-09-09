@@ -683,6 +683,16 @@ function oauthKeyClashes(cfg) {
     return clashes;
 }
 
+// The remedy is per-kind and NOT shared: `doctor`'s crossing loop reports secret references only,
+// so pointing an oauth refusal at it would name a command that prints nothing.
+function authorizationRefusal(envVar, kind, refName, { reason, where, remedy = "" }) {
+    return new VcSecretsError(`env ${envVar}: this ${kind === "tasks" ? "task" : "server"} is `
+        + `${reason} to receive "${refName}" — the authorization for it lives at `
+        + `${where} in ${path.join("~", ".claude", CONFIG_NAME)}${remedy}`);
+}
+
+const DOCTOR_REMEDY = '; run "vc-secrets doctor" for the block to add';
+
 // `kind` is "servers" or "tasks". Both are launchables with the same declaration shape; the only
 // difference is who starts them — the MCP client, or a person running `task`.
 async function resolveEnvEntries(name, cfg, resolveSecret, kind = "servers") {
@@ -692,6 +702,7 @@ async function resolveEnvEntries(name, cfg, resolveSecret, kind = "servers") {
     const server = cfg[kind][name];
     // validate every reference BEFORE contacting any backend
     const entries = [];
+    const oauthEntries = [];
     for (const [envVar, value] of Object.entries(server.env)) {
         const ref = parseReference(value);
         if (ref === null) {
@@ -706,17 +717,31 @@ async function resolveEnvEntries(name, cfg, resolveSecret, kind = "servers") {
             if (!Object.hasOwn(cfg.oauth ?? {}, ref.name)) {
                 throw new VcSecretsError(`env ${envVar}: undeclared oauth entry "${ref.name}" — declare it in the "oauth" section of ${CONFIG_NAME}`);
             }
-            throw new VcSecretsError(`env ${envVar}: oauth entry "${ref.name}" cannot be resolved — this build declares oauth entries but does not yet acquire tokens for them`);
+            const oauthDecl = cfg.oauth[ref.name];
+            // Same exemption crossingProblem makes for secrets: a launchable declared in the user's
+            // own file is not crossing a scope boundary, so there is nothing for a grant to police.
+            const source = server.home === USER_SCOPE ? null : authorizationFor(cfg, oauthDecl);
+            if (source !== null) {
+                const grant = own(own(source.block, kind), name);
+                if (grant === undefined) {
+                    throw authorizationRefusal(envVar, kind, ref.name, { reason: "not authorized", where: source.where });
+                }
+                const shapeDiffs = shapeDifferences(grant, consumerShape(server));
+                if (shapeDiffs !== null) {
+                    throw authorizationRefusal(envVar, kind, ref.name,
+                        { reason: `authorized for a different shape: ${shapeDiffs.join("; ")}`, where: source.where });
+                }
+            }
+            // The declaration travels so the launcher needs no cfg of its own to acquire the token.
+            oauthEntries.push({ envVar, name: ref.name, decl: oauthDecl });
+            continue;
         }
         if (!Object.hasOwn(cfg.secrets, ref.name)) {
             throw new VcSecretsError(`env ${envVar}: undeclared secret "${ref.name}"`);
         }
         const problem = crossingProblem(cfg, kind, name, ref.name);
         if (problem !== null) {
-            throw new VcSecretsError(`env ${envVar}: this ${kind === "tasks" ? "task" : "server"} is `
-                + `${problem.reason} to receive "${ref.name}" — the authorization for it lives at `
-                + `${problem.where} in ${path.join("~", ".claude", CONFIG_NAME)}; `
-                + `run "vc-secrets doctor" for the block to add`);
+            throw authorizationRefusal(envVar, kind, ref.name, { ...problem, remedy: DOCTOR_REMEDY });
         }
         const decl = cfg.secrets[ref.name];
         if (ref.field !== null && decl.format !== "json") {
@@ -756,7 +781,7 @@ async function resolveEnvEntries(name, cfg, resolveSecret, kind = "servers") {
         result[entry.envVar] = parsed[ref.field];
     }
 
-    return result;
+    return { env: result, oauth: oauthEntries };
 }
 
 const TIMEOUT_LOCAL_MS = 10_000;
@@ -2009,7 +2034,19 @@ function killProcessTree(child, signal, { platform = process.platform, spawnSync
 async function cmdLaunch(kind, name, cfg) {
     const startedAt = process.hrtime.bigint();
     const resolver = makeSecretResolver(cfg);
-    const secretEnv = await resolveEnvEntries(name, cfg, resolver, kind);
+    // Interim, until Task 20 wires the token channel; delete this block with it. It runs BEFORE
+    // resolveEnvEntries because that function resolves as well as validates: refusing afterwards
+    // unlocks the keystore for a launch that cannot proceed, and a missing secret beside the oauth
+    // ref then reports "run vc-secrets set" — the wrong problem entirely. Only a DECLARED entry is
+    // refused here, so an undeclared one still reaches the message that names the typo.
+    for (const [envVar, value] of Object.entries(cfg[kind][name]?.env ?? {})) {
+        const ref = parseReference(value);
+        if (ref?.kind === "oauth" && Object.hasOwn(cfg.oauth ?? {}, ref.name)) {
+            throw new VcSecretsError(`env ${envVar}: oauth entry "${ref.name}" cannot be resolved — `
+                + "this build declares oauth entries but does not yet acquire tokens for them");
+        }
+    }
+    const { env: secretEnv } = await resolveEnvEntries(name, cfg, resolver, kind);
     if (process.env.VC_SECRETS_TIMING === "1") {
         const ms = Number(process.hrtime.bigint() - startedAt) / 1e6;
         process.stderr.write(`vc-secrets: resolve phase took ${ms.toFixed(0)} ms\n`);   // budget measurement

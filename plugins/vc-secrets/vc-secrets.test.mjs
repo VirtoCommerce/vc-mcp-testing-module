@@ -232,7 +232,7 @@ test("a project declaration cannot take a user-scope secret by naming it — the
 
 test("an authorized shape passes, and its authorization is reported rather than silent", async () => {
     const cfg = m.loadConfig(crossingPaths({ servers: { gh: CROSSING_SHAPE } }));
-    assert.deepEqual(await m.resolveEnvEntries("gh", cfg, async () => "tok"), { T: "tok" });
+    assert.deepEqual((await m.resolveEnvEntries("gh", cfg, async () => "tok")).env, { T: "tok" });
 
     const lines = crossingReport(cfg);
     assert.ok(lines.some((l) => l.startsWith("INFO") && l.includes('server "gh"') && l.includes("personal-pat")),
@@ -296,7 +296,7 @@ test("a project-declared keyvault secret needs the owner's authorization too —
 test("the vaults block authorizes by vault and secret name, and pins the consumer's shape", async () => {
     const authorized = { "victim-prod": { "db-password": { tasks: { build: VAULT_SHAPE } } } };
     const cfg = m.loadConfig(vaultPaths(authorized));
-    assert.deepEqual(await m.resolveEnvEntries("build", cfg, async () => "v", "tasks"), { V: "v" });
+    assert.deepEqual((await m.resolveEnvEntries("build", cfg, async () => "v", "tasks")).env, { V: "v" });
 
     // Same shape, different vault: the authorization does not transfer.
     const elsewhere = m.loadConfig(vaultPaths({ "other-vault": { "db-password": { tasks: { build: VAULT_SHAPE } } } }));
@@ -321,7 +321,7 @@ test("a project-declared LOCAL secret still needs nothing — the set you ran is
         project: { projectId: "demo", secrets: { x: { backend: "local" } },
             tasks: { build: { command: "printenv", args: ["V"], env: { V: "secret:x" } } } },
     }));
-    assert.deepEqual(await m.resolveEnvEntries("build", cfg, async () => "v", "tasks"), { V: "v" });
+    assert.deepEqual((await m.resolveEnvEntries("build", cfg, async () => "v", "tasks")).env, { V: "v" });
 });
 
 test("doctor names the file and the path to paste into, and which of the two it is", () => {
@@ -877,13 +877,13 @@ const CFG = {
 };
 
 test("resolveEnvEntries: literal passthrough + secret resolution", async () => {
-    const env = await m.resolveEnvEntries("azure-mcp", CFG, async () => "tok");
+    const { env } = await m.resolveEnvEntries("azure-mcp", CFG, async () => "tok");
     assert.deepEqual(env, { ADO_MCP_AUTH_TOKEN: "tok", LITERAL: "as-is" });
 });
 
 test("resolveEnvEntries: json fields, one fetch per secret", async () => {
     let calls = 0;
-    const env = await m.resolveEnvEntries("azure-monitor", CFG, async () => {
+    const { env } = await m.resolveEnvEntries("azure-monitor", CFG, async () => {
         calls += 1;
         return JSON.stringify({ tenantId: "t", clientId: "c", clientSecret: "s" });
     });
@@ -1601,7 +1601,14 @@ function collidingUserPaths(envValue) {
 
 test("resolveEnvEntries: an oauth reference never resolves a same-named secret", async () => {
     let asked = 0;
-    const cfg = m.loadConfig(collidingProjectPaths("oauth:ado"));
+    // A SECOND env var that is a real secret ref: without one, `asked === 0` holds because the
+    // fixture offers no backend contact to make, not because validation refused before making it.
+    const cfg = m.loadConfig(scopedPaths({ project: {
+        projectId: "proj-x",
+        secrets: { ado: { backend: "local" }, other: { backend: "local" } },
+        oauth: { ado: OAUTH_DECL },
+        servers: { s: { command: "npx", args: [], env: { ADO_TOKEN: "oauth:ado", OTHER: "secret:other" } } },
+    } }));
     // Asserted, not described: move this fixture's secret to user scope and the authorization gate
     // throws before resolution, leaving `asked` at 0 for a reason that has nothing to do with the
     // kind branch — the test would keep passing while proving nothing about the injection.
@@ -1609,8 +1616,11 @@ test("resolveEnvEntries: an oauth reference never resolves a same-named secret",
     // own it is satisfied by a fixture with no collision left in it.
     assert.ok(Object.hasOwn(cfg.secrets, "ado"));
     assert.equal(m.crossingProblem(cfg, "servers", "s", "ado"), null);
+    // Matched, not bare: a bare `rejects` is satisfied by any throw, so the refusal could move to an
+    // unrelated cause and `asked === 0` would still hold for the wrong reason. The message's own
+    // content is pinned by the authorization test below, not here.
     await assert.rejects(() => m.resolveEnvEntries("s", cfg, async () => { asked += 1; return "PLAINTEXT"; }),
-        /oauth entry "ado" cannot be resolved/);
+        /not authorized/);
     assert.equal(asked, 0, "the secret resolver is never reached");
 });
 
@@ -1635,6 +1645,151 @@ test("resolveEnvEntries: the oauth branch looks the name up among oauth entries,
     }));
     await assert.rejects(() => m.resolveEnvEntries("s", cfg, async () => "PLAINTEXT"),
         /undeclared oauth entry "ado"/);
+});
+
+// A project-scope sign-in WITH its registration grant in the user file, and a server whose shape
+// matches what the grant authorizes — the only fixture in which an oauth reference gets past
+// authorization at all.
+function authorizedOauthPaths() {
+    return scopedPaths({
+        user: { registrations: { [OAUTH_TENANT_ID]: { [OAUTH_CLIENT_ID]: REGISTRATION_BLOCK } } },
+        project: {
+            projectId: "proj-x",
+            oauth: { ado: OAUTH_DECL },
+            servers: { s: { command: "npx", args: ["-y", "some-oauth-package"], env: { ADO_TOKEN: "oauth:ado" } } },
+        },
+    });
+}
+
+test("resolveEnvEntries: an oauth reference is reported apart from the resolved environment", async () => {
+    const cfg = m.loadConfig(authorizedOauthPaths());
+    const out = await m.resolveEnvEntries("s", cfg, async () => "PLAINTEXT");
+    assert.deepEqual(Object.keys(out).sort(), ["env", "oauth"]);
+    assert.deepEqual(out.env, {}, "an oauth ref contributes no value here — the launcher supplies it");
+    assert.equal(out.oauth.length, 1);
+    assert.equal(out.oauth[0].envVar, "ADO_TOKEN");
+    assert.equal(out.oauth[0].name, "ado");
+    // The declaration itself travels, not just its name: the launcher needs tenantId/clientId to
+    // acquire the token, and re-looking it up by name is what the collision tests above forbid.
+    assert.equal(out.oauth[0].decl.clientId, OAUTH_CLIENT_ID);
+});
+
+test("resolveEnvEntries: a user-scope launchable needs no grant for a sign-in, exactly as for a secret", async () => {
+    // crossingProblem exempts a user-scope launchable outright — it is not crossing a scope boundary,
+    // so there is nothing for a grant to police. Without the same exemption the two kinds disagree on
+    // the plainest config there is: everything in one personal file.
+    const paths = (env, extra) => scopedPaths({ user: { ...extra,
+        servers: { s: { command: "npx", args: [], env } } } });
+    const viaOauth = m.loadConfig(paths({ TOK: "oauth:ado" }, { oauth: { ado: OAUTH_DECL } }));
+    const out = await m.resolveEnvEntries("s", viaOauth, async () => "PLAINTEXT");
+    assert.equal(out.oauth.length, 1);
+    // The positive control, in the same test: the secret path has always allowed this shape.
+    const viaSecret = m.loadConfig(paths({ TOK: "secret:ado" }, { secrets: { ado: { backend: "local" } } }));
+    assert.deepEqual((await m.resolveEnvEntries("s", viaSecret, async () => "PLAINTEXT")).env, { TOK: "PLAINTEXT" });
+});
+
+test("resolveEnvEntries: the exemption follows the launchable's home, not the declaration's", async () => {
+    // The two are only distinguishable where they differ. A fixture with both at user scope is
+    // satisfied by either rule, which is why the test above cannot stand in for this one.
+    const cfg = m.loadConfig(scopedPaths({
+        user: { servers: { s: { command: "npx", args: [], env: { TOK: "oauth:ado" } } } },
+        project: { projectId: "proj-x", oauth: { ado: OAUTH_DECL } },
+    }));
+    const out = await m.resolveEnvEntries("s", cfg, async () => "PLAINTEXT");
+    assert.equal(out.oauth.length, 1, "the server is the user's own; the grant polices a crossing that is not happening");
+});
+
+test("resolveEnvEntries: an oauth refusal names no command, because doctor does not report one yet", async () => {
+    // doctorReport's crossing loop reports secret references only, so the secret refusal's closing
+    // advice is true and the same advice on an oauth refusal would name a command that prints nothing.
+    const noGrant = m.loadConfig(collidingProjectPaths("oauth:ado"));
+    await assert.rejects(() => m.resolveEnvEntries("s", noGrant, async () => "x"),
+        (e) => /not authorized to receive "ado"/.test(e.message) && !/vc-secrets doctor/.test(e.message));
+    // The positive control: the secret path still carries it, so this pins a difference, not an absence.
+    const secretSide = m.loadConfig(crossingPaths(undefined));
+    await assert.rejects(() => m.resolveEnvEntries("gh", secretSide, async () => "x"), /run "vc-secrets doctor"/);
+});
+
+test("resolveEnvEntries: a grant naming the task list does not authorize a server of the same name", async () => {
+    // The grant is read at cfg.registrations[t][c][kind][name]; ignoring `kind` would let a task's
+    // authorization launch a server, which is a different command with different arguments.
+    const cfg = m.loadConfig(scopedPaths({
+        user: { registrations: { [OAUTH_TENANT_ID]: { [OAUTH_CLIENT_ID]: { tasks: REGISTRATION_BLOCK.servers } } } },
+        project: { projectId: "proj-x", oauth: { ado: OAUTH_DECL },
+            servers: { s: { command: "npx", args: ["-y", "some-oauth-package"], env: { ADO_TOKEN: "oauth:ado" } } } },
+    }));
+    await assert.rejects(() => m.resolveEnvEntries("s", cfg, async () => "x"), /not authorized/);
+});
+
+test("resolveEnvEntries: an env entry declared after an oauth reference still reaches the child", async () => {
+    // The oauth branch ends in `continue`; a `break` would silently drop everything after it.
+    const cfg = m.loadConfig(scopedPaths({
+        user: { registrations: { [OAUTH_TENANT_ID]: { [OAUTH_CLIENT_ID]: {
+            servers: { s: { command: "npx", args: ["-y", "some-oauth-package"], envKeys: ["ADO_TOKEN", "TRAILING"] } } } } } },
+        project: { projectId: "proj-x", oauth: { ado: OAUTH_DECL }, secrets: { later: { backend: "local" } },
+            servers: { s: { command: "npx", args: ["-y", "some-oauth-package"],
+                env: { ADO_TOKEN: "oauth:ado", TRAILING: "secret:later" } } } },
+    }));
+    const out = await m.resolveEnvEntries("s", cfg, async () => "PLAINTEXT");
+    assert.deepEqual(out.env, { TRAILING: "PLAINTEXT" });
+    assert.equal(out.oauth.length, 1);
+});
+
+test("cmdLaunch: an authorized oauth reference is refused, and the secret beside it is still not leaked", async () => {
+    // The interim refusal lives in cmdLaunch, so resolution runs first and a secret beside the oauth
+    // ref IS fetched before the refusal. That is the measured cost of moving the seam; Task 20 removes
+    // it. What must hold meanwhile is that the launch does not proceed.
+    const cfg = m.loadConfig(scopedPaths({
+        user: { registrations: { [OAUTH_TENANT_ID]: { [OAUTH_CLIENT_ID]: {
+            servers: { s: { command: "npx", args: ["-y", "some-oauth-package"], envKeys: ["ADO_TOKEN", "OTHER"] } } } } } },
+        project: { projectId: "proj-x", oauth: { ado: OAUTH_DECL }, secrets: { plain: { backend: "local" } },
+            servers: { s: { command: "npx", args: ["-y", "some-oauth-package"],
+                env: { ADO_TOKEN: "oauth:ado", OTHER: "secret:plain" } } } },
+    }));
+    await assert.rejects(() => m.cmdLaunch("servers", "s", cfg), /does not yet acquire tokens/);
+});
+
+test("resolveEnvEntries: an oauth reference with no registration grant is refused before any backend is contacted", async () => {
+    let asked = 0;
+    const cfg = m.loadConfig(collidingProjectPaths("oauth:ado"));
+    await assert.rejects(() => m.resolveEnvEntries("s", cfg, async () => { asked += 1; return "PLAINTEXT"; }),
+        /not authorized to receive "ado".*registrations\./s);
+    assert.equal(asked, 0, "the secret resolver is never reached");
+});
+
+test("resolveEnvEntries: a grant authorizing a different launch shape is refused, naming the difference", async () => {
+    // A grant is a launch shape, not a yes: the registration authorizes THIS command with THESE args,
+    // so a server that keeps the name and changes what it runs is not covered by it.
+    const cfg = m.loadConfig(scopedPaths({
+        user: { registrations: { [OAUTH_TENANT_ID]: { [OAUTH_CLIENT_ID]: REGISTRATION_BLOCK } } },
+        project: {
+            projectId: "proj-x",
+            oauth: { ado: OAUTH_DECL },
+            servers: { s: { command: "npx", args: ["-y", "a-different-package"], env: { ADO_TOKEN: "oauth:ado" } } },
+        },
+    }));
+    // Both halves: that a difference is NAMED, and which side is which — shapeDifferences renders
+    // "args are <actual>, authorized <granted>", so swapping its arguments inverts the advice and
+    // sends the reader to change the half that was already right.
+    await assert.rejects(() => m.resolveEnvEntries("s", cfg, async () => "PLAINTEXT"),
+        /authorized for a different shape: args are \["-y","a-different-package"\], authorized \["-y","some-oauth-package"\]/);
+});
+
+test("an oauth reference cannot smuggle a value into a dangerous env key either, and is stopped at load", () => {
+    // The guard is on the KEY, so it needed no knowledge of the new prefix. This is what says so —
+    // and it also says the refusal happens at load, so resolveEnvEntries never sees such a config.
+    assert.throws(() => m.loadConfig(projectPaths({
+        projectId: "proj-x",
+        oauth: { ado: OAUTH_DECL },
+        servers: { s: { command: "npx", args: [], env: { NODE_OPTIONS: "oauth:ado" } } },
+    })), /NODE_OPTIONS/);
+});
+
+test("cmdLaunch refuses an authorized oauth reference while this build cannot acquire tokens", async () => {
+    // The interim refusal moved out of resolveEnvEntries rather than being deleted, so the CLI
+    // behaviour is unchanged while the resolver gains its reporting shape. Task 20 removes it.
+    const cfg = m.loadConfig(authorizedOauthPaths());
+    await assert.rejects(() => m.cmdLaunch("servers", "s", cfg), /does not yet acquire tokens/);
 });
 
 test("doctorReport: an oauth reference sharing a user-scope secret's name reports no grant", () => {
@@ -1784,8 +1939,8 @@ test("two servers naming different secrets get different values — the resolve 
 
         return `value-of-${name}`;
     };
-    const envA = await m.resolveEnvEntries("a", loaded, fake);
-    const envB = await m.resolveEnvEntries("b", loaded, fake);
+    const { env: envA } = await m.resolveEnvEntries("a", loaded, fake);
+    const { env: envB } = await m.resolveEnvEntries("b", loaded, fake);
 
     // The failure this guards is a per-name cache degenerating into a per-run one, which would hand
     // the second server the first one's credential — with both servers looking correctly configured.
