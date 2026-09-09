@@ -116,6 +116,22 @@ Real examples from recent reports (BUG-IMP-049 at 315 lines vs 150 target; BA-VC
 | Regression suite (20+ tests) | failures + 1 summary per area | 15–20 |
 | Exploratory session | anomalies only | 10 |
 
+**Video / GIF — only for a defect that lives in a transition.** A redirect that fires on its own, a
+flash of wrong content, a layout jump, an element that vanishes: two stills of the before and after
+states do not show that the app did it unprompted, so they do not evidence the bug. Everything else
+stays a screenshot — a recording of a static defect is just a heavier screenshot nobody scrubs
+through. Capture with `npm run evidence:record` (`.claude/rules/mcp-browsers.md` §Video & GIF
+evidence). Keep it **short** — a recording runs roughly navigation + `--wait` + a second of browser
+startup, so tune `--wait` down to just past the symptom rather than leaving the 6 s default; one
+recording per defect. At `--fps 5` a 12 s GIF is about 7 KB, so length is an attention budget, not a
+size one. Recordings
+land in the gitignored `test-results/evidence/` and are **never committed** — they go onto the ticket
+as an attachment, by hand, because the Atlassian MCP cannot upload files. Reference one from the
+report by what it shows, not by path (the reader cannot open your `test-results/`). If the recording
+needed artificial help to reproduce (`--throttle`, an injected delay), **say so on the ticket**: that
+is a demonstration of a race, not an organic repro, and a reviewer who mistakes one for the other
+will draw the wrong conclusion about severity.
+
 **Retention:** Regression/test-lifecycle/coverage screenshots under `reports/regression/REG-*/`, `reports/test-lifecycle/TLC-*/`, `reports/coverage/COV-*/` are gitignored — disposable artifacts referenced from the permanent markdown. Bug evidence (`reports/bugs/screenshots/`) and per-ticket evidence (`reports/tickets/SprintXX-XX/VCST-XXXX/screenshots/`, `reports/tickets/VCST-XXXX/screenshots/`) stay tracked.
 
 ## 6. Console & Network Evidence

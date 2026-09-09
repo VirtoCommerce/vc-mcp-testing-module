@@ -27,7 +27,11 @@ The 6 servers in the table above are configured in `.mcp.json` (project-level). 
 - Default to `chromium` (not `chrome`) for Playwright MCP browser launches. WebKit is NOT supported on Windows — fall back to Edge or Chrome immediately without attempting installation.
 - Always verify MCP server config uses correct browser engine names: `chromium`, `firefox`, `webkit` (not `chrome`, `edge`).
 - After any MCP config change, remind the user that a server restart is required before the new config takes effect.
-- Browser configs set viewport to 1920x1080, HAR capture enabled, video on failure, isolated contexts.
+- Browser configs set viewport to 1920x1080, HAR capture enabled, isolated contexts, and
+  `screenshot: "only-on-failure"`. **They do NOT record video** — `recordVideo` is absent from all
+  three `config/mcp-playwright-*.config.json` files (this line previously claimed "video on failure",
+  which sent an investigation looking for recordings that were never made). To capture a transition,
+  use `npm run evidence:record` — see §Video & GIF evidence below.
 
 ## `.mcp.json` Setup
 
@@ -40,6 +44,52 @@ Suites that sign into the storefront/Admin SPA must enter real passwords via the
 - **Point `--secrets` at a dedicated, minimal file — NOT `.env.local`.** `.env.local` also holds API tokens/keys (`ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, `GITHUB_FIX_BUGS_TOKEN`, `JIRA_API_TOKEN`, `FIGMA_API_KEY`, `POSTMAN_API_KEY`, `BROWSERSTACK_ACCESS_KEY`). If those were reachable, a malicious page or prompt-injection could get the agent to type a PAT/API key into an arbitrary web form. Least privilege = a separate file with **login passwords only**.
 - **Setup:** copy `templates/.env.playwright.local.template` → `.env.playwright.local` (auto-gitignored by the `.env.*.local` rule), fill from the team secret store, and add `"--secrets", ".env.playwright.local"` to each Playwright server's args (see `templates/.mcp.json.example`). Reconnect/restart the MCP after editing.
 - The file is **not** suffix-promoted (read raw by the MCP) — put the concrete value for whichever env you run browser suites against, matching that env's `.env.local` values.
+
+## Video & GIF evidence
+
+Some defects do not live on a screen, they live in a **transition** — a redirect that fires on its
+own, a flash of the wrong content, a layout jump, an element that vanishes. Two screenshots of the
+before and after states do not show that the app did it by itself, so they do not evidence the bug.
+For those, record.
+
+```bash
+# one recording of a page
+npm run evidence:record -- --url "$BACK_URL/#!/resetpassword/{userId}/{token}"
+
+# an INTERMITTENT defect: replay until the symptom appears, keep only the run that caught it
+npm run evidence:record -- --url "..." --runs 20 --until login --headed --frames 2
+```
+
+`scripts/evidence/record-browser.mjs`. Each run is a fresh browser (no cache, no storage — the state
+a user arriving from an emailed link is in), prints a timeline of URL changes, and writes a `.webm`
+per run under `test-results/evidence/<timestamp>/`. Key flags: `--until <substr>` declares the
+symptom (page URL comes to contain it) and **deletes the recordings of runs that missed**, so chasing
+a race does not leave a pile of look-alike videos to sort by hand; `--runs N` sets the attempts;
+`--headed` because a headless browser is faster and can win a race the real one loses; `--throttle`
+(CPU 4x + Slow 4G, Chromium only) widens a race window; `--frames N` also extracts PNG stills.
+Exit code is 1 when `--until` never matched — a miss is reportable data, not a pass.
+
+**GIF needs a system ffmpeg.** The ffmpeg binary Playwright ships (reused here for frame extraction)
+is built with `webm`/`png` only and has no GIF or MP4 encoder, so `--gif` reports that and skips
+rather than failing. `winget install Gyan.FFmpeg` enables it.
+
+**Session-wide recording** (every MCP browser action, not one scripted scenario) means adding
+`recordVideo` to `contextOptions` in `config/mcp-playwright-<lane>.config.json`:
+
+```json
+"recordVideo": { "dir": "./test-results/chrome/video", "size": { "width": 1280, "height": 720 } }
+```
+
+Deliberately **not** enabled by default: Playwright has no "video only on failure" for a raw context
+(that is a `@playwright/test` runner feature), so it records every page of every session — a full
+121-suite regression would write video for all of it. Turn it on for a focused investigation, then
+turn it off. As with every MCP config change, **a full server restart is required** — a `/mcp`
+reconnect does not reliably restart the child process.
+
+**Artifacts are gitignored on purpose.** `test-results/` is not tracked: a recording is evidence for
+a tracker attachment, not a repo asset. Note that the Atlassian MCP cannot upload attachments, so a
+video or GIF goes onto a ticket by hand. Retention + when a recording is warranted at all:
+`.claude/rules/reports.md` §5.
 
 ## Storybook Visual Regression
 

@@ -88,6 +88,8 @@
     "sitemap:refresh": "node scripts/maintenance/refresh-sitemap.mjs",
     "sitemap:check": "node scripts/maintenance/refresh-sitemap.mjs --check",
     "reports:prune": "node scripts/maintenance/prune-old-artifacts.mjs",
+    "evidence:record": "node scripts/evidence/record-browser.mjs",
+    "jira:attach": "node scripts/lib/jira-attach.mjs",
     "reports:prune:apply": "node scripts/maintenance/prune-old-artifacts.mjs --apply",
     "td:validate": "npx tsx scripts/test-data/validate-td-refs.ts",
     "td:validate:warn": "npx tsx scripts/test-data/validate-td-refs.ts --warn-only",
