@@ -233,6 +233,21 @@ tweaks go in `.serena/project.local.yml` (gitignored), never in the shared `proj
 
 Bugs from each env are auto-tagged `env:${TEST_ENV}` and `risk:${ENV_RISK}` in JIRA labels so you can filter by env (e.g. "show me only prod bugs").
 
+### Attaching evidence to a ticket
+
+The Atlassian MCP connector has no attachment tool, so screenshots and recordings used to be dragged onto a ticket by hand. `npm run jira:attach` does it over the Jira REST API:
+
+```bash
+npm run jira:attach -- VCST-1234 reports/bugs/screenshots/BUG-cart-total-wrong.png
+npm run jira:attach -- VCST-1234 --list   # what is already attached, with ids and sizes
+```
+
+It also reads attachments back, which is how a developer's screenshots posted to a ticket become usable locally.
+
+This needs three keys in your **own** `.env.local` — `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` (see `templates/.env.local.template`). Create a **classic** API token — the "Create API token" button, not "with scopes" — at [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens). A new token can take up to a minute to start working.
+
+> **The token is personal** and carries your permissions: an attachment is credited to whoever owns it. Never share one, and never commit it — `.env.local` is gitignored for that reason.
+
 ## Cost Awareness
 
 The plugin uses your Anthropic API tokens. Approximate cost per command (varies by environment + bug density):

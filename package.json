@@ -94,6 +94,7 @@
     "releases:check": "node scripts/maintenance/refresh-release-ledger.mjs --check",
     "reports:prune": "node scripts/maintenance/prune-old-artifacts.mjs",
     "reports:prune:apply": "node scripts/maintenance/prune-old-artifacts.mjs --apply",
+    "jira:attach": "node scripts/lib/jira-attach.mjs",
     "td:validate": "npx tsx scripts/test-data/validate-td-refs.ts",
     "td:validate:warn": "npx tsx scripts/test-data/validate-td-refs.ts --warn-only",
     "td:reconcile": "node scripts/seed-data/reconcile-test-data.mjs",
