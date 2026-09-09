@@ -96,13 +96,17 @@ fire once, at loop exit ([`skills/qa-test/modes.md`](../skills/qa-test/modes.md)
 never restate it here.** `1a` resolves them and its own table carries the per-flow branch.
 
 1. **FLOW** — which pipeline runs at all: `verify-fix` · `hotfix-verify` · `feature-test`.
-2. **EFFORT** — FAST or FULL, **only** within `feature-test`. FULL for a new feature / Story / Epic, P0–P1,
+2. **EFFORT** — FAST or FULL, **only** within `feature-test`. FULL for a new feature / Epic, P0–P1,
    cross-layer, ≥2 domains, a critical-revenue flow, or an unclear surface; FAST for a bug fix / copy-tweak /
    config / Technical task — or a `Review task` contribution whose PR diff is one-file and
    single-surface (`ticket-routing.md` §5a, which also defaults its `coverage` axis ON) — that is
-   P2–P3, single-layer, single-domain, obvious surface. **When in doubt, take
-   FULL** — a real regression is worse missed than a fast run saved
-   ([`SKILL.md`](../skills/qa-test/SKILL.md) §Effort routing).
+   P2–P3, single-layer, single-domain, obvious surface. **A `Story` is FULL by default and downgrades to
+   FAST only when it is narrow on all six §5b tokens** — and never on a surface whose purpose `2-map`
+   reports `UNDECLARED`, because a Story is the only step that ever declares one. For a Story that
+   downgrade is **provisional at `1a` and confirmed at the end of `1b`** (two tokens resolve there;
+   `1b` is identical on both paths, so nothing has been skipped yet) and it moves one way only,
+   FAST→FULL — record both in `summary.json.path_route`. **The tie-break when a token will not resolve is
+   `ticket-routing.md` §5's, stated only there — read it rather than assuming which way it points.**
 
 A `not-fixed` Bug takes `feature-test` **FAST** to reproduce and characterize the defect live with fresh
 evidence — there is no fix to *verify* yet; state that the next step is `/qa-fix <ticket-key>`.
@@ -305,7 +309,9 @@ blocks** — 12 of 13 domains have no map.
 
 **2. The per-ticket prior art**, read directly — `reports/ba/<domain folder>/` (prior BA analysis),
 `reports/ba/test-models/` (prior test models), and the tickets already tested here
-(`reports/tickets/**/summary.json`). (The generated the prior-art sources (`2-map`) index that used to front these was removed 2026-09-08 — read the sources, dated by their filenames or `git log`.) Two questions, and the second is the one that lets you design a test.
+(`reports/tickets/**/summary.json`). (The generated index that used to front these sources was removed 2026-09-08 — read the sources directly, 
+dated by their filenames or `git log`.) 
+Two questions, and the second is the one that lets you design a test.
 
 **The bibliography** — carry four things forward: the **prior BA analysis** for this domain, the **prior
 test model** for this surface, the **domain knowledge** docs, and the **tickets already tested** here.
@@ -333,9 +339,12 @@ current behaviour, confirmed against the `2-release` ledger Δ **since that docu
 check before anything is built on it (the map's own §1 carries the axis table and the
 `CONFIRMED`/`DRIFT`/`MISSING`/`UNVERIFIED` verdicts). Reading a stale deliverable and repeating it is
 worse than reading none, because it arrives with a written deliverable's authority. Three consumers: the `1c` brief (so
-`ba-system-analyzer` starts from the prior analysis instead of re-deriving it), `1e` (**amend the existing
-surface model, never fork it** — VCST-5346 already has two), and `5h` (an existing guide for this surface
-is amended, never forked).
+`ba-system-analyzer` starts from the prior analysis instead of re-deriving it), `1e` (**a later round of the
+SAME ticket amends that model in place; another ticket on this surface writes its own file and carries the
+predecessor's Part 0 forward, citing it** — what is forbidden either way is a second independently-derived
+model of one surface, and VCST-5346 already has two:
+[`test-model.md`](../skills/qa-test/test-model.md) §Why it is a durable file), and `5h` (an existing guide
+for this surface is amended, never forked).
 
 **PR testing:** confirm the PR's artifact version is deployed; if not → offer `/qa-deploy-pr <ticket-key>`
 (**ask first**) or warn and ask whether to wait.

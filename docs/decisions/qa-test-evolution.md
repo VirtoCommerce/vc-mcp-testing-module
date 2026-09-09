@@ -39,3 +39,29 @@
 - **The ECL citation gate** (the `ecl` axis's deterministic core, above) — `scripts/knowledge/lint-ecl.ts` → **`ecl:lint`/`ecl:audit:collect`**, the ECL twin of `bl:lint`. It cross-references every `Edge_Case_Refs` cell in `regression/suites/**.csv` against the library's section headings: **ECLC-001** dangling citation (a case cites a section that does not exist — false traceability) · **ECLC-002** section no case cites · **ECLC-003** unparsable suite (its citations are ABSENT from the report, so it invalidates the other two in both directions rather than reading as clean — same rule as `bl:lint`'s BLC-005) · **ECLL-001** duplicate section number · **ECLL-002/003** Appendix D ↔ body coherence · **ECLL-004** zero-padded spelling. Created 2026-08-06 because the library had **no declared write owner and no gate at all**, and its first run found **20 dangling ECL ids cited by ~65 cases across 7 suites** — including `ECL-13.4`, which never existed, and 24 layout-stability cases reaching for `ECL-1.4`–`1.8`, i.e. content the library was genuinely missing. **The gate proves a ref EXISTS; it cannot prove the ref is RIGHT** — nine loyalty cases cited `ECL-13.2` ("Subscription & Recurring Billing") meaning `ECL-13.3` ("Loyalty & Points") and no gate could object. That semantic call is `/qa-review-tests` **Dimension 6**, the exact analogue of the GRD-001 ↔ Dimension-11 split below.
 - **Test-case self-maintenance (stale-case audit)** — the same triangulation mechanism applied to regression suites, because `lint-test-cases.ts` GRD-001 only checks that an assertion **carries** a grounded provenance tag, never that the tag is **true** (a `{DOC}` whose doc changed and an `{OBSERVED}` from a six-month-old build both lint green). **Dimension 11** of `/qa-review-tests` (`--triangulate`, judgment rules in `.claude/skills/qa-review-tests/triangulation-criteria.md`) triangulates each assertion against **docs + live + source** → CONFIRMED / DRIFT / MISSING / CONTRADICTORY / UNGROUNDED / RETIRE (TRI-001…006), auto-applying only CONFIRMED (refresh the `Audited:` stamp) and DRIFT (rewrite the drifted assertion); the other four are proposals — deprecation and authoring stay human. The stamp appends to the free-text `References` column (which already carries `Synced:`/`Corrected:` stamps), so the 15-column CSV contract is **unchanged**, and **the stamp is the rotation state** — no ledger file to desync. Scheduled twin: `ci/run-suite-audit.ts` (`npm run ci:audit`) + `.github/workflows/suite-audit.yml` audits **one suite per weekday** and lands each audit as its own **draft PR** (that PR is the human gate replacing `--fix`'s confirm prompt; never auto-merges). Rotation `scripts/test-cases/audit-queue.ts` (`tc:audit:queue`, keyed by **file**, not id — a defensive convention retained from when manifest id `092` was briefly carried by two suites; that duplicate is resolved); source axis `scripts/test-cases/suite-source-map.ts` (`tc:audit:source`) derives suite→module→repo from `module-suite-map.md` + `fix-repos.json` for 117/126 suites and **never invents a repo name**. Details: `.claude/knowledge/execution/regression-pipelines.md` §Scheduled Test-Case Staleness Audit.
 - Virto Commerce docs: **VirtoOZ MCP** (primary — 12 topic-scoped tools: `PlatformUserGuide`, `PlatformDeveloperGuide`, `StorefrontUserGuide`, `StorefrontDeveloperGuide`, `*SourceCode`, `MarketplaceUserGuide`, `MarketplaceDeveloperGuide`, `DeploymentGuide`, `B2BExperts`, `VirtoCommerce`) accessed via the `/vc-docs` skill. Context7 library `/virtocommerce/vc-docs` is a fallback.
+
+## The EFFORT tie-break
+
+- **One sentence, one home, because four copies hid an inversion for a day.** *"When in doubt → FULL"* is
+  stated **only** in `.claude/knowledge/execution/ticket-routing.md` §5 — the file `CLAUDE.md` declares
+  normative for routing and which `commands/qa-test.md` is already told to *"cite, never restate."* It had
+  been pasted into three more places: the command's §Routing, `skills/qa-test/SKILL.md` §Effort routing
+  and `docs/qa-test-flow.md`.
+
+  On **2026-09-09**, commit `092c9375` — *"Docs housekeeping: close the live dangling references, **leave
+  the record alone**"* — flipped the normative copy to `+**When in doubt → FAST.**`. It is the only
+  semantic change in an otherwise clean 103-dangling-reference repair pass, and it inverted the fail-safe
+  direction of the routing decision: read literally, a Story of unestablished scope would have taken a
+  checklist run with no Test Model, no authored cases and no verifier gates.
+
+  **Nothing detected it for a day, and the redundancy is why.** The three copies still said FULL, so no
+  file contradicted itself, no gate compares one file's prose to another's (`DOC-006` is scoped to the
+  always-loaded tier and to suite/case counts; `DOC-001` compares a stated count only against the table
+  *immediately below it*), and an agent's answer depended on which file it happened to open. The failure
+  mode is the one `CLAUDE.md` §Where the rules live already names — *"every contradiction the 2026-09-07
+  audit found was in a fact that had been restated"* — reproduced by the very pass that was tidying up.
+
+  **Resolution:** restore FULL, keep the reasoning with the rule, and reduce the other three to citations,
+  so a future inversion is a one-line diff in the file that owns the rule rather than a silent
+  disagreement between four. The rule is also now marked as the EFFORT instance of §6's fail-safe
+  principle, so the two cannot drift apart either.

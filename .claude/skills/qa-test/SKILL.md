@@ -93,7 +93,9 @@ Two consequences of the FAST cut are deliberate and worth stating rather than di
 - **The checklist is therefore the run's only durable record** of what was checked — which is why it is
   written to the ticket folder (Artifact B) instead of scrolling past in the terminal.
 
-*When in doubt, take FULL* — a real regression is worse missed than a fast run saved.
+The tie-break for an unresolvable token is **`ticket-routing.md` §5's, and only there** — this file argues
+where the line sits, that one states which side of it an unestablished token falls on. Four copies of that
+one sentence is how it got inverted for a day without anything noticing.
 
 ## The verifier, in one place
 
