@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "6edfd08c-ddce-4788-9e01-5ee4b70e85b5",
+    "_postman_id": "70309ed2-0daa-4827-bc90-21556374ac50",
     "name": "VCST-5933 — organizationOrders authorizes on raw membership (self-contained)",
     "description": "Self-contained reproducible evidence for VCST-5933. Locks and unlocks the membership over the REST API, so no seeder script is needed.\n\nLAST RUN 2026-09-09 via newman: 13/13 requests, 23 assertions, 1 failed — request 8, which is the evidence. Teardown verified back to V1.\n\nTHE DEFECT: organizationOrders(organizationId:) authorizes through CanAccessOrderAuthorizationHandler -> IsCustomerOrganization -> Contact.Organizations.Contains(organizationId) — raw membership, never lock-aware. organization(id:) re-evaluates the lock. The two reads disagree for a member who is LOCKED OUT.\n\nTHE ORDER IS NOT ARBITRARY — two measured facts force it:\n 1. Platform REST needs a CONTEXT-FREE ADMIN token. A storefront-scoped token gets 401 invalid_token, so lock/unlock cannot reuse the buyer's (requests 1-4 and 12-13 use the admin token).\n 2. A V2 lock KILLS a token minted BEFORE it. So the buyer authenticates at request 5, AFTER the lock.\n\nWHY EVERY CONTROL IS HERE — no single request carries the finding:\n · request 8 (THE DEFECT) is meaningless without 7: same principal, same org, refused\n · 9 proves the refusal is LOCK-specific, not a blanket customer-principal denial\n · 10 proves the query really reads the named org (measured 66 vs 14)\n · 11 proves it is not simply ungated — a NON-MEMBER org IS refused\n · 5 proves the buyer token is scoped to the UNLOCKED org, so nothing request 8 returns about the locked org can be explained by the token's scope\n\nREAD-BACK IS MANDATORY: POST .../{id}/lock on an unknown membership id returns 200 with a null body, NOT 404. Request 4 verifies the state instead of trusting request 3's status; request 13 does the same for the unlock.\n\nDO NOT RUN WITH --bail. Requests 12-13 unlock the fixture; --bail would stop at request 8 and leave it LOCKED, poisoning suites 006 and 050d.\n\nGRAPHQL BODIES USE mode:\"graphql\", never raw (qa-postman SKILL.md Rules).\n\nRUN: newman run <collection> -e <env> --env-var \"adminUser=$ADMIN\" --env-var \"adminPassword=$ADMIN_PASSWORD_VCST\" --env-var \"b2bUserPassword=$DEFAULT_TEST_PASSWORD\"",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
@@ -20,7 +20,7 @@
           }
         }
       ],
-      "id": "a1000000-0000-4000-8000-000000000001",
+      "id": "ebd865a4-91a7-4ea0-b0b4-613062b266be",
       "request": {
         "auth": {
           "type": "noauth"
@@ -84,7 +84,7 @@
           }
         }
       ],
-      "id": "a1000000-0000-4000-8000-000000000002",
+      "id": "523834bb-0ada-4854-9105-4fc89849bcfb",
       "request": {
         "auth": {
           "type": "bearer",
@@ -143,7 +143,7 @@
           }
         }
       ],
-      "id": "a1000000-0000-4000-8000-000000000003",
+      "id": "588a8e6f-1528-483a-844c-059bed61ddbf",
       "request": {
         "auth": {
           "type": "bearer",
@@ -207,7 +207,7 @@
           }
         }
       ],
-      "id": "a1000000-0000-4000-8000-000000000004",
+      "id": "bc3b29bf-05ba-4e6c-b1ba-c74c7745b14c",
       "request": {
         "auth": {
           "type": "bearer",
@@ -267,7 +267,7 @@
           }
         }
       ],
-      "id": "a1000000-0000-4000-8000-000000000005",
+      "id": "e70c50f8-846b-4d1d-811c-031a8a7be20a",
       "request": {
         "auth": {
           "type": "noauth"
@@ -342,7 +342,7 @@
           }
         }
       ],
-      "id": "a1000000-0000-4000-8000-000000000006",
+      "id": "80b4ee1b-279a-49c3-8038-a9cc431f0969",
       "request": {
         "method": "POST",
         "header": [
@@ -390,7 +390,7 @@
           }
         }
       ],
-      "id": "a1000000-0000-4000-8000-000000000007",
+      "id": "605cdcc4-a0d2-4d11-b4f0-19db46e41736",
       "request": {
         "method": "POST",
         "header": [
@@ -446,7 +446,7 @@
           }
         }
       ],
-      "id": "a1000000-0000-4000-8000-000000000008",
+      "id": "d377820e-c347-4166-92cd-02ac2a7ce9e0",
       "request": {
         "method": "POST",
         "header": [
@@ -492,7 +492,7 @@
           }
         }
       ],
-      "id": "a1000000-0000-4000-8000-000000000009",
+      "id": "1ff40fe0-c1e5-44e6-a60c-7a7414c5507d",
       "request": {
         "method": "POST",
         "header": [
@@ -540,7 +540,7 @@
           }
         }
       ],
-      "id": "a1000000-0000-4000-8000-00000000000a",
+      "id": "0ac09b35-acd5-43dd-995e-6956523600dc",
       "request": {
         "method": "POST",
         "header": [
@@ -596,7 +596,7 @@
           }
         }
       ],
-      "id": "a1000000-0000-4000-8000-00000000000b",
+      "id": "4d66a901-91be-42db-9f9d-59bab434ba72",
       "request": {
         "method": "POST",
         "header": [
@@ -638,7 +638,7 @@
           }
         }
       ],
-      "id": "a1000000-0000-4000-8000-00000000000c",
+      "id": "d4ee525f-5e23-40a6-8fc8-a42c1081f063",
       "request": {
         "auth": {
           "type": "bearer",
@@ -702,7 +702,7 @@
           }
         }
       ],
-      "id": "a1000000-0000-4000-8000-00000000000d",
+      "id": "fa4045d9-1c52-4b42-981e-8616b13cac91",
       "request": {
         "auth": {
           "type": "bearer",
