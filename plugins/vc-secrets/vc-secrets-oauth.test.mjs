@@ -10,8 +10,16 @@ import net from "node:net";
 test("vc-secrets-oauth throws the same VcSecretsError the launcher's exit-code path recognises", () => {
     // The whole reason VcSecretsError lives in its own module. Two same-named classes would both
     // print fine, but fail() reads `instanceof VcSecretsError` to pick the exit code, so a second
-    // class silently degrades every oauth failure to a bare 1 — and a cyclic import through
-    // vc-secrets.mjs would hand this module `undefined` instead of a class at all.
+    // class silently degrades every oauth failure to a bare 1. That silent degrade is what this
+    // pins. The source's comment also warned that a cyclic require would hand over `undefined`
+    // instead of a class; that half does not carry to ESM — but not because cycles became loud.
+    // There is no cycle here to begin with — vc-secrets-error.mjs imports nothing, which is the
+    // whole reason it exists. Measured on the arrangement it avoids (the class back in the
+    // launcher, used only inside a function): that cycle loads clean from either entry, and ESM
+    // throws only when the binding is dereferenced during module EVALUATION. So reintroducing one
+    // would be quiet until something validates at load, and fatal from then on — a warning, not a
+    // reassurance, which is the direction the source's sentence got backwards. Either way ESM has no
+    // `undefined` outcome, so that half needs no test; this one is for the silent degrade.
     assert.throws(() => oauth.parseTokenResponse(400, JSON.stringify({ error: "invalid_grant" }), 0), m.VcSecretsError);
 });
 
@@ -90,6 +98,38 @@ test("buildAuthorizeUrl: the verifier is never in the URL, only its digest", () 
     assert.ok(!url.includes(verifier), "PKCE is worthless if the verifier travels with the request");
 });
 
+// FIVE tests below are NOT ported, and they are interleaved with ported ones rather than
+// contiguous, so they are named here rather than bounded by position: "the challenge itself
+// travels", "client_id, redirect_uri and state", "the refresh grant carries the token it is
+// refreshing", "both grants carry client_id and scope", and "the code grant carries no refresh
+// token". A name that no longer matches one below means this note went stale, not that you
+// miscounted. The source's suite leaves these fields unpinned
+// because there mcpw.js imports this module and a real `login` exercised most of them end to end.
+// Nothing imports this module yet, so until it is wired up they are all that stands between a
+// tidy-up of the two builders and a protocol request that is still well-formed and no longer safe.
+
+test("buildAuthorizeUrl: the challenge itself travels, not only the method that advertises it", () => {
+    // Measured: dropping `code_challenge` leaves the URL still advertising
+    // code_challenge_method=S256. What Entra then does with such a request is not knowable from
+    // this repository, and that is the risk — if it serves it as an ordinary non-PKCE sign-in, the
+    // authorization code stops being bound to whoever asked for it and nothing local reports it.
+    const u = new URL(oauth.buildAuthorizeUrl({ tenantId: "t", clientId: "c", scopes: ["a"],
+        redirectUri: "http://localhost:1/", state: "st", challenge: "the-challenge" }));
+    assert.equal(u.searchParams.get("code_challenge"), "the-challenge");
+});
+
+test("buildAuthorizeUrl: client_id, redirect_uri and state reach the request unaltered", () => {
+    // No callback layer is ported yet, and that is precisely why these are asserted here: the
+    // consumer that would notice a missing `state` — a listener comparing it against the one it
+    // generated — does not exist in this package, so nothing downstream fails if the builder
+    // stops emitting it.
+    const u = new URL(oauth.buildAuthorizeUrl({ tenantId: "t", clientId: "the-client", scopes: ["a"],
+        redirectUri: "http://localhost:1/", state: "the-state", challenge: "ch" }));
+    assert.equal(u.searchParams.get("client_id"), "the-client");
+    assert.equal(u.searchParams.get("redirect_uri"), "http://localhost:1/");
+    assert.equal(u.searchParams.get("state"), "the-state");
+});
+
 test("buildTokenBody: code grant carries the verifier and the code", () => {
     const b = new URLSearchParams(oauth.buildTokenBody({ kind: "code", clientId: "c",
         redirectUri: "http://localhost:1/", code: "the-code", verifier: "the-verifier", scopes: ["a"] }));
@@ -104,6 +144,49 @@ test("buildTokenBody: refresh grant carries no code and no verifier", () => {
     assert.equal(b.get("grant_type"), "refresh_token");
     assert.equal(b.get("code"), null);
     assert.equal(b.get("code_verifier"), null);
+});
+
+test("buildTokenBody: the refresh grant carries the token it is refreshing", () => {
+    // Its sibling above pins what the refresh body must NOT contain; nothing pinned the one field
+    // it exists to carry. Dropping it still produces a well-formed grant_type=refresh_token body,
+    // so the mistake leaves this package looking correct and surfaces only as whatever the token
+    // endpoint says about a request that names no token.
+    const b = new URLSearchParams(oauth.buildTokenBody({ kind: "refresh", clientId: "c",
+        redirectUri: "http://localhost:1/", refreshToken: "the-token", scopes: ["a"] }));
+    assert.equal(b.get("refresh_token"), "the-token");
+});
+
+test("buildTokenBody: both grants carry client_id and scope, and the code grant its redirect_uri", () => {
+    // redirect_uri on the code grant is not a destination — nothing is redirected at exchange
+    // time. It is the value the authorization-code grant is expected to repeat from the authorize
+    // step, so a body that omits it is refused for a reason that names neither builder.
+    const code = new URLSearchParams(oauth.buildTokenBody({ kind: "code", clientId: "the-client",
+        redirectUri: "http://localhost:1/", code: "c0de", verifier: "v", scopes: ["a", "b"] }));
+    assert.equal(code.get("client_id"), "the-client");
+    assert.equal(code.get("redirect_uri"), "http://localhost:1/");
+    assert.equal(code.get("scope"), "a b", "the code grant must ask for the scopes it was given");
+    const refresh = new URLSearchParams(oauth.buildTokenBody({ kind: "refresh", clientId: "the-client",
+        redirectUri: "http://localhost:1/", refreshToken: "rt", scopes: ["a", "b"] }));
+    assert.equal(refresh.get("client_id"), "the-client");
+    assert.equal(refresh.get("scope"), "a b", "a renewal that drops the scopes renews a narrower token");
+    // The name above states a relation, so both halves need asserting: without this, moving
+    // redirect_uri into the shared header — so both grants carry it — leaves the suite green.
+    assert.equal(refresh.get("redirect_uri"), null, "the redirect belongs to the code grant alone");
+});
+
+test("buildTokenBody: the code grant carries no refresh token", () => {
+    // The mirror of "refresh grant carries no code and no verifier", which had no counterpart.
+    // The fixture supplies a refresh token it must not travel with: omitting it would leave the
+    // assertion two causes — the branch never sets the field, or there was nothing to set — and
+    // the realistic defect has the second shape. A maintainer adding a defensive
+    // `if (refreshToken) { body.set(...) }` to the code branch survives an empty fixture — measured.
+    // Posting a real token then needs a second change, a caller that passes refreshToken on the
+    // code grant, which no call site does today; the fixture is what keeps the assertion able to
+    // notice the first change before the second one arrives to make it matter.
+    const b = new URLSearchParams(oauth.buildTokenBody({ kind: "code", clientId: "c",
+        redirectUri: "http://localhost:1/", code: "c0de", verifier: "v",
+        refreshToken: "rt-must-not-travel", scopes: ["a"] }));
+    assert.equal(b.get("refresh_token"), null);
 });
 
 test("buildTokenBody: an unknown grant kind is refused rather than posted as a refresh", () => {
@@ -227,7 +310,7 @@ test("parseTokenResponse: only a judged grant is refused — a throttle or an ou
     assert.equal(tag(408, ""), false);
 });
 
-// Measured on this machine: a bind the sandbox refuses does NOT throw from listen() — it emits
+// Measured on this machine: a bind that is refused does NOT throw from listen() — it emits
 // an 'error' event, and an unattached one aborts the whole process instead of failing one test.
 // So the probe attaches a handler, which makes it async, which is why the skip decision happens
 // inside each test rather than in a module-level constant.
@@ -248,12 +331,14 @@ function canBindSockets() {
     return bindProbe;
 }
 
-// This is the only coverage httpsPostForm's socket-drop behaviour has. If an UNSANDBOXED run
-// still reports it skipped, the probe is broken rather than the environment — the skip is meant
-// to disappear the moment binding is permitted.
+// This is the only coverage httpsPostForm's socket-drop behaviour has. Measured on this machine:
+// a loopback TCP bind is permitted both inside and outside the Claude Code sandbox — it is the
+// unix-socket bind the sandbox refuses, which is what the source's probe tested and why this one
+// was changed. So the expected outcome here is RUN, not skip: a run reporting it skipped means a
+// broken probe or an unusually restricted host, and either way the skip is a signal.
 const socketTest = (name, fn) => test(name, async (t) => {
     if (!(await canBindSockets())) {
-        t.skip("needs an unsandboxed run: socket bind is EPERM in the sandbox");
+        t.skip("needs an environment that permits a loopback TCP bind");
 
         return;
     }
@@ -268,7 +353,9 @@ socketTest("httpsPostForm: a connection dropped after the headers REJECTS, it do
     //
     // Driven through the real wiring with http.request rather than an injected `request`, because an
     // injected transport exercises none of the code that was broken.
+    let gotRequest = false;
     const server = http.createServer((req, res) => {
+        gotRequest = true;
         req.resume();
         req.on("end", () => {
             res.writeHead(200, { "content-type": "application/json" });
@@ -289,8 +376,36 @@ socketTest("httpsPostForm: a connection dropped after the headers REJECTS, it do
         assert.notEqual(outcome, "HUNG", "the promise must settle; pending forever is the defect");
         assert.notEqual(outcome, "resolved", "a truncated body must not read as a token response");
         assert.ok(outcome instanceof m.VcSecretsError, `expected a VcSecretsError, got ${outcome}`);
+        // The two below MUST stay below the three above. They read `outcome.message`, and when the
+        // hang regresses `outcome` is the string "HUNG" — but because assert.match carries an
+        // explicit message, Node reports that message rather than an argument-type error. Measured
+        // by deleting res.on("error"): with these two first, the headline regression announced
+        // "rejected through the request listener", which is false, and the sentence written for the
+        // hang never ran. Order is the fix, not a tidy-up.
+        //
+        // Both are needed. `gotRequest` rules out a connect-time failure; it does not rule out a
+        // socket dropped after the handler ran but before any response byte, which rejects through
+        // req.on("error") and satisfies every other assertion here — measured. The match is
+        // anchored because "response failed" is not reserved to this listener: rewording the OTHER
+        // one to "response failed to open" defeated a floating match with the suite still green.
+        // Matching on wording is the assertion here rather than a shortcut — the module's "a tag
+        // rather than a message match" argument is about a branch taken at runtime, which fails
+        // silently, whereas a test fails loudly. It holds only while this module stays a verbatim
+        // transcription of mcpw-oauth.js; if that is ever allowed to diverge, this needs a tag.
+        assert.ok(gotRequest, "the server never saw the request; the response path was not exercised");
+        // The leak check goes ABOVE the prefix match, and that order is load-bearing for the same
+        // reason as the block above. An edit that echoes the body AND rewords the prefix fails the
+        // match first, so a refresh token sitting in the error text is reported as a wording
+        // complaint and this line never runs. Measured.
         assert.doesNotMatch(outcome.message, /grant_type|refresh_token=/,
             "the request body carried a refresh token and must not be echoed");
+        // Says what it observed, not what caused it: a missing prefix means the rejection did not
+        // come from the response listener, OR that listener was reworded. Naming only the first
+        // made the test announce a request-listener rejection on a reword that came through the
+        // response listener — measured, and false.
+        assert.match(outcome.message, /^token endpoint response failed: /,
+            "no response-listener prefix: either the rejection came through the request listener, "
+            + "or the response listener was reworded and this match must be updated with it");
     } finally {
         await new Promise((r) => server.close(r));
     }
