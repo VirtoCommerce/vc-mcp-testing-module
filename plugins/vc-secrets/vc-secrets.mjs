@@ -439,7 +439,7 @@ function parseConfigFile(file, warnings) {
     }
     for (const [name, decl] of Object.entries(cfg.oauth)) {
         // Same reasoning as the secret name check above: this reaches a keystore key
-        // ("oauth-<name>-refresh"/"-access", see unlockTargets/keyFor) — the secret charset, not the
+        // ("oauth-<name>-refresh"/"-access", see oauthEntryKeys) — the secret charset, not the
         // looser launchable one, which admits dots and capitals a keystore key cannot round-trip.
         if (!SECRET_NAME_RE.test(name)) {
             throw new VcSecretsError(`oauth "${name}": name must match ${SECRET_NAME_RE.source}`);
@@ -651,6 +651,36 @@ function keyFor(name, decl, cfg) {
     }
 
     return `${KEY_PREFIX}:${cfg.projectId}:${name}`;
+}
+
+function oauthEntryKeys(name, decl, cfg) {
+    return {
+        refresh: keyFor(`oauth-${name}-refresh`, decl, cfg),
+        access: keyFor(`oauth-${name}-access`, decl, cfg),
+    };
+}
+
+function oauthKeyClashes(cfg) {
+    const secretKeys = new Map();
+    for (const [secretName, decl] of Object.entries(cfg.secrets)) {
+        // Only a local secret has a keystore slot: cmdSet refuses others, cmdMigrate and unlockTargets skip them.
+        if (decl.backend !== "local") {
+            continue;
+        }
+        secretKeys.set(keyFor(secretName, decl, cfg), secretName);
+    }
+    const clashes = [];
+    for (const [name, decl] of Object.entries(cfg.oauth ?? {})) {
+        for (const [role, key] of Object.entries(oauthEntryKeys(name, decl, cfg))) {
+            const secretName = secretKeys.get(key);
+            if (secretName !== undefined) {
+                clashes.push(`oauth "${name}" ${role} entry and secret "${secretName}" resolve to the `
+                    + `same keystore key ${key} — one overwrites the other`);
+            }
+        }
+    }
+
+    return clashes;
 }
 
 // `kind` is "servers" or "tasks". Both are launchables with the same declaration shape; the only
@@ -1334,9 +1364,9 @@ function unlockTargets(cfg, exists = fs.existsSync) {
         }
     }
     for (const [name, decl] of Object.entries(cfg.oauth ?? {})) {
-        const entryNames = { refresh: `oauth-${name}-refresh`, access: `oauth-${name}-access` };
-        for (const entryName of Object.values(entryNames)) {
-            const file = keyToPath(keyFor(entryName, decl, cfg));
+        for (const key of Object.values(oauthEntryKeys(name, decl, cfg))) {
+            const entryName = key.slice(key.lastIndexOf(":") + 1);   // KEY_RE: prefix:scope:name
+            const file = keyToPath(key);
             if (exists(file)) {
                 files.push({ name: entryName, file });
             }
@@ -1670,6 +1700,9 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
     }
     for (const collision of cfg.collisions ?? []) {
         lines.push(`WARN ${collision.kind} "${collision.name}" declared in both ${collision.from} and ${collision.to} — ${collision.to} wins`);
+    }
+    for (const clash of oauthKeyClashes(cfg)) {
+        lines.push(`WARN ${clash}`);
     }
     let backend = null;
     try {
@@ -2176,6 +2209,7 @@ export {
     runCli, REQUIRED_SHIM_CONTRACT,
     VcSecretsError, REF_RE, parseReference, parseLiteral, LITERAL_PREFIX, CONFIG_NAME, LOCAL_CONFIG_NAME, KEY_PREFIX,
     SCHEMA_VERSION, SCOPE_ORDER, configPaths, parseConfigFile, loadConfig, keyFor, keyToPath, legacyKeyToPath,
+    oauthEntryKeys, oauthKeyClashes,
     resolveEnvEntries, detectLocalBackend, redactSecrets, secretsDir, psEncode, psCommand, PS_CRED_READ, PS_CRED_WRITE,
     PS_CRED_DELETE, decodeCredBlobHex, buildLocalRead, buildLocalWrite, buildLocalDelete, deleteEntryIo,
     buildKeyvaultRead, TIMEOUT_LOCAL_MS, TIMEOUT_AZ_MS, VALUE_ON_STDIN,

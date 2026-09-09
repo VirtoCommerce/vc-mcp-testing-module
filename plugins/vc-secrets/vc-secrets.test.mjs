@@ -717,6 +717,93 @@ test("doctor does not report a valid oauth reference as an undeclared secret", (
     assert.match(crossingReport(bad).join("\n"), /undeclared oauth "nope"/);
 });
 
+test("an oauth entry key is a full three-segment key the read builder accepts", () => {
+    const keys = m.oauthEntryKeys("ado", { scope: "project" }, { projectId: "p1" });
+    assert.equal(keys.refresh, `${m.KEY_PREFIX}:p1:oauth-ado-refresh`);
+    assert.equal(keys.access, `${m.KEY_PREFIX}:p1:oauth-ado-access`);
+    assert.doesNotThrow(() => m.buildLocalRead("gpg", keys.refresh));
+});
+
+test("a user-scope oauth declaration lands in the user namespace, not the project's", () => {
+    const keys = m.oauthEntryKeys("ado", { scope: "user" }, { projectId: "p1" });
+    assert.equal(keys.refresh, `${m.KEY_PREFIX}:user:oauth-ado-refresh`);
+    assert.equal(keys.access, `${m.KEY_PREFIX}:user:oauth-ado-access`);
+});
+
+test("two projects declaring the same oauth name do not share one entry", () => {
+    const a = m.oauthEntryKeys("ado", { scope: "project" }, { projectId: "p1" });
+    const b = m.oauthEntryKeys("ado", { scope: "project" }, { projectId: "p2" });
+    // Both spelled out: `notEqual` waves through any key that is wrong yet still differs per
+    // project — both losing the prefix, for instance — and `undefined` is only the loudest such case.
+    assert.equal(a.refresh, `${m.KEY_PREFIX}:p1:oauth-ado-refresh`);
+    assert.equal(b.refresh, `${m.KEY_PREFIX}:p2:oauth-ado-refresh`);
+    assert.notEqual(a.refresh, b.refresh);
+});
+
+test("an oauth entry key colliding with a same-spelled secret is reported, naming both sides", () => {
+    // SECRET_NAME_RE admits `oauth-ado-refresh`, which is what lets the two derive one key.
+    const cfg = m.loadConfig(scopedPaths({ project: { projectId: "proj-x",
+        oauth: { ado: OAUTH_DECL },
+        secrets: { "oauth-ado-refresh": { backend: "local" } } } }));
+    const clashes = m.oauthKeyClashes(cfg);
+    assert.equal(clashes.length, 1);
+    assert.match(clashes[0], /oauth "ado"/);
+    assert.match(clashes[0], /secret "oauth-ado-refresh"/);
+    assert.ok(clashes[0].includes(`${m.KEY_PREFIX}:proj-x:oauth-ado-refresh`));
+});
+
+test("no clash is reported when an oauth entry and a secret merely look similar", () => {
+    const cfg = m.loadConfig(scopedPaths({ project: { projectId: "proj-x",
+        oauth: { ado: OAUTH_DECL },
+        secrets: { "oauth-ado": { backend: "local" } } } }));
+    assert.deepEqual(m.oauthKeyClashes(cfg), []);
+});
+
+test("a clash on the access entry is reported, and names that entry rather than the refresh one", () => {
+    const cfg = m.loadConfig(scopedPaths({ project: { projectId: "proj-x",
+        oauth: { ado: OAUTH_DECL },
+        secrets: { "oauth-ado-access": { backend: "local" } } } }));
+    const clashes = m.oauthKeyClashes(cfg);
+    assert.equal(clashes.length, 1);
+    assert.match(clashes[0], /access entry/);
+    // The role is interpolated, not spelled: a hardcoded "refresh" is invisible to every fixture
+    // that happens to collide on the refresh entry, which is all the others.
+    assert.doesNotMatch(clashes[0], /refresh entry/);
+});
+
+test("the secret side's own scope decides the clash, in both directions", () => {
+    const across = m.loadConfig(scopedPaths({
+        user: { secrets: { "oauth-ado-refresh": { backend: "local" } } },
+        project: { projectId: "proj-x", oauth: { ado: OAUTH_DECL } },
+    }));
+    assert.deepEqual(m.oauthKeyClashes(across), [],
+        "a user secret and a project sign-in are different namespaces — neither can overwrite the other");
+
+    const together = m.loadConfig(scopedPaths({
+        user: { secrets: { "oauth-ado-refresh": { backend: "local" } }, oauth: { ado: OAUTH_DECL } },
+        project: { projectId: "proj-x" },
+    }));
+    const clashes = m.oauthKeyClashes(together);
+    assert.equal(clashes.length, 1);
+    assert.ok(clashes[0].includes(`${m.KEY_PREFIX}:user:oauth-ado-refresh`));
+});
+
+test("a keyvault secret holds no keystore slot, so its spelling is not a clash", () => {
+    const cfg = m.loadConfig(scopedPaths({ project: { projectId: "proj-x",
+        oauth: { ado: OAUTH_DECL },
+        secrets: { "oauth-ado-refresh": { backend: "keyvault", vault: "v", secret: "s" } } } }));
+    assert.deepEqual(m.oauthKeyClashes(cfg), []);
+});
+
+test("doctorReport: a colliding oauth entry key is a WARN and does not fail the run", () => {
+    const cfg = m.loadConfig(scopedPaths({ project: { projectId: "proj-x",
+        oauth: { ado: OAUTH_DECL },
+        secrets: { "oauth-ado-refresh": { backend: "local" } } } }));
+    const lines = crossingReport(cfg);
+    assert.match(lines.join("\n"), /^WARN oauth "ado" .*same keystore key/m);
+    assert.doesNotMatch(lines.join("\n"), /^FAIL/m);
+});
+
 test("loadConfig: schemaVersion above what the launcher supports → VcSecretsError names the version", () => {
     const paths = scopedPaths({ project: { schemaVersion: 999, secrets: {}, servers: {}, tasks: {} } });
     assert.throws(() => m.loadConfig(paths), /schemaVersion 999/);
@@ -1049,6 +1136,7 @@ test("unlock finds the entries of a machine whose only stored material is a sign
     const cfg = { secrets: {}, oauth: { ado: { scope: "user" } }, projectId: "p", files: {} };
     const targets = m.unlockTargets(cfg, () => true);
     assert.equal(targets.length, 2, "a sign-in is two entries: refresh and access");
+    assert.deepEqual(targets.map((t) => t.name).sort(), ["oauth-ado-access", "oauth-ado-refresh"]);
 });
 
 test("unlock still finds ordinary local secrets, and prefers the current key over the legacy one", () => {
