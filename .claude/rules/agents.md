@@ -6,7 +6,7 @@ Knowledge-base inventory and the read-before-you-write rules (`graphql-schema.md
 
 ## MCP servers & browser essentials
 
-Project `.mcp.json` (gitignored, per machine): `playwright-chrome` / `playwright-firefox` / `playwright-edge` (`config/mcp-playwright-*.config.json`), `postman`, `github`, `context7`; user/IDE level: Chrome DevTools, Azure, Atlassian, Figma, Microsoft Learn, **VirtoOZ** (primary VC docs via `/vc-docs`). Browser login secrets go through Playwright MCP `--secrets .env.playwright.local` — **Chrome DevTools MCP has no `--secrets`**; a DevTools brief must name its auth path (persistent profile / mint an account / delegate to a Playwright lane). Full server table, `--secrets` setup and the DevTools auth options: [`knowledge/execution/browser-lanes.md`](../knowledge/execution/browser-lanes.md).
+Project `.mcp.json` (gitignored, per machine): `playwright-chrome` / `playwright-firefox` / `playwright-edge` (`config/mcp-playwright-*.config.json`), `postman`, `github`, `context7`; user/IDE level: Chrome DevTools, Azure, Atlassian, Figma, Microsoft Learn, **VirtoOZ** (primary VC docs via `/vc-docs`). Browser login secrets go through Playwright MCP `--secrets .env.playwright.local` — type the **bare key name** (`ORG_USER_PASSWORD`), never `{{VAR}}`: the miss is silent and hook-blocked. **Chrome DevTools MCP has no `--secrets`**; a DevTools brief must name its auth path (persistent profile / mint an account / delegate to a Playwright lane). Full server table, `--secrets` setup and the DevTools auth options: [`knowledge/execution/browser-lanes.md`](../knowledge/execution/browser-lanes.md).
 
 ## Browser Automation Rules
 

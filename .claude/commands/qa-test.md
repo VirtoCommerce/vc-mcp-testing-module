@@ -708,4 +708,4 @@ and promotion deferred to the exit round
   first ([`skills/qa-test/modes.md`](../skills/qa-test/modes.md) §5k).
 - App Insights correlation (5a) reuses `/qa-monitoring`'s query + dedup + triage machinery scoped to the
   window (no separate live-repro); resolve resources from `APPINSIGHTS_*`, skip gracefully when
-  unconfigured; a correlated error gets no separate `BUG-AI-*` draft (5d's `/qa-bug` owns it).
+  unconfigured; a correlated error gets no separate `BUG-AI-*` draft (5d's `/vc-fix:qa-bug` owns it). 

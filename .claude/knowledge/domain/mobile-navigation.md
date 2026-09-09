@@ -660,7 +660,7 @@ Two independent live runs on 2026-09-09 (12:36–13:00 UTC) plus one targeted re
 | Persona | Lane | Auth path |
 |---|---|---|
 | Anonymous (§3) | `playwright-edge` | n/a — guest |
-| Personal customer (§4) | `playwright-edge` | real `/sign-in` form, password via Playwright MCP `--secrets` (worked on this lane) |
+| Personal customer (§4) | `playwright-edge` | real `/sign-in` form, password via Playwright MCP `--secrets` (bare key name) |
 | Company member (§5) | `playwright-chrome` | **UNCONFIRMED — see below** |
 | §2a chevron re-verification | `playwright-edge` | irrelevant (catalog is store-level) |
 
@@ -688,10 +688,16 @@ directions (the org `AGENT-TEST-Org-TechFlow-20260310` matches the `USR-006` Tec
 corporate-member route guard in `domain/sitemap.md` §2), so the map is kept — but **§5 was not
 observed on a freshly authenticated session**, and a re-run should confirm it.
 
-Contributing factor worth fixing regardless: `.env.playwright.local` contains **duplicate keys** —
-`ORG_USER_PASSWORD` x2 and `EUR_USER_PASSWORD` x2 out of 27 — so which value wins is
-load-order-dependent. Note this does not by itself explain a *literal* passthrough; if that survives
-an MCP restart, pin `@playwright/mcp` off `@latest`.
+**Root cause of that literal passthrough — SETTLED 2026-09-09, and it was not a tooling defect.**
+`--secrets` looks the typed text up as a **bare dotenv key**; `{{ORG_USER_PASSWORD}}` is not a key, and
+`lookupSecret()` returns the input unchanged with no error (`@playwright/mcp` 0.0.80). The `{{VAR}}`
+form came from this repo's *test-data* convention, which does not apply to this flag. Typing the bare
+`ORG_USER_PASSWORD` substitutes correctly on `playwright-chrome` (re-verified live 2026-09-09), so the
+"lane asymmetry" recorded here was a difference between the two runs' syntax, not between the lanes.
+The contract and the one-call hit check: [`../execution/browser-lanes.md`](../execution/browser-lanes.md)
+§Browser login secrets. Separately fixed regardless: `.env.playwright.local` had **duplicate keys**
+(`ORG_USER_PASSWORD` x2, `EUR_USER_PASSWORD` x2 — the duplicate values were identical, so nothing was
+ever mis-resolved by it), now deduplicated.
 
 **Operational note — a fumbled password costs ~6 minutes.** `{OBSERVED}` Three failed sign-in
 attempts on the personal account produced "Your account has been temporarily locked. Please try

@@ -1607,3 +1607,287 @@ The lane fixture's memberships declare membership_status=Approved explicitly, so
 [EVIDENCE] the two ops differ ONLY in the statuses value, so the pair is a controlled comparison: the same membership must appear under BOTH [""Locked""] (matched on the lock predicate) and [""Approved""] (matched on its persisted status), while the unlocked sibling appears under [""Approved""] only. That asymmetry is the whole proof — either op alone is consistent with a filter that ignores its argument
 [EVIDENCE] record both raw responses in full, including each item's status field. A summary verdict loses the reconciling fact that the [""Locked""]-matched membership reads status=Approved","THE CONTRACT REGRESSION THIS ROW GUARDS: locked_filter returns EMPTY (totalCount 0). That means the pseudo-status overload has been dropped from ContactType.ResolveMyOrganizationIdsByStatusAsync — the wantsLocked && isLocked branch is gone — and with it the only way to filter ON lock through the statuses argument. Do NOT invert this case's assertion to match it: report it to the oracle owner via /qa-review-oracles as a deliberate-behaviour regression, and leave this row failing until it is decided. A silently inverted assertion would certify whichever behaviour shipped and would flip again on the next change.
 OTHER SIGNALS: locked_filter returns the UNLOCKED sibling too (the filter is not filtering — it is ignoring its argument and returning every membership); locked_filter returns errors[] non-empty (""Locked"" started being rejected as an invalid value, which would contradict both this overload and PRF-GQL-078's established silent-narrowing behaviour); the [""Locked""]-matched item reads myStatusInOrganization other than Approved (a lock was written into the membership's status column — a direct BL-B2B-013 violation and the most serious shape here, because it collapses the two axes in storage rather than in a query; note this is the MEMBERSHIP field — Organization.status is org-level and legitimately reads null on TechFlow, so a null there is not this signal); approved_at_v2 returns only the sibling (a lock DID move the membership out of its status bucket — the pre-#145 short-circuit is back); approved_at_v2 shows the locked item with isLockedForCurrentUser false (the flag and the filter disagree within one response); the seeder read-back shows nothing locked (BLOCKED, not FAIL — the case never ran).","MANDATORY teardown symmetry (every case that locks must unlock, or the next case reads a poisoned fixture): `npm run seed:membership-lock:teardown`, then `npm run seed:membership-lock:verify` — it must exit 0 or lock residue was left behind and the suite is no longer re-runnable.","VCST-5317 · Archetype:SILENT · Technique:DT · extends the statuses-argument coverage held by PRF-GQL-078 ([""Approved""] / wrong-case / never-legal) and PRF-GQL-083 (argument absent) with the one value neither covers · ContactType.ResolveMyOrganizationIdsByStatusAsync (wantsLocked && isLocked) + PR #145 ContactTypeTests · BL-B2B-013 scopes the persisted status column and is asserted here as intact",Draft
+PRF-GQL-092,"xProfile — The userId Argument On me, contact And organization Is Accepted And Silently Ignored, So It Never Queries As Another User",GraphQL xProfile > Organizations > Lock Axis,Medium,"BL-AUTH-015, BL-B2B-013",ECL-14.3,"Runner-native. BACKEND lane ONLY: this case applies a lock to an OrganizationMembership row of @td(MULTI_ORG_TF_BR.email). The frontend/UI lane account @td(MULTI_ORG_TF_BR_ALT.email) must NEVER be authenticated as here, and must never be locked or unlocked here — a membership row is keyed on userId plus organizationId and carries the isLocked both lanes write, so two lanes on one account eat each other's state and both report confident wrong results. This case READS @td(MULTI_ORG_TF_BR_ALT.userId) and nothing else from that fixture: it is used purely as a different real user id string in the third shape below, never as an identity to sign in as and never as a row to mutate.
+IMPERSONATE_TARGET_BLOCKED (USR-021) is OFF LIMITS: it is the environment's only other locked membership and suite 082's impersonation-blocked-target condition depends on it. Never unlock it, never reference it as a mutable fixture.
+Resting state before the case starts: `npm run seed:membership-lock:verify` exits 0.
+WHAT THIS CASE IS FOR: me, contact and organization each DECLARE a userId argument in the live xAPI schema — me(userId: String), organization(id: String!, userId: String), contact(id: String!, userId: String), from the snapshot refreshed live 2026-09-09 — but the resolvers read the subject from the authenticated principal, so the argument is accepted and then silently ignored. BOTH halves are asserted, because ""rejected"" and ""honoured"" are each a different world from ""accepted and ignored"": errors[] must stay empty in every shape, AND the four shapes must return the same answer. The case exists so no later case is written in the belief that it queries as another user and is therefore vacuously green.
+THE FOUR SHAPES, one op each, identical documents otherwise: userId omitted; userId set to the caller’s own id; userId set to a DIFFERENT real user’s id; userId set to an all-zeros GUID. The third is the discriminating one — if the argument were honoured anywhere, that is the shape whose answer would change.
+WHY V2 AND NOT THE RESTING STATE: at V1 every isLockedForCurrentUser reads false, so ""the four shapes agree"" would be a comparison of all-false and would pass whatever the resolver did. V2 locks the NON-active organization, so the flag is true on one membership and false on the other, and the equality becomes a real assertion instead of a coincidence.
+WHY THE ROOT organization READ NAMES THE UNLOCKED ORGANIZATION: reading the LOCKED organization through organization(id:) answers Forbidden with a null organization on this build. That pair is PRF-GQL-093’s subject, not this case’s; mixing it in here would put an error in every shape and drown the argument axis this case is about.
+V2 lands IsCurrentlyLocked true and the membership-changed handler terminates the account’s sessions on that post-state, so the token MUST be acquired AFTER the lock. A token minted first would be revoked and the case would fail on auth rather than on the contract. The runner caches one token per role for the run, so the caller is authenticated exactly once, in the first non-SETUP step.
+THE CALLER’S TOKEN CARRIES NO organization_id CLAIM: [AUTH role=MULTI_ORG_TF_BR] performs a password grant with storeId and no organization_id, because the alias declares none. The caller’s active organization is therefore resolved by BL-AUTH-015 to the accessible one, which the bootstrap assertion pins live rather than assuming.","email=@td(MULTI_ORG_TF_BR.email), password={{DEFAULT_TEST_PASSWORD}}, lockedOrgId=@td(MULTI_ORG_TF_BR.org_techflow_id), activeOrgId=@td(MULTI_ORG_TF_BR.org_buildright_id), otherUserId=@td(MULTI_ORG_TF_BR_ALT.userId)","[SETUP] `npm run seed:membership-lock -- --lane backend --state V2` — permanent lock, LockoutEnd null, on the NON-active organization
+[SETUP] `npm run seed:membership-lock -- --lane backend --verify` — record which leg it reports locked and its read-back isLocked and isCurrentlyLocked. A lock POST against an unknown membership id returns 200 with a null body, so never trust the status code alone
+[AUTH role=MULTI_ORG_TF_BR]
+[GQL-OP bootstrap]
+  query {
+    me {
+      id
+      contact {
+        id
+        organizationId
+        organizations(first: 20) {
+          totalCount
+          items { id name isLockedForCurrentUser }
+        }
+      }
+    }
+  }
+[GQL-EXEC bootstrap]
+[GQL-CAPTURE bootstrap.data.me.contact.id → CONTACT_ID]
+[GQL-CAPTURE bootstrap.data.me.contact.organizations.items[?isLockedForCurrentUser=true].id → LOCKED_ORG_ID]
+[GQL-CAPTURE bootstrap.data.me.contact.organizations.items[?isLockedForCurrentUser=false].id → UNLOCKED_ORG_ID]
+[GQL-OP shape_omitted]
+  query {
+    me {
+      id
+      userName
+      contact {
+        id
+        organizationId
+        organizationsIds
+        organizations(first: 20) {
+          totalCount
+          items { id name status myStatusInOrganization isLockedForCurrentUser }
+        }
+      }
+    }
+    organization(id: ""@td(MULTI_ORG_TF_BR.org_buildright_id)"") {
+      id
+      name
+      status
+      myStatusInOrganization
+      isLockedForCurrentUser
+    }
+    contact(id: ""{{CONTACT_ID}}"") {
+      id
+      organizationId
+      organizationsIds
+    }
+  }
+[GQL-EXEC shape_omitted]
+[GQL-CAPTURE shape_omitted.data.me.id → MEID_OMITTED]
+[GQL-CAPTURE shape_omitted.data.me.contact.organizationsIds → ORGIDS_OMITTED]
+[GQL-CAPTURE shape_omitted.data.me.contact.organizations.items[?id={{LOCKED_ORG_ID}}].isLockedForCurrentUser → LOCKFLAG_OMITTED]
+[GQL-CAPTURE shape_omitted.data.organization.id → ROOTORG_OMITTED]
+[GQL-CAPTURE shape_omitted.data.contact.id → ROOTCONTACT_OMITTED]
+[GQL-OP shape_self]
+  query {
+    me(userId: ""@td(MULTI_ORG_TF_BR.userId)"") {
+      id
+      userName
+      contact {
+        id
+        organizationId
+        organizationsIds
+        organizations(first: 20) {
+          totalCount
+          items { id name status myStatusInOrganization isLockedForCurrentUser }
+        }
+      }
+    }
+    organization(id: ""@td(MULTI_ORG_TF_BR.org_buildright_id)"", userId: ""@td(MULTI_ORG_TF_BR.userId)"") {
+      id
+      name
+      status
+      myStatusInOrganization
+      isLockedForCurrentUser
+    }
+    contact(id: ""{{CONTACT_ID}}"", userId: ""@td(MULTI_ORG_TF_BR.userId)"") {
+      id
+      organizationId
+      organizationsIds
+    }
+  }
+[GQL-EXEC shape_self]
+[GQL-CAPTURE shape_self.data.me.id → MEID_SELF]
+[GQL-CAPTURE shape_self.data.me.contact.organizationsIds → ORGIDS_SELF]
+[GQL-CAPTURE shape_self.data.me.contact.organizations.items[?id={{LOCKED_ORG_ID}}].isLockedForCurrentUser → LOCKFLAG_SELF]
+[GQL-CAPTURE shape_self.data.organization.id → ROOTORG_SELF]
+[GQL-CAPTURE shape_self.data.contact.id → ROOTCONTACT_SELF]
+[GQL-OP shape_other]
+  query {
+    me(userId: ""@td(MULTI_ORG_TF_BR_ALT.userId)"") {
+      id
+      userName
+      contact {
+        id
+        organizationId
+        organizationsIds
+        organizations(first: 20) {
+          totalCount
+          items { id name status myStatusInOrganization isLockedForCurrentUser }
+        }
+      }
+    }
+    organization(id: ""@td(MULTI_ORG_TF_BR.org_buildright_id)"", userId: ""@td(MULTI_ORG_TF_BR_ALT.userId)"") {
+      id
+      name
+      status
+      myStatusInOrganization
+      isLockedForCurrentUser
+    }
+    contact(id: ""{{CONTACT_ID}}"", userId: ""@td(MULTI_ORG_TF_BR_ALT.userId)"") {
+      id
+      organizationId
+      organizationsIds
+    }
+  }
+[GQL-EXEC shape_other]
+[GQL-CAPTURE shape_other.data.me.id → MEID_OTHER]
+[GQL-CAPTURE shape_other.data.me.contact.organizationsIds → ORGIDS_OTHER]
+[GQL-CAPTURE shape_other.data.me.contact.organizations.items[?id={{LOCKED_ORG_ID}}].isLockedForCurrentUser → LOCKFLAG_OTHER]
+[GQL-CAPTURE shape_other.data.organization.id → ROOTORG_OTHER]
+[GQL-CAPTURE shape_other.data.contact.id → ROOTCONTACT_OTHER]
+[GQL-OP shape_zeros]
+  query {
+    me(userId: ""00000000-0000-0000-0000-000000000000"") {
+      id
+      userName
+      contact {
+        id
+        organizationId
+        organizationsIds
+        organizations(first: 20) {
+          totalCount
+          items { id name status myStatusInOrganization isLockedForCurrentUser }
+        }
+      }
+    }
+    organization(id: ""@td(MULTI_ORG_TF_BR.org_buildright_id)"", userId: ""00000000-0000-0000-0000-000000000000"") {
+      id
+      name
+      status
+      myStatusInOrganization
+      isLockedForCurrentUser
+    }
+    contact(id: ""{{CONTACT_ID}}"", userId: ""00000000-0000-0000-0000-000000000000"") {
+      id
+      organizationId
+      organizationsIds
+    }
+  }
+[GQL-EXEC shape_zeros]
+[GQL-CAPTURE shape_zeros.data.me.id → MEID_ZEROS]
+[GQL-CAPTURE shape_zeros.data.me.contact.organizationsIds → ORGIDS_ZEROS]
+[GQL-CAPTURE shape_zeros.data.me.contact.organizations.items[?id={{LOCKED_ORG_ID}}].isLockedForCurrentUser → LOCKFLAG_ZEROS]
+[GQL-CAPTURE shape_zeros.data.organization.id → ROOTORG_ZEROS]
+[GQL-CAPTURE shape_zeros.data.contact.id → ROOTCONTACT_ZEROS]","[ERRORS label=bootstrap] errors[] empty {OBSERVED}
+[DATA label=bootstrap] data.me.id = @td(MULTI_ORG_TF_BR.userId) {OBSERVED}
+[DATA label=bootstrap] data.me.contact.organizationId = @td(MULTI_ORG_TF_BR.org_buildright_id) {OBSERVED}
+[COUNT label=bootstrap] data.me.contact.organizations.totalCount = 2 {OBSERVED}
+[DATA label=bootstrap] data.me.contact.organizations.items[?id=@td(MULTI_ORG_TF_BR.org_techflow_id)].isLockedForCurrentUser = true {OBSERVED}
+[DATA label=bootstrap] data.me.contact.organizations.items[?id=@td(MULTI_ORG_TF_BR.org_buildright_id)].isLockedForCurrentUser = false {OBSERVED}
+[ERRORS label=shape_omitted] errors[] empty {OBSERVED}
+[ERRORS label=shape_self] errors[] empty {OBSERVED}
+[ERRORS label=shape_other] errors[] empty {OBSERVED}
+[ERRORS label=shape_zeros] errors[] empty {OBSERVED}
+[DATA label=shape_other] data.me.id = @td(MULTI_ORG_TF_BR.userId) {BL}
+[DATA label=shape_other] data.organization.id = @td(MULTI_ORG_TF_BR.org_buildright_id) {OBSERVED}
+[DATA label=shape_other] data.contact.id = {{CONTACT_ID}} {OBSERVED}
+[DATA label=shape_zeros] data.me.id = @td(MULTI_ORG_TF_BR.userId) {OBSERVED}
+[DATA label=shape_zeros] data.organization.id = @td(MULTI_ORG_TF_BR.org_buildright_id) {OBSERVED}
+[DATA label=shape_zeros] data.contact.id = {{CONTACT_ID}} {OBSERVED}
+[VAR] meid:{{MEID_OMITTED}} = meid:{{MEID_SELF}} {OBSERVED}
+[VAR] meid:{{MEID_OMITTED}} = meid:{{MEID_OTHER}} {OBSERVED}
+[VAR] meid:{{MEID_OMITTED}} = meid:{{MEID_ZEROS}} {OBSERVED}
+[VAR] orgids:{{ORGIDS_OMITTED}} = orgids:{{ORGIDS_SELF}} {OBSERVED}
+[VAR] orgids:{{ORGIDS_OMITTED}} = orgids:{{ORGIDS_OTHER}} {OBSERVED}
+[VAR] orgids:{{ORGIDS_OMITTED}} = orgids:{{ORGIDS_ZEROS}} {OBSERVED}
+[VAR] lockflag:{{LOCKFLAG_OMITTED}} = lockflag:{{LOCKFLAG_SELF}} {OBSERVED}
+[VAR] lockflag:{{LOCKFLAG_OMITTED}} = lockflag:{{LOCKFLAG_OTHER}} {OBSERVED}
+[VAR] lockflag:{{LOCKFLAG_OMITTED}} = lockflag:{{LOCKFLAG_ZEROS}} {OBSERVED}
+[VAR] rootorg:{{ROOTORG_OMITTED}} = rootorg:{{ROOTORG_SELF}} {OBSERVED}
+[VAR] rootorg:{{ROOTORG_OMITTED}} = rootorg:{{ROOTORG_OTHER}} {OBSERVED}
+[VAR] rootorg:{{ROOTORG_OMITTED}} = rootorg:{{ROOTORG_ZEROS}} {OBSERVED}
+[VAR] rootcontact:{{ROOTCONTACT_OMITTED}} = rootcontact:{{ROOTCONTACT_SELF}} {OBSERVED}
+[VAR] rootcontact:{{ROOTCONTACT_OMITTED}} = rootcontact:{{ROOTCONTACT_OTHER}} {OBSERVED}
+[VAR] rootcontact:{{ROOTCONTACT_OMITTED}} = rootcontact:{{ROOTCONTACT_ZEROS}} {OBSERVED}","[EVIDENCE] every assertion here is a BARE predicate followed only by its provenance tag. Rationale prose left inside a runner predicate that contains a slash or an opening parenthesis trips the arithmetic branch and degrades the comparison to undefined equals undefined — a guaranteed pass wearing the costume of a check. The rationale lives in this column; do not helpfully re-inline it.
+[ROUNDTRIP] the seeder read-back for the locked leg must report isLocked true AND isCurrentlyLocked true at the moment bootstrap runs. If it does not, the fixture never reached V2, both lock flags read false, and every equality below is vacuous rather than passing.
+[EVIDENCE] STATED FIXTURE LIMIT: the third shape discriminates only while @td(MULTI_ORG_TF_BR_ALT.userId) and @td(MULTI_ORG_TF_BR.userId) resolve to DIFFERENT user ids. They are separately seeded accounts, but nothing inside this case can detect a collapse — if the two aliases ever point at one account the shape silently stops testing anything. Re-run `npm run td:validate:membership-lock` after any re-seed of either lane.
+[EVIDENCE] the equality block compares the omitted shape against each of the other three on five independent signals: the caller’s user id, the caller’s organization id list, the lock flag on the locked membership, the id returned by the root organization read, and the id returned by the root contact read. A resolver that honoured the argument on any one root would move at least one of them.
+[EVIDENCE] the equality predicates carry a short literal prefix in front of each substituted value so a pair of empty captures still parses as a comparison instead of collapsing into an unparseable bare equals sign. An empty-versus-empty comparison is a genuine agreement and is reported as one; the per-shape errors assertions are what catch the read having failed in the first place.","any shape returns errors[] non-empty (the argument is being REJECTED rather than ignored — a different contract that needs its own case, not a silent edit to this one); the other-user shape returns a me.id that is not the caller’s (the argument IS honoured on me — a data-exposure finding, not a passing test); any of the fifteen equality comparisons differs (the four shapes disagree, so the argument is honoured somewhere and every later case that passes a userId is suspect); a comparison fails with ""variable was never captured"" (an upstream capture path missed — harness problem, BLOCKED not FAIL); bootstrap reports both memberships unlocked or totalCount other than 2 (the seeder never reached V2 or the lane fixture drifted — the comparison is vacuous, BLOCKED not FAIL); the root contact read answers Forbidden in all four shapes (the caller cannot read his own contact by id — a real finding on a different axis; report it separately rather than deleting the read)","MANDATORY teardown symmetry (every case that locks must unlock, or the next case reads a poisoned fixture): `npm run seed:membership-lock -- --lane backend --teardown`, then `npm run seed:membership-lock -- --lane backend --verify` — it must exit 0 and report the lane back at the V1 resting state, or lock residue was left behind and the suite is no longer re-runnable.",VCST-5317 · Archetype:SILENT · Technique:EG,Draft
+PRF-GQL-093,xProfile — organization(id:) And organizationOrders(organizationId:) Agree On Whether The Same Organization Is Accessible To The Same Principal,GraphQL xProfile > Organizations > Lock Axis,High,"BL-AUTH-015, BL-B2B-013",ECL-14.8,"Runner-native. BACKEND lane ONLY: this case applies a lock to an OrganizationMembership row of @td(MULTI_ORG_TF_BR.email). The frontend/UI lane account @td(MULTI_ORG_TF_BR_ALT.email) must NEVER be used here — a membership row is keyed on userId plus organizationId and carries the isLocked this case writes, so two lanes on one account eat each other's state and both report confident wrong results.
+IMPERSONATE_TARGET_BLOCKED (USR-021) is OFF LIMITS: it is the environment's only other locked membership and suite 082's impersonation-blocked-target condition depends on it. Never unlock it, never reference it as a mutable fixture.
+Resting state before the case starts: `npm run seed:membership-lock:verify` exits 0.
+WHAT IS ASSERTED: for ONE organization id and ONE principal, organization(id:) and organizationOrders(organizationId:) must AGREE on whether that organization is accessible — either both serve it or both refuse it. BL-AUTH-015 makes accessibility a two-axis predicate over the userId plus organizationId pair, so two reads of the same pair cannot legitimately disagree, whichever answer is the right one.
+WHAT IS DELIBERATELY NOT ASSERTED: that order history must be hidden from a locked member. No specification says that, and this case does not say it either. Which of the two reads is the wrong one is a product decision this run does not make, so the agreement assertion is worded to hold whichever way the fix goes — hide the orders, or serve the organization.
+THIS ROW IS EXPECTED TO FAIL ON THE BUILD UNDER TEST, and that is the intended result, not a defect in the case. Measured live 2026-09-09: organization(id: locked) answers extensions.code Forbidden with a null organization, while organizationOrders(organizationId: locked) answers 200 with a non-zero totalCount for the same id and the same principal. The row asserts the CORRECT expectation and therefore reds. Do not invert it to match the observed split — that would certify the defect and would invert again the day it is fixed.
+THE DISCRIMINATOR, A TOKEN WITH NO organization_id CLAIM: [AUTH role=MULTI_ORG_TF_BR] performs a password grant with storeId and no organization_id, because the MULTI_ORG_TF_BR alias declares no organization_id and the runner sends one only when the alias carries it. With no organization_id on the request there is no requested organization for BL-AUTH-016 to fall back from or silently substitute, so that fallback cannot be what serves the locked organization’s orders. The ctx op pins the condition LIVE rather than by assumption: the resolved active organization must be the UNLOCKED one, so the token’s organization context is demonstrably not the locked organization. A run of this case on an org-scoped token proves nothing and must be discarded.
+THE PAIRED CONTROL: the same two reads are taken against the UNLOCKED active organization, and both must serve it. Without that control a refusal on the locked organization would be equally consistent with a blanket denial of org-scoped reads to a storefront customer principal, and the case would be attributing to the lock something that has nothing to do with it.
+V2 lands IsCurrentlyLocked true on the NON-active organization and the membership-changed handler terminates the account’s sessions on that post-state, so the token MUST be acquired AFTER the lock. A token minted first would be revoked and the case would fail on auth rather than on the contract.","email=@td(MULTI_ORG_TF_BR.email), password={{DEFAULT_TEST_PASSWORD}}, lockedOrgId=@td(MULTI_ORG_TF_BR.org_techflow_id), activeOrgId=@td(MULTI_ORG_TF_BR.org_buildright_id)","[SETUP] `npm run seed:membership-lock -- --lane backend --state V2` — permanent lock, LockoutEnd null, on the NON-active organization
+[SETUP] `npm run seed:membership-lock -- --lane backend --verify` — record which leg it reports locked and its read-back isLocked and isCurrentlyLocked. A lock POST against an unknown membership id returns 200 with a null body, so never trust the status code alone
+[AUTH role=MULTI_ORG_TF_BR]
+[GQL-OP ctx]
+  query {
+    me {
+      id
+      userName
+      contact {
+        id
+        organizationId
+        organizations(first: 20) {
+          totalCount
+          items { id name status myStatusInOrganization isLockedForCurrentUser }
+        }
+      }
+    }
+  }
+[GQL-EXEC ctx]
+[GQL-OP org_locked]
+  query {
+    organization(id: ""@td(MULTI_ORG_TF_BR.org_techflow_id)"") {
+      id
+      name
+      status
+      myStatusInOrganization
+      isLockedForCurrentUser
+    }
+  }
+[GQL-EXEC org_locked]
+[GQL-CAPTURE org_locked.data.organization.id → ORGREAD_LOCKED_ID]
+[GQL-CAPTURE org_locked.data.organization.name → ORGREAD_LOCKED_NAME]
+[GQL-OP orders_locked]
+  query {
+    organizationOrders(organizationId: ""@td(MULTI_ORG_TF_BR.org_techflow_id)"", first: 5) {
+      totalCount
+      items { id number status createdDate organizationId organizationName customerId }
+    }
+  }
+[GQL-EXEC orders_locked]
+[GQL-CAPTURE orders_locked.data.organizationOrders.items.0.organizationId → ORDERSREAD_LOCKED_ID]
+[GQL-CAPTURE orders_locked.data.organizationOrders.items.0.organizationName → ORDERSREAD_LOCKED_NAME]
+[GQL-OP org_unlocked]
+  query {
+    organization(id: ""@td(MULTI_ORG_TF_BR.org_buildright_id)"") {
+      id
+      name
+      status
+      myStatusInOrganization
+      isLockedForCurrentUser
+    }
+  }
+[GQL-EXEC org_unlocked]
+[GQL-OP orders_unlocked]
+  query {
+    organizationOrders(organizationId: ""@td(MULTI_ORG_TF_BR.org_buildright_id)"", first: 5) {
+      totalCount
+      items { id number status createdDate organizationId organizationName customerId }
+    }
+  }
+[GQL-EXEC orders_unlocked]","[ERRORS label=ctx] errors[] empty {OBSERVED}
+[DATA label=ctx] data.me.id = @td(MULTI_ORG_TF_BR.userId) {OBSERVED}
+[DATA label=ctx] data.me.contact.organizationId = @td(MULTI_ORG_TF_BR.org_buildright_id) {OBSERVED}
+[DATA label=ctx] data.me.contact.organizations.items[?id=@td(MULTI_ORG_TF_BR.org_techflow_id)].isLockedForCurrentUser = true {OBSERVED}
+[DATA label=ctx] data.me.contact.organizations.items[?id=@td(MULTI_ORG_TF_BR.org_buildright_id)].isLockedForCurrentUser = false {OBSERVED}
+[VAR] orgid:{{ORGREAD_LOCKED_ID}} = orgid:{{ORDERSREAD_LOCKED_ID}} {BL}
+[VAR] orgname:{{ORGREAD_LOCKED_NAME}} = orgname:{{ORDERSREAD_LOCKED_NAME}} {BL}
+[DATA label=orders_locked] data.organizationOrders is null OR data.organizationOrders.totalCount = 0 OR data.organizationOrders.items.0.organizationId is non-null {OBSERVED}
+[ERRORS label=org_unlocked] errors[] empty {BL}
+[DATA label=org_unlocked] data.organization.id = @td(MULTI_ORG_TF_BR.org_buildright_id) {OBSERVED}
+[DATA label=org_unlocked] data.organization.isLockedForCurrentUser = false {OBSERVED}
+[ERRORS label=orders_unlocked] errors[] empty {BL}
+[DATA label=orders_unlocked] data.organizationOrders.totalCount is non-null {OBSERVED}","[EVIDENCE] every assertion here is a BARE predicate followed only by its provenance tag. Rationale prose left inside a runner predicate that contains a slash or an opening parenthesis trips the arithmetic branch and degrades the comparison to undefined equals undefined — a guaranteed pass wearing the costume of a check. The rationale lives in this column; do not helpfully re-inline it.
+[ROUNDTRIP] the seeder read-back must report the NON-active leg isCurrentlyLocked true at the moment org_locked and orders_locked run. If it does not, nothing was locked and the agreement would hold for the uninteresting reason.
+[EVIDENCE] HOW THE AGREEMENT IS MEASURED WITHOUT NAMING A DIRECTION: each read is reduced to the organization identity it exposes — id and name from the direct read, the first order’s organizationId and organizationName from the order read — and a refused read exposes neither, so its capture is the empty string. Both refusing compares empty to empty and passes. Both serving compares the same organization to itself and passes. One of each fails. That is the whole verdict, and it stays correct whichever side is eventually changed.
+[EVIDENCE] the guard on orders_locked is what stops a SERVED-but-empty order page from being read as a refusal: a non-zero totalCount must come with an item whose organizationId is readable, otherwise the identity capture would be empty for a reason that has nothing to do with access.
+[EVIDENCE] the direct read of the locked organization deliberately carries NO errors assertion of its own. Asserting errors[] empty there would demand the organization be served; asserting errors[] non-empty would enshrine the current Forbidden as the expected answer. Either one picks a direction the specification does not.","the two locked-organization reads disagree — one exposes the organization identity and the other does not (the finding this row exists for: an organization the principal is refused by name is still served through its order history, or the inverse); the unlocked control pair does not both serve (either that leg is not at the resting state, or org-scoped reads are denied wholesale to this principal, which would make the locked result meaningless — BLOCKED not FAIL); ctx reports the active organization as the LOCKED one (the token carried an organization claim after all, the discriminator is gone and the run must be discarded); ctx reports the locked membership isLockedForCurrentUser false (the seeder never reached V2 — BLOCKED not FAIL); orders_locked reports a non-zero totalCount with no readable item (the identity capture reads empty from a SERVED response and would agree with a refusal for the wrong reason — the guard assertion catches this); either read answers a schema error on organizationOrders (the query drifted against the live schema — harness problem, BLOCKED not FAIL)","MANDATORY teardown symmetry (every case that locks must unlock, or the next case reads a poisoned fixture): `npm run seed:membership-lock -- --lane backend --teardown`, then `npm run seed:membership-lock -- --lane backend --verify` — it must exit 0 and report the lane back at the V1 resting state, or lock residue was left behind and the suite is no longer re-runnable.",VCST-5317 · Archetype:SCOPE · Technique:EG,Draft

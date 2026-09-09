@@ -1283,3 +1283,154 @@ The cart contents this journey creates are user-created state, not a fixture —
 Leave the active organization as organization A (@td(MULTI_ORG_TF_BR_ALT.org_buildright_id)), the organization that was active when the journey started.
 This row applies no lock, so there is nothing to unlock — but run `npm run seed:membership-lock:verify` and confirm it exits 0, so a lock leaked by a neighbouring case is caught here rather than silently poisoning the next baseline.
 Sign out via the storefront account-menu popup (click the user name in the top header -> Logout).",VCST-5317 · Archetype:SCOPE · Technique:FLOW · BL-B2B-001 value-chain baseline for the switcher (membership -> list -> gate -> render -> click -> token -> org-scoped context),Draft
+B2C-ORG-066,Org Switcher — Mobile Locked Organization Row Is Flagged And Guarded Exactly As The Desktop Row Is In The Same Session,B2C Features > Organization > Switcher Lock Axis,Critical,"BL-AUTH-013, BL-AUTH-016",ECL-7.4,"Frontend lane ONLY. This case mutates the OrganizationMembership rows of @td(MULTI_ORG_TF_BR_ALT.email); the backend/GraphQL lane account @td(MULTI_ORG_TF_BR.email) must NEVER be used here — a membership row is keyed on (userId, organizationId) and carries the isLocked this case writes, so two lanes on one account eat each other's state and both report confident wrong results.
+IMPERSONATE_TARGET_BLOCKED (USR-021) is the only other currently-locked membership on the environment and is OFF LIMITS: suite 082's impersonation-blocked-target condition depends on it. Never unlock it, never reference it as a mutable fixture.
+The lock axis must be at its resting state before the case starts: `npm run seed:membership-lock:verify` exits 0.
+Lock setup is REST-only: `npm run seed:membership-lock -- --lane frontend --state <V1|V2|V7>`, read back with `--verify`. The xAPI lock mutations return Forbidden, so never drive the lock through GraphQL. A POST to the lock endpoint with an unknown membership id returns 200 OK with a null body rather than 404, so the read-back is the only trustworthy confirmation that the intended state landed.
+On DESKTOP the switcher is NOT a top-header control: it lives inside the Account-menu popover as listbox 'Organizations' with one option per organization, so every desktop step opens the account menu first.
+Measured live 2026-09-09: BuildRight is the ACTIVE organization on this account and TechFlow is the non-active one, which is why the seeder targets 'non-active' relative to the live contact.organizationId rather than by organization name, and why every step binds an organization by its lane-scoped @td() id rather than by name.
+The MOBILE switcher is a DIFFERENT component from the desktop one — `mobile-menu/menus/multi-organisation-menu.vue`, reached hamburger -> 'Corporate' -> 'My organizations' (menu.json id contact-organizations), gated on isMultiOrganization. It reads the same organizationFields fragment that now carries isLockedForCurrentUser, but it is ABSENT from PR #2469's changed files: no :disabled binding, no lock icon, no guard in its selection handler.
+B2C-ORG-047 enumerated the TOP-LEVEL hamburger panel only and found no organization switcher there. This row goes one level deeper, into 'Corporate' -> 'My organizations', which is where the mobile organization list actually lives. The two rows are not in conflict: the difference is nesting depth, not build. If 'My organizations' is absent at 375x812, re-scope both rows together rather than reading either as a product change.
+VIEWPORT HONESTY: the mobile leg is only valid at a genuine 375x812. A Chrome window that clamps at a ~500px minimum invalidates it. Record the achieved innerWidth/innerHeight and report BLOCKED:PRECONDITION_UNMET:VIEWPORT_CLAMPED — never pass a 500px read off as 375, and never report it as a FAIL either.
+Record the storefront build string printed in the page footer on every page; the 2026-09-09 measurement below was taken on the PR #2469 preview build (footer string beginning `2.58.0-pr-2469`). A different build makes the measurement non-comparable, not wrong.
+THIS ROW ASSERTS THE CORRECT EXPECTATION, NOT THE MEASURED BEHAVIOUR. Measured live 2026-09-09 (3x M1) at a genuine 375x812: the locked row renders as an ENABLED, full-contrast, tappable radio with NO padlock; tapping it POSTs /connect/token naming the locked organization; the SERVER is right (HTTP 400, exactly one errors[] entry, code user_is_locked_in_organization, with a user-facing message) and the CLIENT discards that response and signs the user out of everything. So this row is EXPECTED TO FAIL on this build — that failure IS the finding. Do not invert these assertions to match the build: an inverted assertion certifies the defect and flips red on the fix.
+The lock treatment is a property of the membership, not of the viewport, so the desktop control read first in the SAME signed-in session at the SAME lock state is the paired control this row measures the mobile row against. Do not sign out, do not re-authenticate, do not change lock state between the two legs — a fresh session between them would make the pair uncomparable.
+The cart-preservation half of the sign-out blast radius belongs to B2C-ORG-067, which owns that assertion. This row reads no cart.","front_url={{FRONT_URL}}, user=@td(MULTI_ORG_TF_BR_ALT.email), password={{DEFAULT_TEST_PASSWORD}}, locked_org=@td(MULTI_ORG_TF_BR_ALT.org_techflow_id), active_org=@td(MULTI_ORG_TF_BR_ALT.org_buildright_id)","[SETUP] `npm run seed:membership-lock -- --lane frontend --state V2` (IsLocked=true, LockoutEnd null, on the NON-active organization @td(MULTI_ORG_TF_BR_ALT.org_techflow_id))
+[SETUP] `npm run seed:membership-lock -- --lane frontend --verify` — record the read-back isLocked / isCurrentlyLocked for each leg; a lock POST against an unknown membership id returns 200 with a null body, so never trust the POST status alone
+[PRE:SIGNIN_AS:MULTI_ORG_TF_BR_ALT]
+--- SCREEN: desktop account-menu popover (the paired control) ---
+[VIEWPORT] 1920x1080
+[NAV] {{FRONT_URL}}/account/dashboard
+[WAIT] the account page renders with the top header present
+[ACT] record the storefront build string printed in the page footer
+[ACT] record the achieved viewport as reported by the browser: innerWidth, innerHeight
+[ACT] click the account button in the top header (data-test-id=""account-button"")
+[WAIT] the Account-menu popover is open with listbox 'Organizations' rendered
+[ACT] record the disabled state of every option in listbox 'Organizations', keyed by organization id
+[ACT] record which options render a 'lock-closed' icon
+[ACT] capture the popover to reports/tickets/Sprint26-18/VCST-5317/screenshots/R2-ORG-066-desktop-1920-locked-row.png
+[ASSERT] GATE — the option for @td(MULTI_ORG_TF_BR_ALT.org_techflow_id) is disabled with a 'lock-closed' icon. If the desktop control is NOT flagged, PR #2469 is reverted or not deployed on this build: the mobile leg is then uninterpretable, so report BLOCKED:PRECONDITION_UNMET:DESKTOP_BASELINE_ABSENT rather than reading the mobile row against nothing
+[ACT] close the Account-menu popover
+--- SCREEN: mobile organization list (the surface under test) ---
+[VIEWPORT] 375x812
+[REFLOW]
+[ACT] record the achieved viewport as reported by the browser after the resize: innerWidth, innerHeight
+[ASSERT] GATE — the achieved viewport is exactly 375 x 812. A window that clamps to a wider minimum (commonly ~500px) invalidates this leg: report BLOCKED:PRECONDITION_UNMET:VIEWPORT_CLAMPED quoting the achieved width, never a pass at 375, never a FAIL
+[NAV] {{FRONT_URL}}/account/dashboard
+[WAIT] the mobile layout settles with the hamburger control visible
+[ACT] tap the top-header mobile navigation toggle — the 'hamburger' control that is the only header button rendered at this width
+[WAIT] the mobile navigation panel is open
+[ACT] tap 'Corporate' in the mobile navigation panel
+[WAIT] the Corporate submenu is open
+[ACT] tap 'My organizations' in the Corporate submenu
+[WAIT] the mobile organization list renders one row per membership
+[ACT] record the rendered state of the row for @td(MULTI_ORG_TF_BR_ALT.org_techflow_id): its role, its disabled state, whether it is focusable, its contrast against the sibling row
+[ACT] record whether that row renders a lock indicator of any kind
+[ACT] record the same three properties for the row for @td(MULTI_ORG_TF_BR_ALT.org_buildright_id)
+[ACT] capture the mobile organization list to reports/tickets/Sprint26-18/VCST-5317/screenshots/R2-ORG-066-mobile-375-locked-row.png
+--- SCREEN: activating the locked mobile row ---
+[ACT] start recording every /connect/token request from this point to the end of the case
+[ACT] start recording every navigation from this point to the end of the case
+[ACT] tap the row for @td(MULTI_ORG_TF_BR_ALT.org_techflow_id) using a real touch interaction only — never force a disabled control (VC-EXEC-003), because a tap that does nothing IS the pass, not an obstacle to route around
+[WAIT] the interaction settles (~5s), including any navigation or session change it triggers
+[ACT] record the landing URL
+[ACT] record whether the session is still authenticated as @td(MULTI_ORG_TF_BR_ALT.email)
+[ACT] record the active organization after the interaction
+[ACT] record every /connect/token request the interaction issued, with its HTTP status, with its response body, with the organization id it named
+[ACT] record every message rendered to the user by the interaction
+[ACT] capture the post-interaction state to reports/tickets/Sprint26-18/VCST-5317/screenshots/R2-ORG-066-mobile-375-after-activation.png","[STATE] the mobile leg was read at an achieved viewport of width == 375, height == 812 — a clamped read is reported BLOCKED:PRECONDITION_UNMET:VIEWPORT_CLAMPED, never counted as a 375px observation {OBSERVED}
+[DOM] at 1920x1080 the account-menu option for @td(MULTI_ORG_TF_BR_ALT.org_techflow_id) is disabled with a 'lock-closed' icon — the paired control the mobile row is measured against, read in the same session at the same lock state {OBSERVED}
+[DOM] at 375x812 the 'My organizations' row for @td(MULTI_ORG_TF_BR_ALT.org_techflow_id) carries the disabled state in the accessibility tree, exactly as its desktop pair does — the lock treatment is a property of the membership, not of the viewport {BL} (BL-AUTH-013 — the org switcher must surface the org-scoped refusal on the surface the customer is actually using)
+[DOM] that same mobile row renders a lock indicator — a 'lock-closed' glyph or the mobile component's equivalent — so the row is legible as blocked before it is touched {BL} (BL-AUTH-013)
+[REL] the mobile row for @td(MULTI_ORG_TF_BR_ALT.org_buildright_id) is NOT disabled with no lock indicator: the treatment is scoped to the locked membership, matching the scoping observed on desktop {OBSERVED}
+[STATE] after the tap the session is still authenticated as @td(MULTI_ORG_TF_BR_ALT.email): no sign-out, no token clear, no redirect to /sign-in, no landing on the anonymous home page {BL} (BL-AUTH-013 — an org-scoped refusal is not a global lockout, so it must never be resolved by ending the session)
+[STATE] the active organization after the tap equals @td(MULTI_ORG_TF_BR_ALT.org_buildright_id) — unchanged: the guard blocked the switch rather than performing it {BL} (BL-AUTH-016 — an explicit switch gets no fallback, so a blocked target must produce no context change at all)
+[COUNT] the tap issues zero /connect/token requests naming @td(MULTI_ORG_TF_BR_ALT.org_techflow_id) — a guarded row never reaches the token layer {BL} (BL-AUTH-016)
+[STATUS] server-contract guard, evaluated only when the client issues that request anyway: the response is HTTP 400 carrying exactly one entry in errors[], whose code is 'user_is_locked_in_organization', accompanied by a user-facing message — count entries in errors[], never the response's count field, which is the parameter count. This half of the contract is currently right and a regression in it is an independent second failure {BL} (BL-AUTH-013 + BL-AUTH-016 — one error, the lock code, org-specific copy)
+[REL] whatever the tap surfaces to the user is org-specific copy about this organization being blocked, never the generic global-lockout message the sign-in form shows for user_is_locked_out {BL} (BL-AUTH-013)","[API] the GetMe / organization-list queries backing both surfaces return HTTP 200 with errors[] empty — the locked row's state is rendered from isLockedForCurrentUser on the organizationFields fragment, never from an error path
+[CONSOLE] no TypeError and no uncaught exception on the viewport change, on opening 'Corporate' -> 'My organizations', or on the tap
+[NETWORK] no 4xx/5xx on /graphql. The /connect/token 400 described in the Assertions is expected ONLY in the unguarded state and is scored there, not counted as an incidental network failure here","the mobile row renders enabled and full-contrast and tappable with no lock indicator — the mobile component never received PR #2469's lock treatment: this is the primary defect this row exists to catch; the tap ends the session (token cleared, landing on /sign-in or the anonymous home page) — the client discarded the server's 400 instead of surfacing it; the tap switches the active organization to the locked organization — the client guard is missing AND the server accepted it, a strictly worse failure; the /connect/token response carries more than one errors[] entry; the /connect/token response carries a global-lockout code (user_is_locked_out / user_is_temporary_locked_out) in place of user_is_locked_in_organization; the generic global-lockout copy is shown in place of org-specific copy; 'Corporate' -> 'My organizations' is absent at 375x812 — the mobile surface moved: re-scope this row together with B2C-ORG-047 rather than reading it as a product change; the desktop leg at 1920x1080 shows the locked option enabled — PR #2469 reverted or not deployed: report BLOCKED:PRECONDITION_UNMET:DESKTOP_BASELINE_ABSENT; the achieved viewport clamps above 375 — report BLOCKED:PRECONDITION_UNMET:VIEWPORT_CLAMPED; both mobile rows render disabled — the lock treatment leaked to the whole list","MANDATORY (teardown symmetry — every case that locks must unlock, or the next case reads a poisoned fixture): run `npm run seed:membership-lock -- --lane frontend --teardown` to restore the resting state V1 on every lane leg.
+Then `npm run seed:membership-lock -- --lane frontend --verify` — it must exit 0; a non-zero exit means lock residue was left behind and the suite is no longer re-runnable.
+This row adds nothing to the cart, but the forced sign-out it probes can leave a cart behind: if any line item exists under either organization at the end of the run, empty it — a cart is user-created state, not a fixture.
+Restore the viewport to 1280x900 so the next case does not inherit the mobile layout.
+Sign out via the storefront account-menu popup (click the user name in the top header -> Logout) if the session survived.",VCST-5317 · Archetype:PARITY · Technique:EP,Draft
+B2C-ORG-067,Org Switcher — A Forced Sign-Out From The Switcher Does Not Cost The Buyer Their Cart,B2C Features > Organization > Switcher Lock Axis,Medium,BL-B2B-001,ECL-14.3,"Frontend lane ONLY. This case mutates the OrganizationMembership rows of @td(MULTI_ORG_TF_BR_ALT.email); the backend/GraphQL lane account @td(MULTI_ORG_TF_BR.email) must NEVER be used here — a membership row is keyed on (userId, organizationId) and carries the isLocked this case writes, so two lanes on one account eat each other's state and both report confident wrong results.
+IMPERSONATE_TARGET_BLOCKED (USR-021) is the only other currently-locked membership on the environment and is OFF LIMITS: suite 082's impersonation-blocked-target condition depends on it. Never unlock it, never reference it as a mutable fixture.
+The lock axis must be at its resting state before the case starts: `npm run seed:membership-lock:verify` exits 0.
+Lock setup is REST-only: `npm run seed:membership-lock -- --lane frontend --state <V1|V2|V7>`, read back with `--verify`. The xAPI lock mutations return Forbidden, so never drive the lock through GraphQL. A POST to the lock endpoint with an unknown membership id returns 200 OK with a null body rather than 404, so the read-back is the only trustworthy confirmation that the intended state landed.
+On DESKTOP the switcher is NOT a top-header control: it lives inside the Account-menu popover as listbox 'Organizations' with one option per organization, so every desktop step opens the account menu first.
+Measured live 2026-09-09: BuildRight is the ACTIVE organization on this account and TechFlow is the non-active one, which is why the seeder targets 'non-active' relative to the live contact.organizationId rather than by organization name, and why every step binds an organization by its lane-scoped @td() id rather than by name.
+The MOBILE switcher is a DIFFERENT component from the desktop one — `mobile-menu/menus/multi-organisation-menu.vue`, reached hamburger -> 'Corporate' -> 'My organizations' (menu.json id contact-organizations), gated on isMultiOrganization. It reads the same organizationFields fragment that now carries isLockedForCurrentUser, but it is ABSENT from PR #2469's changed files: no :disabled binding, no lock icon, no guard in its selection handler.
+B2C-ORG-047 enumerated the TOP-LEVEL hamburger panel only and found no organization switcher there. This row goes one level deeper, into 'Corporate' -> 'My organizations', which is where the mobile organization list actually lives. The two rows are not in conflict: the difference is nesting depth, not build. If 'My organizations' is absent at 375x812, re-scope both rows together rather than reading either as a product change.
+VIEWPORT HONESTY: the mobile leg is only valid at a genuine 375x812. A Chrome window that clamps at a ~500px minimum invalidates it. Record the achieved innerWidth/innerHeight and report BLOCKED:PRECONDITION_UNMET:VIEWPORT_CLAMPED — never pass a 500px read off as 375, and never report it as a FAIL either.
+Record the storefront build string printed in the page footer on every page; the 2026-09-09 measurement below was taken on the PR #2469 preview build (footer string beginning `2.58.0-pr-2469`). A different build makes the measurement non-comparable, not wrong.
+WHAT THIS ROW ASSERTS: the cart, and only the cart. It drives the switcher's failure path to reach an unexpected end-of-session, then asserts that re-authenticating into the SAME organization returns the buyer to the SAME basket. Whether the failure path should end the session at all is B2C-ORG-066's assertion; deliberately not re-asserted here, so this row stays a valid blast-radius bound in both worlds.
+BRANCH-TOLERANT BY DESIGN: on a build where the mobile row is properly guarded the tap is a no-op, the session never ends, and the recovery screen is skipped — the cart comparison still runs and still has to hold. On the current build the tap ends the session and the recovery screen re-authenticates. Either branch is a valid execution of this row; only a changed cart is a failure.
+The cart this row builds is user-created state, not a fixture: it is created from the live catalog at run time (never a pinned SKU, never a transcribed price) and Cleanup empties it.
+The pre-state must be read under the ACTIVE organization @td(MULTI_ORG_TF_BR_ALT.org_buildright_id), and the post-state must be read under that same organization. A post-state read under a different organization compares two different carts and proves nothing — report BLOCKED rather than FAIL if recovery lands elsewhere.","front_url={{FRONT_URL}}, user=@td(MULTI_ORG_TF_BR_ALT.email), password={{DEFAULT_TEST_PASSWORD}}, active_org=@td(MULTI_ORG_TF_BR_ALT.org_buildright_id), locked_org=@td(MULTI_ORG_TF_BR_ALT.org_techflow_id)","[SETUP] `npm run seed:membership-lock -- --lane frontend --state V2` — the switcher's failure path needs a blocked target, which is the NON-active organization @td(MULTI_ORG_TF_BR_ALT.org_techflow_id)
+[SETUP] `npm run seed:membership-lock -- --lane frontend --verify` — confirm the ACTIVE organization leg reads back unlocked; a lock on the active leg would block re-authentication itself, which is a different case
+[PRE:SIGNIN_AS:MULTI_ORG_TF_BR_ALT]
+[PRE:RESET_CART]
+--- SCREEN: build the cart pre-state under the active organization ---
+[VIEWPORT] 1920x1080
+[NAV] {{FRONT_URL}}/
+[WAIT] the storefront home page renders
+[ACT] record the active organization shown in the header
+[ACT] open the first product listing the catalog navigation offers
+[WAIT] the listing renders with at least one product
+[ACT] open the first buyable product on that listing, discovered at run time — never a pinned SKU
+[WAIT] the product page renders with an enabled 'Add to Cart' control
+[ACT] click 'Add to Cart'
+[WAIT] the cart badge increments
+[ACT] open a second buyable product discovered the same way, so the comparison spans more than one line
+[WAIT] the second product page renders with an enabled 'Add to Cart' control
+[ACT] click 'Add to Cart'
+[WAIT] the cart badge increments a second time
+[NAV] {{FRONT_URL}}/cart
+[WAIT] the cart page renders with its line items
+[ACT] record the pre-state line count
+[ACT] record the pre-state identity of each line, with its quantity
+[ACT] record the pre-state subtotal exactly as the page renders it — read the value, never transcribe an expected price
+[ACT] capture the pre-state cart to reports/tickets/Sprint26-18/VCST-5317/screenshots/R2-ORG-067-cart-pre-signout.png
+--- SCREEN: drive the switcher's failure path ---
+[VIEWPORT] 375x812
+[REFLOW]
+[ACT] record the achieved viewport as reported by the browser: innerWidth, innerHeight
+[ASSERT] GATE — the achieved viewport is exactly 375 x 812. A window clamped to a wider minimum invalidates this leg: report BLOCKED:PRECONDITION_UNMET:VIEWPORT_CLAMPED quoting the achieved width
+[NAV] {{FRONT_URL}}/account/dashboard
+[WAIT] the mobile layout settles with the hamburger control visible
+[ACT] tap the top-header mobile navigation toggle — the 'hamburger' control that is the only header button rendered at this width
+[WAIT] the mobile navigation panel is open
+[ACT] tap 'Corporate' in the mobile navigation panel
+[WAIT] the Corporate submenu is open
+[ACT] tap 'My organizations' in the Corporate submenu
+[WAIT] the mobile organization list renders one row per membership
+[ACT] tap the row for @td(MULTI_ORG_TF_BR_ALT.org_techflow_id) using a real touch interaction only — never force a disabled control (VC-EXEC-003), so a properly guarded row simply does not respond, which is a legitimate branch of this row
+[WAIT] the interaction settles (~5s), including any navigation or session change it triggers
+[ACT] record whether the session survived the interaction
+[ACT] record the landing URL
+--- SCREEN: recovery into the same organization ---
+[ACT] re-authenticate as @td(MULTI_ORG_TF_BR_ALT.email) with {{DEFAULT_TEST_PASSWORD}} when the previous step ended the session — skip this whole screen when the session survived
+[WAIT] the account page renders for the re-authenticated session
+[ACT] record the active organization after recovery
+[VIEWPORT] 1280x900
+[REFLOW]
+--- SCREEN: read the cart post-state ---
+[NAV] {{FRONT_URL}}/cart
+[WAIT] the cart page renders
+[ACT] record the post-state line count
+[ACT] record the post-state identity of each line, with its quantity
+[ACT] record the post-state subtotal exactly as the page renders it
+[ACT] capture the post-state cart to reports/tickets/Sprint26-18/VCST-5317/screenshots/R2-ORG-067-cart-post-signout.png","[STATE] the organization active when the post-state is read equals @td(MULTI_ORG_TF_BR_ALT.org_buildright_id) — the same organization the pre-state was built under, so the two reads are org-for-org comparable; a mismatch invalidates the comparison and is reported BLOCKED rather than FAIL {BL} (BL-B2B-001 — the cart is org-scoped, so a cross-org comparison decides nothing)
+[REL] the post-state line count is identical to the recorded pre-state line count {BL} (BL-B2B-001)
+[REL] every pre-state line identity is present in the post-state cart at the same quantity, with no line added, none removed, none re-ordered out of the set {BL} (BL-B2B-001 — ""switch back -> Org A's cart restored"")
+[REL] the post-state subtotal is identical to the recorded pre-state subtotal, compared against the value read from the pre-state page — never against a transcribed price {BL} (BL-B2B-001)
+[STATE] no line belonging to any other organization's context appears in the recovered cart: the recovered cart is exactly the pre-state cart, neither emptied nor topped up {BL} (BL-B2B-001 — no data from another org may leak into this org's context)
+[REL] the assertion above holds on whichever branch the failure path takes — a guarded row that never ends the session, or a session that ends and is recovered — because the cart is server-side state keyed on the organization, not on the session {BL} (BL-B2B-001)","[API] the cart query issued after recovery returns HTTP 200 with errors[] empty, under the recovered organization's context
+[CONSOLE] no TypeError and no uncaught exception on the interaction, on the recovery, or on the cart re-read
+[NETWORK] no 4xx/5xx on /graphql at any point. A 400 on /connect/token during the failure path is expected in the unguarded state and is scored by B2C-ORG-066, not counted as an incidental failure here","the recovered cart is EMPTY — the forced sign-out cost the buyer their basket: the finding this row exists to catch; the recovered line count differs from the pre-state line count; a pre-state line comes back at a different quantity; the post-state subtotal differs from the pre-state subtotal while the line set is identical — the cart was re-priced under a re-minted token; recovery lands in a different organization than the one the cart was built under — the comparison is invalid: report BLOCKED, not FAIL; the cart badge shows a count the /cart page does not render; re-authentication is refused for the ACTIVE organization — the lock landed on the wrong membership: re-run --verify before treating this as a product failure; the cart page renders an error state in place of its line items after recovery","Empty the cart this row created, under the organization it was created in — those line items are user-created state, and a leftover line changes the starting point of every cart-sensitive case that runs next. Do this even if the row aborted midway, re-authenticating first if the session ended.
+MANDATORY (teardown symmetry — every case that locks must unlock, or the next case reads a poisoned fixture): run `npm run seed:membership-lock -- --lane frontend --teardown` to restore the resting state V1 on every lane leg.
+Then `npm run seed:membership-lock -- --lane frontend --verify` — it must exit 0; a non-zero exit means lock residue was left behind and the suite is no longer re-runnable.
+Leave the active organization as @td(MULTI_ORG_TF_BR_ALT.org_buildright_id), the organization that was active when the row started.
+Restore the viewport to 1280x900 so the next case does not inherit the mobile layout.
+Sign out via the storefront account-menu popup (click the user name in the top header -> Logout).",VCST-5317 · Archetype:LIFECYCLE · Technique:ST,Draft
