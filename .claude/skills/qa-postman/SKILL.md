@@ -11,7 +11,7 @@ Author Postman collections via Postman MCP with correct variable scoping, authen
 
 **Problem this solves:** Agents create broken Postman collections because they hardcode URLs, forget auth tokens, misuse variable scopes, or build requests with wrong body formats. This skill is the single source of truth for how to use Postman MCP tools correctly.
 
-> **The Postman MCP does NOT execute collections.** There is no `runCollection` tool. To execute, export and run with Newman/Postman CLI, or schedule via a Postman Monitor (`createMonitor` — full toolset). Use the `verify` mode below to validate collection content before handing off to a runner.
+> **`runCollection` is not callable — Newman is the default runner.** The tool is listed in the MCP's own `enabledTools` catalog but registered by no endpoint ([mcp-tools.md](mcp-tools.md) §1a). The one MCP-native execution route is a **Postman Monitor** on the full endpoint, and it is rarely the right call for evidence runs — it needs real credentials stored in the Postman cloud and it leaves a scheduled artifact behind ([execution.md](execution.md) §3.3). Use the `verify` mode below to validate content before handing off to a runner.
 
 ---
 
@@ -50,7 +50,7 @@ Read the relevant file **before** invoking the matching Postman MCP tools.
 ### Step 0 — Read the Reference Files
 At minimum: [mcp-tools.md](mcp-tools.md). Read the others on demand based on what you're authoring (REST → collections-and-requests; GraphQL → graphql-authoring; fixture-driven values → test-data-fixtures).
 
-If a tool you expect appears unavailable, call `getEnabledTools` first — the MCP runs in `minimal` mode (40 tools) by default and may not expose every tool from the `full` set (116 tools).
+If a tool you expect appears unavailable, call `getEnabledTools` first — the MCP runs in `minimal` mode by default. Read `serverInfo.currentServerTools`, **not** the `enabledTools` catalog: the catalog advertises tools no endpoint actually serves ([mcp-tools.md](mcp-tools.md) §1a).
 
 ### Step 1 — Get Workspace ID
 - Default workspace: **VirtoPlatform** — `8bd7a5b3-73e5-4414-a9c9-d59018b44079` (team workspace)
@@ -150,11 +150,28 @@ Read and output [examples.md](examples.md).
 - **ALWAYS include the auth request first** — every collection starts with OAuth2 token acquisition
 - **ALWAYS validate status codes** in test scripts — don't assume 200
 - **ALWAYS verify GraphQL field names** against [`graphql-schema.md`](../../knowledge/api/graphql-schema.md) before authoring
+- **A GraphQL body is `mode: "graphql"`, NEVER `mode: "raw"`** — `body.graphql.query` + `body.graphql.variables` (variables as their own JSON string). Postman then treats the query and its variables as first-class (schema autocomplete, a real variables pane) instead of one opaque blob, and a variable change no longer means editing a hand-embedded JSON string. This is stated in [`graphql-authoring.md`](graphql-authoring.md) §3 and is repeated here because that file is read *on demand* while this list is read every time — the rule was missed on VCST-5933 for exactly that reason. Only a genuine REST JSON body stays `raw`.
 - **ALWAYS use `pm.collectionVariables.set()`** for entity IDs from chained requests
 - **ALWAYS use `pm.environment.get()`** for credentials and URLs
+- **NEVER leave an edited collection only on disk — PUSH it, then VERIFY it. Do not skip either half.**
+  Every change to a collection goes back to the workspace with `putCollection` **in the same turn as the
+  edit**, and is then read back with `getCollection model: "full"` and checked for *the specific fields you
+  changed*. Two reasons, both measured on VCST-5933:
+  - **A `200` from `putCollection` is not proof the content is right.** It returned 200 on a payload whose
+    own description still pointed at the pre-restructure request numbers ("request 6 is the defect" when it
+    was 8) — persisted, and wrong.
+  - **`model: "minimal"` cannot confirm a body change** — it returns metadata and item ids only, no bodies.
+    Verifying a `raw` → `graphql` conversion with `minimal` proves nothing; it needs `full`.
+  When a local mirror exists (`test-data/postman/*.json`), **regenerate it in the same turn** so the two
+  never diverge. A divergence is invisible until someone runs the stale one and reports a result that does
+  not match the ticket.
+- **A client cache is not a failed push.** If the operator says they still see the old collection, re-read it
+  with `getCollection model: "full"` and report the `updatedAt` + the changed fields before re-pushing —
+  Postman's desktop/web app does not live-refresh a collection edited through the API, and a blind re-push
+  hides whether the first one worked.
 - **Schema is required** — `info.schema` must be `"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"`
 - **Collection name cannot be empty** — `info.name` minLength is 1
 - **Workspace ID is required** for create operations — default `8bd7a5b3-73e5-4414-a9c9-d59018b44079` (VirtoPlatform)
-- **`runCollection` does NOT exist** — execute via Newman, Postman CLI, Postman Monitor, or the Postman UI
+- **`runCollection` is advertised but not served** — no endpoint registers it, so execute via Newman (default), Postman CLI, the Postman UI, or a Monitor on the full endpoint. Diagnose any "listed but uncallable" tool against `currentServerTools` ([mcp-tools.md](mcp-tools.md) §1a)
 - **Collection ID format depends on the tool** — owner-qualified `<OWNER>-<UUID>` for `getCollection`/`putCollection`/`duplicateCollection`; bare UUID for `createCollectionRequest`/`updateCollectionRequest`
 - **`getCollection` returns a collection map by default** — pass `model: "full"` to get the complete v2.1.0 payload
