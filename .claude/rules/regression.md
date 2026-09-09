@@ -38,10 +38,13 @@ Derived, not documented here — `config/test-suites.json` is the source of trut
 
 ### WORKING IN A SHARED TREE — the git prohibition, then the one-author rule
 
-**FIRST AND STRONGEST: never run a git command that changes repository or working-tree state.**
+**FIRST AND STRONGEST: never run a git command that DESTROYS repository or working-tree state.**
 No `stash` (push/pop/apply/drop), no `checkout` / `restore` / `switch` on paths or branches, no
-`reset`, `clean`, `revert`, `rebase`, `merge`, `commit` — by any agent, in any session, for any reason,
-**including "recovery"**. Read-only git is always fine (`status`, `diff`, `log`, `show HEAD:<path>`);
+`reset`, `clean`, `revert`, `rebase`, `merge` — by any agent, in any session, for any reason,
+**including "recovery"**. **`commit` is NOT on that list** — it is additive, it destroys nothing, and
+committing when the user asks is ordinary work; what a commit can get wrong is its *scope*, which the
+next paragraph governs (stage explicit paths, never `-A`). Commit when asked, never on your own
+initiative. Read-only git is always fine (`status`, `diff`, `log`, `show HEAD:<path>`);
 for a baseline, copy the file to the scratchpad or read `git show HEAD:<path>`. A command that
 "failed silently" is the signal to stop and report, never to escalate to a broader one — that
 escalation is exactly how 2026-08-28's `git checkout --theirs -- .` reverted **every tracked file** to
