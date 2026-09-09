@@ -453,6 +453,10 @@ test("loadConfig: projectId at user scope → warning, ignored", () => {
 });
 
 const OAUTH_TENANT_ID = "12345678-1234-1234-1234-123456789012";
+// Distinct from OAUTH_TENANT_ID: that one is all-digit, so upper- and lower-casing it produce the
+// same string and it cannot expose a case-folding defect. This one carries letters.
+const CASE_TENANT_ID_UPPER = "ABCDEF12-3456-7890-ABCD-EF1234567890";
+const CASE_TENANT_ID_LOWER = CASE_TENANT_ID_UPPER.toLowerCase();
 const OAUTH_DECL = {
     tenantId: OAUTH_TENANT_ID,
     clientId: "my-client-id",
@@ -620,6 +624,66 @@ test("a user-scope oauth declaration is authorized on the declaration, as a secr
     const a = m.authorizationFor(cfg, cfg.oauth.ado);
     assert.deepEqual(a.block, REGISTRATION_BLOCK);
     assert.equal(a.where, `oauth."ado".authorized`);
+});
+
+test("a mixed-case tenantId declaration is authorized against a lower-case grant", () => {
+    const cfg = m.loadConfig(scopedPaths({
+        user: { registrations: { [CASE_TENANT_ID_LOWER]: { [OAUTH_CLIENT_ID]: REGISTRATION_BLOCK } } },
+        project: { projectId: "proj-x", oauth: { ado: { ...OAUTH_DECL, tenantId: CASE_TENANT_ID_UPPER } } },
+    }));
+    const source = m.authorizationFor(cfg, cfg.oauth.ado);
+    assert.notEqual(source, null, "the registrations branch must exist for this test to say anything");
+    assert.deepEqual(source.block, REGISTRATION_BLOCK);
+    // The pointer's job is to name the exact key to write — printed canonical, not as declared.
+    assert.equal(source.where, `registrations."${CASE_TENANT_ID_LOWER}"."${OAUTH_CLIENT_ID}"`);
+});
+
+test("a lower-case tenantId declaration is authorized against a mixed-case grant", () => {
+    const cfg = m.loadConfig(scopedPaths({
+        user: { registrations: { [CASE_TENANT_ID_UPPER]: { [OAUTH_CLIENT_ID]: REGISTRATION_BLOCK } } },
+        project: { projectId: "proj-x", oauth: { ado: { ...OAUTH_DECL, tenantId: CASE_TENANT_ID_LOWER } } },
+    }));
+    const source = m.authorizationFor(cfg, cfg.oauth.ado);
+    assert.notEqual(source, null, "the registrations branch must exist for this test to say anything");
+    assert.deepEqual(source.block, REGISTRATION_BLOCK);
+    assert.equal(source.where, `registrations."${CASE_TENANT_ID_LOWER}"."${OAUTH_CLIENT_ID}"`);
+});
+
+test("two registrations tenant keys differing only by case are refused, naming both spellings", () => {
+    // Canonicalising would otherwise collapse these into one key and silently drop whichever grant
+    // loses the collision.
+    assert.throws(() => m.loadConfig(scopedPaths({
+        user: {
+            registrations: {
+                [CASE_TENANT_ID_UPPER]: { [OAUTH_CLIENT_ID]: REGISTRATION_BLOCK },
+                [CASE_TENANT_ID_LOWER]: { [OAUTH_CLIENT_ID]: REGISTRATION_BLOCK },
+            },
+        },
+    })), (e) => e.message.includes(CASE_TENANT_ID_UPPER) && e.message.includes(CASE_TENANT_ID_LOWER));
+});
+
+test("loadConfig refuses malformed registrations blocks", () => {
+    // A bare `true` leaf: the shape an earlier draft of this feature used, and the operator explicitly
+    // voided it — nothing else in the suite feeds this shape in.
+    assert.throws(() => m.loadConfig(scopedPaths({
+        user: { registrations: { [OAUTH_TENANT_ID]: { c: true } } },
+    })), /"authorized" must be an object/);
+    // A leaf missing envKeys.
+    assert.throws(() => m.loadConfig(scopedPaths({
+        user: { registrations: { [OAUTH_TENANT_ID]: { c: { servers: { s: { command: "x", args: [] } } } } } },
+    })), /needs "envKeys" as an array of strings/);
+    // A leaf whose kind is neither servers nor tasks.
+    assert.throws(() => m.loadConfig(scopedPaths({
+        user: { registrations: { [OAUTH_TENANT_ID]: { c: { oauth: {} } } } },
+    })), /is not a kind \(expected servers\/tasks\)/);
+    // registrations as a string rather than an object.
+    assert.throws(() => m.loadConfig(scopedPaths({
+        user: { registrations: "not-an-object" },
+    })), /"registrations" must be an object keyed by tenant id/);
+    // A tenant key mapping to a number.
+    assert.throws(() => m.loadConfig(scopedPaths({
+        user: { registrations: { [OAUTH_TENANT_ID]: 5 } },
+    })), /must be an object keyed by client id/);
 });
 
 test("a config carrying an oauth env reference LOADS", () => {

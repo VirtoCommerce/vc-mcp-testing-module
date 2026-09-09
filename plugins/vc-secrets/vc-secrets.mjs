@@ -185,7 +185,7 @@ function validateVaults(vaults) {
         for (const [secret, block] of Object.entries(secrets)) {
             // Same validator as a secret's own `authorized` block: one shape rule, so a change to one
             // cannot leave the other authorizing something it no longer understands.
-            validateAuthorized(`${vault}/${secret}`, block);
+            validateAuthorized(`vaults."${vault}"."${secret}"`, block);
         }
     }
 }
@@ -197,44 +197,54 @@ function validateRegistrations(registrations) {
     if (typeof registrations !== "object" || registrations === null || Array.isArray(registrations)) {
         throw new VcSecretsError(`"registrations" must be an object keyed by tenant id`);
     }
+    // Canonicalising to lower case (the merge in loadConfig, and the lookup in authorizationFor) would
+    // otherwise collapse two spellings of the same tenant into one key and silently drop whichever
+    // grant loses the collision — refuse it here instead, while both spellings are still visible.
+    const seenTenantIds = new Map();
     for (const [tenantId, clients] of Object.entries(registrations)) {
+        const lower = tenantId.toLowerCase();
+        const prior = seenTenantIds.get(lower);
+        if (prior !== undefined && prior !== tenantId) {
+            throw new VcSecretsError(`registrations has both "${prior}" and "${tenantId}" — tenant ids are matched without regard to case, so pick one spelling`);
+        }
+        seenTenantIds.set(lower, tenantId);
         if (typeof clients !== "object" || clients === null || Array.isArray(clients)) {
             throw new VcSecretsError(`registrations."${tenantId}" must be an object keyed by client id`);
         }
         for (const [clientId, block] of Object.entries(clients)) {
             // Same validator as a secret's own `authorized` block: one shape rule, so a change to one
             // cannot leave the other authorizing something it no longer understands.
-            validateAuthorized(`${tenantId}/${clientId}`, block);
+            validateAuthorized(`registrations."${tenantId}"."${clientId}"`, block);
         }
     }
 }
 
-function validateAuthorized(secretName, authorized) {
+function validateAuthorized(label, authorized) {
     if (authorized === undefined) {
         return;
     }
     if (typeof authorized !== "object" || authorized === null || Array.isArray(authorized)) {
-        throw new VcSecretsError(`secret "${secretName}": "authorized" must be an object`);
+        throw new VcSecretsError(`${label}: "authorized" must be an object`);
     }
     for (const [kind, entries] of Object.entries(authorized)) {
         if (kind !== "servers" && kind !== "tasks") {
-            throw new VcSecretsError(`secret "${secretName}": authorized "${kind}" is not a kind (expected servers/tasks)`);
+            throw new VcSecretsError(`${label}: authorized "${kind}" is not a kind (expected servers/tasks)`);
         }
         if (typeof entries !== "object" || entries === null || Array.isArray(entries)) {
-            throw new VcSecretsError(`secret "${secretName}": authorized.${kind} must be an object keyed by name`);
+            throw new VcSecretsError(`${label}: authorized.${kind} must be an object keyed by name`);
         }
         for (const [name, shape] of Object.entries(entries)) {
             if (typeof shape !== "object" || shape === null || Array.isArray(shape)) {
-                throw new VcSecretsError(`secret "${secretName}": authorized.${kind}."${name}" must be an object`);
+                throw new VcSecretsError(`${label}: authorized.${kind}."${name}" must be an object`);
             }
             if (typeof shape.command !== "string" || !shape.command) {
-                throw new VcSecretsError(`secret "${secretName}": authorized.${kind}."${name}" needs a "command" string`);
+                throw new VcSecretsError(`${label}: authorized.${kind}."${name}" needs a "command" string`);
             }
             if (!Array.isArray(shape.args) || !shape.args.every((a) => typeof a === "string")) {
-                throw new VcSecretsError(`secret "${secretName}": authorized.${kind}."${name}" needs "args" as an array of strings`);
+                throw new VcSecretsError(`${label}: authorized.${kind}."${name}" needs "args" as an array of strings`);
             }
             if (!Array.isArray(shape.envKeys) || !shape.envKeys.every((k) => typeof k === "string")) {
-                throw new VcSecretsError(`secret "${secretName}": authorized.${kind}."${name}" needs "envKeys" as an array of strings`);
+                throw new VcSecretsError(`${label}: authorized.${kind}."${name}" needs "envKeys" as an array of strings`);
             }
         }
     }
@@ -251,9 +261,10 @@ function validateAuthorized(secretName, authorized) {
 // oauth declaration is the same shape: the token is minted against whatever identity the developer signs in
 // as, which the repository does not own — while the tenantId and clientId it signs in against DO come from
 // the repository, so the authorization is keyed by that pair in the user file too. A project-declared
-// `local` secret needs nothing: its key is namespaced to the project, so it reads what you set for that
-// project and nothing else — the `set` you ran IS the authorization, and there is no equivalent act behind
-// a vault read or an oauth sign-in.
+// `local` secret needs nothing: its key is namespaced to the project (keyFor), so what you `set` cannot
+// be read by another project — the namespacing itself is what stands in for authorization. A sign-in is
+// not namespaced that way: the token it mints is not confined to one project, so it cannot stand in for
+// a per-project grant the way a namespaced keystore entry can.
 // Every lookup below reads parsed JSON, not one of the null-prototype maps this module builds — and a
 // launchable may legally be named `toString` or `constructor` (LAUNCHABLE_NAME_RE allows both). A plain
 // bracket read would return the inherited builtin instead of undefined, which then reaches
@@ -277,9 +288,15 @@ function authorizationFor(cfg, decl) {
         };
     }
     if (decl.kind === "oauth") {
+        // tenantId is folded to the same lower case the merge canonicalises registrations keys to
+        // (TENANT_ID_RE matches it case-insensitively, which is what licenses this). clientId is NOT
+        // folded: it is validated only as a non-empty string, so its case may carry meaning a GUID's
+        // cannot, and lower-casing it would destroy a distinction the declaration is allowed to make.
+        const tenantId = decl.tenantId.toLowerCase();
+
         return {
-            block: own(own(cfg.registrations, decl.tenantId), decl.clientId),
-            where: `registrations."${decl.tenantId}"."${decl.clientId}"`,
+            block: own(own(cfg.registrations, tenantId), decl.clientId),
+            where: `registrations."${tenantId}"."${decl.clientId}"`,
         };
     }
 
@@ -416,7 +433,7 @@ function parseConfigFile(file, warnings) {
                 throw new VcSecretsError(`secret "${name}": a double quote in "${field}" is not allowed`);
             }
         }
-        validateAuthorized(name, decl.authorized);
+        validateAuthorized(`secret "${name}"`, decl.authorized);
     }
     for (const [name, decl] of Object.entries(cfg.oauth)) {
         // Same reasoning as the secret name check above: this reaches a keystore key
@@ -454,7 +471,7 @@ function parseConfigFile(file, warnings) {
         if (decl.binName !== undefined && (typeof decl.binName !== "string" || !BIN_NAME_RE.test(decl.binName))) {
             throw new VcSecretsError(`oauth "${name}": binName must match ${BIN_NAME_RE.source}`);
         }
-        validateAuthorized(name, decl.authorized);
+        validateAuthorized(`oauth "${name}"`, decl.authorized);
     }
     validateLaunchables("server", cfg.servers);
     validateLaunchables("task", cfg.tasks);
@@ -541,7 +558,16 @@ function loadConfig(paths = configPaths()) {
         }
         if (cfg.registrations !== undefined) {
             if (scope === USER_SCOPE) {
-                registrations = cfg.registrations;
+                // Canonicalise the tenant key to lower case, matching the lookup in authorizationFor —
+                // otherwise a declaration and a grant spelling the same GUID in different case fail to
+                // match, and the failure is invisible: authorizationFor's `where` pointer prints the
+                // declaration's own casing, so the key it tells the user to add looks identical to the
+                // one already in their file. validateRegistrations has already refused two tenant keys
+                // that differ only by case, so this cannot silently drop a grant.
+                registrations = Object.create(null);
+                for (const [tenantId, clients] of Object.entries(cfg.registrations)) {
+                    registrations[tenantId.toLowerCase()] = clients;
+                }
             } else {
                 // A repository authorizing the app registration it names would be the grant written by the
                 // party requesting it — the same reason `authorized` and `vaults` are user-scope only.
