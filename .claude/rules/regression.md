@@ -24,13 +24,13 @@ Do not re-create it. Why it was removed: [`docs/decisions/regression-history.md`
 
 Central configuration for regression orchestration. Defines:
 - **Browser pool**: 3 slots (playwright-chrome, playwright-firefox, playwright-edge) with fallback chain
-- **Suite definitions**: 126 suites in module-aligned subdirectories under `Frontend/` and `Backend/`, with id, name, CSV file path, priority, test count, assigned agent type, and tags
-- **Selection groups**: 37 groups — `smoke`, `critical`, `sprint`, `full`, `frontend`, `backend`, plus module-specific groups (`catalog`, `search`, `orders`, `auth`, `b2b`, `marketing`, `platform`, `bopis`, `payment`, `configurable-products`, `whitelabeling`, `purchase-flow`, `loyalty`, …)
+- **Suite definitions**: one per suite in module-aligned subdirectories under `Frontend/` and `Backend/`, with id, name, CSV file path, priority, test count, assigned agent type, and tags
+- **Selection groups**: `smoke`, `critical`, `sprint`, `full`, `frontend`, `backend`, plus module-specific groups (`catalog`, `search`, `orders`, `auth`, `b2b`, `marketing`, `platform`, `bopis`, `payment`, `configurable-products`, `whitelabeling`, `purchase-flow`, `loyalty`, …)
 - **Defaults**: max 3 parallel agents, 2 retries, 30s retry delay, HAR capture enabled
 
 ## Regression Test Suites
 
-126 suites in `regression/suites/` organized by module (50 directories) under `Frontend/` and `Backend/`. Enriched agent-native CSV format. Full definitions in `config/test-suites.json`. **Total: 4,155 test cases** (per manifest `testCount`; the source of truth is `config/test-suites.json`).
+Suites live in `regression/suites/`, organized by module under `Frontend/` and `Backend/`, in the enriched agent-native CSV format. **`config/test-suites.json` is the source of truth for how many there are and how many cases they hold — `npm run suites:lint` prints both.** Do not restate either number here: the two that used to sit in this paragraph were wrong by 9 suites and 348 cases when checked on 2026-09-09.
 
 ### Suite inventory
 
@@ -75,23 +75,20 @@ in its own dispatch brief): [`knowledge/execution/regression-suites.md`](../know
 
 ### Selection Groups
 
-| Selection | Suites | Use Case |
-|-----------|--------|----------|
-| `smoke` | 042, 078, 078b, 078c, 078d | Daily validation before deployment |
-| `critical` | 042, 078, 078b, 078c, 078d, 039, 044, 049 | P0 suites only |
-| `purchase-flow` | cart + checkout + orders-frontend + payment | Purchase flow regression |
-| `catalog` | 001-003, 051, 053 | Catalog module (frontend + admin) |
-| `search` | 004-005, 061 | Search module (frontend + admin) |
-| `orders` | 014-019 | Orders & quotes (frontend + admin) |
-| `auth` | 031-033 | Authentication module |
-| `b2b` | 006-010 | B2B features |
-| `marketing` | 023-025, 077 | Marketing module (admin + storefront) |
-| `platform` | 020-021, 049, 063 | Platform module |
-| `frontend` | All Frontend/ suites minus 3 exclusions (53) | Frontend-only regression |
-| `backend` | All Backend/ suites minus 4 exclusions (63) | Backend-only regression |
-| `sprint` | **Plan-driven** — `/qa-regression sprint` reads `vc/shared/docs/Sprint plans/sprint-*-summary.json` → `suitesActivated[]` (auto-picks the most recent plan). Falls back to all P0+P1 suites when no plan exists or `--no-plan` is set. | Before sprint release |
-| `sprint:XX-YY` | Pinned to a specific sprint plan in `vc/shared/docs/Sprint plans/` | Re-run a past sprint's regression scope |
-| `full` | All 119 (126 minus the 7 excluded) | Before production release |
+**Membership is defined in `config/test-suites.json` `selections`, never here** — `npm run suites:lint`
+prints the group count, and `npm run regression:plan -- <name>` resolves one to its actual
+suite list. The table below is *when to reach for which*, which the manifest cannot tell you.
+
+| Selection | Use Case |
+|-----------|----------|
+| `smoke` | Daily validation before deployment |
+| `critical` | P0 suites only |
+| `purchase-flow` | Cart → checkout → orders → payment, end to end |
+| `catalog` · `search` · `orders` · `auth` · `b2b` · `marketing` · `platform` | One module, frontend + admin |
+| `frontend` · `backend` | One layer, minus the suites the manifest excludes |
+| `sprint` | **Plan-driven** — `/qa-regression sprint` reads `vc/shared/docs/Sprint plans/sprint-*-summary.json` → `suitesActivated[]` (auto-picks the most recent plan). Falls back to all P0+P1 suites when no plan exists or `--no-plan` is set |
+| `sprint:XX-YY` | Re-run a past sprint's regression scope, pinned to that plan |
+| `full` | Everything the manifest does not exclude — before a production release |
 
 ## CI Regression Testing
 

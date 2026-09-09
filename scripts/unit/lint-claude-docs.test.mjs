@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BUDGET, BASELINE, alwaysLoadedFiles, measureBudget, isPlaceholderPath, isEphemeralPath, citationTarget, citedFromRoot, pathResolves, headingMatch, MAY_NOT_EXIST, classifyScript, ratchet, lint } from '../maintenance/lint-claude-docs.mjs';
+import { BUDGET, BASELINE, alwaysLoadedFiles, measureBudget, isPlaceholderPath, isEphemeralPath, citationTarget, citedFromRoot, pathResolves, headingMatch, DERIVED_COUNT_RE, isTranscribedCount, MAY_NOT_EXIST, classifyScript, ratchet, lint } from '../maintenance/lint-claude-docs.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -225,4 +225,49 @@ test('a compound citation must satisfy BOTH halves', () => {
 test('DOC-004 is at zero — a § citation that stops resolving is a real defect now', () => {
   assert.equal(BASELINE['DOC-004'], 0, 'raising this baseline is how a gate stops gating');
   assert.equal(CORPUS.counts['DOC-004'], 0, `a cited section heading no longer resolves (${counts()}):\n    ${show('DOC-004')}`);
+});
+
+// --- DOC-006: a derived count transcribed into the always-loaded set ---------------------------------
+//
+// CLAUDE.md §Where the rules live: "Counts (suites, cases, agents…) are never transcribed into prose
+// — run the script that prints them", because every contradiction the 2026-09-07 audit found was in a
+// fact that had been restated. Measured 2026-09-09: `.claude/rules/regression.md` carried three such
+// counts, ALL stale (126 suites vs 135, 4,155 test cases vs 4,503, 37 selection groups), in the tier
+// every agent pays on every dispatch, in a file that named the manifest as the source of truth two
+// paragraphs later. Prose does not stay right on its own.
+
+const fires = (line) => [...line.matchAll(DERIVED_COUNT_RE)].some((m) => isTranscribedCount(line, m.index));
+
+test('a transcribed corpus count is a finding — including one that is correct today', () => {
+  assert.ok(fires('126 suites in `regression/suites/` organized by module'));
+  assert.ok(fires('**Total: 4,155 test cases** (per manifest `testCount`)'));
+  assert.ok(fires('- **Selection groups**: 37 groups — `smoke`, `critical`, …'));
+  assert.ok(fires('135 suites'), 'the CORRECT number fails too — the defect is the transcription, not the arithmetic');
+});
+
+test('a dated measurement is archaeology and cannot drift, so it is exempt', () => {
+  assert.ok(!fires('the two numbers here were wrong by 9 suites and 348 cases when checked on 2026-09-09'));
+  assert.ok(fires('the two numbers here were wrong by 9 suites and 348 cases'), 'undated, the same sentence is a live claim');
+});
+
+test('an "N of M" proportion is an outcome, not a corpus size', () => {
+  assert.ok(!fires('two suites on one disposable fixture set (5 of 34 cases lost)'));
+  assert.ok(!fires('46 of 4,429 cases have ever caught a bug'));
+});
+
+test('DOC-006 does not fire on prose that merely contains a number and a noun', () => {
+  assert.ok(!fires('Batch regression in groups of 3 (matching browser pool slots)'));
+  assert.ok(!fires('Max 3 concurrent browser agents'));
+});
+
+test('DOC-006 is scoped to the always-loaded tier and ratchets at zero', () => {
+  assert.equal(BASELINE['DOC-006'], 0, 'raising this baseline is how the counts grow back');
+  const offenders = CORPUS.findings.filter((f) => f.code === 'DOC-006');
+  assert.deepEqual(
+    offenders.map((f) => `${f.file}:${f.line} ${f.detail}`),
+    [],
+    `a derived count was transcribed into CLAUDE.md or .claude/rules/ (${counts()})`,
+  );
+  const alwaysLoaded = new Set(alwaysLoadedFiles(ROOT));
+  assert.ok(offenders.every((f) => alwaysLoaded.has(f.file)), 'DOC-006 must not reach the on-demand tier');
 });

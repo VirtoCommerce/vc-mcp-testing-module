@@ -18,6 +18,8 @@
  *   DOC-002     `npm run <script>` with no such script in package.json                             (ratchet)
  *   DOC-003     a cited repo path that does not exist                                              (ratchet)
  *   DOC-004     a cited `file.md` … §Section with no such heading in that file                    (ratchet)
+ *   DOC-006     a DERIVED count (suites / test cases / selection groups) transcribed into the
+ *               always-loaded set, where it silently rots                                        (ratchet)
  *
  * DOC-002/003/004 generalise `scripts/qa-test/doclint.mjs` (which stays scoped to /qa-test and owns the
  * qa-test-specific DOC-001/005/006) to CLAUDE.md + every .claude/**\/*.md. They are RATCHETS, same shape as
@@ -46,7 +48,7 @@ export const BUDGET = { alwaysLoadedChars: 80_000, longestLineChars: 2_500, skil
 //                  it, so `§Effort routing records that the…` missed "## Effort routing, and why…".
 //                  9 were phantom, 9 were genuinely stale citations and were repointed.
 // 0 is the real number for all three, and a ratchet at 0 is the only one that catches the next one.
-export const BASELINE = { 'DOC-002': 0, 'DOC-003': 0, 'DOC-004': 0 };
+export const BASELINE = { 'DOC-002': 0, 'DOC-003': 0, 'DOC-004': 0, 'DOC-006': 0 };
 
 /** Codes reported for information but never ratcheted — see DOC-003E on `isEphemeralPath`. */
 export const INFORMATIONAL = new Set(['DOC-003E']);
@@ -99,6 +101,39 @@ export const isEphemeralPath = (p) => /^reports\//.test(p);
  * `## ` heading. Deliberately narrow — it suppresses existence checks only, never § or budget rules.
  */
 export const MAY_NOT_EXIST = 'doclint:may-not-exist';
+
+/**
+ * A count that `config/test-suites.json` already knows, written into prose instead.
+ *
+ * `CLAUDE.md` §Where the rules live is explicit — *"Counts (suites, cases, agents…) are never
+ * transcribed into prose — run the script that prints them"* — and the reason is measured: every
+ * contradiction the 2026-09-07 audit found was in a fact that had been restated. The always-loaded
+ * set is the worst place for one, because a wrong number there reaches every agent on every dispatch.
+ *
+ * Checked 2026-09-09, `.claude/rules/regression.md` claimed 126 suites (135), 4,155 test cases
+ * (4,503) and 37 selection groups — three numbers, all stale, in the tier that costs the most, in a
+ * file that told the reader two paragraphs later that the manifest was the source of truth. Prose
+ * cannot be trusted to stay right; only a gate can.
+ *
+ * Deliberately narrow: it fires on a NUMBER adjacent to one of these nouns, not on every digit. A
+ * count that happens to be correct today still fails — the defect is the transcription, not the
+ * arithmetic, and a correct number is simply a stale one that has not rotted yet.
+ *
+ * Two exemptions, because a gate that cries wolf gets its baseline raised, which is the failure this
+ * rule exists to prevent. Both describe a measurement of a PAST event, which cannot drift:
+ *   - the line carries a date (`2026-09-09`) — that is this corpus's convention for a measured fact
+ *   - the count is the M of an "N of M" proportion ("5 of 34 cases lost") — an outcome, not a size
+ */
+export const DERIVED_COUNT_RE = /\b(\d[\d,]{1,6})\s+(suites?|test cases?|selection groups?|groups?|cases?\b(?!\s*(?:sensitive|study)))/gi;
+const DATED_RE = /\b20\d\d-\d\d-\d\d\b/;
+const PROPORTION_RE = /\d+\s+of\s+$/;
+
+/** Is this DERIVED_COUNT_RE hit a live corpus claim, or a measurement of something that already happened? */
+export function isTranscribedCount(line, matchIndex) {
+  if (DATED_RE.test(line)) return false;
+  if (PROPORTION_RE.test(line.slice(0, matchIndex))) return false;
+  return true;
+}
 
 /** A markdown link target immediately following a backticked label: `` `label` ``](target). */
 const LINK_RE = /^\]\(([^)\s]*)\)/;
@@ -221,6 +256,10 @@ export function lint(root = '.') {
   const cwd = process.cwd(); process.chdir(root);
   try {
     const files = ['CLAUDE.md', ...walkMd('.claude')].filter((f) => fs.existsSync(f));
+    // DOC-006 applies to the ALWAYS-LOADED tier only. A count in a knowledge file is read by the one
+    // step that needs it and can be corrected there; the same count in `.claude/rules/` is paid, and
+    // believed, by every agent on every dispatch.
+    const alwaysLoaded = new Set(alwaysLoadedFiles('.'));
     const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8')).scripts || {};
     const findings = [];
     const add = (code, file, line, detail) => findings.push({ code, file, line, detail });
@@ -241,6 +280,12 @@ export function lint(root = '.') {
       const lines = fs.readFileSync(f, 'utf8').split(/\r?\n/);
       let sectionExempt = false;
       lines.forEach((l, i) => {
+        if (alwaysLoaded.has(f)) {
+          for (const m of l.matchAll(DERIVED_COUNT_RE)) {
+            if (!isTranscribedCount(l, m.index)) continue;
+            add('DOC-006', f, i + 1, `derived count transcribed: "${m[1]} ${m[2]}" — print it with npm run suites:lint instead`);
+          }
+        }
         const marked = l.includes(MAY_NOT_EXIST);
         if (marked && /^\s*<!--/.test(l)) sectionExempt = true;
         else if (/^## /.test(l)) sectionExempt = false;
