@@ -27,6 +27,7 @@ Read the relevant file **before** invoking the matching Postman MCP tools.
 | [graphql-authoring.md](graphql-authoring.md) | Before any GraphQL request — links to canonical [`graphql-schema.md`](../../knowledge/api/graphql-schema.md) and [`graphql-test-cases-runner.md`](../../knowledge/api/graphql-test-cases-runner.md) |
 | [test-data-fixtures.md](test-data-fixtures.md) | Before authoring values into bodies — `@td()` resolver, [`test-data/aliases.json`](../../../test-data/aliases.json), fixture conventions |
 | [execution.md](execution.md) | After authoring — verify checklist + Newman/Postman CLI/Monitor + endpoint quick-reference |
+| [bug-evidence.md](bug-evidence.md) | Before building a collection as **bug evidence** — an optional artifact for the narrow class of API/GraphQL defect whose finding is a disagreement or needs ≥2 controls. Criterion, anatomy, the secrets rule, and how it relates to the regression carrier |
 | [common-mistakes.md](common-mistakes.md) | When something doesn't work — 15-item catalog |
 | [examples.md](examples.md) | Copy-paste-ready collection + environment payloads |
 
@@ -39,6 +40,7 @@ Read the relevant file **before** invoking the matching Postman MCP tools.
 | `create <purpose>` | Create a new collection for a specific purpose (e.g., `create catalog CRUD`, `create auth testing`) |
 | `env <profile>` | Create a Postman environment from .env variables for a profile (`qa`, `staging`, `full`) |
 | `verify <collection>` | Fetch the full collection payload (`getCollection model=full`) and audit it: schema, auth at every request, test scripts, variable usage |
+| `bug-evidence <TICKET>` | **Optional.** Build a reproduction collection to attach to a bug ticket — asserts the CORRECT expectation, so it is red while the defect is open and green on the fix. Only for an API/GraphQL defect whose finding is a disagreement or needs ≥2 controls; see [bug-evidence.md](bug-evidence.md) §1 before starting. Needs no Postman MCP — the workspace copy is a separate, optional step |
 | `export <collection>` | Output a Newman/Postman-CLI-ready run command for a collection + environment pair (the MCP cannot execute collections directly) |
 | `list` | List all collections and environments in the workspace |
 | `examples` | Show copy-paste-ready examples for common Postman MCP operations |
