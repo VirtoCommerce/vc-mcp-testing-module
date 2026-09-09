@@ -124,15 +124,31 @@ export const MAY_NOT_EXIST = 'doclint:may-not-exist';
  *   - the line carries a date (`2026-09-09`) — that is this corpus's convention for a measured fact
  *   - the count is the M of an "N of M" proportion ("5 of 34 cases lost") — an outcome, not a size
  */
-export const DERIVED_COUNT_RE = /\b(\d[\d,]{1,6})\s+(suites?|test cases?|selection groups?|groups?|cases?\b(?!\s*(?:sensitive|study)))/gi;
-const DATED_RE = /\b20\d\d-\d\d-\d\d\b/;
+export const DERIVED_COUNT_RE =
+  /\b(\d(?:[\d,]*\d)?)\s+(suites?|test cases?|selection groups?|groups?|agents?|skills?|commands?|cases?\b(?!\s*(?:sensitive|study)))/gi;
 const PROPORTION_RE = /\d+\s+of\s+$/;
+/** "up to 3 suites in parallel", "max 3 concurrent" — a BOUND on concurrency, not an inventory. */
+const BOUND_RE = /(?:up to|at most|max(?:imum)?(?: of)?)\s+$/i;
 
-/** Is this DERIVED_COUNT_RE hit a live corpus claim, or a measurement of something that already happened? */
+/**
+ * Is this DERIVED_COUNT_RE hit a live corpus claim, or the M of an "N of M" proportion?
+ *
+ * Two exemptions, both structural rather than guesses, and both about what the number DENOTES:
+ * "5 of 34 cases lost" measures an outcome, and "up to 3 suites in parallel" is a bound on
+ * concurrency. Neither is an inventory of the corpus, which is the only thing that drifts as suites
+ * and agents are added.
+ *
+ * A date exemption was tried first and removed. Paragraphs here are single lines of up to 2,500
+ * characters, so "there is a date somewhere on this line" let one dated clause exempt every count in
+ * the paragraph — `126 suites (measured 2026-09-09) and 4,155 test cases` passed whole — and no
+ * proximity window separates that from a genuinely dated measurement, because in both the date sits a
+ * few characters from the number. The right answer was not a cleverer heuristic: prose in this tier
+ * should not be writing counts at all, so the one sentence of mine that needed the exemption was
+ * rewritten instead. `doclint:may-not-exist` remains the escape hatch for a real exception.
+ */
 export function isTranscribedCount(line, matchIndex) {
-  if (DATED_RE.test(line)) return false;
-  if (PROPORTION_RE.test(line.slice(0, matchIndex))) return false;
-  return true;
+  const before = line.slice(0, matchIndex);
+  return !PROPORTION_RE.test(before) && !BOUND_RE.test(before);
 }
 
 /** A markdown link target immediately following a backticked label: `` `label` ``](target). */
@@ -280,17 +296,19 @@ export function lint(root = '.') {
       const lines = fs.readFileSync(f, 'utf8').split(/\r?\n/);
       let sectionExempt = false;
       lines.forEach((l, i) => {
-        if (alwaysLoaded.has(f)) {
-          for (const m of l.matchAll(DERIVED_COUNT_RE)) {
-            if (!isTranscribedCount(l, m.index)) continue;
-            add('DOC-006', f, i + 1, `derived count transcribed: "${m[1]} ${m[2]}" — print it with npm run suites:lint instead`);
-          }
-        }
         const marked = l.includes(MAY_NOT_EXIST);
         if (marked && /^\s*<!--/.test(l)) sectionExempt = true;
         else if (/^## /.test(l)) sectionExempt = false;
         const exempt = marked || sectionExempt;
         if (!exempt) for (const m of l.matchAll(/npm run ([a-z][a-z0-9:-]*)/g)) if (classifyScript(m[1], pkg) === 'missing') add('DOC-002', f, i + 1, `npm run ${m[1]} — no such script`);
+        // After `exempt`, so `doclint:may-not-exist` is an escape hatch here too. On a ratchet pinned
+        // at zero, a rule with no way out turns one unusual-but-correct sentence into a blocked PR.
+        if (!exempt && alwaysLoaded.has(f)) {
+          for (const m of l.matchAll(DERIVED_COUNT_RE)) {
+            if (!isTranscribedCount(l, m.index)) continue;
+            add('DOC-006', f, i + 1, `derived count transcribed: "${m[1]} ${m[2]}" — print it with the script that derives it (npm run suites:lint, or ls .claude/{agents,skills,commands})`);
+          }
+        }
         for (const m of l.matchAll(PATH_RE)) {
           if (exempt) break;
           const label = m[1].replace(/\/$/, '');

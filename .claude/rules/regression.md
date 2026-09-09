@@ -14,7 +14,7 @@ Load a prompt template from `vc/shared/docs/prompts/`, execute via MCP browser t
 Do not re-create it. Why it was removed: [`docs/decisions/regression-history.md`](../../docs/decisions/regression-history.md).
 
 ### 4. Full Test Cycle CI Pipeline (Sync → Lifecycle → Regression)
-`ci/run-full-cycle.ts` orchestrates a 3-phase pipeline triggered by code changes. Phase 1 (SYNC + REVIEW) uses `/qa-test-lifecycle --ci` to detect stale test cases from PRs/diffs/module updates, update Steps/Assertions, analyze coverage gaps, and run the `/qa-review-tests` **static** dimensions (1–7, 9, 10 — dim 8 needs a browser, dim 11 is the separate `ci/run-suite-audit.ts` twin). Phase 2 (REGRESSION) delegates to `ci/run-regression.ts` to execute the affected suites. Each phase has independent skip flags and budget allocation (50%/50% of total budget). Results go to `reports/full-cycle/{RUN_ID}/`.
+`ci/run-full-cycle.ts` orchestrates a 3-phase pipeline triggered by code changes. Phase 1 (SYNC + REVIEW) uses `/qa-test-lifecycle --ci` to detect stale test cases from PRs/diffs/module updates, update Steps/Assertions, analyze coverage gaps, and run the `/qa-review-tests` **static** dimensions (1–7, 9, 10 — dim 8 needs a browser, dim 11 is the separate `ci/run-suite-audit.ts` twin). Phase 3 (REGRESSION) delegates to `ci/run-regression.ts` to execute the affected suites — the workflow's phase numbering (1 Sync · 2 Lifecycle · 3 Regression) is the one to quote. Each phase has independent skip flags and budget allocation (50%/50% of total budget). Results go to `reports/full-cycle/{RUN_ID}/`.
 
 **Invoke:** `CHANGE_SOURCE="PR #123" npm run ci:cycle` or via `.github/workflows/full-cycle.yml`
 **Triggers:** PR merge to main (auto), daily schedule (Mon-Fri 8AM UTC), manual dispatch
@@ -30,7 +30,7 @@ Central configuration for regression orchestration. Defines:
 
 ## Regression Test Suites
 
-Suites live in `regression/suites/`, organized by module under `Frontend/` and `Backend/`, in the enriched agent-native CSV format. **`config/test-suites.json` is the source of truth for how many there are and how many cases they hold — `npm run suites:lint` prints both.** Do not restate either number here: the two that used to sit in this paragraph were wrong by 9 suites and 348 cases when checked on 2026-09-09.
+Suites live in `regression/suites/`, organized by module under `Frontend/` and `Backend/`, in the enriched agent-native CSV format. **`config/test-suites.json` is the source of truth for how many there are and how many cases they hold — `npm run suites:lint` prints both.** Do not restate either number here — the two that used to sit in this paragraph were both stale when checked on 2026-09-09, which is why `DOC-006` now fails a build that reintroduces one.
 
 ### Suite inventory
 
@@ -70,7 +70,7 @@ analysis while serialising the write, the re-parse-after-every-write discipline 
 unparsable suite takes the manifest gate down for *everyone*), and the cross-session relay rule (a
 fact sent to another session's SUBAGENT is dropped silently — the receiving session must re-issue it
 in its own dispatch brief): [`knowledge/execution/regression-suites.md`](../knowledge/execution/regression-suites.md)
-§Working concurrently on suites. The four measured 2026-08-28 losses behind all of it:
+§Working concurrently on suites. The measured losses behind all of it:
 [`docs/decisions/regression-history.md`](../../docs/decisions/regression-history.md) §Shared-tree losses.
 
 ### Selection Groups
@@ -108,7 +108,7 @@ Suite selection accepts group names (`smoke`, `critical`, `catalog`, `orders`, e
 
 **Note:** The CI `run-regression.ts` dynamically loads suite definitions from `config/test-suites.json` at startup. Selection groups are also defined in the manifest's `selections` block.
 
-**There is no regression GitHub Actions workflow.** `regression.yml` was **removed 2026-09-08** — it ran exactly once, on 2026-02-11, from a schedule that was later commented out, and that run **failed** after 72 s. It never ran manually and never succeeded, so it documented a capability the team does not have. **The RUNNER is unaffected:** `ci/run-regression.ts` is invoked by `npm run ci:regression`, by the Docker image above, and by `full-cycle.yml` Phase 2.
+**There is no regression GitHub Actions workflow.** `regression.yml` was **removed 2026-09-08** — it ran exactly once, on 2026-02-11, from a schedule that was later commented out, and that run **failed** after 72 s. It never ran manually and never succeeded, so it documented a capability the team does not have. **The RUNNER is unaffected:** `ci/run-regression.ts` is invoked by `npm run ci:regression`, by the Docker image above, and by `full-cycle.yml` Phase 3 (Regression).
 
 The remaining pipelines (`suite-audit.yml`, `monitor.yml`, `auto-fix.yml`, `full-cycle.yml`) still have every `cron:` **commented out**, so nothing in `ci/` runs unattended (audit 2026-09-07 §4b, D9). Re-enabling one means uncommenting its `cron:` line; until then do not describe those runs as happening.
 

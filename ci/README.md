@@ -69,7 +69,7 @@ docker run --rm \
 ### Run via GitHub Actions
 
 1. Go to **Actions** tab
-2. Select **Regression Tests** or **Full Test Cycle**
+2. Select **Full Test Cycle** (there is no Regression workflow — removed 2026-09-08; see below)
 3. Click **Run workflow** and configure inputs
 
 ## Pipelines
@@ -78,7 +78,7 @@ docker run --rm \
 
 Executes test suites against the live environment.
 
-**Invoked by:** the CLI alias, the Docker image above, or `full-cycle.yml` Phase 2. There is **no
+**Invoked by:** the CLI alias, the Docker image above, or `full-cycle.yml` Phase 3 (Regression). There is **no
 regression GitHub Actions workflow** — `regression.yml` was removed 2026-09-08 after one run in its
 lifetime (2026-02-11, scheduled, failed in 72 s). Nothing scheduled or manual triggers a regression
 run today; a run is something a person or an agent starts.

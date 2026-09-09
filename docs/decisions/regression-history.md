@@ -23,9 +23,9 @@ What was kept: the graduated rate-limit guard and the 30/60s backoff ladder, now
 `.claude/agents/regression-orchestrator.md` Step 5. Mode 2 (headless CI) and mode 1 (interactive)
 remain; the interactive one is the path in daily use.
 
-## Shared-tree losses — 2026-08-28 and 2026-09-01
+## Shared-tree losses
 
-Four measured incidents. They are the evidence for
+The measured incidents, 2026-08-28 and 2026-09-01. They are the evidence for
 [`.claude/rules/regression.md`](../../.claude/rules/regression.md) §WORKING IN A SHARED TREE and
 [`.claude/knowledge/execution/regression-suites.md`](../../.claude/knowledge/execution/regression-suites.md)
 §Working concurrently on suites; neither restates them, so this is the only record.

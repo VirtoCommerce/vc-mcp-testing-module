@@ -245,9 +245,17 @@ test('a transcribed corpus count is a finding — including one that is correct 
   assert.ok(fires('135 suites'), 'the CORRECT number fails too — the defect is the transcription, not the arithmetic');
 });
 
-test('a dated measurement is archaeology and cannot drift, so it is exempt', () => {
-  assert.ok(!fires('the two numbers here were wrong by 9 suites and 348 cases when checked on 2026-09-09'));
-  assert.ok(fires('the two numbers here were wrong by 9 suites and 348 cases'), 'undated, the same sentence is a live claim');
+test('a single-digit count is still a count', () => {
+  // The first draft used `\d[\d,]{1,6}`, which needs two characters, so every single-digit count
+  // walked straight through the gate — an undocumented third exemption nobody chose.
+  assert.ok(fires('9 suites'));
+  assert.ok(fires('5 test cases'));
+  assert.ok(fires('3 selection groups'));
+});
+
+test('a year followed by a comma is not a count', () => {
+  // `2026, suites` matched while the capture could end in a comma. It cannot now.
+  assert.ok(!fires('For most of 2026, suites on that lane were denied'));
 });
 
 test('an "N of M" proportion is an outcome, not a corpus size', () => {
@@ -255,9 +263,33 @@ test('an "N of M" proportion is an outcome, not a corpus size', () => {
   assert.ok(!fires('46 of 4,429 cases have ever caught a bug'));
 });
 
+test('a bound on concurrency is not an inventory', () => {
+  assert.ok(!fires('CI runs up to 3 suites in parallel (configurable via MAX_PARALLEL)'));
+  assert.ok(!fires('Max 3 concurrent browser agents'));
+  assert.ok(fires('3 suites in parallel'), 'without the bound wording it reads as a count again');
+});
+
+test('a date does NOT exempt a count — the heuristic was removed on purpose', () => {
+  // Paragraphs here are single lines up to 2,500 chars, so "there is a date on this line" let one
+  // dated clause exempt every count in the paragraph, and no proximity window separates that from a
+  // genuinely dated measurement. Prose in this tier should not be writing counts at all.
+  assert.ok(fires('126 suites (measured 2026-09-09) and 4,155 test cases live today'));
+});
+
+test('the nouns cover what CLAUDE.md names — suites, cases, agents, skills, commands', () => {
+  assert.ok(fires('17 agents as flat `.claude/agents/*.md` files'));
+  assert.ok(fires('10 agents, 16 skills, 8 commands'));
+});
+
 test('DOC-006 does not fire on prose that merely contains a number and a noun', () => {
   assert.ok(!fires('Batch regression in groups of 3 (matching browser pool slots)'));
-  assert.ok(!fires('Max 3 concurrent browser agents'));
+});
+
+test('the may-not-exist marker is an escape hatch for DOC-006 too', () => {
+  // On a ratchet pinned at zero, a rule with no way out turns one unusual-but-correct sentence into a
+  // blocked PR. DOC-006 is evaluated after `exempt`, so the marker suppresses it like the others.
+  const marked = CORPUS.findings.filter((f) => f.code === 'DOC-006' && f.detail.includes(MAY_NOT_EXIST));
+  assert.deepEqual(marked, [], 'a marked line must never produce a finding');
 });
 
 test('DOC-006 is scoped to the always-loaded tier and ratchets at zero', () => {
