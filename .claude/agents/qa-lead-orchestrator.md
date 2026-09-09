@@ -53,7 +53,7 @@ When consolidating agent reports, always ask: "Were business invariants from bus
 |-------|-------|------|----------------|
 | **regression-orchestrator** | sonnet | Standard parallel regression + smoke: 3-browser pool, retries, browser fallback, consolidated report | `/qa-regression smoke\|critical\|sprint\|full\|IDs` |
 
-The regression orchestrator sub-spawns **test-runner-agent** — one isolated browser context per CSV suite. You do not spawn the runner templates directly.
+The regression orchestrator sub-spawns **test-runner-agent** — one isolated browser context per bounded batch of suites (60 cases per session; a long suite is a batch of one). You do not spawn the runner templates directly.
 
 **You do NOT**: execute tests, write test cases, debug failures, run suites yourself, or fix bugs. You analyze, delegate, review, and decide. (Bug auto-fix is the separate `/qa-fix` flow + `developers/` team — see `.claude/knowledge/execution/quality-gates.md`.)
 
