@@ -2,7 +2,8 @@
 
 ## Status: CONFIRMED
 
-**Severity:** Medium-High · **Priority:** Medium · **Found:** 2026-09-09 · **Ticket:** VCST-5317 (**in-scope** — a direct consequence of PR #145's declared breaking change)
+**Severity:** Medium-High · **Priority:** Medium · **Found:** 2026-09-09 · **Filed as:** VCST-5932 (Subtask of VCST-5317)
+**Provenance (revised 2026-09-09 after source investigation):** the defective check is **PRE-EXISTING in `vc-module-x-order`** and was always membership-only. PR #145 did not touch it — it made it **REACHABLE**, by surfacing a locked organization id the client can pass. In-scope for VCST-5317 as the exposure vector; the **fix lands in a different repo than first routed**.
 **Env:** vcst-qa — `BACK_URL=https://vcst-qa.govirto.com`
 **Found by:** `/qa-test VCST-5317` Step 3a, confirmed and broadened by the Step 4 backend lane.
 
@@ -45,9 +46,24 @@ PR #145 removes the server-side filter that excluded locked memberships from `co
 
 **Owning layer:** Layer 3 — xAPI.
 
-## Root cause analysis
+## Root cause analysis — pinned to source 2026-09-09
 
-`ContactType.ResolveMyOrganizationIdsByStatusAsync` no longer short-circuits on `IsCurrentlyLocked` (PR #145 deletes the early `continue`), so a locked org flows through to every downstream consumer of the membership list. `organization(id:)`'s authorization path re-evaluates the lock per org; `organizationOrders(organizationId:)` validates membership only. Before #145 the divergence was unreachable, because the locked org never appeared in the list to begin with.
+`organizationOrders` is owned by **`vc-module-x-order`**, not the profile module (`search_code`: 1 hit in `vc-module-x-order`, **0** in `vc-module-profile-experience-api`).
+
+`SearchOrganizationOrderQueryBuilder` (`Name => "organizationOrders"`) is a thin subclass of `BaseSearchOrderQueryBuilder`, whose `BeforeMediatorSend` authorizes with `new CanAccessOrderAuthorizationRequirement()`. In `CanAccessOrderAuthorizationHandler`:
+
+```csharp
+else if (context.Resource is SearchOrganizationOrderQuery organizationOrderQuery)
+{
+    result = await IsCustomerOrganization(context, organizationOrderQuery.OrganizationId);
+}
+// ...
+nameof(Contact) => (member as Contact)?.Organizations?.Contains(organizationId) ?? false,
+```
+
+**`Contact.Organizations` is the raw platform association list — pure membership. It consults neither `IsCurrentlyLocked` nor the membership status.** That single line predicts every observation: a non-member is refused (absent from the list), a locked member is served (still present), V7 is served, and V5 is served.
+
+Meanwhile `organization(id:)` re-evaluates the lock per organization. **The two reads have always disagreed**; before PR #145 the disagreement was unreachable from the storefront, because `contact.organizations` never surfaced a locked org id for a client to pass in. #145 removed that filter (`ContactType.ResolveMyOrganizationIdsByStatusAsync`, the deleted early `continue`) and with it the accidental protection.
 
 ## Impact
 
@@ -60,11 +76,12 @@ Platform `3.1064.0` · `ProfileExperienceApiModule 3.1018.0-pr-145-4fe6` · `Cus
 ## Fix Routing (→ /qa-fix)
 
 - **Owning layer:** Layer 3 — xAPI
-- **Suggested repo:** `VirtoCommerce/vc-module-profile-experience-api` (the org-scoped read paths) — **verify against `vc-module-x-order`**, which may own `organizationOrders`' resolver
+- **Suggested repo:** **`VirtoCommerce/vc-module-x-order`** — confirmed by `search_code` (1 hit there, 0 in `vc-module-profile-experience-api`). *This supersedes the original MEDIUM-confidence guess of the profile module, which was wrong.*
 - **repoKind:** module
 - **Ownership hint:** platform
-- **RCA anchor:** `src/VirtoCommerce.ProfileExperienceApiModule.Data/Schemas/ContactType.cs` `ResolveMyOrganizationIdsByStatusAsync` (the deleted lock short-circuit) vs whichever resolver backs `organizationOrders`
-- **Routing confidence:** **MEDIUM** — the defect is certain; the owning repo is not, because `organizationOrders` may resolve outside this module. Gate 1 must confirm before any clone.
+- **RCA anchor:** `src/VirtoCommerce.XOrder.Data/Authorization/CanAccessOrderAuthorizationHandler.cs` — the `SearchOrganizationOrderQuery` branch calling `IsCustomerOrganization(...)`, and `MemberAssignedToOrganization` (`Contact.Organizations.Contains(organizationId)`), which is membership-only. Entry point: `src/VirtoCommerce.XOrder.Data/Queries/SearchOrganizationOrderQueryBuilder.cs` and `.../BaseQueries/BaseSearchOrderQueryBuilder.cs:69`.
+- **Routing confidence:** **HIGH** — repo, file and predicate all confirmed at source.
+- **Cross-repo note for Gate 0:** the *fix* is single-repo (`vc-module-x-order`). The *exposure* came from `vc-module-profile-experience-api` #145. Deciding whether the correct behaviour is "x-order must check the lock" or "the profile module must keep filtering" is the product call below — that choice determines which repo changes, so Gate 0 should not assume it.
 
 ## Evidence
 

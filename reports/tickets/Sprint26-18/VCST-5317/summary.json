@@ -184,14 +184,15 @@
       "parent_comment": "VCST-5317 comment 108924"
     },
     {
-      "key": "VCST-5932",
-      "shape": "Subtask of VCST-5317",
+      "key": "VCST-5933",
+      "shape": "standalone Bug + Relates link to VCST-5317 (verified: issuetype Bug 10176, subtask false, no parent)",
       "severity": "Medium-High",
-      "provenance": "IN-SCOPE",
-      "title": "organizationOrders returns a locked organization's full order history while organization(id:) refuses it",
+      "provenance": "PRE-EXISTING in vc-module-x-order",
+      "title": "organizationOrders authorizes on raw membership, so a locked-out member can still read the organization's full order history",
       "report": "reports/bugs/open/medium/BUG-organizationorders-serves-locked-org-order-history-VCST-5317.md",
       "evidence": "runner capture PRF-GQL-093-evidence.json attached; no UI claim, so no screenshots by design (reports.md 5.0)",
-      "parent_comment": "VCST-5317 comment 108924"
+      "routing": "vc-module-x-order, repoKind module, confidence HIGH. RCA anchor CanAccessOrderAuthorizationHandler -> IsCustomerOrganization -> Contact.Organizations.Contains (membership-only, never lock-aware).",
+      "supersedes": "VCST-5932, cancelled. Filed first as a Subtask of VCST-5317 on an IN-SCOPE reading; source investigation revised the provenance to PRE-EXISTING, which files standalone + related. Jira cannot convert a Subtask to a standard type over REST, so the replacement was created fresh and the Subtask cancelled with a pointer. The defect never changed - only its classification."
     }
   ],
   "bugs_not_filed": [
