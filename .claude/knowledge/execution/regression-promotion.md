@@ -6,7 +6,7 @@
 
 A run produces the only evidence that can justify calling a case `Automated`, and until
 2026-08-26 nothing consumed it. The promotion rule was written down three times (`/qa-test`
-5g, `/qa-test-lifecycle` 6P, `test-case-template.md` §Automation_Status) and performed by
+`/qa-test-lifecycle` 6P — `/qa-test`'s own `5g` gate was removed 2026-09-10 — plus `test-case-template.md` §Automation_Status) and performed by
 hand: an agent re-read a report, decided which cases "ran green", and edited the
 `Automation_Status` cell. `suites:lint` S-006 only ever checked the **vocabulary** — that
 `Automated` is a legal word, never that it is a justified one — so a promotion could not be
@@ -71,6 +71,6 @@ Five decisions are worth stating, because each one was a live fork:
 
 **It is a tool, not an automatic step.** Promotion out of `Draft` stays a human /
 `qa-lead-orchestrator` decision — the promoter makes that decision *checkable* and its write
-*safe*, which is the half that was missing. `/qa-test` 5g and `/qa-test-lifecycle` 6P remain
+*safe*, which is the half that was missing. `/qa-test-lifecycle` 6P remains
 the flows that decide; they now call this instead of hand-editing the cell.
 

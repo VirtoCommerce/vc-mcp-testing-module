@@ -1,19 +1,27 @@
-# Step 5g — promote the new cases (FULL only, last, non-blocking)
+# Promoting the cases a `/qa-test` run authored — the procedure, not a `/qa-test` step
 
-Split out of [`close-out.md`](close-out.md). Read it when a FULL run authored cases and the close-out has
-already been delivered — 5g runs **after** 5e/5f/5h and blocks nothing.
+**`/qa-test` no longer promotes. Its `5g` step was REMOVED 2026-09-10** — cases it authors are appended
+as `Draft` at Step 3, executed live at Step 4 (C1), and **left at `Draft`** when the run ends.
+[`/qa-test-lifecycle`](../../commands/qa-test-lifecycle.md) Phase 6P is the only promoter, for these cases
+exactly as for handoff, re-promotion and legacy sources.
 
-## 5g. Promote the new cases — FULL only, last, non-blocking
+**Why it moved.** The flip needs a *human decision on a corpus-wide artifact*, and it was sitting at the
+tail of a ticket run as a hard-STOP verifier gate that fired after the close-out had already been
+delivered — so it could neither block anything nor be skipped cleanly, and it added a fourth verifier
+dispatch to a run whose verdict was already published. Promotion is not part of answering *did this ticket
+pass*; it is part of maintaining the regression corpus, which is what `/qa-test-lifecycle` is for.
+**Nothing about the mechanism changed** — this file is still the procedure, and the gate below is still the
+gate. Only the caller did.
 
-**`--iterate`: 5g runs AT LOOP EXIT, ONCE.** `tc:promote` reads `Draft` and writes `Automated` and can
-**never re-promote**, so a round-1 flip is irreversible and would ground `{OBSERVED}` in the build that
-was wrong. At exit, promote **per `RUN_ID`, `--ids`-scoped to the cases that run actually executed** —
-the three invocations and the expected PR-014 warning are in [`modes.md`](modes.md) §5k §5g at loop
-exit.
+## The procedure — run by `/qa-test-lifecycle` 6P against a completed `RUN_ID`
 
-The verdict/report/status close-out (5a–5f) is already complete and delivered to the user before this phase
-starts; a slow or REJECTed promotion never delays TESTED/REOPEN. The cases are in the suite as `Draft`,
-grounded and promotable only now that Step 4 executed them live via the automated runner.
+**Promote per `RUN_ID`, `--ids`-scoped to the cases that run actually executed.** `tc:promote` reads
+`Draft` and writes `Automated` and can **never re-promote**, so a premature flip is irreversible and would
+ground `{OBSERVED}` in a build that was wrong. For a `/qa-test --iterate` run, that means the FINAL round's
+evidence: only the last round describes the code a human is being asked to ship.
+
+The cases are in the suite as `Draft`, grounded and promotable only once a run has executed them live via
+the automated runner.
 
 1. **Harvest:** `/qa-review-tests file <target-suite.csv> --verify --fix` — every assertion this run observed
    live is rewritten `{HYPOTHESIS}` / unconfirmed-`{SPEC}` → `{OBSERVED}`; a **refuted** behaviour surfaces
@@ -38,10 +46,10 @@ grounded and promotable only now that Step 4 executed them live via the automate
    reverted).
 5. **Record the split** in `summary.json.promotion` (`automated`/`reviewed`/`blocked`/`reverted`).
 
-**Gate (FULL, 1 round):** every `Automated`/`Reviewed` upgrade traces to a real artifact from this run;
+**Gate (1 round):** every `Automated`/`Reviewed` upgrade traces to a real artifact from this run;
 every surviving `{HYPOTHESIS}` is resolved or reworded; `suites:lint` green. A fresh `qa-lead` verifier
 **re-runs `suites:review`** on the target suite and, for a sample of upgraded assertions, **re-opens the
-Step-4 evidence** grounding each `{OBSERVED}`. REJECT any `{OBSERVED}` with no traceable artifact, any
+run evidence** grounding each `{OBSERVED}`. REJECT any `{OBSERVED}` with no traceable artifact, any
 `{HYPOTHESIS}` cleared by an invented value, any case promoted while still carrying a Blocker/Critical →
 revert the append → fix → re-verify once → STOP.
 
