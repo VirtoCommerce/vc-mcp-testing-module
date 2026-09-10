@@ -142,9 +142,9 @@
     "notes": "All four story ACs graded non-testable or partial at 1d: AC-1 and AC-2 are structural/vague ('is responsible for Data Protection', 'works as expected'); AC-3 and AC-4 are deliverable-presence checks. AC-4 names IEntityDataProtectionService, which does not exist in the shipped diff — only docs/data-protection-architecture.md defines it, marked Status: Proposal and targeting VirtoCommerce.Platform.Core. The 22 gap-ACs, not the story ACs, are the spine of this run."
   },
   "total_cases": 20,
-  "passed": 1,
-  "failed": 3,
-  "blocked": 16,
+  "passed": 3,
+  "failed": 4,
+  "blocked": 13,
   "iterations": {
     "enabled": false,
     "rounds": 0,
@@ -222,6 +222,12 @@
       "report": null
     },
     {
+      "severity": "Critical",
+      "provenance": "in-scope",
+      "summary": "ORDA-113/invoice: the invoice endpoint returns HTTP 200 to a caller denied order:read_prices and renders a PDF stating Total: $0 for an order worth 44.99, without consulting withPrices. Indistinguishable from a genuinely zero order. Server-rendered, outside the ten migrated client files. NOT FILED — awaiting operator consent.",
+      "report": null
+    },
+    {
       "severity": "High",
       "provenance": "in-scope",
       "summary": "ORDA-107: indexed/DB search sorted by total returns the exact true descending order of the hidden totals to a denied caller, making every order rankable by value. NOT FILED — awaiting operator consent.",
@@ -254,15 +260,17 @@
       "pr-diff: 10 Admin SPA blade/widget .js and .tpl.html files changed",
       "derived layer includes admin-spa"
     ],
-    "ran": false,
-    "skipped_reason": "BLOCKED-on-deploy — the masking behaviour under audit does not exist on any environment. Not a pass.",
+    "ran": true,
+    "skipped_reason": null,
     "targets": [
-      "Admin SPA order list grid",
-      "line items",
+      "list grid",
+      "line items blade",
       "order-totals widget",
-      "invoice",
-      "shipment",
-      "operation-tree widget"
+      "invoice PDF",
+      "shipment blade",
+      "operation-tree widget",
+      "discounts blade (order)",
+      "discounts blade (shipment)"
     ],
     "axes": {
       "a11y": {
@@ -272,10 +280,10 @@
         "skipped_reason": "visual lane never dispatched"
       },
       "design_system": {
-        "ran": false,
-        "verdict": null,
-        "findings": 0,
-        "skipped_reason": "visual lane never dispatched"
+        "ran": true,
+        "verdict": "FAIL",
+        "findings": 3,
+        "skipped_reason": null
       },
       "design_spec": {
         "ran": false,
@@ -290,9 +298,28 @@
       }
     },
     "a11y_findings": [],
-    "invariant_failures": [],
+    "invariant_failures": [
+      {
+        "invariant": "BL-AUTH-005",
+        "severity": "Critical",
+        "measured": "Discounts blade renders discountAmount 44.995 / 5175 / 10 to a caller denied order:read_prices, at order and shipment level",
+        "bug": null
+      },
+      {
+        "invariant": "BL-AUTH-005",
+        "severity": "Critical",
+        "measured": "Invoice PDF renders Total: $0 (HTTP 200) instead of a withheld state — ignores the withPrices flag",
+        "bug": null
+      },
+      {
+        "invariant": "BL-AUTH-005",
+        "severity": "High",
+        "measured": "List grid Total column is sortable; row order equals the true descending order of the hidden totals",
+        "bug": null
+      }
+    ],
     "advisory": [],
-    "report": null
+    "report": "testing-checklist.md §Admin SPA pass"
   },
   "contract": {
     "surface": "true",
@@ -424,5 +451,5 @@
     "correlated_failures": [],
     "skipped_reason": "not correlated this run — findings were proven by direct API comparison, not by log inspection"
   },
-  "screenshots": "reports/tickets/Sprint26-18/VCST-3912/screenshots/"
+  "screenshots": "reports/tickets/Sprint26-18/VCST-3912/screenshots/ (13 files, each denied-user finding paired with a CONTROL- admin counterpart) + payloads/ (JSON + invoice PDFs)"
 }

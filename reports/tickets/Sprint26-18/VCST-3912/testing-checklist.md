@@ -3,7 +3,7 @@
 `[Support] #38981 — Price restriction on order, catalog, pricing modules` · Story · High · status `Testing`
 Run: 2026-09-10 · Path **FULL** · Flow `feature-test` · Env target **vcptcore-qa** · Model: [`VCST-3912-2026-09-10.md`](../../../ba/test-models/VCST-3912-2026-09-10.md)
 
-## Verdict — FAIL (3 confirmed defects, 2 of them Critical)
+## Verdict — FAIL (4 confirmed defects, 3 of them Critical)
 
 **Deployed and executed.** vc-deploy-dev PR [#6499](https://github.com/VirtoCommerce/vc-deploy-dev/pull/6499) pinned `VirtoCommerce.Orders` to the PR-472 build; merged 2026-09-10 09:42, deploy green 09:44. Verified on the stand, not from the action's status: `GET /api/platform/modules` → **`3.1015.0-pr-472-dfa3`**, and an order payload now carries **`withPrices`**.
 
@@ -16,10 +16,33 @@ Fixtures seeded on vcptcore-qa: role **`AGENT-TEST-ORDER-NOPRICES`** (all 10 Ord
 | `ORDA-107` | **FAIL (High)** | Sort-order inference proven exactly. |
 | `ORDA-109` | **BLOCKED** | No order with captures/refunds exists in 120 sampled — fixture gap, not a product result. |
 | `ORDA-114` | **FAIL (Critical)** | Payment/shipment endpoints return real money **and** falsely report `withPrices:true`. |
-| `ORDA-118` | **FAIL (Critical)** | `discounts[]` survives redaction and reconstructs the hidden total. |
-| `ORDA-104`, `108`, `110`–`113`, `115`–`117`, `119`–`122`, `ORD-GQL-014` | **NOT RUN** | Need the store-scoped role, a disposable order, or a browser lane. |
+| `ORDA-118` | **FAIL (Critical)** | `discounts[]` survives redaction and reconstructs the hidden total — **and renders as a real number on screen**. |
+| `ORDA-113` | **FAIL (Critical)** | 6 of 8 Admin surfaces mask correctly; the **invoice PDF renders `Total: $0`** and both Discounts blades show real amounts. |
+| `ORDA-120`, `ORDA-121` | **PASS** | Deep-link and refresh both hold masking; no partial save. |
+| `ORDA-122` | **PARTIAL** | Fails closed on a 404 fault; the 500/malformed branch needs the reserved Chrome DevTools lane. |
+| `ORDA-104`, `108`, `110`, `111`, `112`, `115`–`117`, `119`, `ORD-GQL-014` | **NOT RUN** | Need a store-scoped role, a disposable order with captures/refunds, or a system-context export trigger. |
 
-### The three defects, as proven
+### Admin SPA pass — `playwright-edge`, 8 price surfaces × 2 users
+
+**Bundle freshness proved objectively before anything was judged** (`VC-DEPLOY-003`): the deployed `VirtoCommerce.Orders/dist/app.js` contains **13 occurrences of `withPrices` and 0 of `checkPermission('order:read_prices')`** — the migrated client is genuinely live, so results are attributable to the new behaviour, not a stale 4h-cached bundle.
+
+| Surface | Denied user renders | Verdict |
+|---|---|---|
+| List grid (Total) | `#.##` | PASS |
+| Line items blade | all `#.##` / `#` | PASS |
+| Order-totals widget | absent entirely (control confirms absence = masking, not empty data) | PASS |
+| Shipment blade | `#` | PASS |
+| Operation-tree widget | no price row | PASS |
+| **Discounts blade (order)** | **`Coupon 50%` · `44.995` · USD**, and `5,175` on `CO260909-00001` | **FAIL** |
+| **Discounts blade (shipment)** | **`test` · `10` · USD** | **FAIL** |
+| **Invoice PDF** | **`Total: $0`**, HTTP 200 | **FAIL** |
+| List grid sorted by Total | `#.##`, but row order = true ranking | **FAIL** |
+
+`ORDA-120` deep-link **PASS** · `ORDA-121` refresh **PASS** (verified there was no partial save; also caught that `press_key('F5')` does not actually reload in Playwright and re-ran with a real navigation rather than reporting a false pass) · `ORDA-122` **PARTIAL** — a 404 fault proved it fails closed, but the 500/malformed-body branch needs Chrome DevTools MCP (reserved lane) · `ORDA-113` third sub-case **BLOCKED** — no custom `CanReadPrices` override is installed on this env.
+
+Console: 42 errors for the denied user, **all** 401/403 from modules the narrow fixture role lacks, plus 404 logo assets. **No TypeError and no unhandled `.withPrices` access** — the admin control shows neither, so these are fixture artifacts, not a regression.
+
+### The four defects, as proven
 
 **1. `ORDA-114` — the whole restriction is bypassed one hop sideways (Critical).**
 `POST /api/order/payments/search` as `agent-test-noprices` returns `totalCount 1157`, real `sum` values, and `withPrices: true` on every row — the flag actively asserts nothing was withheld. In a 200-row sample, **176 non-zero payments totalling 13,235,931.74**, largest single payment **2,421,250**. Shipments behave the same. The decorator implements only the `CustomerOrder`-typed interfaces, so the child services were never wrapped — exactly what `cursor[bot]` flagged with no reviewer reply, and what the PR's own architecture doc states is "the state the order module is in today".
@@ -27,7 +50,10 @@ Fixtures seeded on vcptcore-qa: role **`AGENT-TEST-ORDER-NOPRICES`** (all 10 Ord
 **2. `ORDA-118` — `discounts[]` is never cleared (Critical).**
 `RemovePrices` calls `ReduceDetails(Full & ~WithPrices)`; only the `WithPrices` flag is cleared, so `WithDiscounts` stays set and the `Discounts = null` branch never fires. `TaxDetails`/`FeeDetails` are not referenced by `ReduceDetails` at all. Measured: **15 of 60 orders leak, 26 leaking nodes**, at order level *and* shipment level. `CO260909-00002`: `total 0` beside `discounts[0].discountAmount 44.995` ("50% off cart subtotal"). `CO260909-00001`: `discountAmount 5175`. **In no reviewer comment and not in the architecture doc — found by reading the diff this run.**
 
-**3. `ORDA-107` — the ranking leaks even though the values do not (High).**
+**3. `ORDA-113` / invoice — the PDF renders `$0`, ignoring the very flag the feature added (Critical). FOUND IN THE BROWSER PASS; not visible from the API.**
+The invoice endpoint returns **HTTP 200** to the denied user and generates a PDF from the already-zeroed entity **without consulting `withPrices`**. Result: a commercially meaningful document stating `Total: $0.00` for an order actually worth 44.99. This is strictly worse than masking — it is indistinguishable from a genuinely zero-value order, and the admin's own legitimate invoice shows `$0` for Shipping/GST, so there is no way for a reader to tell. The toolbar button is unconditionally enabled (`canExecuteMethod: return true`). Server-rendered, and therefore outside the ten migrated client files. Evidence: `screenshots/S4-invoice-DENIED-CO260909-00001.png` + `payloads/invoice.*.DENIED.pdf` against their `CONTROL-`/`ADMIN` counterparts.
+
+**4. `ORDA-107` — the ranking leaks even though the values do not (High).**
 Denied user sorts by `total:desc` and receives every total as `0`. Reading those same orders privileged, in the order they were returned: `2421250, 2421250, 2400062, 2400040, 2400040, 930040, 105723.1, 82381.04` — **exactly the true descending order**. Every order in the system is rankable by value, and range filters narrow actual amounts. The architecture doc predicts this and says the design does not address it.
 
 ## Gates
@@ -37,8 +63,11 @@ Denied user sorts by `total:desc` and receives every total as `0`. Reading those
 | Model complete (10 clauses) | 1e | PASS (inline) |
 | Existing coverage disposed | 2a | PASS (inline) |
 | **Artifacts reviewed + data resolved** | **Step 3** | **APPROVE** — fresh `qa-lead-orchestrator` in Verifier Mode, re-derived from source. Confirmed the `ORDA-118` leak against the diff independently, confirmed the `ORDA-115` withdrawal, confirmed the REPAIR touched `Preconditions` only, and confirmed zero Critical/High lint findings land on any of the 20 new rows. |
-| Execution evidenced | Step 4 | **NOT REACHED** — BLOCKED-on-deploy |
-| Triage + AC/DoD sound · Filing sound · Release gate · Promotion | 5b · 5d · 5e · 5g | **NOT REACHED** |
+| Execution evidenced | Step 4 | **PASS** — 7 cases executed across two lanes: API (privileged-vs-denied comparison) and Admin SPA (`playwright-edge`, 13 screenshots each paired with an admin control, plus payloads and both invoice PDFs). Bundle freshness proved before judging. |
+| Triage + AC/DoD sound | 5b | **PASS (inline)** — all four defects trace to a named code site in the diff; three were predicted by the model before execution, the fourth (invoice) was found only in the browser. |
+| Filing sound | 5d | **NOT DONE** — four bugs drafted and held; the tracker write awaits operator consent. |
+| Release gate | 5e | **NO-GO** — three Criticals on a data-confidentiality feature. |
+| Promotion | 5g | **NOT RUN** — cases that are RED against the build under test are not promotable; all 20 stay `Draft`. |
 
 ## Conditions → coverage
 
