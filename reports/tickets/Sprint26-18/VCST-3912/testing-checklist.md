@@ -3,12 +3,32 @@
 `[Support] #38981 — Price restriction on order, catalog, pricing modules` · Story · High · status `Testing`
 Run: 2026-09-10 · Path **FULL** · Flow `feature-test` · Env target **vcptcore-qa** · Model: [`VCST-3912-2026-09-10.md`](../../../ba/test-models/VCST-3912-2026-09-10.md)
 
-## Verdict — BLOCKED (not executed)
+## Verdict — FAIL (3 confirmed defects, 2 of them Critical)
 
-**Nothing below was run.** vcptcore-qa (and every other environment) pins `VirtoCommerce.Orders 3.1014.0`; PR [#472](https://github.com/VirtoCommerce/vc-module-order/pull/472) is open and 12 commits ahead of `dev`. A live probe of `POST /api/order/customerOrders/search` returns orders with **no `withPrices` key** — the feature's headline wire contract is absent. Deployable artifact **does** exist: `VirtoCommerce.Orders_3.1015.0-pr-472-dfa3.zip` in `vc3prerelease` (HTTP 200), consumable via an AzureBlob pin on vc-deploy-dev `vcptcore-qa`.
+**Deployed and executed.** vc-deploy-dev PR [#6499](https://github.com/VirtoCommerce/vc-deploy-dev/pull/6499) pinned `VirtoCommerce.Orders` to the PR-472 build; merged 2026-09-10 09:42, deploy green 09:44. Verified on the stand, not from the action's status: `GET /api/platform/modules` → **`3.1015.0-pr-472-dfa3`**, and an order payload now carries **`withPrices`**.
 
-Every item is `NOT RUN`. Cases are authored and appended as `Draft`; run them with
-`/qa-regression 017,050c --ids ORDA-104..ORDA-122,ORD-GQL-014` once the pin lands.
+Fixtures seeded on vcptcore-qa: role **`AGENT-TEST-ORDER-NOPRICES`** (all 10 Orders permissions except `order:read_prices`, plus `platform:access`) and user **`agent-test-noprices`**. Both must be deleted after triage.
+
+| Case | Verdict | One line |
+|---|---|---|
+| `ORDA-105` | **PASS** | Every scalar monetary field on the order root and its line items is correctly zeroed; `withPrices:false` set. |
+| `ORDA-106` | **PARTIAL** | 404 for an absent order/number confirmed. The 403-out-of-scope half needs a store-scoped user — not created. |
+| `ORDA-107` | **FAIL (High)** | Sort-order inference proven exactly. |
+| `ORDA-109` | **BLOCKED** | No order with captures/refunds exists in 120 sampled — fixture gap, not a product result. |
+| `ORDA-114` | **FAIL (Critical)** | Payment/shipment endpoints return real money **and** falsely report `withPrices:true`. |
+| `ORDA-118` | **FAIL (Critical)** | `discounts[]` survives redaction and reconstructs the hidden total. |
+| `ORDA-104`, `108`, `110`–`113`, `115`–`117`, `119`–`122`, `ORD-GQL-014` | **NOT RUN** | Need the store-scoped role, a disposable order, or a browser lane. |
+
+### The three defects, as proven
+
+**1. `ORDA-114` — the whole restriction is bypassed one hop sideways (Critical).**
+`POST /api/order/payments/search` as `agent-test-noprices` returns `totalCount 1157`, real `sum` values, and `withPrices: true` on every row — the flag actively asserts nothing was withheld. In a 200-row sample, **176 non-zero payments totalling 13,235,931.74**, largest single payment **2,421,250**. Shipments behave the same. The decorator implements only the `CustomerOrder`-typed interfaces, so the child services were never wrapped — exactly what `cursor[bot]` flagged with no reviewer reply, and what the PR's own architecture doc states is "the state the order module is in today".
+
+**2. `ORDA-118` — `discounts[]` is never cleared (Critical).**
+`RemovePrices` calls `ReduceDetails(Full & ~WithPrices)`; only the `WithPrices` flag is cleared, so `WithDiscounts` stays set and the `Discounts = null` branch never fires. `TaxDetails`/`FeeDetails` are not referenced by `ReduceDetails` at all. Measured: **15 of 60 orders leak, 26 leaking nodes**, at order level *and* shipment level. `CO260909-00002`: `total 0` beside `discounts[0].discountAmount 44.995` ("50% off cart subtotal"). `CO260909-00001`: `discountAmount 5175`. **In no reviewer comment and not in the architecture doc — found by reading the diff this run.**
+
+**3. `ORDA-107` — the ranking leaks even though the values do not (High).**
+Denied user sorts by `total:desc` and receives every total as `0`. Reading those same orders privileged, in the order they were returned: `2421250, 2421250, 2400062, 2400040, 2400040, 930040, 105723.1, 82381.04` — **exactly the true descending order**. Every order in the system is rankable by value, and range filters narrow actual amounts. The architecture doc predicts this and says the design does not address it.
 
 ## Gates
 
