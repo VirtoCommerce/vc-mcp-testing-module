@@ -10,6 +10,16 @@ Run: 2026-09-10 · Path **FULL** · Flow `feature-test` · Env target **vcptcore
 Every item is `NOT RUN`. Cases are authored and appended as `Draft`; run them with
 `/qa-regression 017,050c --ids ORDA-104..ORDA-122,ORD-GQL-014` once the pin lands.
 
+## Gates
+
+| Gate | Where | Result |
+|---|---|---|
+| Model complete (10 clauses) | 1e | PASS (inline) |
+| Existing coverage disposed | 2a | PASS (inline) |
+| **Artifacts reviewed + data resolved** | **Step 3** | **APPROVE** — fresh `qa-lead-orchestrator` in Verifier Mode, re-derived from source. Confirmed the `ORDA-118` leak against the diff independently, confirmed the `ORDA-115` withdrawal, confirmed the REPAIR touched `Preconditions` only, and confirmed zero Critical/High lint findings land on any of the 20 new rows. |
+| Execution evidenced | Step 4 | **NOT REACHED** — BLOCKED-on-deploy |
+| Triage + AC/DoD sound · Filing sound · Release gate · Promotion | 5b · 5d · 5e · 5g | **NOT REACHED** |
+
 ## Conditions → coverage
 
 Story ACs first. **1d graded all four non-testable or partial** — two are structural claims, two are deliverable-presence checks — so the gap-ACs, not these, carry the run.
@@ -54,6 +64,8 @@ Story ACs first. **1d graded all four non-testable or partial** — two are stru
 ## Step 2a — existing coverage disposed
 
 `tc:scope` over `purchase-flow` + `platform-config`: **27 hits, 22 `WILL_RUN`, 0 `FILTERED_OUT`, 5 `NOT_EXECUTING`**; 6 suites `unscannable` (legacy 11-column headers: `056`, `063`, `064`, `065`, `073`, `076` — **stated, not skipped**; `064` matters here because it is CSV import/export). `unmatchedObservables`: none.
+
+> **Re-running `tc:scope` now returns 35 hits / 30 `WILL_RUN`, not 27 / 22 — and that is expected.** The extra 8 are this run's **own** newly-authored rows (`ORDA-104`, `105`, `111`, `113`, `117`, `120`, `121`, `122`) plus `ORDA-057`, which only started matching the `read_prices` observable **after** the REPAIR corrected its permission names. 35 − 8 = 27. The figures above are the **pre-authoring** scan the dispositions were made against; nothing was missed. Verified independently at the Step-3 verifier gate.
 
 | Disposition | Rows | Action taken |
 |---|---|---|
