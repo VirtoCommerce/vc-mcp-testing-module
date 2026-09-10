@@ -71,8 +71,8 @@
     "audiences": [],
     "files": [],
     "amended": [],
-    "comment_posted": false,
-    "refusal": "verdict-not-pass"
+    "comment_posted": true,
+    "refusal": null
   },
   "status_transitions": [
     {
@@ -95,7 +95,7 @@
       "confirmed": false,
       "actor": "qa-lead",
       "skipped": true,
-      "skip_reason": "FAIL verdict. Not transitioned: the closing hop and the bug filing are one decision, and the operator has not yet consented to either tracker write."
+      "skip_reason": "FAIL verdict, and BLOCKED/FAIL transitions nothing here. Findings delivered as comment 109131; the ticket stays in Testing for the developer to act on. No transition was requested by the operator."
     }
   ],
   "agents_dispatched": [
@@ -212,25 +212,25 @@
     {
       "severity": "Critical",
       "provenance": "in-scope",
-      "summary": "ORDA-114: /api/order/payments/search and /shipments/search return real monetary values to a caller denied order:read_prices AND report withPrices:true. 176 non-zero payments totalling 13,235,931.74 in a 200-row sample; max single 2,421,250. Child services are undecorated. NOT FILED — awaiting operator consent to write to the tracker.",
+      "summary": "ORDA-114: /api/order/payments/search and /shipments/search return real monetary values to a caller denied order:read_prices AND report withPrices:true. 176 non-zero payments totalling 13,235,931.74 in a 200-row sample; max single 2,421,250. Child services are undecorated. REPORTED in comment 109131 on VCST-3912 (operator asked for one consolidated comment rather than separate Bug tickets); 6 screenshots attached and verified rendered via renderedBody.",
       "report": null
     },
     {
       "severity": "Critical",
       "provenance": "in-scope",
-      "summary": "ORDA-118: ReduceDetails(Full & ~WithPrices) leaves WithDiscounts set, so Discounts[] is never nulled; TaxDetails/FeeDetails are never referenced. 15 of 60 orders leak, 26 nodes, order and shipment level. CO260909-00002 total=0 beside discounts[0].discountAmount=44.995. NOT FILED — awaiting operator consent.",
+      "summary": "ORDA-118: ReduceDetails(Full & ~WithPrices) leaves WithDiscounts set, so Discounts[] is never nulled; TaxDetails/FeeDetails are never referenced. 15 of 60 orders leak, 26 nodes, order and shipment level. CO260909-00002 total=0 beside discounts[0].discountAmount=44.995. REPORTED in comment 109131 on VCST-3912 (operator asked for one consolidated comment rather than separate Bug tickets); 6 screenshots attached and verified rendered via renderedBody.",
       "report": null
     },
     {
       "severity": "Critical",
       "provenance": "in-scope",
-      "summary": "ORDA-113/invoice: the invoice endpoint returns HTTP 200 to a caller denied order:read_prices and renders a PDF stating Total: $0 for an order worth 44.99, without consulting withPrices. Indistinguishable from a genuinely zero order. Server-rendered, outside the ten migrated client files. NOT FILED — awaiting operator consent.",
+      "summary": "ORDA-113/invoice: the invoice endpoint returns HTTP 200 to a caller denied order:read_prices and renders a PDF stating Total: $0 for an order worth 44.99, without consulting withPrices. Indistinguishable from a genuinely zero order. Server-rendered, outside the ten migrated client files. REPORTED in comment 109131 on VCST-3912 (operator asked for one consolidated comment rather than separate Bug tickets); 6 screenshots attached and verified rendered via renderedBody.",
       "report": null
     },
     {
       "severity": "High",
       "provenance": "in-scope",
-      "summary": "ORDA-107: indexed/DB search sorted by total returns the exact true descending order of the hidden totals to a denied caller, making every order rankable by value. NOT FILED — awaiting operator consent.",
+      "summary": "ORDA-107: indexed/DB search sorted by total returns the exact true descending order of the hidden totals to a denied caller, making every order rankable by value. REPORTED in comment 109131 on VCST-3912 (operator asked for one consolidated comment rather than separate Bug tickets); 6 screenshots attached and verified rendered via renderedBody.",
       "report": null
     }
   ],
