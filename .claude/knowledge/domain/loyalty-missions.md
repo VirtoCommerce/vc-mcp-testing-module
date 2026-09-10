@@ -33,7 +33,7 @@ sources:
   - vc-frontend — NOT cloned this pass (deliberate breadth-first opt-out); every storefront-rendering claim is prior-art-sourced only and marked UNVERIFIED
   - reports/tickets/**/summary.json — NOT read this pass; ticket-status statements are inherited from the test-models' own inline citations, dated to each model's capture time
   - config/test-suites.json + regression/suites/{Backend,Frontend}/loyalty/** + the six non-loyalty suites named in §4, each CSV parsed row-by-row 2026-09-10
-  - test-data/aliases.json + test-data/aliases.vcst.json + scripts/seed-data/loyalty/** + package.json scripts (the fixture/seeder inventory in §5)
+  - test-data/aliases.json + the env-keyed test-data/aliases.{TEST_ENV}.json + scripts/seed-data/loyalty/** + package.json scripts (the fixture/seeder inventory in §5)
   - GET /api/platform/modules — NOT reachable this pass (403 at the egress proxy), so DEPLOYED versions are UNVERIFIED (§5 G9)
   - storefront theme version: UNVERIFIED — the storefront was unreachable, so the page footer could not be read
 excludes: |
@@ -66,8 +66,9 @@ excludes: |
 >    unset. Established the way `.claude/rules/test-data.md` requires — `import('./config.js')`
 >    then read `process.env` — never from a single `.env` layer and never from the curated `env`
 >    export, either of which would have been an unsound basis for the conclusion.
-> 2. The session's egress policy **403s** `https://vcst-qa.govirto.com` at the proxy
->    (`curl: (56) CONNECT tunnel failed, response 403`). Organization policy, not retried.
+> 2. The session's egress policy **403s the target QA deployment's backend** at the proxy
+>    (`curl: (56) CONNECT tunnel failed, response 403`). Organization policy, not retried. The
+>    deployment is deliberately not named here — see the note under this call-out.
 >
 > **Consequence for a reader: treat every `CONFIRMED (source)` row as "the code says so at this
 > revision", not "the build does so".** The four axes actually available were module source,
@@ -76,6 +77,16 @@ excludes: |
 > `UNVERIFIED`"), not a silent degradation — and it is why §5 opens with six live-axis gaps
 > rather than one blanket note. A `/qa-domain-map loy --refresh` on a credentialled,
 > network-reachable session is the intended follow-up; §5 names what each gap needs.
+
+> **This map names no environment and no environment URL — deliberately, and it costs nothing here.**
+> The sibling maps in this directory abstract deployments to `Env-A` / `Env-B` with a definition
+> table, because a map outlives the environment it was read on and a hostname in a knowledge file
+> is a hardcode with a delay fuse (`.claude/rules/test-data.md` §GOLDEN RULE). This pass had **no**
+> live axis at all, so there is no observation to attribute to a deployment in the first place:
+> every row is source-, docs-, prior-art- or corpus-derived. Where a live probe is needed, §5 names
+> it by **variable** (`FRONT_URL`, `BACK_URL`, `TEST_ENV`) and never by value — so a reader on any
+> deployment can run it. The `docs.virtocommerce.org` links are **public product documentation**,
+> not an environment, and gate clause 8 requires each doc quote to carry its URL.
 
 **Read-only pass.** No create/edit/publish/archive/seed/teardown/delete was performed against
 any environment or repository. Every capability confirmable only by mutating is `UNVERIFIED`
@@ -500,7 +511,8 @@ needs credentials and network, not authoring: 17 npm scripts under `scripts/seed
 `seed:missions-e2e`, `seed:loyalty:zero-user`, each with a `:teardown`), three live guards
 (`td:validate:loyalty`, `td:validate:missions`, `td:validate:missions-e2e`), a ready query fixture
 at `test-data/graphql/queries/loyaltyMissionProgress.graphql`, and **14 `@td()` aliases** in
-`test-data/aliases.json` (12 with runtime write-back in `test-data/aliases.vcst.json`) that
+`test-data/aliases.json` (12 with runtime write-back in the env-keyed
+`test-data/aliases.{TEST_ENV}.json`) that
 already supply the account contrasts a map pass wants: `LOYALTY_VIP_USER` (rich),
 `LOYALTY_WHOLESALE_USER`, `LOYALTY_NOBAL_USER` (no balance) and `LOYALTY_ZERO_USER` (the
 ephemeral negative case). `CONFIRMED (corpus read)`.
@@ -536,7 +548,7 @@ that is written down here so the next reader does not inherit a stale doc's auth
 | `BL-LOY-015`'s own SHA note (its self-flagged staleness of `file:line` anchors) | **CONFIRMED still partially accurate, with precision added.** `LoyaltyMissionLogicService.cs` has had exactly **one** commit (`5a6c10d`) since introduction, so its HEAD content is unchanged since merge. The `da8abc6`-anchored citations in `BL-LOY-015/016/017` (`:417`, `:420-431`) are **byte-identical at HEAD `da284217` — still fully accurate**. The `1be73b4`-anchored ones (`:410`, `:413-423`) do **not** match current line numbers (`ApplyContribution` now starts at `:411`) — a small, real drift for anyone citing that earlier SHA's lines |
 | `missions-design-gaps-2026-08-28.md` Theme D: *"two independent accrual implementations that disagree… the structural risk"* | **CONFIRMED (source)** — this is §1's central finding, independently re-derived rather than merely repeated |
 | `VCST-5346-2026-09-02.md`: storefront route `/account/missions`, the Apollo `errorPolicy` payload-discard bug, the one-shot nav-bootstrap bug, the card-vs-modal-vs-PDP currency mismatch | **Not re-verified this pass** (no `vc-frontend` clone, no live env) — carried forward as prior-art-sourced and flagged `UNVERIFIED` in §2b and G1, neither confirmed nor refuted |
-| `.claude/knowledge/execution/module-suite-map.md`, the **Loyalty** row: `\| **Loyalty** \| — \| 075 \| Customers → Loyalty \| /api/loyalty/ \| — \|` | **DRIFT** (this repo's own knowledge base, not a BA deliverable). The Frontend column is `—` against four shipped frontend suites (`083`, `083b`, `083c`, `083d`); Backend lists only `075` against five (`075`–`075e`); and the xAPI column is `—` although the module ships a `VirtoCommerce.Loyalty.ExperienceApi` project with three queries (§2c). Compare the fully-populated Sales Rep row in the same table. That file is `applicability: reference`, so the correction is vcst-scoped |
+| `.claude/knowledge/execution/module-suite-map.md`, the **Loyalty** row: `\| **Loyalty** \| — \| 075 \| Customers → Loyalty \| /api/loyalty/ \| — \|` | **DRIFT** (this repo's own knowledge base, not a BA deliverable). The Frontend column is `—` against four shipped frontend suites (`083`, `083b`, `083c`, `083d`); Backend lists only `075` against five (`075`–`075e`); and the xAPI column is `—` although the module ships a `VirtoCommerce.Loyalty.ExperienceApi` project with three queries (§2c). Compare the fully-populated Sales Rep row in the same table. That file is `applicability: reference`, so the correction is scoped to this deployment's module set rather than universal |
 
 **This map resolves:** `missions-design-gaps-2026-08-28.md` Open Question 2 (cancellation reversal
 — now `BL-LOY-019`, independently reconfirmed VIOLATED) and `VCST-5320-2026-08-27.md` Open
