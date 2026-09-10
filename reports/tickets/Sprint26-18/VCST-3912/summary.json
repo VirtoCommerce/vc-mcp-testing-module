@@ -142,9 +142,9 @@
     "notes": "All four story ACs graded non-testable or partial at 1d: AC-1 and AC-2 are structural/vague ('is responsible for Data Protection', 'works as expected'); AC-3 and AC-4 are deliverable-presence checks. AC-4 names IEntityDataProtectionService, which does not exist in the shipped diff — only docs/data-protection-architecture.md defines it, marked Status: Proposal and targeting VirtoCommerce.Platform.Core. The 22 gap-ACs, not the story ACs, are the spine of this run."
   },
   "total_cases": 20,
-  "passed": 7,
-  "failed": 5,
-  "blocked": 8,
+  "passed": 9,
+  "failed": 6,
+  "blocked": 5,
   "iterations": {
     "enabled": false,
     "rounds": 0,
@@ -212,7 +212,13 @@
     {
       "severity": "Critical",
       "provenance": "in-scope",
-      "summary": "ORDA-108 REGRESSION introduced by this PR: store scope changed from unconditional overwrite (criteria.StoreIds = allowedStoreIds) to Intersect. An out-of-scope or differently-cased store request yields an empty StoreIds, which downstream means no filter — a user scoped to Electronics (54 orders) receives all 1248 orders across every store. Reviewer flagged High; author replied \"By design\". Not filed — awaiting operator decision.",
+      "summary": "ORDA-108 REGRESSION: store scope moved from unconditional overwrite to Intersect; an empty intersection means NO store filter. A user scoped to Electronics (54 of 1248 orders) receives all 1248 for storeIds=[\"B2B-store\"], [\"ELECTRONICS\"] (case) or even [\"NoSuchStore\"] (fail-open). Identical on /customerOrders/search and /customerOrders/indexed/search. EXPOSURE IS METADATA ONLY: leaked rows carry withPrices:false with zeroed totals and GET by id is fail-closed 403, so number/store/customerName/status/date leak, not money. Reachable by clicking via browser-local saved filters that cross users. Reviewer flagged High; author replied \"By design\".",
+      "report": null
+    },
+    {
+      "severity": "High",
+      "provenance": "in-scope",
+      "summary": "REGRESSION: the Admin SPA is not prepared for the 403 this PR introduces on GET .../{id}. Clicking an out-of-scope order sends the blade into an AngularJS infinite digest loop ($rootScope:infdig), 184+ occurrences and climbing, 3295 console lines from one click, in the ui-grid watcher. An in-scope order produces about 8 lines and no loop.",
       "report": null
     },
     {
@@ -237,6 +243,12 @@
       "severity": "High",
       "provenance": "pre-existing",
       "summary": "[PRE-EXISTING, not a regression — the deleted handler called the identical ReduceDetails(Full & ~WithPrices)] ORDA-107: indexed/DB search sorted by total returns the exact true descending order of the hidden totals to a denied caller, making every order rankable by value. REPORTED in comment 109131 on VCST-3912 (operator asked for one consolidated comment rather than separate Bug tickets); 6 screenshots attached and verified rendered via renderedBody.",
+      "report": null
+    },
+    {
+      "severity": "Medium",
+      "provenance": "out-of-scope",
+      "summary": "Admin SPA blade state including UNSAVED EDITS survives sign-out and is offered to the next user, and saved filters are browser-local rather than per-user. Write-attribution hazard on a shared workstation, and the click path that makes ORDA-108 reachable without a crafted request. Not caused by this PR.",
       "report": null
     }
   ],

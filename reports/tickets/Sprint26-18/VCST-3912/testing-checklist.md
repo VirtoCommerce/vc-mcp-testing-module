@@ -3,9 +3,9 @@
 `[Support] #38981 — Price restriction on order, catalog, pricing modules` · Story · High · status `Testing`
 Run: 2026-09-10 · Path **FULL** · Flow `feature-test` · Env target **vcptcore-qa** · Model: [`VCST-3912-2026-09-10.md`](../../../ba/test-models/VCST-3912-2026-09-10.md)
 
-## Verdict — FAIL (5 confirmed defects: 1 REGRESSION this PR introduced, 4 pre-existing)
+## Verdict — FAIL (6 confirmed defects: 2 REGRESSIONS this PR introduced, 4 pre-existing)
 
-> **The one regression is `ORDA-108` (store scope) — see Round 2.** The other four are real and worth fixing, but the deleted handler behaved identically, so they are *not fixed by* this PR rather than *broken by* it. That distinction drives triage and it was established from the diff, not assumed.
+> **The two regressions are `ORDA-108` (store scope fails open) and the Admin-SPA digest loop on the new 403 — see Round 2.** The other four are real and worth fixing, but the deleted handler behaved identically, so they are *not fixed by* this PR rather than *broken by* it. That distinction drives triage and it was established from the diff, not assumed.
 
 > **SCOPE — the customer scenario was NOT tested, and this run does not speak to it.**
 > Everything below exercises the **default** rule: a role without the global `order:read_prices`, which hides prices on **every** order for that user. That is the approach Infosys already reported as unworkable (comment 2026-02-24 and the attached analysis: *"This kind of assignment masks all types of order irrespective of whether direct or indirect"*). Heineken needs prices hidden **per distributor**, and making that possible is the whole purpose of this story.
@@ -82,32 +82,63 @@ Round 1 tested the *default* rule, which pre-dates this PR. This round targets t
 | Export/import through the protection service | **NOT RUN** — export permissions now granted, but the platform export request shape could not be resolved (admin control also 500s, so the instrument is unverified — not reported as a product result) |
 | The extension point / direct-vs-indirect distributor rule | **NOT RUN** — sample module `VirtoCommerce.OrdersModule2` is built by no pipeline and exists in no artifact feed |
 
-### THE REGRESSION — store scope, `ORDA-108` {Critical}
-
-**This is the only defect in this run that the PR introduced.** All four Round-1 findings are pre-existing (the deleted handler called the identical `ReduceDetails(Full & ~WithPrices)`, and the architecture doc records the payment/shipment no-op as the old design's behaviour). This one is new:
+### REGRESSION 1 — store scope fails OPEN, `ORDA-108` {Critical}
 
 ```
 OLD (deleted):  criteria.StoreIds = allowedStoreIds;                        // unconditional overwrite
 NEW:            criteria.StoreIds = AllowedStoreIds.Intersect(criteria.StoreIds)
 ```
 
-The old code always narrowed a request down to the caller's scope. The new code intersects — and an out-of-scope request yields `[]`, which downstream means *no store filter at all*.
+The old code always narrowed a request to the caller's scope. The new one intersects, and **an empty intersection means no store filter at all**. Measured with a user scoped to `Electronics` (entitled to 54 of 1248):
 
-Measured with a user scoped to `Electronics` (entitled to 54 orders):
-
-| Request | Returned |
+| Requested `storeIds` | Returned |
 |---|---|
-| no store specified | 54 · Electronics only ✅ |
-| `storeIds: ["Electronics"]` | 54 · Electronics only ✅ |
-| `storeIds: ["B2B-store"]` — out of scope | **1248 · every store** ❌ |
-| `storeIds: ["ELECTRONICS"]` — case differs | **1248 · every store** ❌ |
-| `storeIds: ["B2B-store","Electronics"]` | 54 · Electronics only ✅ |
+| *(none)* / `["Electronics"]` / `["B2B-store","Electronics"]` | 54, Electronics only — correct |
+| `["B2B-store"]` — out of scope | **1248, every store** |
+| `["ELECTRONICS"]` — case differs | **1248, every store** |
+| `["NoSuchStore"]` — does not exist | **1248, every store** |
 
-Asking for a store you may not see returns the entire order book. A case difference does the same, because `Intersect` is ordinal — the case-insensitive matching the PR advertises covers the single-order path, not this one.
+Identical on `POST /api/order/customerOrders/search` **and** `POST /api/order/customerOrders/indexed/search` — the latter is what the Admin grid actually calls.
 
-Note the asymmetry: `GET .../number/{n}` correctly returns **403** for an out-of-scope order. The entity path denies; the search path opens everything.
+**Scope of the exposure, corrected after measuring.** Leaked rows carry `withPrices:false` with zeroed totals, and opening one is fail-closed (`GET .../{id}` returns **403**). So this leaks **order metadata, not money**: number, store, customer name, status and dates for all 1248 orders. Still a scope violation and still a regression, but not a price leak — an earlier draft of this report overstated it.
 
-Reviewer flagged this High on the PR; the author replied "By design". It is strictly worse than the code it replaces, so that reply should be revisited.
+**It is reachable by clicking.** The Store dropdown cannot be used (the fixture lacks `store:read`, so the picker is empty), but **saved filters are browser-local, not per user**: a filter created by an admin with `storeIds:["B2B-store"]` loaded automatically for `agent-test-scoped` after sign-out and sign-in on the same browser, and appears in that user's own filter dropdown. On a shared workstation no crafted request is needed.
+
+Reviewer flagged this High on the PR; the author replied "By design". It is strictly weaker than the code it replaces, so that reply should be revisited.
+
+### REGRESSION 2 — the Admin SPA is not prepared for the new 403 {High}
+
+The PR introduces `403` on `GET .../{id}` for an out-of-scope order. Clicking such an order in the grid sends the blade into an AngularJS infinite digest loop — `[$rootScope:infdig] 10 $digest() iterations reached. Aborting!`, **184 occurrences and still climbing** while the blade stayed open, 3295 console lines from a single click, in the ui-grid row/col watcher. An in-scope order produces about 8 console lines and no loop, so it is specific to the new 403 path. Evidence: `payloads/R2-console-scoped-403-loop.log`.
+
+### Export — UNVERIFIED, not failed
+
+The PR's headline claim is that export now goes through the protection service. **The masking never gets a chance to run**: the backup path is gated by the BackupRestore module's own permissions, not `platform:export`. `agent-test-noprices` carries `platform:export` and `platform:import` in its token and still gets **403** on both `GET /api/platform/export/manifest/new` and `POST /api/platform/export`, with the byte-identical body that returns 200 for admin. That user has no "Backup and restore" menu entry at all.
+
+To exercise `OrderExportImport.DoExportAsync` the fixture needs `platform:backuprestore:access` plus `platform:backuprestore:backup`.
+
+Instrument verified: the admin control produced `VirtoCommerce.Orders.json` with 1250 orders, **real prices**, `withPrices:true` (`CO260827-00002` total 284.94). Correct request shape — note `passwordProtect` defaults to **true** and the one-time AES password comes back in the response body:
+
+```
+GET  /api/platform/export/manifest/new
+POST /api/platform/export   {"passwordProtect": ..., "exportManifest": {...}, "modules": ["VirtoCommerce.Orders"]}
+```
+
+### Restore-on-write through the UI — PASS
+
+Run as `agent-test-noprices`; the scoped user has no `order:update`, so its blade shows no Save button and the write half is untestable there by design. Comment added, saved, `PUT` returned 204, with the UI sending `withPrices:false`, `total:0`, item `price:0`. Admin re-read afterwards: **every price unchanged** — total 284.94, subTotal 249.95, tax 47.49, discount 12.5, item 249.95/237.45, shipment 5. Comment persisted, reverted afterwards, prices re-verified.
+
+### Line-item Discounts leak — confirmed on a second order, pure click path
+
+Orders → order → Line items → item row → Discounts widget shows **`12.5 USD`** in plain text for `CO260827-00002`, while `items[0].discountAmount` and `discountTotal` in the same payload are correctly zeroed. The nested `Discount` collection is not reduced. The order-level Discounts widget reads 0, so it is reachable only one level down. `screenshots/R2-T3-04-scoped-lineitem-discounts-LEAK-12.50.png`.
+
+### Incidental, outside this ticket but worth a look
+
+- **Blade state including unsaved edits survives sign-out and is offered to the next user.** After signing out of `agent-test-scoped` with an unsaved comment, admin was prompted "The operation has been modified. Do you want to save changes?" on that user's order — clicking Yes would write one user's edit under another's identity. Same browser-scoped-not-user-scoped mechanism as the saved-filter bleed above.
+- Generic export offers `Catalog` and `Pricing` object types to a user holding neither permission.
+- A **Revenue per customer** dashboard widget renders for a `read_prices`-denied user; it read 0 here, so it needs a store with real revenue to judge.
+- The Store field on the order blade stays on "Loading..." forever for any user without `store:read`.
+
+**Live store counts** (an earlier draft used stale numbers): total 1248, `B2B-store` 1062, `Electronics` 54, `ExportStore` 4.
 
 ## Gates
 
