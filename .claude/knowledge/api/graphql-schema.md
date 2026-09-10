@@ -1,6 +1,6 @@
 # GraphQL xAPI Schema Reference
 
-> **Source**: Live introspection of `{{BACK_URL}}/graphql` (2026-09-04)
+> **Source**: Live introspection of `{{BACK_URL}}/graphql` (2026-09-10)
 > **Purpose**: Agents MUST consult this file before writing or reviewing GraphQL queries/mutations.
 > **Refresh**: `npm run schema:refresh` — run when the schema may have changed.
 > **SCOPE — read this before concluding a field does not exist.** The query and mutation
@@ -26,16 +26,16 @@
 12. **Pass the ambient context — `cultureName`, `storeId`, `userId`, `organizationId` — on almost every query and mutation.**
     Most xAPI operations resolve against an implied context, and **omitting a context arg is not an error**:
     the server substitutes a default and returns `200` with data that is wrong, empty, or `null`. There is no
-    message to notice. Measured on this schema (108 queries, derived at refresh):
+    message to notice. Measured on this schema (110 queries, derived at refresh):
 
     | Context arg | Queries accepting it | Required | Optional |
     |---|---|---|---|
-    | `cultureName` | 61 (56%) | 3 | 58 |
-    | `storeId` | 63 (58%) | 32 | 31 |
-    | `userId` | 31 (29%) | 2 | 29 |
+    | `cultureName` | 61 (55%) | 3 | 58 |
+    | `storeId` | 64 (58%) | 32 | 32 |
+    | `userId` | 31 (28%) | 2 | 29 |
     | `organizationId` | 14 (13%) | 2 | 12 |
 
-    **84 of 108 queries (78%) accept at least one; 74 (69%) accept one OPTIONALLY** —
+    **85 of 110 queries (77%) accept at least one; 75 (68%) accept one OPTIONALLY** —
     that last figure is the exposure, because those are the calls that can quietly answer for a context you
     never chose. Mutations take the same fields inside the `command:` wrapper (see Rule 1), so the same rule applies.
 
@@ -68,35 +68,14 @@
     field is one edit away from a future author. **Assert on `currentBalance` unless the case is specifically
     testing pay-with-points affordability.**
 
-    **There is no per-mission attribution on the points ledger GRAPHQL SURFACE.** `LoyaltyOperationLogObject` exposes only
-    `type` / `orderId` / `orderNumber` (verified by live introspection, 2026-08-28 and again 2026-09-08), and `LoyaltyMissionTransaction`
+    **There is no per-mission attribution on the points ledger at all.** `LoyaltyOperationLogObject` exposes only
+    `type` / `orderId` / `orderNumber` (verified by live introspection, 2026-08-28), and `LoyaltyMissionTransaction`
     — which *does* carry `MissionId`, `ObjectId`, `UserId` with a composite index, and is how the accrual dedup
     works — is **not exposed through GraphQL in any form**. One order settles every mission applicable to its
     user (measured: four missions at `+250 / +200 / +100 / +0` on one order), so **a balance total, a history
     length, or any other aggregate is not an oracle for one mission's contribution**. The maximum attribution
     the API permits is amount + `orderId` on the ledger entry — pin both, and never assert positionally on
     `items.0` when several rows can land from one event.
-
-    **The two loyalty ledger types, spelled out — the nesting is the trap.** `type` / `orderId` / `orderNumber` live on
-    the **nested** `object`, NOT on the log row, so selecting them at the top level fails validation outright with
-    `Cannot query field 'type' on type 'LoyaltyOperationLog'` (reproduced 2026-09-08). Live introspection:
-
-    ```
-    LoyaltyOperationLog        { id  operationType  amount  createdDate  object: LoyaltyOperationLogObject }
-    LoyaltyOperationLogObject  { type  orderId  orderNumber }
-    ```
-
-    So the correct selection is `items { id operationType amount createdDate object { type orderId orderNumber } }`.
-
-    **`object` is `null` for every mission-granted row, and that is a product defect, not a bad query.** Measured
-    2026-09-08 on the VIP fixture: 69 of 167 entries return `object: null`, all of them `Earned`. A Platform REST read
-    of those same entries (`POST /api/loyalty-program-operation-log/search`, admin token) returns
-    `objectType: "LoyaltyMissionProgress"` + an `objectId`, so the attribution exists in storage and is dropped by the
-    xAPI resolver (`LoadLoyaltyObject()`'s `objectType switch` has no arm for it). **Authoring consequences:** do not
-    treat a null `object` on a mission row as a broken query or a context-argument omission — it is the current
-    contract, tracked as a read-side defect and as **BL-LOY-015**; assert `object is null` for a mission grant and
-    `object.orderNumber` only for an order-driven row; and if a case needs real per-mission attribution, it cannot get
-    it from GraphQL at all — the admin REST path is the only source today.
 
     **Consequences for authoring:** never conclude a field is empty, missing, or broken until the call carries
     its full context; a differential result between two callers is a context difference until proven otherwise;
@@ -216,6 +195,8 @@ salesRepTopSellerFilterRules(storeId: String, cultureName: String, organizationI
 salesRepTopSellerSortRules(storeId: String, cultureName: String)
 salesRepTopSellers(organizationId: String, storeId: String, filter: String, sort: String, period: SalesRepStatisticsPeriodInput, take: Int, currencyCode: String, cultureName: String)
 salesRepCustomerCounts(organizationId: String, storeId: String)
+purchaseRequest(purchaseRequestId: String!)
+purchaseRequests(after: String, first: Int, keyword: String, sort: String, storeId: String, customerId: String)
 canLeaveFeedback(storeId: String!, entityId: String!, entityType: String!)
 customerReviews(after: String, first: Int, keyword: String, sort: String, storeId: String!, entityId: String!, entityType: String!, filter: String)
 ```
@@ -383,6 +364,12 @@ wishlists(after: String, first: Int, storeId: String, userId: String, currencyCo
 | `registerByInvitation` | `InputRegisterByInvitationType` |
 | `saveSalesRepLayout` | `InputSalesRepLayout` |
 | `sendCustomerCommunication` | `InputSendCustomerCommunicationType` |
+| `addPurchaseRequestSource` | `InputAddPurchaseRequestSourceType` |
+| `createPurchaseRequest` | `InputCreatePurchaseRequestType` |
+| `createPurchaseRequestFromDocuments` | `InputCreatePurchaseRequestFromDocumentsType` |
+| `extractPurchaseRequestSourcesData` | `InputExtractDataFromPurchaseRequestSourcesType` |
+| `postProcessPurchaseRequestSources` | `InputPostProcessPurchaseRequestSourcesType` |
+| `updatePurchaseRequestByDocuments` | `InputUpdatePurchaseRequestByDocumentsType` |
 
 ### Payment
 
