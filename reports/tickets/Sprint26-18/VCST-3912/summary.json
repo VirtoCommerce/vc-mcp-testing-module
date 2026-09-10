@@ -142,9 +142,9 @@
     "notes": "All four story ACs graded non-testable or partial at 1d: AC-1 and AC-2 are structural/vague ('is responsible for Data Protection', 'works as expected'); AC-3 and AC-4 are deliverable-presence checks. AC-4 names IEntityDataProtectionService, which does not exist in the shipped diff — only docs/data-protection-architecture.md defines it, marked Status: Proposal and targeting VirtoCommerce.Platform.Core. The 22 gap-ACs, not the story ACs, are the spine of this run."
   },
   "total_cases": 20,
-  "passed": 9,
-  "failed": 6,
-  "blocked": 5,
+  "passed": 10,
+  "failed": 7,
+  "blocked": 3,
   "iterations": {
     "enabled": false,
     "rounds": 0,
@@ -219,6 +219,12 @@
       "severity": "High",
       "provenance": "in-scope",
       "summary": "REGRESSION: the Admin SPA is not prepared for the 403 this PR introduces on GET .../{id}. Clicking an out-of-scope order sends the blade into an AngularJS infinite digest loop ($rootScope:infdig), 184+ occurrences and climbing, 3295 console lines from one click, in the ui-grid watcher. An in-scope order produces about 8 lines and no loop.",
+      "report": null
+    },
+    {
+      "severity": "High",
+      "provenance": "in-scope",
+      "summary": "Export fix works but produces an undetectable poison-pill backup. A user with backuprestore rights but without order:read_prices produces a full Data-backup archive of all 1250 orders with every price 0.0 and withPrices:false. Manifest.json carries NO redaction or partial-data marker, the filename and size look normal, and the job completes green with no warning. Restoring it destroys every price and nothing distinguishes it from a complete backup. Admin control on the same stand: total 44.99 / subTotal 89.99. Artifacts: payloads/R2-T2-backup-DENIED.zip vs R2-T2-backup-ADMIN.zip.",
       "report": null
     },
     {
@@ -447,7 +453,7 @@
     "fixtures_covering": [],
     "divergence_resolved": true,
     "td_validate": "green for the two suites this run touched — 050c [OK] 3/3 resolved; 017 carries no @td() refs. 17 unrelated suites fail on the known vcptcore fixture gap, pre-existing and untouched.",
-    "seed_run": "manual, inline: roles AGENT-TEST-ORDER-NOPRICES (+platform:export/import) and AGENT-TEST-ORDER-SCOPED-ELECTRONICS (order:read with an OrderSelectedStoreScope for Electronics); users agent-test-noprices / agent-test-scoped. Disposable order AGENT-TEST-CO-3912-01 created and deleted. ALL MUST BE DELETED after triage.",
+    "seed_run": "manual, inline: roles AGENT-TEST-ORDER-NOPRICES (+platform:export/import) and AGENT-TEST-ORDER-SCOPED-ELECTRONICS (order:read with an OrderSelectedStoreScope for Electronics); users agent-test-noprices / agent-test-scoped. Disposable order AGENT-TEST-CO-3912-01 created and deleted. ALL MUST BE DELETED after triage. AGENT-TEST-ORDER-NOPRICES additionally granted platform:backuprestore:access/backup/storage to reach the export path.",
     "deferred_reason": "Step 3a was deliberately NOT dispatched. Seeding a role and user onto a shared QA environment was not authorised, the fixtures cannot be validated against a feature that is not deployed, and inventing @td() aliases that resolve to nothing would break td:validate for every author in the tree. The cases name their fixtures in Preconditions prose instead — the same convention ORDA-091..095 already use — so a seeder can be written straight off the rows.",
     "fixtures_required_before_execution": [
       "Admin role with every Orders permission EXCEPT order:read_prices, plus platform:access, assigned to a dedicated user (permissions live on roles — VC-B2B-002)",

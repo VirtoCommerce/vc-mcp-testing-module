@@ -3,9 +3,9 @@
 `[Support] #38981 — Price restriction on order, catalog, pricing modules` · Story · High · status `Testing`
 Run: 2026-09-10 · Path **FULL** · Flow `feature-test` · Env target **vcptcore-qa** · Model: [`VCST-3912-2026-09-10.md`](../../../ba/test-models/VCST-3912-2026-09-10.md)
 
-## Verdict — FAIL (6 confirmed defects: 2 REGRESSIONS this PR introduced, 4 pre-existing)
+## Verdict — FAIL (7 confirmed defects: 3 from this PR, 4 pre-existing)
 
-> **The two regressions are `ORDA-108` (store scope fails open) and the Admin-SPA digest loop on the new 403 — see Round 2.** The other four are real and worth fixing, but the deleted handler behaved identically, so they are *not fixed by* this PR rather than *broken by* it. That distinction drives triage and it was established from the diff, not assumed.
+> **Three come from this PR:** `ORDA-108` (store scope fails open), the Admin-SPA digest loop on the new 403, and the unmarked price-free backup its own export fix now produces. The other four pre-date it. The other four are real and worth fixing, but the deleted handler behaved identically, so they are *not fixed by* this PR rather than *broken by* it. That distinction drives triage and it was established from the diff, not assumed.
 
 > **SCOPE of this run.** Everything here exercises the **default** rule — the global `order:read_prices` permission. A live custom `CanReadPrices` override was not exercised, and that was a deliberate call rather than a gap: `samples/VirtoCommerce.OrdersModule2.Web` predates this PR, is built by CI only to prove it compiles, and is not published as a deployable artifact — a solution registers its own override, not that one. The override contract is compile-time, and the per-order semantics a distributor rule depends on are verifiable from source (`ReduceDetailsForCurrentUser` calls `ReduceDetailsForUser(user, orders[i], cloned)` **per order**, not once per user).
 >
@@ -111,18 +111,31 @@ Reviewer flagged this High on the PR; the author replied "By design". It is stri
 
 The PR introduces `403` on `GET .../{id}` for an out-of-scope order. Clicking such an order in the grid sends the blade into an AngularJS infinite digest loop — `[$rootScope:infdig] 10 $digest() iterations reached. Aborting!`, **184 occurrences and still climbing** while the blade stayed open, 3295 console lines from a single click, in the ui-grid row/col watcher. An in-scope order produces about 8 console lines and no loop, so it is specific to the new 403 path. Evidence: `payloads/R2-console-scoped-403-loop.log`.
 
-### Export — UNVERIFIED, not failed
+### Export — VERIFIED. The fix works, and it creates a poison-pill backup {High}
 
-The PR's headline claim is that export now goes through the protection service. **The masking never gets a chance to run**: the backup path is gated by the BackupRestore module's own permissions, not `platform:export`. `agent-test-noprices` carries `platform:export` and `platform:import` in its token and still gets **403** on both `GET /api/platform/export/manifest/new` and `POST /api/platform/export`, with the byte-identical body that returns 200 for admin. That user has no "Backup and restore" menu entry at all.
+Fixture needed `platform:backuprestore:access` + `:backup` + `:storage` — `platform:export` is not the gate. Once granted, `agent-test-noprices` (no `order:read_prices`) ran a full platform backup with the Orders module selected.
 
-To exercise `OrderExportImport.DoExportAsync` the fixture needs `platform:backuprestore:access` plus `platform:backuprestore:backup`.
+**The PR's headline fix is confirmed.** Same 1250 orders, same archive layout, same Manifest schema:
 
-Instrument verified: the admin control produced `VirtoCommerce.Orders.json` with 1250 orders, **real prices**, `withPrices:true` (`CO260827-00002` total 284.94). Correct request shape — note `passwordProtect` defaults to **true** and the one-time AES password comes back in the response body:
+| | `total` | `subTotal` | `sum` | `withPrices` |
+|---|---|---|---|---|
+| admin control | 44.99 | 89.99 | 44.99 | *(absent)* |
+| `agent-test-noprices` | **0.0** | **0.0** | **0.0** | **false** |
 
-```
-GET  /api/platform/export/manifest/new
-POST /api/platform/export   {"passwordProtect": ..., "exportManifest": {...}, "modules": ["VirtoCommerce.Orders"]}
-```
+Export previously bypassed authorization entirely and wrote full prices. It no longer does.
+
+**But the resulting archive is an undetectable poison pill.** It is produced through *Data backup and restore*, it is restorable, and nothing marks it as partial:
+
+- 1250 orders, every price `0.0`
+- `Manifest.json` keys are `Author, PlatformVersion, HandleSettings, HandleDynamicProperties, HandleSecurity, HandleBinaryData, Modules, Options, Created, IsEncrypted` — **no redaction or partial-data marker of any kind**
+- filename shape identical to a valid backup (`vc_backup_<ts>_<host>.zip`), size comparable (1.05 MB vs 1.18 MB)
+- job completes green, no warning in the UI or the notification
+
+So a restore from it destroys every price in the system, and neither the operator nor the restore path can tell it from a complete backup. The architecture doc predicts this for the *system* context ("an export running outside an HTTP request produces a backup with every price zeroed, and nothing reports an error"); measured here, it happens for an ordinary interactive user too.
+
+Artifacts: `payloads/R2-T2-backup-DENIED.zip` and `payloads/R2-T2-backup-ADMIN.zip`.
+
+**Not run:** restoring that archive. It would destroy prices on a shared stand, and the round trip (`ORDA-119`) needs an isolated target.
 
 ### Restore-on-write through the UI — PASS
 
