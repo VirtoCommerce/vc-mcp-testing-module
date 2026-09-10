@@ -308,6 +308,114 @@ Four rules:
 When triaging a suite failure, check fixture generation and consumption timestamps **before**
 reaching for a product explanation; here that ordering settled 5 of 11 failures in a single query.
 
+## GOLDEN RULE — the pattern and the incident
+
+Cited from [`.claude/rules/test-data.md`](../../rules/test-data.md) §GOLDEN RULE, which states the rule
+itself. This is how you satisfy it, and what it costs when you do not.
+
+| Step | What | Example |
+|------|------|---------|
+| 1 | **Generator** reads the real source, emits a committed `*.generated.ts` | `scripts/maintenance/sync-design-tokens.mjs` → `scripts/lib/design-tokens.generated.ts` (`npm run tokens:sync`) |
+| 2 | **Go all the way up the chain** — even a library's own defaults come from the pinned version, not from memory | Tailwind's default spacing is fetched from the exact `tailwindcss` version vc-frontend's `package.json` declares |
+| 3 | **Drift guard as a CI gate** — re-derive and fail on mismatch | `npm run tokens:check` (same ratchet as `td:validate` / `scope:validate`) |
+| 4 | **Never pass on an unreachable source** — exit non-zero, don't silently succeed | `tokens:check` exits `2` on network/checkout failure |
+| 5 | **Docs must point at the constant, not restate it** — a number copied into an agent/skill/oracle file rots identically | `business-logic.md` BL-UI-002 and `qa-design` reference `SPACING_GRID`, they don't list values |
+
+**The incident.** `scripts/lib/measure-layout.ts` hardcoded a 14-value spacing grid `{0,4,8,…,96}` while
+vc-frontend's real scale had **39** values. The UI kit's own `vc-button.vue` uses 10 px / 14 px padding,
+so the canonical button "violated" our grid — run REG-2026-07-24-2121 emitted ~7 phantom `BL-UI-002`
+failures and the runner concluded there was a "site-wide design-token issue" that did not exist.
+
+Net effect of the pattern: a redesign surfaces as **one loud gate failure** instead of a wave of phantom
+test failures.
+
+## SECOND RULE — designing from the chain
+
+Cited from [`.claude/rules/test-data.md`](../../rules/test-data.md) §SECOND RULE, which states the
+falsifiability test and the divergence property. Three further clauses, then the worked example.
+
+- **State the fixture's own limits where they exist.** If a link's question is not decidable from the
+  seeded state, say so at the fixture — in the spec module's rationale and in the case's
+  `Preconditions` — rather than letting a green case imply an answer it cannot give.
+- **Constrain live-discovery on every dimension the feature is sensitive to.** `live-discover` is the
+  right default for identity ([`live-discovery.md`](live-discovery.md)), but it selects on
+  availability, not on suitability. Discovering "any two buyable products" for a money-summing surface
+  will eventually hand you one priced in EUR and one in USD. Pin currency, price shape, stock and
+  catalog scope when the feature reads them; leave them free when it does not.
+- **Seed through the mechanism where the mechanism is what is under test.** An entity written straight
+  into storage bypasses the very handler the chain depends on. An API-shaped seed is correct for
+  *arranging* a precondition and wrong for *proving* the link that arranges it — the journey case
+  places a real order.
+
+**Worked example — Loyalty Missions (VCST-5320/5346).** The fixture set was large, carefully documented
+and correct against every existing guard: 2 042 lines of spec module, no committed GUIDs, overlay
+write-back per env, its own `td:validate:cfg`-style drift guard and unit tests. It was designed from the
+**screens** — fixtures that render a partial card, a completed card, a zero-target card, a zero-reward
+card. Two consequences followed directly:
+
+1. Its seeded orders were flat $30 with no shipping, tax or discount, so the central mechanism
+   question — *does an `OrderValueGoal` accrue `order.Total` or merchandise value?* — was **not
+   decidable from the data**. The exploratory report had to record it in as many words: *"the only
+   in-window orders were API-seeded at exactly $30 … `$30.00 spent` is consistent with both
+   readings."* The defect was ultimately found by reading source, not by any of 127 cases.
+2. Its featured-SKU targets were live-discovered with no currency constraint, so the modal was seeded
+   with a €455 row and a $25 row. That produced a mixed-currency subtotal finding which was filed and
+   then **rejected** — reviewer time spent on an artefact of the fixture rather than on the feature.
+
+A fixture set can be immaculate by every rule in the policy and still test nothing. Design it from the
+chain.
+
+## Why hardcoded fixtures rot
+
+- Catalogs are re-seeded → product IDs change → tests silently fail or skip
+- B2B orgs are re-created → contact/user/role IDs change
+- Virtual-catalog root IDs migrate (the active root moved on 2026-04-30; see `feedback_storefront_virtual_catalog_link` memory)
+- Prices, coupon codes, and addresses get reseeded with each sprint
+
+`@td()` indirection means the alias is stable; the CSV row gets updated when the underlying data
+changes, and every consumer follows automatically.
+
+## When you must add a hardcoded value
+
+You should not. If you genuinely cannot resolve via `{{VAR}}` or `@td()`:
+
+1. Add a new alias entry to [`test-data/aliases.json`](../../../test-data/aliases.json) pointing to a CSV row that holds the value
+2. Or use the inline `@td(file, filter, column)` form for one-off lookups (see [`test-data/README.md`](../../../test-data/README.md) §Direct form)
+3. Run `npm run td:validate` to confirm resolution
+4. If neither works, the value is environmental — promote it to `.env` and reference as `{{VAR}}`
+
+A literal in a Steps/Test_Data column without one of these resolvers is a review failure (see
+`/qa-review-tests` Dimension 5 — Data Validity; Dimension 6 is BL/ECL Coverage + Requirement
+Traceability).
+
+## Canonical references (single sources of truth)
+
+- **[`live-discovery.md`](live-discovery.md)** — decision tree, JS + CSV-runner recipes, anti-patterns, parallel-run isolation
+- **[`skills/qa-postman/test-data-fixtures.md`](../../skills/qa-postman/test-data-fixtures.md)** — `@td()` resolver contract, fixture directory layout, account/catalog/address conventions
+- **[`test-data/aliases.json`](../../../test-data/aliases.json)** — alias registry (`_meta.version` is the contract version)
+- **[`test-data/README.md`](../../../test-data/README.md)** — directory layout and seed-results index
+- **[`scripts/lib/test-data-resolver.ts`](../../../scripts/lib/test-data-resolver.ts)** — `@td()` resolver implementation (CSV-backed + inline aliases)
+- **[`scripts/lib/live-discover.ts`](../../../scripts/lib/live-discover.ts)** — typed xAPI discovery primitives (catalog root, products, addresses, cart, coupons)
+- **[`scripts/lib/random-data.ts`](../../../scripts/lib/random-data.ts)** — zero-dep random generators (emails, org names, SKUs, quantities, comments)
+- **[`scripts/test-data/validate-td-refs.ts`](../../../scripts/test-data/validate-td-refs.ts)** — STATIC validation (`npm run td:validate` — every `@td()` resolves + flags hardcoded GUIDs)
+- **[`scripts/seed-data/reconcile-test-data.mjs`](../../../scripts/seed-data/reconcile-test-data.mjs)** — LIVE reconciliation (`TEST_ENV=<env> npm run td:reconcile` — catalog root exists, `.env.{ENV}` roles have accounts, B2B users are org-scoped, no password literals in committed CSVs)
+- **[`scripts/lib/user-roles.mjs`](../../../scripts/lib/user-roles.mjs)** — canonical test-user ROLE → `.env.{ENV}` var registry; consumed by the user seeders + `td:reconcile`
+- **[`knowledge/api/graphql-test-cases-runner.md`](../api/graphql-test-cases-runner.md)** — runner-native CSV grammar where `@td()` and `[GQL-CAPTURE]` are consumed natively
+- **[`knowledge/api/graphql-schema.md`](../api/graphql-schema.md)** — schema reference; verify field names before authoring queries that consume `@td()` values or `live-discover` recipes
+
+`scripts/seed-data/` is organized into per-domain subfolders (`catalog/`, `products/`, `b2b/`,
+`orders/`, `loyalty/`, …); the orchestrator `seed-bootstrap.mjs` + `reconcile-test-data.mjs` + legacy
+`seed-test-data.js` stay at the `seed-data/` root.
+
+## Memory entries that codify the no-hardcode rule
+
+- `feedback_no_test_data` — Use `test-data/` for test data; avoid hardcoding in CSV `Test_Data` columns
+- `feedback_flexible_test_cases` — GOLDEN RULE: no hardcoded IDs/SKUs/emails/prices/order-numbers/paths
+- `feedback_env_resilience` — Never assert exact prices, section titles, or URL path segments tied to catalog data
+- `reference_test_data_resolver` — `@td()` is real; `scripts/lib/test-data-resolver.ts` + `test-data/aliases.json`
+- `feedback_verify_source_data_before_bug` — Verify the underlying record's field value before filing a "wrong field mapping" bug
+- `feedback_agents_read_env_creds` — Never hardcode passwords in agent prompts; agents read `.env` at runtime
+
 ## Where this rule is enforced
 
 | Skill / Agent / File | How it enforces |
@@ -321,6 +429,8 @@ reaching for a product explanation; here that ordering settled 5 of 11 failures 
 | Credential-declaration guard | `npm run td:validate:credentials` (`scripts/seed-data/validate-credentials.mjs` + the side-effect-free `credential-specs.mjs`) — STATIC, no network. Fails when a **destructive** fixture (a lockout/abuse role, `DESTRUCTIVE_ROLE_KEYS`) shares its account with a shared happy-path fixture, and warns when one account is declared with **two different password vars** across the credential registries (a committed CSV `{{VAR}}` cell vs a `user-roles.mjs` `passwordVar`). Both classes silently BLOCK whole suites: the account can only hold one password, and a lockout run locks every other consumer out. A contested account additionally has its password reconciliation **disabled** by the seeders (`user-provision.mjs` `contestedPasswordEmails`) so two seeders can't overwrite each other. Live companion: `td:reconcile` [10] Auth drift. |
 | Overlay GUID liveness | `TEST_ENV=<env> npm run td:reconcile` check **[11]** (+ the side-effect-free `scripts/seed-data/overlay-specs.mjs`) — the committed `aliases.<env>.json` overlay is probed against `GET /api/members/{id}`, so a fixture that was torn down and re-seeded (new GUID) can no longer leave `@td(ALIAS.id)` pointing at a **deleted** entity. That failure mode is silent: the assertion just never matches and the case reads as a product bug. Scope is an explicit **member-only allowlist** — security-account ids are excluded because this platform has no reliable by-GUID account lookup (`GET /users/{guid}` → 200 + `null`; the users search ignores an `ids` filter), and probing products/pricelists/config-sections with the member endpoint would manufacture ~90% phantom failures. |
 | Store required defaults | `TEST_ENV=<env> npm run td:reconcile` check **[13]**, and the cheap standalone pre-flight **`npm run td:reconcile:store`** — both call the side-effect-free `scripts/seed-data/store/store-defaults-specs.mjs`. A store missing `defaultCurrency` / `defaultLanguage` / `url` is a **broken storefront**, not a feature bug (memory `reference_store_required_defaults_null_breaks_frontend`). It lives in `td:reconcile` rather than a `td:validate:store` because that family is STATIC (committed fixtures, no network) and a null on a live store is ENV STATE. Created after 2026-08-27, when suite `075d`'s store-toggle cases sent a PARTIAL `PUT /api/stores` — which **replaces** the entity — twice on vcst-qa (14:29:56Z, 16:48:29Z), nulling `defaultCurrency`/`defaultLanguage`/`url`/`secureUrl` on `B2B-store`; the second took the storefront down and nothing in the repo could see it, because every other check probes the entities the fixtures POINT AT, never the store they live in. It **names the store and the null fields**, gates only the store under test (`STORE_ID` + live `stores.csv` rows) so a dormant legacy store is not permanent noise, and also flags a default that is set but absent from its own `currencies[]`/`languages[]` (populated-but-unusable passes a null check). Repair values are **derived from live evidence** — the store's own recent orders' `currency`/`languageCode`, a single-entry list field, `FRONT_URL` for the env's own store — and are reported as **null with a reason** when the evidence is ambiguous; peer-store consensus is corroboration only and is NEVER promoted to a value (this env carries a live EUR store, so a modal value would confidently overwrite a correct one). Nothing is ever written. Safe companion: **`npm run store:set -- --name <Setting> --value <v>`** does the GET-merge-PUT of the FULL body (generalising the one implementation that always had it right — `setMissionsEnabled()` in `seed-loyalty-missions.mjs`) and refuses via `fieldsLostByWrite()` any body that would blank a required default. |
+| Overlay-shadow guard — an ENV OVERLAY hiding an AUTHORED business key | `npm run td:validate:missions` check **[8s]** (`loyalty/validate-missions-data.mjs` → the side-effect-free `missions-specs.overlayShadowProblems()`, unit-tested in `scripts/unit/loyalty-missions-overlay-shadow.test.mjs`). The **exact inverse of that guard's [4]**, and a class no other gate in this repo can see. [4] asks "is a RUNTIME field empty in the committed base?"; [8s] asks "is a NON-runtime field — an authored business key — present in `aliases.<env>.json`?". The overlay wins field-by-field, so the shadow silently becomes what `@td()` returns; it still RESOLVES, so `td:validate` stays green (it proves refs resolve, **not** that they resolve to the right entity). **It cannot be repaired by re-seeding:** `writeEnvAliasOverride` merges per alias (`{...cur[alias], ...fields}`) and never deletes, so a seeder that has STOPPED writing a key can never remove what a previous generation of itself wrote — the shadow is permanent until the overlay key is deleted by hand. Measured 2026-09-08 on vcst: `MSN_PERSKU_PRODUCT_A/B` still carried `sku`/`name` from the generation that live-DISCOVERED its PerSku targets (`201482` PEPSI, `55557702` Xerox); the targets are CREATED now so those two fields moved to the committed base as business keys, and `@td(MSN_PERSKU_PRODUCT_A.sku)` resolved to `201482` while the mission's own `LoyaltyMissionGoalItem` pointed at `AGENT-TEST-MSN-TARGET-A` — 14 cases in suite `083c` addressed featured-SKU modal rows by a SKU the modal does not render. **Any seeder that migrated a fixture from live-discovered to authored owes its domain guard this check.** |
+| Per-user fixture state must be reported WITH its owner | `npm run td:validate:missions` labels its declared-progress notes with the account they belong to (`PROGRESS_USER_ROLE` → its `emailVars`), because mission progress is per-user and that guard is STATIC — every percentage it prints is DERIVED from the spec, never observed. Measured 2026-09-08: two browser lanes signed in as `@td(USER_DEFAULT)` (`users/test-users.csv` USER-001 = `qa-user-01@…`) read 0% on every mission, while `PROGRESS_USER_ROLE` resolves the `USER` role to `USER_EMAIL` — a **different account**. The guard's `✓ clean` + its then-unlabelled "InProgress 75%" read as a contradiction and were reported as a provisioning failure; the fixtures were correct and a re-seed would have double-accrued the provisioning order. The generalisable rule: **a fixture whose state is per-user, per-org or per-store is not described by a value alone — quote the owner, or the number is unfalsifiable.** |
 | Alias base guard (DV-021) | `npm run td:validate` — the **DV-021** scan in `scripts/test-data/validate-td-refs.ts` fails if the **committed base** `test-data/aliases.json` carries a runtime platform GUID baked into an `_inline` alias (they must live in the per-env `aliases.<env>.json` overlay). Allowlist = deterministic sentinel pins + pinned org `platform_id`s (derived live from `b2b/organizations.csv`) + a short documented env-constant list (the virtual-catalog root). Migrate offenders with `node scripts/test-data/migrate-inline-guids.mjs --apply`. |
 | Fixture-shape guard (DV-022) | `npm run td:validate` — the **DV-022** scan in `scripts/test-data/validate-td-refs.ts` fails when a suite case binds `{{MULTI_ORG_USER_EMAIL/PASSWORD}}` **and** performs a per-org membership operation (`lockOrganizationContact`, `unlockOrganizationContact`, `changeOrganizationContactRole`, `organization-memberships/{id}/lock|unlock`, or the UI actions `Block user`/`Unblock user`/`Edit role`). Two multi-org fixtures look interchangeable but are not: `{{MULTI_ORG_USER_EMAIL}}` is an Approved contact with **many `contact.organizations` associations and ZERO `OrganizationMembership` rows** — correct for org-switcher and global-contact-status cases, but a lock/unlock/role-change has no membership row to act on, so the case silently tests nothing. Those need `@td(MULTI_ORG_TF_BR.email/.password)` (real membership rows in TechFlow + BuildRight). Deliberately keyed on membership **mutations**, not on any mention of `organization-memberships`, so a case that asserts the *absence* of a membership row (e.g. `027` `CUST-091`) is not flagged. Reviewed exception: add `DV-022-OK` to the row. |
 | [`/qa-generate-data`](../skills/qa-generate-data/SKILL.md) | Authors fixtures from scratch with no system GUIDs (blank `*_guid`/`platform_id`, `seeded=false`), business-key aliases, `AGENT-TEST-` prefix; ends on a mandatory `validate-td-refs.ts` green gate |

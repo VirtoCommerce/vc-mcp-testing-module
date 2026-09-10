@@ -18,8 +18,10 @@
  *      notes show 32 case IDs that do not exist anywhere in the corpus.
  *   2. Dispatch order. Fixed batches of 3 with a barrier between them: each batch costs its
  *      slowest suite and a freed slot idles until the whole batch drains.
- *   3. The firefox rule. `playwright-firefox` cannot click on this storefront or the Admin SPA,
- *      and the rule lived as prose in three separate files, re-derived per decision.
+ *   3. The firefox rule. It lived as prose in three separate files, re-derived per decision; it is
+ *      now one manifest switch (`defaults.firefoxClickOk`, read via `browserDenyListFor`). Since
+ *      2026-09-08 that switch is ON and the lane takes click-driven work again — see
+ *      `.claude/knowledge/automation/browser-quirks.md` §Firefox for the root cause and the rollback.
  *
  * Usage:
  *   npm run regression:plan                      # smoke
@@ -36,7 +38,8 @@ import { fileURLToPath } from "url";
 import { browserDenyListFor, loadManifest, resolveSelection, selectionNames, type ManifestSuite } from "../../ci/lib/suite-manifest.ts";
 import { classifyLane } from "../../ci/lib/lane-classifier.ts";
 import { buildRunPlan, formatRunPlan, type PlannableSuite } from "../../ci/lib/run-plan.ts";
-import { orderLpt } from "../../ci/lib/scheduler.ts";
+import { batchSuites, DEFAULT_MAX_BATCH_CASES } from "../../ci/lib/suite-batching.ts";
+import { orderLpt, simulateMakespan } from "../../ci/lib/scheduler.ts";
 import { formatPreflightProblems, preflightManifest, type PreflightSuite } from "../../ci/lib/manifest-preflight.ts";
 
 const DEFAULT_CONCURRENCY = { browser: 3, fastpath: 4, deterministic: 2 };
@@ -167,6 +170,30 @@ function main(): void {
   }
   console.log("");
   console.log(formatRunPlan(plan, { verbose }));
+
+  // Batching: report what bounding a session would cost and save, on THIS selection, so the choice
+  // is checkable rather than asserted. Advisory — the plan does not batch, it prices it.
+  for (const lane of plan.lanes) {
+    if (lane.suites.length < 2) continue;
+    const batches = batchSuites(lane.suites.map((s) => ({
+      id: s.id,
+      testCount: s.cases,
+      estimatedMinutes: s.estimatedMinutes,
+      ...(s.preferredBrowser ? { preferredBrowser: s.preferredBrowser } : {}),
+      ...(s.browserDenyList.length ? { browserDenyList: s.browserDenyList } : {}),
+    })));
+    const saved = lane.suites.length - batches.length;
+    if (saved <= 0) continue;
+    const batched = simulateMakespan(orderLpt(batches), lane.concurrency).makespanMinutes;
+    const delta = lane.makespanMinutes > 0 ? ((batched - lane.makespanMinutes) / lane.makespanMinutes) * 100 : 0;
+    console.log("");
+    console.log(
+      `Bounded batching — ${lane.lane} lane at ${DEFAULT_MAX_BATCH_CASES} cases/session: ` +
+        `${lane.suites.length} dispatches → ${batches.length} (${saved} fewer), ` +
+        `makespan ${Math.round(batched)}m vs ${Math.round(lane.makespanMinutes)}m (${delta >= 0 ? "+" : ""}${delta.toFixed(1)}%), ` +
+        `longest session ${Math.max(...batches.map((b) => b.testCount))} cases.`,
+    );
+  }
 
   for (const lane of plan.lanes) {
     if (lane.suites.length === 0) continue;

@@ -1,12 +1,12 @@
 # Agents Reference
 
-17 agents as flat `.claude/agents/*.md` files, across three teams (QA, BA, Developers). Agent discovery is non-recursive, so agents are NOT nested in team subfolders; the per-team `shared-instructions.md` and the agents README live under `knowledge/agents/` (a plain reference dir, not scanned as components). See `knowledge/agents/README.md` for full documentation. QA agents use a **four-layer prompt architecture** — business logic (invariants), domain knowledge (judgment), skill set (technique), and design decisions (constraints).
+Agents are flat `.claude/agents/*.md` files (`ls` them for the roster), across three teams (QA, BA, Developers). Agent discovery is non-recursive, so agents are NOT nested in team subfolders; the per-team `shared-instructions.md` and the agents README live under `knowledge/agents/` (a plain reference dir, not scanned as components). See `knowledge/agents/README.md` for full documentation. QA agents use a **four-layer prompt architecture** — business logic (invariants), domain knowledge (judgment), skill set (technique), and design decisions (constraints).
 
 Knowledge-base inventory and the read-before-you-write rules (`graphql-schema.md`, `release-ledger.md`, …): [`.claude/ROUTING.md`](../ROUTING.md) §Knowledge bases.
 
 ## MCP servers & browser essentials
 
-Project `.mcp.json` (gitignored, per machine): `playwright-chrome` / `playwright-firefox` / `playwright-edge` (`config/mcp-playwright-*.config.json`), `postman`, `github`, `context7`; user/IDE level: Chrome DevTools, Azure, Atlassian, Figma, Microsoft Learn, **VirtoOZ** (primary VC docs via `/vc-docs`). Browser login secrets go through Playwright MCP `--secrets .env.playwright.local` — **Chrome DevTools MCP has no `--secrets`**; a DevTools brief must name its auth path (persistent profile / mint an account / delegate to a Playwright lane). Full server table, `--secrets` setup and the DevTools auth options: [`knowledge/execution/browser-lanes.md`](../knowledge/execution/browser-lanes.md).
+Project `.mcp.json` (gitignored, per machine): `playwright-chrome` / `playwright-firefox` / `playwright-edge` (`config/mcp-playwright-*.config.json`), `postman`, `github`, `context7`; user/IDE level: Chrome DevTools, Azure, Atlassian, Figma, Microsoft Learn, **VirtoOZ** (primary VC docs via `/vc-docs`). Browser login secrets go through Playwright MCP `--secrets .env.playwright.local` — type the **bare key name** (`ORG_USER_PASSWORD`), never `{{VAR}}`: the miss is silent and hook-blocked. **Chrome DevTools MCP has no `--secrets`**; a DevTools brief must name its auth path (persistent profile / mint an account / delegate to a Playwright lane). Full server table, `--secrets` setup and the DevTools auth options: [`knowledge/execution/browser-lanes.md`](../knowledge/execution/browser-lanes.md).
 
 ## Browser Automation Rules
 
@@ -16,7 +16,7 @@ Project `.mcp.json` (gitignored, per machine): `playwright-chrome` / `playwright
 - After any MCP config change, remind the user that a server restart is required before the new config takes effect.
 - Browser configs set viewport to 1920x1080, HAR capture enabled, video on failure, isolated contexts.
 
-## QA Team (9 agents + shared-instructions)
+## QA Team (+ shared-instructions)
 
 | Agent | Model | Purpose |
 |-------|-------|---------|
@@ -28,9 +28,9 @@ Project `.mcp.json` (gitignored, per machine): `playwright-chrome` / `playwright
 | **test-data-engineer** | opus | Owns test-data end-to-end: designs cross-entity combinations, **authors** the seeders / fixtures / `@td()` aliases / drift-guard validators + their unit tests, **AND RUNS them live** — real seed/teardown against a non-prod env + `td:reconcile` (Node + Platform-API, no browser) (`/qa-generate-data` + `/qa-seed-data`). Write-capable in THIS repo only (`scripts/seed-data/`, `test-data/`); no external repos. Canonical owner — `test-management-specialist` delegates fixture authoring here; `qa-backend/frontend-expert` do only the **browser** confirmation (storefront/Admin-SPA render + suite run) the engineer can't. See `knowledge/execution/test-data-authoring.md`. |
 | **ui-ux-expert** | sonnet | Storybook component testing, WCAG 2.2 AA accessibility, design system, and the **`vs. DESIGN` axis** — diffing declared tokens / control geometry / icon name→glyph parity against a Claude Design project (`DesignSync` → `scripts/lib/verify-design-spec.ts`, methodology `skills/qa-design/claude-design-verification.md`). Runs by default against the project **the ticket's own Prototype link names** (no global default — `DESIGN_SYSTEM_PROJECT_ID` removed 2026-09-03; no design link ⇒ `SKIPPED`); precedence `BL-UI invariant > design spec > UX heuristic`; reports `SKIPPED`, never PASS, where `/design-consent` is unavailable (web sessions, CI), and `KNOWN_DIVERGENCE` — advisory, never filed — for a mismatch the spec itself declares unshipped |
 | **regression-orchestrator** | sonnet | Parallel regression + smoke mode, retries, browser fallback, consolidated reports |
-| **test-runner-agent** | sonnet | Parameterized template for standard suite execution (used by regression-orchestrator) |
+| **test-runner-agent** | sonnet | Parameterized template for standard suite execution — runs a bounded batch of suites on one slot (used by regression-orchestrator) |
 
-## BA Team (4 agents + shared-instructions)
+## BA Team (+ shared-instructions)
 
 Team framework: `knowledge/agents/ba/shared-instructions.md` (VirtoOZ-first sourcing, the four documentation audiences, no-hardcode, external-write discipline, output policy).
 
@@ -47,7 +47,7 @@ Team framework: `knowledge/agents/ba/shared-instructions.md` (VirtoOZ-first sour
 - `ba-story-writer` consumes other agents' output (no browser/GitHub); `ba-doc-writer` uses a browser **only** to capture real screenshots for Customer/Admin docs
 - **Documentation audiences:** `ba-doc-writer` writes for four audiences — Customer (StorefrontUserGuide style), Admin (PlatformUserGuide style), Developer (PlatformDeveloperGuide style), and **Sales** (virtocommerce.com benefit-led marketing). Invoked via `/ba-analyze docs [audience]`. Virto's customers/partners are B2B enterprise organizations — see `reference_virto_customer_base` memory.
 
-## Developers Team (4 agents + shared-instructions)
+## Developers Team (+ shared-instructions)
 
 The **only write-capable team** — clone / branch / commit / push / open PR on external VirtoCommerce
 product repos via local `git`/`gh`. QA agents stay read-only on GitHub; write scope is isolated here.
@@ -114,4 +114,4 @@ Each agent MUST use its own separate browser session. Agents sharing a browser w
 - When delegating to sub-agents/specialist agents, verify the agent has the required tool permissions BEFORE dispatching.
 - If a delegated agent fails with an internal error (e.g., classifyHandoffIfNeeded), immediately fall back to working directly rather than retrying the same broken delegation.
 - For multi-suite regression runs, plan for rate limits: batch in groups of 3 (matching browser pool slots) rather than launching all simultaneously.
-- **Independent operations go out in ONE message; the unit you are saving is a round-trip, not a second.** A numbered list of independent probes/scripts walked one tool call per turn spends a full model turn per item — measured in `/qa-test` `1b`, seven independent probes totalling ~3 s of work were costing seven turns. Every deterministic script in this repo runs in 1–2 s (the one exception is live GraphQL introspection at ~8.5 s), so batching turns beats optimising script wall-clock by a wide margin. **But parallelism here has a measured cost too, so it is a per-case judgment, never a default:** two writers on one suite CSV take the corpus gate down for every author in the tree (`.claude/rules/regression.md` §WORKING IN A SHARED TREE), two suites on one disposable fixture set silently eat each other's data (`.claude/knowledge/execution/test-data-authoring.md` §The scope of "isolated" — 5 of 34 cases lost), and a verifier run beside its own doer verifies a half-finished step. Reordering something that costs milliseconds to look concurrent is churn. Worked dependency waves + the full never-parallelise table: `.claude/skills/qa-test/SKILL.md` §Concurrency.
+- **Independent operations go out in ONE message; the unit you are saving is a round-trip, not a second.** A numbered list of independent probes/scripts walked one tool call per turn spends a full model turn per item — measured in `/qa-test` `1b`, seven independent probes totalling ~3 s of work were costing seven turns. Every deterministic script in this repo runs in 1–2 s (the one exception is live GraphQL introspection at ~8.5 s), so batching turns beats optimising script wall-clock by a wide margin. **But parallelism here has a measured cost too, so it is a per-case judgment, never a default:** two writers on one suite CSV take the corpus gate down for every author in the tree (`.claude/rules/regression.md` §Suite inventory), two suites on one disposable fixture set silently eat each other's data (`.claude/knowledge/execution/test-data-authoring.md` §The scope of "isolated" — 5 of 34 cases lost), and a verifier run beside its own doer verifies a half-finished step. Reordering something that costs milliseconds to look concurrent is churn. Worked dependency waves + the full never-parallelise table: `.claude/skills/qa-test/SKILL.md` §Concurrency.

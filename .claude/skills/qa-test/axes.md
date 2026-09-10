@@ -55,15 +55,80 @@ Every axis obeys all five. Where an axis differs, it is §3, and it says so expl
 **`layer` and `data_surface` fail CLOSED. The other three fail OPEN.** This is the single most consequential rule in the
 block, and it was the one the shared *"same discipline"* phrasing concealed.
 
-| | `layer` (2b) | `visual_surface` (2c) | `contract_surface` (2d) | `coverage_surface` (2e) | `data_surface` (2f) |
-|---|---|---|---|---|---|
-| **Unresolved ⇒** | **`null` + `UNRESOLVED`** | `true` | `true` | `true` | **`false`** |
-| Shape | 6 values + `cross-layer` | boolean | boolean | boolean | boolean |
-| Dispatches an agent? | no | **yes** (`ui-ux-expert`) | no | no | **yes** (`test-data-engineer`) |
-| Costs I/O in `1b`? | no | no | **yes** (~8.6 s) | yes (~1 s, wave B) | yes (~1 s, wave B) |
-| Has a conflict rule? | **yes** (`layers_conflict`) | no | no | no | no |
-| **Adds** a step, or **gates** one? | gates 5f/5h | adds the visual lane | adds two refreshers | adds Step 2a | **gates Step 3a** |
-| Consumed by | 5f / 5h routing | Step 4's visual lane | `1c`/`1d`/`1e`/3b pack | Step 2a's dispositions | Step 3a's dispatch |
+| | `layer` (2b) | `visual_surface` (2c) | `contract_surface` (2d) | `coverage_surface` (2e) | `data_surface` (2f) | `domain_map` (2g) |
+|---|---|---|---|---|---|---|
+| **Unresolved ⇒** | **`null` + `UNRESOLVED`** | `true` | `true` | `true` | **`false`** | **`unresolved` + recommend** |
+| Shape | 6 values + `cross-layer` | boolean | boolean | boolean | boolean | **4 states** (`PRESENT`/`STALE`/`ABSENT`/`unresolved`) |
+| Dispatches an agent? | no | **yes** (`ui-ux-expert`) | no | no | **yes** (`test-data-engineer`) | **FULL only**, and only on `ABSENT` + all-layer (`ba-system-analyzer`, `1c-map`) |
+| Costs I/O in `1b`? | no | no | **yes** (~8.6 s) | yes (~1 s, wave B) | yes (~1 s, wave B) | **no** (one local frontmatter read) |
+| Has a conflict rule? | **yes** (`layers_conflict`) | no | no | no | no | no |
+| **Adds** a step, or **gates** one? | gates 5f/5h | adds the visual lane | adds two refreshers | adds Step 2a | **gates Step 3a** | **adds `1c-map` on FULL; RECOMMENDS on FAST. Gates nothing, ever** |
+| Consumed by | 5f / 5h routing | Step 4's visual lane | `1c`/`1d`/`1e`/3b pack | Step 2a's dispositions | Step 3a's dispatch | `2-map`'s read order · `1c-map`'s trigger · `1e` clauses 11/11b · `1c`'s unmapped-surface report |
+
+### 2g `domain_map` — the axis whose lane is a WRITE, not a read
+
+**It resolves an artifact, not a surface.** Every other axis asks *does this ticket touch X, so should we
+also test X?* This one asks *does the persistent answer to "what exists and where" EXIST yet?* —
+`.claude/knowledge/domain/<name>.md`, `domain_slug` matching the ticket's domain. That makes its response
+unlike any other: the other five *consume* something already in the repo, and 2g's `ABSENT` branch
+**produces** it.
+
+**So it triggers a lane on FULL and no lane on FAST, and the asymmetry is the whole design.**
+
+| Path | On `ABSENT` + all-layer | Cost |
+|---|---|---|
+| **FULL** | dispatch `ba-system-analyzer` to BUILD the map — item `1c-map`, in the message that already carries `1c ‖ 1d ‖ 2-load` | one BA pass **once per domain, ever**; it lands in the run's existing dispatch wave rather than adding one |
+| **FAST** | recommend `/qa-domain-map <slug>` in one line and proceed | **zero** — one local frontmatter read |
+
+**FAST is untouched, and that is load-bearing.** The FAST promise is *one execution agent*
+([`SKILL.md`](SKILL.md) §Effort routing); 2g adds nothing to it and still cannot regrow the *"both paths,
+always"* problem §4 exists to prevent. **The axis derives on both paths; only its lane is FULL-only** —
+the same shape as `data_surface`, which derives everywhere and dispatches only where it must.
+
+**Why the build was promoted from a recommendation (2026-09-10).** The recommendation was honest and it
+did not work: the map existed for **1 of 13** domains months after the mechanism shipped, because a
+recommendation arrives at the moment its cost is least welcome — mid-run, to someone who came for a ticket
+verdict, about an artifact that pays off on the *next* ticket. Each individual decline was correct and the
+aggregate was that clauses 11 and 11b — the two that catch the failure the other ten cannot see — were
+satisfied by writing down `ABSENT` on almost every run. A run that can build the thing in a wave it is
+already paying for should build it. **What did NOT change: nothing about this axis blocks, and a build
+failure degrades to exactly the old behaviour.**
+
+**And a `STALE` map is still never auto-refreshed.** A refresh rewrites a tracked knowledge file, carries
+`D*`/`G*` ids forward and must contradict its previous rev out loud. *Days since `generated`* is a
+staleness suspicion, not a mandate to rewrite — that decision stays with an operator (`--refresh`).
+
+**Four states, not a boolean, because absence and staleness are different facts with opposite consequences.**
+
+| State | Means | Consequence |
+|---|---|---|
+| `PRESENT` | a map matches the slug and is inside `stale_after_days` | `2-map` reads it first; `1e` clauses 11/11b bind against its inventory; **`5h-map` writes back what the run verified** ([`reporting.md`](reporting.md) §5h-map) |
+| `STALE` | matches, but past `stale_after_days` | **read it, and treat every claim as a hypothesis** — a stale map is the *more* dangerous artifact, because it is read as current and arrives with a written deliverable's authority. Recommend `--refresh`; **never auto-refresh**. `5h-map` still amends it — upgrading a stale cell with a live observation is strictly an improvement, and it moves `amended`, never `generated`, so the map stays STALE until someone re-enumerates |
+| `ABSENT` | no map for this slug | **only if the chain is all-layer** — FULL builds it at `1c-map`, FAST recommends. Single-layer, or a build that failed: `1e` records `Domain map: ABSENT — chain position unverified` |
+| `unresolved` | slug did not resolve, or the directory was unreadable | same as `ABSENT` — **fail open** (build on FULL, recommend on FAST); see the fail direction below. A slug that `bl:extract --list` does not know **stops the build, never the run**: a map filed under a slug no oracle uses is a map nothing can look up |
+
+**Fail direction: fail-OPEN on the build, fail-NEVER on blocking.** A false positive now costs one BA pass
+on a domain that turns out not to need a map — recoverable, and the map is still true. A false negative
+repeats the failure the axis exists to catch. But **no state of this axis ever blocks a run**, and that is
+the clause the promotion to a build must not erode: `1c-map` joins before `1e` and the run does not wait on
+it past that point, a failed or gate-refused build leaves `state: ABSENT` and proceeds, and a missing map
+is never a finding about the product. `npm run domain:check` encodes the same asymmetry: **stale fails,
+missing passes.**
+
+**Two-moment axis, like `coverage_surface`.** At `1b` 2g the all-layer question is answered
+**provisionally** — from `1a`'s domains plus whether the domain has a back-office surface at all — because
+the ticket's value chain does not exist until `1e`. It is **confirmed at `1e`** against Part 0. And it
+reads the **CHAIN, not the diff**: VCST-5317's diff was storefront + xAPI with no admin-spa file, so a
+diff-based read stays silent, while its chain's first link is *an admin locks the membership* — an
+Admin-layer action, and exactly where the mechanism it tested blind actually lives.
+
+**It is the only axis a run REPAYS, and since 2026-09-10 the repayment actually lands.** `1c` reports
+surfaces it touched that the map does not list into `domain_map.unmapped_surfaces[]`, and **`5h-map`
+writes them into the map** after the verdict — along with a `D*` confirmed or refuted live, a `G*` this
+run closed, and a §4 count it proved wrong. Before that step those reports were proposals, which is the
+same shape as the recommendation above and failed the same way. Two guards make the write safe: it runs
+**after 5f**, so a run can never bind clause 11b against inventory it widened itself, and it moves
+`amended` and never `generated`, so amending is never mistaken for re-enumerating.
 
 **Why `layer` alone fails closed.** Every other axis answers *should we also do X?*, where a wrong `true`
 costs one agent or one script and a wrong `false` leaves a gap nobody sees — so doubt widens. `layer`
@@ -162,7 +227,7 @@ measured them.
 
 One block per axis in `summary.json`, and the field names are **nested, matching the schema**:
 `visual.surface_source[]`, `contract.surface_source[]`, `coverage_triage.surface`, `release.layer_source[]`,
-`test_data.surface` + `test_data.surface_source[]`.
+`test_data.surface` + `test_data.surface_source[]`, `domain_map.state` + `domain_map.sources[]`.
 A flat `visual_surface_source[]` spelling is drift — `npm run qa-test:doclint` (DOC-005) catches it.
 
 In every block, **`null` means the axis never ran**; an empty array means it ran and found nothing. The

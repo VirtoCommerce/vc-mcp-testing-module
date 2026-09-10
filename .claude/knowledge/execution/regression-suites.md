@@ -45,6 +45,52 @@ came to be documented for weeks after its CSV was deleted.
   - **All four stay in `regression/suites/Backend/smoke/`.** `check-smoke-gates.ts` builds its case
     set as the UNION of the sibling CSVs in a directory, so `ADMIN-SMOKE-CHECKLIST.md` and gates
     SG-001/004/005 keep working with no checklist edit. Moving one file out silently breaks them.
+- **Splitting is now a script, not a hand analysis — `npm run suites:split -- <ID>`**
+  (`scripts/regression/plan-suite-split.ts`, `--apply` to write, tests
+  `scripts/unit/suite-split-planner.test.ts`). It imports the SAME reference regex and the same
+  *"a token counts only when it resolves to a real case id"* rule XREF-001 is enforced with, so the
+  planner and the gate cannot disagree; it keeps every dependency component whole and **refuses to
+  emit a plan whose boundaries cut an edge**. Rows are sliced out of the raw file by a quote-aware
+  scanner and written byte-for-byte — a `csv-parse` round-trip would renormalise quoting across
+  ~100 multi-line rows, an unreviewable diff `CSV_LINT_BASELINE` would absorb silently. The parent
+  KEEPS its id (a past `sprint:XX-YY` plan naming it still resolves, to a smaller suite); siblings
+  take the next free letter, carry the parent's routing fields, and must be added by hand to any
+  `selections` entry that names the parent EXPLICITLY (`where`-based groups pick them up from the
+  carried domain/layer/tags). **Its generated sibling NAMES are placeholders** — it takes the first
+  theme in the range, which is rarely the representative one.
+  - **Three splits applied 2026-09-09** at the default 60-case budget: `060` → `060`+`060b`
+    (116 → 58+58), `072` → `072`+`072e` (113 → 57+56), `014` → `014`+`014b` (98 → 51+47). Verified
+    lossless **in binary, against the HEAD blob with CRLF normalised to LF** (`.gitattributes` pins
+    these CSVs to `text eol=crlf`, so the blob is LF and the working tree is CRLF — comparing them
+    in a text-mode reader proves nothing, which is how the first pass of this check came out green
+    while a whole file's endings were wrong): `060` and `014` reassemble to **0 bytes of
+    difference**; `072` differs by exactly its one intended content change (below) and one stray
+    blank line between records. Corpus total is unchanged at 4 506 cases. The longest browser session on `full` drops **116 → 84**, which is
+    the one thing bounded batching provably cannot do (`ci/lib/suite-batching.ts` — a batch is
+    never shorter than its longest member). 327 cases leave the 28.6% artefactual-BLOCKED bucket
+    for the 17.7% one.
+  - **Two suites remain over 81 and both are correct to leave.** `050m` (129) is **machine-lane**
+    (`lanes.machine: 126`) — a deterministic runner, not an LLM session, so the 81+ bucket does not
+    describe it. `083c` (84) is **dependency-span-blocked**: its largest dependency component is
+    only 8, but its declared edges reach 74 rows apart, so no contiguous, order-preserving split can
+    separate them. Splitting it needs the rows RE-ORDERED so each component sits together — a
+    manual, single-author change the script deliberately will not make for you. The planner reports
+    these three cases (oversized component · wide span · merely-coarse theme) distinctly, because
+    the operator's next move differs and the first version of the message sent 083c to a `--depth`
+    flag that could not help it.
+  - **A split can move a baselined XREF-001 violation into a new file**, where it reads as new drift
+    and hard-fails. `072`'s one baselined ref (`CFG-PDP-045-COND` → `CFG-CA-023`, suite 052) landed
+    in `072e`; it was **fixed rather than re-baselined** — the case's own `[SETUP]` seeds the
+    circular dependency via REST, so the clause was contextual background, not a precondition, and
+    restating it as state (citation kept in `References`) burned `XREF_BASELINE` down 98 → 97.
+  - **Never round-trip a suite CSV through a text-mode reader.** Making that one-cell edit with
+    Python's default `open()` silently stripped **every CRLF in `072e`** — text mode translates on
+    read *and* on write, and on Linux writes back bare `\n`. It produced exactly the mixed-endings
+    state `.gitattributes` exists to prevent (the 2026-06-10 `050b4` incident: the GraphQL runner's
+    `csv-parse` with `relax_column_count: false` fails on mixed endings inside a multi-line quoted
+    cell). Git would have normalised it away on commit, which is worse, not better — the working
+    tree everyone runs against was wrong in the meantime. Edit in binary, or with a tool that
+    preserves endings; `suites:split` now warns when a parent is already mixed.
 - **XREF-001 — a dependency may not leave its suite CSV.** New hard gate in
   `npm run suites:lint` (`findCrossFileCaseRefs`, unit tests `scripts/unit/suite-split-integrity.test.ts`).
   A suite is the unit of dispatch: two suites can run on different lanes, in either order, or one
@@ -65,3 +111,50 @@ came to be documented for weeks after its CSV was deleted.
   - **Renumber into a free range** when both suites legitimately share one domain namespace and only the numbers clashed — no new prefix: `035` STORE-052…055 → 066…069, `032` AUTH-066/067 → 074/075, `003` CAT-030…040 → 068…078, plus `CFG-TEXT`/`CFG-VAR` singles.
 - **Critical UI scope**: `knowledge/oracles/critical-ui-scope.md` defines the checklist of 36 components and 16 pages with applicable BL-UI invariants per cell. **Currently UNCOVERED** — its sole covering suite `048b-layout-stability.csv` (selection `layout-stability`) was removed on 2026-07-25, so all 197 applicable cells are marked `GAP`. The file is retained as the scope definition + audit-protocol reference for `/qa-design`. `npm run scope:validate` still hard-fails if a cell points at a *missing* test ID and warns on the GAP count; `--strict` makes GAPs fatal again once a replacement suite lands.
 
+## Working concurrently on suites
+
+The rule itself — one author per suite CSV per change, and a conflict is never resolved with git — is
+tier 1, in [`.claude/rules/regression.md`](../../rules/regression.md) §Suite inventory. This is the
+reasoning and the how-to.
+
+**Why one author, specifically for a CSV.** The same discipline `/qa-review-oracles` applies to
+`business-logic.md` and `e-commerce-edge-cases-library.md` — triangulation fans out, the **apply is
+single-writer** — plus two reasons specific to suites:
+
+- **A CSV is not mergeable in practice.** Rows are multi-line, quoted, and the safe writers
+  (`suites:append`, the surgical byte-level edit `promote-cases.ts` uses) all read-modify-write the
+  whole file. Two such writes interleave into a file that parses but is wrong — and `suites:lint`
+  cannot tell you which half was intended.
+- **The disposition is the artifact, not the diff.** A restructure is a set of coupled decisions —
+  this case is culled *because* that journey now crosses its link, these two merge *because* they
+  test one rule. Splitting the file between two authors splits the reasoning, and the second author
+  cannot see why the first kept what they kept.
+
+**How to work concurrently anyway** — the fan-out is fine, the *write* is what serialises:
+
+| Want | Do |
+|---|---|
+| Two people analysing one suite | Both analyse; **one** applies. The other hands over a staged rows CSV + a disposition table |
+| Two suites, two authors | Fine — ownership is per file, and `config/test-suites.json` is written by `suites:sync`, not by hand. **It is shared state**: agree who runs sync, or exchange the per-suite delta and let one side apply it |
+| Handing a suite over mid-change | Say so explicitly and stop writing. The successor re-reads the file from disk before their first edit |
+| You find a suite already modified in the tree | **Do not overwrite and do not revert.** Someone else is mid-change; report the conflict and wait |
+
+**A mid-write invalid CSV blocks every concurrent author, not just you.** `suites:sync` and
+`suites:lint` hard-fail on a parse error anywhere in the corpus, so a suite left transiently
+unparsable — a half-written quoted field, an unbalanced closing quote — takes the manifest gate down
+for everyone in the tree until it is fixed. So the surgical-edit discipline (`promote-cases.ts`:
+locate the record by its own raw text, replace only the changed bytes, **re-parse and compare
+field-by-field**) is not merely about diff hygiene during a shared-tree window — **re-parse after
+EVERY write**, not once at the end.
+
+**A fact relayed to another session's SUBAGENT does not arrive — it is lost silently.** Cross-session
+messages land in a subagent's context as system-reminder blocks and (correctly) trip the harness's
+prompt-injection handling: the receiving agent treats them as untrusted, declines to act, and may
+refuse to open files the message points at. **The relay path that works is session → session → the
+receiving session RE-ISSUES the fact, in its own words, in the subagent's dispatch brief.** That
+re-statement is also what makes the fact reviewable, so it is the right shape independent of the
+transport. Never assume a forwarded fact landed; if it matters, it belongs in the brief.
+
+The measured losses behind every line above:
+[`docs/decisions/regression-history.md`](../../../docs/decisions/regression-history.md)
+§Shared-tree losses.
