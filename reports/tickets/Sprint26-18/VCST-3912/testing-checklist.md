@@ -3,7 +3,14 @@
 `[Support] #38981 — Price restriction on order, catalog, pricing modules` · Story · High · status `Testing`
 Run: 2026-09-10 · Path **FULL** · Flow `feature-test` · Env target **vcptcore-qa** · Model: [`VCST-3912-2026-09-10.md`](../../../ba/test-models/VCST-3912-2026-09-10.md)
 
-## Verdict — FAIL (4 confirmed defects, 3 of them Critical)
+## Verdict — FAIL (5 confirmed defects: 1 REGRESSION this PR introduced, 4 pre-existing)
+
+> **The one regression is `ORDA-108` (store scope) — see Round 2.** The other four are real and worth fixing, but the deleted handler behaved identically, so they are *not fixed by* this PR rather than *broken by* it. That distinction drives triage and it was established from the diff, not assumed.
+
+> **SCOPE — the customer scenario was NOT tested, and this run does not speak to it.**
+> Everything below exercises the **default** rule: a role without the global `order:read_prices`, which hides prices on **every** order for that user. That is the approach Infosys already reported as unworkable (comment 2026-02-24 and the attached analysis: *"This kind of assignment masks all types of order irrespective of whether direct or indirect"*). Heineken needs prices hidden **per distributor**, and making that possible is the whole purpose of this story.
+> The extension point could not be exercised here: the sample module `VirtoCommerce.OrdersModule2` is **not deployed**, so `order_samples:read_prices_direct` / `..._indirect` do not exist (345 permissions on the stand, none with that prefix) and no custom `ICustomerOrderDataProtectionService` is registered. **AC-3 is unverified and so is the direct/indirect split.**
+> The four pre-existing defects still stand, because they sit in the shared redaction path every rule flows through — under a per-distributor rule the same leaks expose a *competitor's* prices rather than merely "a price". But **no claim is made here that the feature solves the customer's problem.**
 
 **Deployed and executed.** vc-deploy-dev PR [#6499](https://github.com/VirtoCommerce/vc-deploy-dev/pull/6499) pinned `VirtoCommerce.Orders` to the PR-472 build; merged 2026-09-10 09:42, deploy green 09:44. Verified on the stand, not from the action's status: `GET /api/platform/modules` → **`3.1015.0-pr-472-dfa3`**, and an order payload now carries **`withPrices`**.
 
@@ -12,7 +19,7 @@ Fixtures seeded on vcptcore-qa: role **`AGENT-TEST-ORDER-NOPRICES`** (all 10 Ord
 | Case | Verdict | One line |
 |---|---|---|
 | `ORDA-105` | **PASS** | Every scalar monetary field on the order root and its line items is correctly zeroed; `withPrices:false` set. |
-| `ORDA-106` | **PARTIAL** | 404 for an absent order/number confirmed. The 403-out-of-scope half needs a store-scoped user — not created. |
+| `ORDA-106` | **PASS** | 404 for an absent order and **403 for an out-of-scope order** both confirmed (Round 2, scoped fixture). |
 | `ORDA-107` | **FAIL (High)** | Sort-order inference proven exactly. |
 | `ORDA-109` | **BLOCKED** | No order with captures/refunds exists in 120 sampled — fixture gap, not a product result. |
 | `ORDA-114` | **FAIL (Critical)** | Payment/shipment endpoints return real money **and** falsely report `withPrices:true`. |
@@ -20,7 +27,9 @@ Fixtures seeded on vcptcore-qa: role **`AGENT-TEST-ORDER-NOPRICES`** (all 10 Ord
 | `ORDA-113` | **FAIL (Critical)** | 6 of 8 Admin surfaces mask correctly; the **invoice PDF renders `Total: $0`** and both Discounts blades show real amounts. |
 | `ORDA-120`, `ORDA-121` | **PASS** | Deep-link and refresh both hold masking; no partial save. |
 | `ORDA-122` | **PARTIAL** | Fails closed on a 404 fault; the 500/malformed branch needs the reserved Chrome DevTools lane. |
-| `ORDA-104`, `108`, `110`, `111`, `112`, `115`–`117`, `119`, `ORD-GQL-014` | **NOT RUN** | Need a store-scoped role, a disposable order with captures/refunds, or a system-context export trigger. |
+| `ORDA-108` | **FAIL (Critical)** | **REGRESSION** — an out-of-scope store request returns all 1248 orders instead of the caller's 54. See Round 2. |
+| `ORDA-110` | **PASS** | Restore-on-write via `PUT`: stored `777.77` survived a denied user's save. |
+| `ORDA-104`, `111`, `112`, `115`–`117`, `119`, `ORD-GQL-014` | **NOT RUN** | Need an order with captures/refunds, a resolvable platform-export request shape, or the sample module deployed. |
 
 ### Admin SPA pass — `playwright-edge`, 8 price surfaces × 2 users
 
@@ -55,6 +64,50 @@ The invoice endpoint returns **HTTP 200** to the denied user and generates a PDF
 
 **4. `ORDA-107` — the ranking leaks even though the values do not (High).**
 Denied user sorts by `total:desc` and receives every total as `0`. Reading those same orders privileged, in the order they were returned: `2421250, 2421250, 2400062, 2400040, 2400040, 930040, 105723.1, 82381.04` — **exactly the true descending order**. Every order in the system is rankable by value, and range filters narrow actual amounts. The architecture doc predicts this and says the design does not address it.
+
+
+### Round 2 — the scenarios the PR actually changed (fixtures built, 2026-09-10)
+
+Round 1 tested the *default* rule, which pre-dates this PR. This round targets the behaviour the PR's own "Breaks at runtime" section describes. Fixtures created to unblock it: user `agent-test-scoped` / `AgentScoped2026!` on role `AGENT-TEST-ORDER-SCOPED-ELECTRONICS` (`order:read` carrying an `OrderSelectedStoreScope` for store `Electronics`), and `platform:export`/`import` added to the no-prices role.
+
+| New behaviour (per the PR body) | Result |
+|---|---|
+| `ResponseGroup` no longer rewritten — sections arrive, values zeroed | **PASS** — `Full`/`WithItems`/`Default` each return exactly the group asked for with `total 0`, `withPrices false`. An explicit `responseGroup=WithPrices` does **not** grant prices. |
+| Restore-on-write via `PUT` | **PASS** — denied user read `0`, saved, stored `777.77` survived and the comment persisted (disposable order `AGENT-TEST-CO-3912-01`, since deleted). |
+| Restore-on-write via `PATCH` | **INCONCLUSIVE** — 400, wrong payload shape (JSON Patch expected). Nothing was written, so "prices intact" proves nothing. Not a pass. |
+| `404` for an absent order | **PASS** |
+| `403` for an out-of-scope order on GET-by-number | **PASS** |
+| **Store scope intersected instead of overwritten** | **FAIL — Critical REGRESSION**, see below |
+| Case-insensitive store matching | **FAIL** — folded into the same regression |
+| Export/import through the protection service | **NOT RUN** — export permissions now granted, but the platform export request shape could not be resolved (admin control also 500s, so the instrument is unverified — not reported as a product result) |
+| The extension point / direct-vs-indirect distributor rule | **NOT RUN** — sample module `VirtoCommerce.OrdersModule2` is built by no pipeline and exists in no artifact feed |
+
+### THE REGRESSION — store scope, `ORDA-108` {Critical}
+
+**This is the only defect in this run that the PR introduced.** All four Round-1 findings are pre-existing (the deleted handler called the identical `ReduceDetails(Full & ~WithPrices)`, and the architecture doc records the payment/shipment no-op as the old design's behaviour). This one is new:
+
+```
+OLD (deleted):  criteria.StoreIds = allowedStoreIds;                        // unconditional overwrite
+NEW:            criteria.StoreIds = AllowedStoreIds.Intersect(criteria.StoreIds)
+```
+
+The old code always narrowed a request down to the caller's scope. The new code intersects — and an out-of-scope request yields `[]`, which downstream means *no store filter at all*.
+
+Measured with a user scoped to `Electronics` (entitled to 54 orders):
+
+| Request | Returned |
+|---|---|
+| no store specified | 54 · Electronics only ✅ |
+| `storeIds: ["Electronics"]` | 54 · Electronics only ✅ |
+| `storeIds: ["B2B-store"]` — out of scope | **1248 · every store** ❌ |
+| `storeIds: ["ELECTRONICS"]` — case differs | **1248 · every store** ❌ |
+| `storeIds: ["B2B-store","Electronics"]` | 54 · Electronics only ✅ |
+
+Asking for a store you may not see returns the entire order book. A case difference does the same, because `Intersect` is ordinal — the case-insensitive matching the PR advertises covers the single-order path, not this one.
+
+Note the asymmetry: `GET .../number/{n}` correctly returns **403** for an out-of-scope order. The entity path denies; the search path opens everything.
+
+Reviewer flagged this High on the PR; the author replied "By design". It is strictly worse than the code it replaces, so that reply should be revisited.
 
 ## Gates
 

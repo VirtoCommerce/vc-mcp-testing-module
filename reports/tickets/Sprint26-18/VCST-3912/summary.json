@@ -142,9 +142,9 @@
     "notes": "All four story ACs graded non-testable or partial at 1d: AC-1 and AC-2 are structural/vague ('is responsible for Data Protection', 'works as expected'); AC-3 and AC-4 are deliverable-presence checks. AC-4 names IEntityDataProtectionService, which does not exist in the shipped diff — only docs/data-protection-architecture.md defines it, marked Status: Proposal and targeting VirtoCommerce.Platform.Core. The 22 gap-ACs, not the story ACs, are the spine of this run."
   },
   "total_cases": 20,
-  "passed": 3,
-  "failed": 4,
-  "blocked": 13,
+  "passed": 7,
+  "failed": 5,
+  "blocked": 8,
   "iterations": {
     "enabled": false,
     "rounds": 0,
@@ -212,25 +212,31 @@
     {
       "severity": "Critical",
       "provenance": "in-scope",
-      "summary": "ORDA-114: /api/order/payments/search and /shipments/search return real monetary values to a caller denied order:read_prices AND report withPrices:true. 176 non-zero payments totalling 13,235,931.74 in a 200-row sample; max single 2,421,250. Child services are undecorated. REPORTED in comment 109131 on VCST-3912 (operator asked for one consolidated comment rather than separate Bug tickets); 6 screenshots attached and verified rendered via renderedBody.",
+      "summary": "ORDA-108 REGRESSION introduced by this PR: store scope changed from unconditional overwrite (criteria.StoreIds = allowedStoreIds) to Intersect. An out-of-scope or differently-cased store request yields an empty StoreIds, which downstream means no filter — a user scoped to Electronics (54 orders) receives all 1248 orders across every store. Reviewer flagged High; author replied \"By design\". Not filed — awaiting operator decision.",
       "report": null
     },
     {
       "severity": "Critical",
-      "provenance": "in-scope",
-      "summary": "ORDA-118: ReduceDetails(Full & ~WithPrices) leaves WithDiscounts set, so Discounts[] is never nulled; TaxDetails/FeeDetails are never referenced. 15 of 60 orders leak, 26 nodes, order and shipment level. CO260909-00002 total=0 beside discounts[0].discountAmount=44.995. REPORTED in comment 109131 on VCST-3912 (operator asked for one consolidated comment rather than separate Bug tickets); 6 screenshots attached and verified rendered via renderedBody.",
+      "provenance": "pre-existing",
+      "summary": "[PRE-EXISTING, not a regression — the deleted handler called the identical ReduceDetails(Full & ~WithPrices)] ORDA-114: /api/order/payments/search and /shipments/search return real monetary values to a caller denied order:read_prices AND report withPrices:true. 176 non-zero payments totalling 13,235,931.74 in a 200-row sample; max single 2,421,250. Child services are undecorated. REPORTED in comment 109131 on VCST-3912 (operator asked for one consolidated comment rather than separate Bug tickets); 6 screenshots attached and verified rendered via renderedBody.",
       "report": null
     },
     {
       "severity": "Critical",
-      "provenance": "in-scope",
-      "summary": "ORDA-113/invoice: the invoice endpoint returns HTTP 200 to a caller denied order:read_prices and renders a PDF stating Total: $0 for an order worth 44.99, without consulting withPrices. Indistinguishable from a genuinely zero order. Server-rendered, outside the ten migrated client files. REPORTED in comment 109131 on VCST-3912 (operator asked for one consolidated comment rather than separate Bug tickets); 6 screenshots attached and verified rendered via renderedBody.",
+      "provenance": "pre-existing",
+      "summary": "[PRE-EXISTING, not a regression — the deleted handler called the identical ReduceDetails(Full & ~WithPrices)] ORDA-118: ReduceDetails(Full & ~WithPrices) leaves WithDiscounts set, so Discounts[] is never nulled; TaxDetails/FeeDetails are never referenced. 15 of 60 orders leak, 26 nodes, order and shipment level. CO260909-00002 total=0 beside discounts[0].discountAmount=44.995. REPORTED in comment 109131 on VCST-3912 (operator asked for one consolidated comment rather than separate Bug tickets); 6 screenshots attached and verified rendered via renderedBody.",
+      "report": null
+    },
+    {
+      "severity": "Critical",
+      "provenance": "pre-existing",
+      "summary": "[PRE-EXISTING, not a regression — the deleted handler called the identical ReduceDetails(Full & ~WithPrices)] ORDA-113/invoice: the invoice endpoint returns HTTP 200 to a caller denied order:read_prices and renders a PDF stating Total: $0 for an order worth 44.99, without consulting withPrices. Indistinguishable from a genuinely zero order. Server-rendered, outside the ten migrated client files. REPORTED in comment 109131 on VCST-3912 (operator asked for one consolidated comment rather than separate Bug tickets); 6 screenshots attached and verified rendered via renderedBody.",
       "report": null
     },
     {
       "severity": "High",
-      "provenance": "in-scope",
-      "summary": "ORDA-107: indexed/DB search sorted by total returns the exact true descending order of the hidden totals to a denied caller, making every order rankable by value. REPORTED in comment 109131 on VCST-3912 (operator asked for one consolidated comment rather than separate Bug tickets); 6 screenshots attached and verified rendered via renderedBody.",
+      "provenance": "pre-existing",
+      "summary": "[PRE-EXISTING, not a regression — the deleted handler called the identical ReduceDetails(Full & ~WithPrices)] ORDA-107: indexed/DB search sorted by total returns the exact true descending order of the hidden totals to a denied caller, making every order rankable by value. REPORTED in comment 109131 on VCST-3912 (operator asked for one consolidated comment rather than separate Bug tickets); 6 screenshots attached and verified rendered via renderedBody.",
       "report": null
     }
   ],
@@ -429,7 +435,7 @@
     "fixtures_covering": [],
     "divergence_resolved": true,
     "td_validate": "green for the two suites this run touched — 050c [OK] 3/3 resolved; 017 carries no @td() refs. 17 unrelated suites fail on the known vcptcore fixture gap, pre-existing and untouched.",
-    "seed_run": "manual, inline: role AGENT-TEST-ORDER-NOPRICES (10 Orders perms minus order:read_prices, plus platform:access) + user agent-test-noprices on vcptcore-qa. MUST BE DELETED after triage.",
+    "seed_run": "manual, inline: roles AGENT-TEST-ORDER-NOPRICES (+platform:export/import) and AGENT-TEST-ORDER-SCOPED-ELECTRONICS (order:read with an OrderSelectedStoreScope for Electronics); users agent-test-noprices / agent-test-scoped. Disposable order AGENT-TEST-CO-3912-01 created and deleted. ALL MUST BE DELETED after triage.",
     "deferred_reason": "Step 3a was deliberately NOT dispatched. Seeding a role and user onto a shared QA environment was not authorised, the fixtures cannot be validated against a feature that is not deployed, and inventing @td() aliases that resolve to nothing would break td:validate for every author in the tree. The cases name their fixtures in Preconditions prose instead — the same convention ORDA-091..095 already use — so a seeder can be written straight off the rows.",
     "fixtures_required_before_execution": [
       "Admin role with every Orders permission EXCEPT order:read_prices, plus platform:access, assigned to a dedicated user (permissions live on roles — VC-B2B-002)",
