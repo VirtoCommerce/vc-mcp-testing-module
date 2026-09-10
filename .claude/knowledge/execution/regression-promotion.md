@@ -81,8 +81,8 @@ hand-editing the cell:**
 
 ## The full procedure — `/qa-test-lifecycle` 6P against a completed `RUN_ID`
 
-> **Moved here from `.claude/skills/qa-test/promotion.md` on 2026-09-10, and that file was deleted.**
-> It lived under `skills/qa-test/` describing a step `/qa-test` no longer has, so the location made the
+> **Moved here from the `/qa-test` skill directory on 2026-09-10, and that file was deleted.**
+> It lived under `.claude/skills/qa-test/` describing a step `/qa-test` no longer has, so the location made the
 > procedure look like a `/qa-test` step it had stopped being. Promotion has one home: this file.
 > `/qa-regression` Step 6.5 runs **step 4 alone**, against the run it just produced; steps 1–3 are the
 > assertion work only 6P does, and a case that needs them holds at `PR-007` there and is routed here.
