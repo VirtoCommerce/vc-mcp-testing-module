@@ -230,7 +230,9 @@ on; that is the whole point.
 
 #### Round N+1 is ONE track: C1 / RED→GREEN
 
-**Exactly the previously-FAILED case IDs, as its own `/qa-regression <suites> --ids <IDs>` run.** Its pass
+**Exactly the previously-FAILED case IDs, as its own `/qa-regression <suites> --ids <IDs> --no-promote` run.**
+`--no-promote` for the same reason `4c` passes it: a delegated run must not promote from inside the
+pipeline that authored the cases ([`qa-regression.md`](../../commands/qa-regression.md) §Step 6.5). Its pass
 rate answers **one** question — did the fix turn red green. **FAST:** the failed **checklist items**, run
 by the one execution agent; no `RUN_ID`, no `--ids`.
 

@@ -11,8 +11,10 @@ per-ticket documentation.
 **The order is fixed and each step depends on the one before it:** 5e reports (and is what *publishes* the
 verdict 5c recorded), 5f transitions **after** the report, 5h documents **after** the transition, and
 `5h-map` writes back to the domain map last of all (FULL only, non-blocking). **Promotion is not here** —
-`/qa-test` stopped promoting on 2026-09-10; the procedure moved to
-[`promotion.md`](promotion.md), run by [`/qa-test-lifecycle`](../../commands/qa-test-lifecycle.md) 6P.
+`/qa-test` stopped promoting on 2026-09-10; the procedure lives in
+[`regression-promotion.md`](../../knowledge/execution/regression-promotion.md), run by
+[`/qa-test-lifecycle`](../../commands/qa-test-lifecycle.md) 6P and, for cases already grounded, by a
+direct [`/qa-regression`](../../commands/qa-regression.md) run's Step 6.5.
 
 ## 5e. Report
 

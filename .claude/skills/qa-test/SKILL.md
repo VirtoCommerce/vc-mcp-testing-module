@@ -288,7 +288,7 @@ the agent prompt** — it goes to `/qa-regression` (`feedback_long_runner_sessio
 
 **Artifact A is NOT in the agent prompt either, since 2026-09-10.** It used to be, and `4c`'s C1 run
 executed the same rows — so every authored case ran twice, and only C1 emits the `RUN_ID` promotion needs,
-so the agent's copy grounded nothing ([`promotion.md`](promotion.md)). **Track `4a` is the checklist's
+so the agent's copy grounded nothing ([`regression-promotion.md`](../../knowledge/execution/regression-promotion.md)). **Track `4a` is the checklist's
 home; `4c` is the cases'.** Removing the rows is also what lets `4a` dispatch before authoring has
 finished — an agent briefed with rows that do not exist yet cannot start early.
 

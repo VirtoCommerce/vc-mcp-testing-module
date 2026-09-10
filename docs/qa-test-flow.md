@@ -209,7 +209,7 @@ sequenceDiagram
         Orch-->>User: Resolve env/data/dependency, re-run /qa-test
     end
     opt Step 3 authored new cases (new_cases_authored > 0)
-        note over Orch,User: They stay Draft. /qa-test STOPPED PROMOTING 2026-09-10 — the flip is a later /qa-test-lifecycle 6P pass against this run's RUN_ID (procedure: skills/qa-test/promotion.md)
+        note over Orch,User: They stay Draft. /qa-test STOPPED PROMOTING 2026-09-10 — the flip is a later /qa-test-lifecycle 6P pass, or a direct /qa-regression run's Step 6.5 (procedure: knowledge/execution/regression-promotion.md)
         Orch-->>User: Next step = /qa-test-lifecycle VCST-XXXX --promote-only
     end
 ```
@@ -331,14 +331,18 @@ sequenceDiagram
   of `{OBSERVED}` and needs a live browser, so promoting before execution is impossible. **`/qa-test`'s own
   `5g` step was REMOVED 2026-09-10**: it was a corpus-wide write sitting at the tail of a ticket run as a
   hard-STOP gate that fired *after* the close-out had been delivered, so it could neither block nor be
-  skipped cleanly — and it made two promoters for one corpus. **`/qa-test-lifecycle` Phase 6P is now the
-  only promoter**, for these cases as for handoff, re-promotion and legacy sources; it harvests the run's
+  skipped cleanly — and it made two promoters for one corpus. **`/qa-test-lifecycle` Phase 6P is the FULL
+  promoter**, for these cases as for handoff, re-promotion and legacy sources — and a **direct**
+  `/qa-regression` run flips already-grounded cases at its **Step 6.5**, from the `RUN_ID` it just made
+  (same `tc:promote`, no assertion harvest, suppressed with `--no-promote` on the C1 run `/qa-test`
+  delegates). 6P harvests the run's
   `RUN_ID`, flips each eligible case `Draft → Automated` (green under the automated runner) or
   `Reviewed`/`Manual` (checklist-only), **reverts non-promotable rows**, and leaves a case that failed on a
   real in-scope bug at `Draft` with a reason — ratified by a fresh `qa-lead` verifier + user confirmation,
-  so the author never self-certifies. Procedure: `.claude/skills/qa-test/promotion.md`. **The cost, stated:**
-  until someone runs that pass the cases sit at `Draft`, which the selections do not treat as maintained
-  coverage.
+  so the author never self-certifies. Procedure:
+  `.claude/knowledge/execution/regression-promotion.md` §The full procedure. **The cost, stated:** until
+  someone runs that pass — or a direct `/qa-regression` surfaces them at 6.5 — the cases sit at `Draft`,
+  which the selections do not treat as maintained coverage.
 
 ## Quality gates that apply to a story
 

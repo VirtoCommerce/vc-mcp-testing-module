@@ -1,5 +1,5 @@
 ---
-description: "Full test case lifecycle: detect changes → sync stale cases → analyze gaps → generate → review → fix → verify → approve → promote. Unified pipeline for change-driven sync and quality assurance; THE promoter into regression/suites/ for every source — handoff, re-promotion, legacy run-scoped cases, AND the Draft cases /qa-test appends during a run (it stopped promoting them itself on 2026-09-10)."
+description: "Full test case lifecycle: detect changes → sync stale cases → analyze gaps → generate → review → fix → verify → approve → promote. Unified pipeline for change-driven sync and quality assurance; THE FULL promoter into regression/suites/ — handoff, re-promotion, legacy run-scoped cases, AND the Draft cases /qa-test appends during a run (it stopped promoting them itself on 2026-09-10). Pass --run-id to reach Draft -> Automated. A direct /qa-regression run also flips already-grounded cases at its Step 6.5."
 argument-hint: "suite <ID> | domain <name> | VCST-XXXX | PR #NNN | module <name> | diff | changelog <version> [--promote-only]"
 ---
 
@@ -50,6 +50,7 @@ You are the **Test Case Lifecycle Orchestrator** for Virto Commerce. This comman
 | `--layer <name>` | Scope to a specific layer: `api`, `graphql`, `admin`, `storefront`, `e2e` |
 | `--report-only` | Run all phases but don't modify any CSV files — output report only. **Also blocks Phase 6P** (promotion is a write) |
 | `--promote-only` | Skip Phases 2–5. Resolve the legacy/handoff run-scoped CSV, re-derive G10 eligibility, and run **Phase 6P** only. Use when a case set was already reviewed + executed and only promotion is outstanding |
+| `--run-id <RUN_ID\|latest>` | Ground Phase 6P in a **completed regression run**, so it can reach `Draft → Automated` via `tc:promote` instead of stopping at `Reviewed`. Without it there is no runner verdict to cite and 6P promotes to `Reviewed` only. Combines with `--promote-only` (the usual pairing after a `/qa-test` run: `--promote-only --run-id latest`) |
 | `--ci` | CI mode: skip browser verification, apply all updates without confirmation, output machine-readable JSON. **Never promotes** (6P requires human/`qa-lead` approval) |
 
 > **BL audit is automatic, not a flag.** Phases 2–3 always collect the `BL-*` a run touches (stale refs + new-rule candidates); **Phase 4c always runs, scoped to exactly those candidates** — triangulating each against docs + live + source via `/qa-review-bl` and auto-applying the confirmed ones. No candidates ⇒ 4c is a no-op. For a broader sweep (a whole domain, not just what this run touched), use standalone `/qa-review-bl domain <name>`. (The former `--update-bl` opt-in flag is retired — the audit is safe by default because it's gated by an **applicable-axes evidence bar** — docs + live + source, with a structurally-unavailable axis such as docs-for-a-new-module *waived*, promoting only when every applicable axis agrees and at least two remain — so there's nothing to opt into.)
@@ -621,12 +622,25 @@ The `Automation_Status` flip `Draft → Reviewed` happens **in the rows being ap
 promotion. Stamp `References` with `Promoted: VCST-XXXX → <suite id> (YYYY-MM-DD)`, appending; never
 clobber an existing `Synced:` / `Audited:` / `Corrected:` stamp.
 
-> **6P promotes to `Reviewed`, and that is a different claim from `Automated` — do not reach for
-> `tc:promote` here.** `Reviewed` says a human/`qa-lead` approved the case; `Automated` says a runner
-> executed it green, which only a completed run can evidence. `npm run tc:promote`
-> (`.claude/knowledge/execution/regression-promotion.md` §Post-Run Promotion) derives `Draft → Automated` from a run's own
-> `suite-*-results.json` and writes nothing else — so it is the tool for a case already in a suite that
-> a regression run has since proven, **after** 6P, not instead of it.
+> **6P promotes to `Reviewed` by default, and `Reviewed` is a different claim from `Automated`.**
+> `Reviewed` says a human/`qa-lead` approved the case; `Automated` says a runner executed it green,
+> which only a completed run can evidence — so without a run there is simply no `Automated` claim
+> available to make, and hand-editing the cell to say otherwise is the exact failure `tc:promote` exists
+> to end.
+>
+> **Pass `--run-id <RUN_ID|latest>` and 6P makes both flips.** It runs `npm run tc:promote`
+> (`.claude/knowledge/execution/regression-promotion.md` §Post-Run Promotion), which derives
+> `Draft → Automated` from that run's own `suite-*-results.json`, writes nothing else, and holds
+> anything it cannot ground with a `PR-*` code. **A held case falls back to the `Reviewed` flip** if the
+> step-2 approval covers it — the two are a ladder, not alternatives. A checklist-verified case (no
+> automated-runner verdict at all) is `Reviewed`/`Manual` and stays a human call.
+>
+> **The same `tc:promote` also runs at [`/qa-regression`](qa-regression.md) Step 6.5**, against the run
+> it just made. **That is not a second promoter — it is one mechanism reached from the two places the
+> evidence exists**, and the scopes are disjoint: 6.5 flips cases that are *already grounded* and does no
+> assertion work, while 6P harvests `{HYPOTHESIS}` → `{OBSERVED}`, re-derives G10, and is the only path
+> that can promote a case no run has executed. Neither weakens the shared invariant: **promotion out of
+> `Draft` is never automatic.**
 
 **5 — Re-sync the manifest and re-gate.**
 

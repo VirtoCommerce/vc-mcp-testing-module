@@ -72,8 +72,8 @@ Labels are a **citation contract** and are never renumbered. `1e-plan`/`2a`/`3x`
 
 **`5r` (C2) and `5g` (promotion) were REMOVED 2026-09-10**, with `--release-regression`. Their labels are
 **retired, never reused**. Neither capability was deleted, only its automatic place here: a release sweep
-is a deliberate [`/qa-regression`](qa-regression.md) run, and promotion belongs to
-[`/qa-test-lifecycle`](qa-test-lifecycle.md). Rationale:
+is a deliberate [`/qa-regression`](qa-regression.md) run, and promotion belongs to that command's
+**Step 6.5** + [`/qa-test-lifecycle`](qa-test-lifecycle.md) **6P**. Rationale:
 [`decisions`](../../docs/decisions/qa-test-evolution.md) §Removing 5r and 5g.
 
 ```
@@ -641,7 +641,7 @@ Three rules hold this order, and the reasoning for each is in
 |---|---|---|---|
 | **3a** | Test data — **conditional on `data_surface`**, dispatched **beside `3x`** (browserless, so the seed runs inside the discovery box) | when `true`: **the orchestrator dispatches `test-data-engineer`** (`/qa-generate-data` → `/qa-seed-data`), never sub-delegated. When `false`: **no dispatch**, and the run names the fixtures that cover the plan | `true` → seeded env, green `td:validate`. `false` → every planned case resolves against existing `@td()`/`{{VAR}}` data **or is live-discoverable**, **and** no chain link under test needs a divergence those values lack ([`authoring.md`](../skills/qa-test/authoring.md) §3a) |
 | **3x** | Discovery session (FULL only) | **orchestrator invokes `/qa-exploratory ticket <ticket-key>`** — that command owns the session; this pipeline owns only the charter | model amendments + `summary.json.discovery` + `reports/exploratory/SBTM-<ticket-key>-<date>.md` |
-| **A** | Test cases (FULL only) | `test-management-specialist` | `regression/suites/<layer>/<module>/*.csv` as **`Draft`, and they STAY `Draft`** — `/qa-test` no longer promotes (`5g` removed 2026-09-10). Flipping `Draft → Automated` is [`/qa-test-lifecycle`](qa-test-lifecycle.md)'s job, on its own pass |
+| **A** | Test cases (FULL only) | `test-management-specialist` | `regression/suites/<layer>/<module>/*.csv` as **`Draft`, and they STAY `Draft`** — `/qa-test` no longer promotes (`5g` removed 2026-09-10). The `Draft → Automated` flip happens **outside this run**: [`/qa-test-lifecycle`](qa-test-lifecycle.md) 6P, or a later **direct** [`/qa-regression`](qa-regression.md) at its Step 6.5 |
 | **B** | Testing checklist (both paths) — written **after `3x` returns**, so it carries what discovery observed and not only what the ACs named. **One checklist, one execution pass** | `test-management-specialist`, or the orchestrator inline for a single-surface tweak | `reports/tickets/{SPRINT}/<ticket-key>/testing-checklist.md` |
 | **C1** | Ticket regression — **the exact set: every case this run wrote or changed** | orchestrator | scope assembled **at A's append** (§C1 — the exact set); one `/qa-regression … --ids` run, executed at `4c` |
 
@@ -747,11 +747,11 @@ running**.
 |---|---|---|---|
 | **4a** | **Checklist** — the applicable specialist agent(s), **in a single message**, running **Artifact B and nothing else** | `3-exec` | **FAST = one agent.** Prompt contract: [`SKILL.md`](../skills/qa-test/SKILL.md) §Agent dispatch. **Record `timing.time_to_first_test_minutes` at this dispatch** — it is the number this structure exists to move |
 | **4v** | **Visual lane** — `ui-ux-expert` on Chrome DevTools MCP, in the **same message** as 4a | `3-exec` | FULL when `visual_surface: true`; FAST only under `--visual`/`--axes`. **Dispatch the agent, never invoke `/qa-design`.** Axes, targets, the two things the brief must carry, verdicts, the SKIPPED rule: [`visual-axis.md`](../skills/qa-test/visual-axis.md). Writes `design-report.md` + `summary.json.visual` |
-| **4c** | **C1** — `/qa-regression <suite ids> --ids <new Draft ids + every REPAIR id + every RE-BASE id>` | `3-cases` — **or `2a` when `A` authored nothing** (§C1) | Its own run; capture `RUN_ID` + wall-clock. **Skip it saying so when the exact set is empty** — an omitted C1 must not read as a passing one |
+| **4c** | **C1** — `/qa-regression <suite ids> --ids <new Draft ids + every REPAIR id + every RE-BASE id> --no-promote` | `3-cases` — **or `2a` when `A` authored nothing** (§C1) | Its own run; capture `RUN_ID` + wall-clock. **`--no-promote` is mandatory** — it suppresses `/qa-regression` Step 6.5, which would otherwise promote minutes-old cases from inside the run that authored them, re-creating the placement `5g`'s removal fixed. **Skip C1 saying so when the exact set is empty** — an omitted C1 must not read as a passing one |
 
 **The specialist agent no longer runs the Artifact-A rows.** It ran them *and* `4c` ran them, so every
 authored case executed twice — and only `4c` emits the `RUN_ID` that promotion needs, so the agent's copy
-grounded nothing ([`promotion.md`](../skills/qa-test/promotion.md)). **Track 4a is the checklist's home;
+grounded nothing ([`regression-promotion.md`](../knowledge/execution/regression-promotion.md)). **Track 4a is the checklist's home;
 `4c` is the cases'.** The Scope line in the agent brief now reads *"run ONLY the checklist above"* on both
 paths.
 
