@@ -107,7 +107,7 @@ Each row names THE file that is normative for its topic. Read it before acting o
 | Bug auto-fix gate ladder G0–G7, ownership routing, no-auto-merge, client-code containment | `.claude/knowledge/execution/quality-gates.md` |
 | Test data — `@td()` / `{{VAR}}`, GOLDEN RULE, SECOND RULE | `.claude/rules/test-data.md`; seeder authoring `.claude/knowledge/execution/test-data-authoring.md` |
 | Report policy — categories, caps, severity folders, inline screenshots | `.claude/rules/reports.md` (stub) → `.claude/knowledge/execution/reports-policy.md` |
-| Regression — modes, manifest, shared-tree git prohibition, selection groups | `.claude/rules/regression.md`; lanes / promotion / scaffold / selection / selectors / pipelines / suites under `.claude/knowledge/execution/regression-*.md` |
+| Regression — modes, manifest, suite-authoring, selection groups | `.claude/rules/regression.md`; lanes / promotion / scaffold / selection / selectors / pipelines / suites under `.claude/knowledge/execution/regression-*.md` |
 | Agents — roster, browser lanes, delegation | `.claude/rules/agents.md`; knowledge-base read-before-write rules `.claude/ROUTING.md` |
 | MCP servers, `--secrets`, Chrome DevTools auth options | `.claude/knowledge/execution/browser-lanes.md` |
 | Oracles — BL invariants, ECL edge cases, bug catalog; their audit + value gate | `.claude/knowledge/oracles/`, `.claude/skills/qa-review-oracles/` (`npm run oracles:rank`, `bl:lint`, `ecl:lint`) |

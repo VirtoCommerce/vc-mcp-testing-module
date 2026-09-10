@@ -188,7 +188,7 @@ known cost, and three were measured:
 | Never | Because |
 |---|---|
 | `2d` concurrently with `1c` / `1d` / `1e` / the 3b pack | they READ what it writes; a refresh that races its readers is a refresh that did nothing |
-| Two writers on one suite CSV — the Step-3b append stays **serial**, `suites:sync` runs **once** | `suites:lint`/`sync` hard-fail on a parse error anywhere in the corpus, so N parallel writers multiply a tree-wide outage by N and block every other author in the tree (`.claude/rules/regression.md` §WORKING IN A SHARED TREE — measured: one mid-write invalid CSV blocked two sessions' gates for ~15 min) |
+| Two writers on one suite CSV — the Step-3b append stays **serial**, `suites:sync` runs **once** | `suites:lint`/`sync` hard-fail on a parse error anywhere in the corpus, so N parallel writers multiply a tree-wide outage by N and block every other author in the tree (`.claude/rules/regression.md` §Suite inventory — measured: one mid-write invalid CSV blocked two sessions' gates for ~15 min) |
 | `suites:sync` ‖ `suites:lint` | lint reads what sync wrote |
 | Artifact A ‖ 3a, or Artifact A ‖ 3x | cases are authored against fixtures that already resolve **and against the model 3x amended**. Authoring beside the discovery lane produces cases written from the guesses the lane exists to replace — the lane's value is entirely in the order ([`exploratory-lane.md`](exploratory-lane.md) §2) |
 | `3x` ‖ Step 4's execution agents | the lane closes before Artifact A, which closes before Step 4, so the max-3 cap holds **by construction** and needs no arbitration. Overlap them and it does not |
