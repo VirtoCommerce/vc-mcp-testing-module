@@ -26,16 +26,16 @@
 12. **Pass the ambient context — `cultureName`, `storeId`, `userId`, `organizationId` — on almost every query and mutation.**
     Most xAPI operations resolve against an implied context, and **omitting a context arg is not an error**:
     the server substitutes a default and returns `200` with data that is wrong, empty, or `null`. There is no
-    message to notice. Measured on this schema (110 queries, derived at refresh):
+    message to notice. Measured on this schema (108 queries, derived at refresh):
 
     | Context arg | Queries accepting it | Required | Optional |
     |---|---|---|---|
-    | `cultureName` | 61 (55%) | 3 | 58 |
-    | `storeId` | 64 (58%) | 32 | 32 |
-    | `userId` | 31 (28%) | 2 | 29 |
+    | `cultureName` | 61 (56%) | 3 | 58 |
+    | `storeId` | 63 (58%) | 32 | 31 |
+    | `userId` | 31 (29%) | 2 | 29 |
     | `organizationId` | 14 (13%) | 2 | 12 |
 
-    **85 of 110 queries (77%) accept at least one; 75 (68%) accept one OPTIONALLY** —
+    **84 of 108 queries (78%) accept at least one; 74 (69%) accept one OPTIONALLY** —
     that last figure is the exposure, because those are the calls that can quietly answer for a context you
     never chose. Mutations take the same fields inside the `command:` wrapper (see Rule 1), so the same rule applies.
 
@@ -195,8 +195,6 @@ salesRepTopSellerFilterRules(storeId: String, cultureName: String, organizationI
 salesRepTopSellerSortRules(storeId: String, cultureName: String)
 salesRepTopSellers(organizationId: String, storeId: String, filter: String, sort: String, period: SalesRepStatisticsPeriodInput, take: Int, currencyCode: String, cultureName: String)
 salesRepCustomerCounts(organizationId: String, storeId: String)
-purchaseRequest(purchaseRequestId: String!)
-purchaseRequests(after: String, first: Int, keyword: String, sort: String, storeId: String, customerId: String)
 canLeaveFeedback(storeId: String!, entityId: String!, entityType: String!)
 customerReviews(after: String, first: Int, keyword: String, sort: String, storeId: String!, entityId: String!, entityType: String!, filter: String)
 ```
@@ -364,12 +362,6 @@ wishlists(after: String, first: Int, storeId: String, userId: String, currencyCo
 | `registerByInvitation` | `InputRegisterByInvitationType` |
 | `saveSalesRepLayout` | `InputSalesRepLayout` |
 | `sendCustomerCommunication` | `InputSendCustomerCommunicationType` |
-| `addPurchaseRequestSource` | `InputAddPurchaseRequestSourceType` |
-| `createPurchaseRequest` | `InputCreatePurchaseRequestType` |
-| `createPurchaseRequestFromDocuments` | `InputCreatePurchaseRequestFromDocumentsType` |
-| `extractPurchaseRequestSourcesData` | `InputExtractDataFromPurchaseRequestSourcesType` |
-| `postProcessPurchaseRequestSources` | `InputPostProcessPurchaseRequestSourcesType` |
-| `updatePurchaseRequestByDocuments` | `InputUpdatePurchaseRequestByDocumentsType` |
 
 ### Payment
 
@@ -541,7 +533,7 @@ Fields: `key`, `value`
 
 ### Organization
 
-Fields: `id`, `outerId`, `memberType`, `name`, `status`, `phones`, `emails`, `groups`, `seoObjectType`, `seoInfo(storeId: String!, cultureName: String!)`, `defaultBillingAddress`, `defaultShippingAddress`, `addresses(after: String, first: Int, sort: String)`, `dynamicProperties`, `description`, `businessCategory`, `ownerId`, `parentId`, `myStatusInOrganization`, `contactRoles(storeId: String, cultureName: String)`, `assignableRoles(storeId: String, cultureName: String)`, `contacts(after: String, first: Int, searchPhrase: String, sort: String, roleIds: [String], statuses: [String], storeId: String, cultureName: String)`
+Fields: `id`, `outerId`, `memberType`, `name`, `status`, `phones`, `emails`, `groups`, `seoObjectType`, `seoInfo(storeId: String!, cultureName: String!)`, `defaultBillingAddress`, `defaultShippingAddress`, `addresses(after: String, first: Int, sort: String)`, `dynamicProperties`, `description`, `businessCategory`, `ownerId`, `parentId`, `myStatusInOrganization`, `isLockedForCurrentUser`, `contactRoles(storeId: String, cultureName: String)`, `assignableRoles(storeId: String, cultureName: String)`, `contacts(after: String, first: Int, searchPhrase: String, sort: String, roleIds: [String], statuses: [String], storeId: String, cultureName: String)`
 
 ### ContactType
 
