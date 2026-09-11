@@ -269,7 +269,7 @@
     {
       "severity": "High",
       "provenance": "in-scope",
-      "summary": "N2 runaway digest loop observed on an admin session after account switching: 49125 console lines, 10916 [$rootScope:infdig], 27.6 MB and still climbing after 7 minutes - an order of magnitude worse than the R2 loop just fixed. ui-grid row/col watcher signature. NOT REPRODUCED in four targeted probes, so the trigger is not isolated; reported as observed rather than as a clean repro. Likely related to the browser-scoped (not user-scoped) blade state already recorded.",
+      "summary": "N2 REPRODUCIBLE runaway digest loop in the Admin SPA orders grid. Repro in ONE tab: store-scoped user -> UI sign out -> agent-test-noprices -> UI sign out -> admin -> order deep-link. Grows ~3000 console lines / 2.2 MB per 20s WHILE IDLE, reaching 19228 lines / 4272 infdig / 14.3 MB in 2m20s; stops only on navigating away. CONTROL: fresh tab, same browser context, same admin session, same deep-link = 5 lines, 0 infdig - so the cause is the page instance's accumulated state across successive in-tab sign-ins, not the account/order/store/URL. Loops the orders list grid under the blade: two watchers only (fn: r and u.row+\",\"+u.col, ui-grid, AngularJS 1.8.3), paired 34176 times each. Likely needs >=2 sign-in cycles with a permission-scope change, leaving stale ui-grid scope state live when the wider role re-renders.",
       "report": null
     },
     {

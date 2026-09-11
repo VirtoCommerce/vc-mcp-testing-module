@@ -326,3 +326,24 @@ Job log in full, `errorCount: 0`: `Starting platform import... / Importing 'Virt
 **Request shape** (not discoverable from the API alone): `POST /api/assets?folderUrl=backups` (multipart) → `GET /api/platform/export/manifest/load?fileUrl=…` → `POST /api/platform/import` (JSON, with `fileUrl` naming the stored asset **and** the full `exportManifest` object; an empty body returns 200 and starts a no-op job).
 
 Cleanup: probe order deleted (count back to 1248). The uploaded 1.7 KB archive could not be removed via any assets/export route — it lives in backup storage, not the assets folder — so it needs manual deletion. It contains one zeroed test order that no longer exists, so restoring it would merely recreate a test order.
+
+### N2 — REPRODUCED on demand (closed 2026-09-11)
+
+Previously "observed, trigger not isolated". Reproduced on the first attempt with the exact account sequence, in **one tab**: store-scoped user → sign out → `agent-test-noprices` → sign out → admin → order deep-link.
+
+| Reading | Console lines | `infdig` | Size |
+|---|---|---|---|
+| baseline | 46 | 0 | 8 KB |
+| after deep-link | 2 669 | 582 | 1.94 MB |
+| +60 s idle | 3 520 | 782 | 2.62 MB |
+| after 2m20s | **19 228** | **4 272** | **14.3 MB** |
+
+Grows ~3 000 lines / 2.2 MB per 20 s **while idle**; stops only on navigating away.
+
+**Control that isolates it:** fresh tab, *same browser context, same admin session, same deep-link* → **5 lines, 0 `infdig`**. So the cause is the page instance's accumulated state across successive in-tab sign-ins — not the account, order, store or URL. That is why the four earlier probes (all fresh-tab or single re-login) were clean and this was nearly written off as noise.
+
+**What loops:** the orders list grid *underneath* the blade. Two watchers only, paired 34 176 times each — `fn: r` and `fn: function(){return u.row+","+u.col}` (ui-grid row/col, `dist/vendor.js`, AngularJS 1.8.3). Not a permission watcher.
+
+**Hypothesis for the fix:** one re-login is insufficient (admin→admin probe clean), so it likely needs ≥2 sign-in cycles *with a permission-scope change* — stale ui-grid column/scope state from the narrow role surviving sign-out and still live when the wider role re-renders the grid.
+
+Evidence: `logs/R6-A1-*`, `screenshots/R6-A1-infdig-loop-reading1.png`.
