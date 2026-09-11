@@ -1000,3 +1000,392 @@ lockTest("acquireLock: exactly one of two racing processes holds it", async () =
     assert.equal(outcomes.filter((x) => x === "won").length, 1, `exactly one winner, got ${outcomes}`);
     assert.equal(outcomes.filter((x) => x === "lost").length, 1, `exactly one loser, got ${outcomes}`);
 });
+
+// ---------------------------------------------------------------------------------------------
+// ensureFreshToken / acquireTokenLock / oauthLaunchDeps / tokenLockFor — Task 13's port of the
+// launcher's single locked read→exchange→write refresh path. Ported from the upstream launcher
+// (mcpw.js) and its suite: `m.McpwError` becomes `m.VcSecretsError`, and "mcpw"/"mcpw login" in
+// every user-facing string becomes "vc-secrets"/"vc-secrets login". tokenLockFor and
+// oauthLaunchDeps take a `decl`/`cfg` pair the source never needed, because this package's
+// keystore keys are three-segment ("vc-secrets:<scope>:<name>") and carry a project scope the
+// source's bare entry names never had — see the comments on tokenLockFor and oauthLaunchDeps
+// themselves for why the scope key has to agree with keyFor's.
+// ---------------------------------------------------------------------------------------------
+
+const DEPS = (over = {}) => ({
+    serverName: "azure-mcp",
+    readCache: async () => ({ state: "valid", accessToken: "cached" }),
+    writeCache: async () => {},
+    exchange: async () => ({ accessToken: "fresh", refreshToken: "r2" }),
+    acquireLock: async () => ({ release: async () => {} }),
+    now: () => 1_000,
+    sleep: async () => {},
+    ...over,
+});
+
+test("ensureFreshToken: a valid cached token is used without contacting Entra", async () => {
+    let exchanged = 0;
+    const t = await m.ensureFreshToken(DEPS({ exchange: async () => { exchanged++; } }));
+    assert.equal(t, "cached");
+    assert.equal(exchanged, 0);
+});
+
+test("ensureFreshToken: inside the margin it exchanges once, under the lock, and persists", async () => {
+    const order = [];
+    await m.ensureFreshToken(DEPS({
+        readCache: async () => ({ state: "needs-refresh", refreshToken: "r1" }),
+        acquireLock: async () => { order.push("lock"); return { release: async () => { order.push("release"); } }; },
+        exchange: async () => { order.push("exchange"); return { accessToken: "fresh", refreshToken: "r2" }; },
+        writeCache: async () => order.push("write"),
+    }));
+    assert.deepEqual(order, ["lock", "exchange", "write", "release"]);
+});
+
+test("ensureFreshToken: the loser of the race uses the winner's token, never exchanges", async () => {
+    let exchanged = 0, polls = 0;
+    const t = await m.ensureFreshToken(DEPS({
+        readCache: async () => (++polls < 3 ? { state: "needs-refresh", refreshToken: "r1" }
+                                            : { state: "valid", accessToken: "neighbours" }),
+        acquireLock: async () => cache.HELD_BY_OTHER,
+        exchange: async () => { exchanged++; },
+    }));
+    assert.equal(t, "neighbours");
+    assert.equal(exchanged, 0, "two exchanges would rotate the refresh token twice");
+});
+
+test("ensureFreshToken: waiting on a neighbour that never finishes names the neighbour", async () => {
+    let elapsed = 0;
+    await assert.rejects(() => m.ensureFreshToken(DEPS({
+        readCache: async () => ({ state: "needs-refresh", refreshToken: "r1" }),
+        acquireLock: async () => cache.HELD_BY_OTHER,
+        sleep: async (ms) => { elapsed += ms; },
+        now: () => 1_000 + elapsed,
+    })), (e) => /another vc-secrets/i.test(e.message) && !/vc-secrets login/.test(e.message));
+    assert.ok(elapsed >= cache.LOCK_WAIT_MS, `must wait the full deadline, waited ${elapsed}`);
+});
+
+test("ensureFreshToken: the lock is released even when the exchange throws", async () => {
+    let released = 0;
+    await assert.rejects(() => m.ensureFreshToken(DEPS({
+        readCache: async () => ({ state: "needs-refresh", refreshToken: "r1" }),
+        acquireLock: async () => ({ release: async () => { released++; } }),
+        exchange: async () => { throw new Error("network down"); },
+    })));
+    assert.equal(released, 1, "a leaked lock blocks every other session on this machine, permanently");
+});
+
+test("ensureFreshToken: absent cache fails naming the login verb, and never exchanges", async () => {
+    let exchanged = 0;
+    await assert.rejects(() => m.ensureFreshToken(DEPS({
+        readCache: async () => ({ state: "absent" }),
+        exchange: async () => { exchanged++; },
+    })), /vc-secrets login azure-mcp/);
+    assert.equal(exchanged, 0);
+});
+
+test("ensureFreshToken: an identity mismatch is treated as absent, not as a refreshable cache", async () => {
+    let exchanged = 0;
+    await assert.rejects(() => m.ensureFreshToken(DEPS({
+        readCache: async () => ({ state: "identity-mismatch" }),
+        exchange: async () => { exchanged++; },
+    })), /vc-secrets login azure-mcp/);
+    assert.equal(exchanged, 0);
+});
+
+test("ensureFreshToken: a REFUSED exchange names the login verb; an unreachable endpoint does not", async () => {
+    // The two are not the same failure. A refusal means the refresh token is dead and signing in
+    // again is the remedy; a timeout means the network is down and telling the developer to sign
+    // in sends them to a browser that cannot help either.
+    const refused = Object.assign(new m.VcSecretsError("token endpoint refused the request: invalid_grant"), { refused: true });
+    await assert.rejects(() => m.ensureFreshToken(DEPS({
+        readCache: async () => ({ state: "needs-refresh", refreshToken: "r1" }),
+        exchange: async () => { throw refused; },
+    })), (e) => /invalid_grant/.test(e.message) && /vc-secrets login azure-mcp/.test(e.message));
+
+    await assert.rejects(() => m.ensureFreshToken(DEPS({
+        readCache: async () => ({ state: "needs-refresh", refreshToken: "r1" }),
+        exchange: async () => { throw new m.VcSecretsError("token endpoint unreachable: ENETUNREACH"); },
+    })), (e) => /ENETUNREACH/.test(e.message) && !/vc-secrets login/.test(e.message));
+});
+
+test("ensureFreshToken: a cache that stops being refreshable while we wait for the lock is not exchanged", async () => {
+    // A logout landing between the two reads. Trusting the first verdict hands `undefined` to
+    // the exchange, and Entra's answer to that names nothing the developer can act on.
+    let exchanged = 0, reads = 0;
+    await assert.rejects(() => m.ensureFreshToken(DEPS({
+        readCache: async () => (++reads === 1 ? { state: "needs-refresh", refreshToken: "r1" } : { state: "absent" }),
+        exchange: async () => { exchanged++; },
+    })), /vc-secrets login azure-mcp/);
+    assert.equal(exchanged, 0);
+    assert.equal(reads, 2, "the re-read under the lock is what makes this decidable");
+});
+
+test("ensureFreshToken: a neighbour that released WITHOUT publishing is overtaken, not waited out", async () => {
+    // The winner's access-entry write is best-effort by design, and its exchange can fail
+    // outright — so "the lock is free again" and "a valid token appeared" are different events.
+    // Waiting only on the cache burns the whole 45 s deadline and then blames a neighbour that
+    // released seconds after taking it, for a token this launcher could have exchanged itself.
+    let held = true, exchanged = 0, elapsed = 0;
+    const t = await m.ensureFreshToken(DEPS({
+        // The clock advances even though nothing sleeps for real: with a frozen clock an
+        // implementation that never breaks out of the wait spins forever, and a hanging test
+        // reports as neither pass nor fail.
+        sleep: async (ms) => { elapsed += ms; },
+        now: () => 1_000 + elapsed,
+        readCache: async () => ({ state: "needs-refresh", refreshToken: "r1" }),
+        acquireLock: async () => {
+            if (held) {
+                held = false;   // the neighbour releases after our first look
+
+                return cache.HELD_BY_OTHER;
+            }
+
+            return { release: async () => {} };
+        },
+        exchange: async () => { exchanged++; return { accessToken: "ours", refreshToken: "r2" }; },
+    }));
+    assert.equal(t, "ours");
+    assert.equal(exchanged, 1);
+});
+
+test("ensureFreshToken: the contended poll backs off instead of hammering the backend", async () => {
+    // On Credential Manager every readCache is a PowerShell P/Invoke worth one to three seconds,
+    // so a flat 250 ms poll is really "start powershell.exe as fast as it will start" for 45 s.
+    const waits = [];
+    let elapsed = 0;
+    await assert.rejects(() => m.ensureFreshToken(DEPS({
+        readCache: async () => ({ state: "needs-refresh", refreshToken: "r1" }),
+        acquireLock: async () => cache.HELD_BY_OTHER,
+        sleep: async (ms) => { waits.push(ms); elapsed += ms; },
+        now: () => 1_000 + elapsed,
+    })), /another vc-secrets/i);
+    assert.deepEqual(waits.slice(0, 4), [250, 500, 1000, 2000], `got ${waits.slice(0, 4)}`);
+    assert.ok(waits.every((ms) => ms <= 2000), "the ceiling is what keeps a long wait cheap");
+    assert.ok(elapsed >= cache.LOCK_WAIT_MS, `the deadline must still be reached, waited ${elapsed}`);
+});
+
+// The keystore side of the launch path. ensureFreshToken's own tests inject every seam, so
+// without these the code that actually reads and writes the cache entries has no coverage at
+// all — and both of its interesting cases are silent when wrong.
+//
+// LAUNCH_DECL carries scope: "project" and LAUNCH_CFG a projectId, which the source's bare
+// LAUNCH_DECL/entryName never needed: oauthEntryKeys resolves the keystore key from decl.scope
+// and cfg.projectId (see keyFor, vc-secrets.mjs:648), and a decl with no scope would produce a
+// key with the literal segment "undefined" long before any of these tests reached the assertion
+// they are named for.
+const LAUNCH_DECL = { ...DECL_IDENTITY, scope: "project" };
+const LAUNCH_CFG = { projectId: "launch-p1" };
+const LAUNCH_KEYS = m.oauthEntryKeys("azure-mcp", LAUNCH_DECL, LAUNCH_CFG);
+const refreshBlob = () => cache.serializeRefresh({ refreshToken: "r1", ...DECL_IDENTITY });
+const accessBlob = (over = {}) => cache.serializeAccess({ accessToken: "a1", expiresAt: 9e15,
+    obtainedAt: Date.now(), lifetimeMs: 3600_000, uptimeAtIssue: os.uptime(), ...over });
+
+function keychainMiss() {
+    return Object.assign(new Error("security: item not found"), { toolExitCode: 44 });
+}
+
+test("oauthLaunchDeps.readCache: a missing refresh entry answers absent without reading the access entry", async () => {
+    // The fail-fast path has a latency budget on it, and on Credential Manager every read is a
+    // PowerShell P/Invoke worth one to three seconds. Reading the second entry to learn nothing
+    // is what puts that budget out of reach.
+    const asked = [];
+    const deps = m.oauthLaunchDeps("azure-mcp", LAUNCH_DECL, LAUNCH_CFG, { backend: "keychain",
+        run: (spec) => { asked.push(spec.args.at(-2)); throw keychainMiss(); } });
+    assert.deepEqual(await deps.readCache(), { state: "absent" });
+    assert.equal(asked.length, 1, `one read, asked for ${asked}`);
+});
+
+test("oauthLaunchDeps.readCache: needs-refresh carries the refresh token the exchange will spend", async () => {
+    const deps = m.oauthLaunchDeps("azure-mcp", LAUNCH_DECL, LAUNCH_CFG, { backend: "keychain",
+        run: (spec) => (spec.args.at(-2).endsWith("-refresh") ? refreshBlob() : Promise.reject(keychainMiss())) });
+    const status = await deps.readCache();
+    assert.equal(status.state, "needs-refresh", "no access entry → the launcher must exchange");
+    assert.equal(status.refreshToken, "r1", "cacheStatus returns a state only; without this the exchange gets undefined");
+});
+
+test("oauthLaunchDeps.readCache: a valid access entry is reported valid and carries no refresh token", async () => {
+    const deps = m.oauthLaunchDeps("azure-mcp", LAUNCH_DECL, LAUNCH_CFG, { backend: "keychain",
+        run: (spec) => (spec.args.at(-2).endsWith("-refresh") ? refreshBlob() : accessBlob()) });
+    const status = await deps.readCache();
+    assert.equal(status.state, "valid");
+    assert.equal(status.accessToken, "a1");
+});
+
+test("oauthLaunchDeps.writeCache: a renewal that issues no new refresh token leaves the stored one alone", async () => {
+    // RFC 6749 section 6 makes refresh_token optional on the refresh grant. Writing the entry
+    // anyway serialises `undefined` over a LIVE refresh token, and the next launch then demands
+    // a sign-in that nothing had invalidated — a session lost to a renewal that SUCCEEDED.
+    //
+    // ADAPTED assertion: the source asserted the bare entry name ["oauth-azure-mcp-access"].
+    // `write` here receives the full three-segment keystore key oauthEntryKeys produces (Part
+    // B3 — never a bare entry name), so the value that must appear is LAUNCH_KEYS.access.
+    const written = [];
+    const deps = m.oauthLaunchDeps("azure-mcp", LAUNCH_DECL, LAUNCH_CFG, { backend: "keychain",
+        write: async (key) => { written.push(key); } });
+    await deps.writeCache({ accessToken: "a2", expiresAt: 9e15, obtainedAt: 1, lifetimeMs: 3600_000, uptimeAtIssue: 1 });
+    assert.deepEqual(written, [LAUNCH_KEYS.access]);
+});
+
+test("oauthLaunchDeps.writeCache: a refresh token that cannot be stored names the entry and the remedy", async () => {
+    // The one irreversible step: Entra killed the previous refresh token when it issued this one,
+    // so a failure here IS a signed-out state, and reporting the tool's own words would name a
+    // keystore problem instead of the sign-in that fixes it.
+    const deps = m.oauthLaunchDeps("azure-mcp", LAUNCH_DECL, LAUNCH_CFG, { backend: "keychain",
+        write: async () => { throw new Error("security: SecKeychainItemCreateFromContent failed"); } });
+    await assert.rejects(() => deps.writeCache({ accessToken: "a2", refreshToken: "r2",
+        expiresAt: 9e15, obtainedAt: 1, lifetimeMs: 3600_000, uptimeAtIssue: 1 }),
+        (e) => e instanceof m.VcSecretsError && /oauth-azure-mcp-refresh/.test(e.message)
+            && /vc-secrets login azure-mcp/.test(e.message));
+});
+
+test("oauthLaunchDeps.writeCache: a failed ACCESS write is a warning, not a lost renewal", async () => {
+    // Asymmetric on purpose: losing the access entry costs one exchange next launch, so failing
+    // the renewal over it would throw away a refresh token that was just successfully rotated.
+    const deps = m.oauthLaunchDeps("azure-mcp", LAUNCH_DECL, LAUNCH_CFG, { backend: "keychain",
+        write: async (name) => { if (name.endsWith("-access")) { throw new Error("full"); } } });
+    await deps.writeCache({ accessToken: "a2", refreshToken: "r2", expiresAt: 9e15,
+        obtainedAt: 1, lifetimeMs: 3600_000, uptimeAtIssue: 1 });
+});
+
+// ---------------------------------------------------------------------------------------------
+// New coverage this task adds (not a port): acquireTokenLock had no DIRECT test in the source —
+// every source case drove it through cmdLogin/cmdLogout, which are Tasks 14/15 and do not exist
+// here yet. Without these three, acquireTokenLock ships with zero coverage of its own.
+// ---------------------------------------------------------------------------------------------
+
+test("acquireTokenLock: a clean acquisition returns the lock, without waiting or logging", async () => {
+    const logged = [];
+    const result = await m.acquireTokenLock({
+        acquireLock: async () => ({ release: async () => {} }),
+        now: () => 0,
+        sleep: async () => { throw new Error("must not sleep: nothing is contended"); },
+        log: (line) => logged.push(line),
+    });
+    assert.ok(result.lock, "a free lock must come back as the holder, not a reason");
+    assert.equal(result.reason, undefined);
+    assert.deepEqual(logged, [], "a clean acquisition has nothing to wait out and nothing to announce");
+});
+
+test("acquireTokenLock: a holder that never clears is reported busy, bounded by the poll cap", async () => {
+    // Mirrors the source's frozen-clock regression (mcpw.test.js:2356): with now() frozen the
+    // deadline never advances, and only MAX_LOCK_POLLS stops the loop from spinning forever.
+    // Verified here directly rather than through cmdLogin, which does not exist in this package.
+    let polls = 0;
+    const result = await m.acquireTokenLock({
+        acquireLock: async () => cache.HELD_BY_OTHER,
+        now: () => 0,
+        sleep: async () => { polls += 1; },
+        log: () => {},
+    });
+    assert.deepEqual(result, { lock: null, reason: "busy" });
+    assert.ok(polls > 0 && polls <= 64, `the wait must end by the poll cap, not the clock: ${polls}`);
+});
+
+test("acquireTokenLock: an error that is not a refused bind is not laundered into one", async () => {
+    // The carve-out covers ONE measured condition. An unfiltered catch turned a broken wiring and
+    // an fd exhaustion into "the sandbox refused the bind" — acquireTokenLock decides nothing
+    // about a failure to get the lock, so this must reach the caller unchanged, never come back as
+    // {lock: null, reason: "unbindable"}.
+    const boom = Object.assign(new Error("too many open files"), { code: "EMFILE" });
+    await assert.rejects(() => m.acquireTokenLock({
+        acquireLock: async () => { throw boom; },
+        now: () => 0,
+        sleep: async () => {},
+        log: () => {},
+    }), (e) => e === boom);
+});
+
+test("ensureFreshToken: the contended wait's backoff and ceiling bound the deadline it enforces", async () => {
+    // Behavioural in place of a source-text match. The plan for this test was
+    // `assert.match(m.ensureFreshToken.toString(), /LOCK_WAIT_MS/)` — a comment containing the
+    // name satisfies that just as well as the real reference does, and it stays green with the
+    // constant deleted from the loop. This instead DRIVES the loop and pins the numbers it must
+    // actually produce: the backoff seed, the doubling, the ceiling, and the window the deadline
+    // falls in — the same shape as the source's own pinned-copy test (mcpw.test.js:2934), driven
+    // through ensureFreshToken instead of cmdLogout because cmdLogout does not exist here yet.
+    const LOCK_POLL_SEED = 250;
+    const LOCK_POLL_CEILING = 2_000;
+    const slept = [];
+    let ms = 0;
+    await assert.rejects(() => m.ensureFreshToken({
+        serverName: "azure-mcp",
+        readCache: async () => ({ state: "needs-refresh", refreshToken: "r1" }),
+        writeCache: async () => {},
+        exchange: async () => { throw new Error("must not exchange: the neighbour never releases"); },
+        acquireLock: async () => cache.HELD_BY_OTHER,
+        now: () => ms,
+        sleep: async (d) => { slept.push(d); ms += d; },
+    }), /still refreshing/);
+    assert.deepEqual(slept.slice(0, 4), [LOCK_POLL_SEED, LOCK_POLL_SEED * 2, LOCK_POLL_SEED * 4, LOCK_POLL_CEILING],
+        "backoff seed, doubling, ceiling");
+    assert.ok(slept.every((d) => d <= LOCK_POLL_CEILING), "the ceiling holds for the whole wait");
+    // The boundary, not a tally: it must outlast the ceiling, and overshoot by at most one poll.
+    assert.ok(ms >= cache.LOCK_WAIT_MS && ms < cache.LOCK_WAIT_MS + LOCK_POLL_CEILING,
+        `the wait ended at ${ms}, outside [${cache.LOCK_WAIT_MS}, ${cache.LOCK_WAIT_MS + LOCK_POLL_CEILING})`);
+});
+
+lockTest("tokenLockFor: project scope keys the lock exactly the way keyFor keys the keystore entry", async () => {
+    // tokenLockFor has no return value carrying the scope key it computed, and cache.acquireLock/
+    // cache.lockPathFor are read-only ES module exports — this file cannot substitute them the way
+    // the source's CJS test does (mcpw.test.js:2894, `c.acquireLock = ...`). Proven instead by
+    // PRE-occupying the exact path keyFor's own rule predicts (decl.scope === USER_SCOPE ?
+    // USER_SCOPE : cfg.projectId — vc-secrets.mjs:648) and observing tokenLockFor collide with it:
+    // if tokenLockFor computed its scope key some other way, this would either fail to collide (the
+    // pre-occupied path is not the one it binds) or collide with the WRONG project below.
+    const decl = { scope: "project" };
+    const entryName = "predict-entry-" + process.pid;
+    const cfgA = { projectId: "predict-a-" + process.pid };
+    const cfgB = { projectId: "predict-b-" + process.pid };
+    const pathFor = (cfg) => cache.lockPathFor(entryName, cfg.projectId,
+        { platform: process.platform, env: process.env });
+
+    const holderA = await cache.acquireLock(pathFor(cfgA));
+    // Released defensively (not just on the happy path): under a WRONG scope key, either got*
+    // comes back as a real, live-listening lock instead of HELD_BY_OTHER, and an un-released
+    // listener keeps the process alive long after the assertion has already failed — the test
+    // then reports correctly but the run never exits on its own.
+    let gotA = null, gotB = null;
+    try {
+        gotA = await m.tokenLockFor(entryName, decl, cfgA)();
+        assert.equal(gotA, cache.HELD_BY_OTHER,
+            "the same projectId must collide on the path keyFor's own rule predicts");
+
+        gotB = await m.tokenLockFor(entryName, decl, cfgB)();
+        assert.notEqual(gotB, cache.HELD_BY_OTHER,
+            "a different projectId must not collide with project A's lock");
+    } finally {
+        if (gotA && gotA !== cache.HELD_BY_OTHER) { await gotA.release(); }
+        if (gotB && gotB !== cache.HELD_BY_OTHER) { await gotB.release(); }
+        await holderA.release();
+    }
+});
+
+lockTest("tokenLockFor: user scope keys the lock on USER_SCOPE, ignoring cfg.projectId", async () => {
+    const decl = { scope: "user" };
+    const entryName = "predict-entry-user-" + process.pid;
+    const predictedUserPath = cache.lockPathFor(entryName, "user",
+        { platform: process.platform, env: process.env });
+
+    const holder = await cache.acquireLock(predictedUserPath);
+    // Collected and released defensively, same reason as the project-scope test above: a WRONG
+    // scope key gives back a real, live-listening lock instead of HELD_BY_OTHER, and leaving it
+    // unreleased keeps the process alive after the assertion has already failed.
+    const got = [];
+    try {
+        // Two configs that disagree about projectId: at user scope keyFor ignores cfg.projectId
+        // entirely, so both must still collide with the SAME pre-occupied "user" path, or a
+        // renewal running under one project's config would fail to serialise against one running
+        // under another's for the very same personal token.
+        for (const cfg of [{ projectId: "predict-a-" + process.pid }, { projectId: "predict-b-" + process.pid }]) {
+            const lock = await m.tokenLockFor(entryName, decl, cfg)();
+            got.push(lock);
+            assert.equal(lock, cache.HELD_BY_OTHER,
+                `a user-scope entry must lock on "user" regardless of cfg.projectId=${cfg.projectId}`);
+        }
+    } finally {
+        for (const lock of got) {
+            if (lock && lock !== cache.HELD_BY_OTHER) { await lock.release(); }
+        }
+        await holder.release();
+    }
+});

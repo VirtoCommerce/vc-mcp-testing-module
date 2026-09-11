@@ -11,6 +11,8 @@ import { fileURLToPath } from "node:url";
 import { VcSecretsError } from "./vc-secrets-error.mjs";
 import { clientNames, clientDescriptor, MIN_VERSION_UNKNOWN } from "./clients.mjs";
 import { defaultDataHome, defaultShimDir, defaultShimPath } from "./scripts/shim-path.mjs";
+import * as cache from "./vc-secrets-cache.mjs";     // entries, expiry, the cross-process refresh lock
+import * as oauth from "./vc-secrets-oauth.mjs";     // the Entra protocol
 
 const CONFIG_NAME = "vc-secrets.json";
 const LOCAL_CONFIG_NAME = "vc-secrets.local.json";
@@ -1110,6 +1112,27 @@ async function writeLocalValue(backend, key, spec, value, env = process.env) {
     }
 }
 
+// Callers must not build their own write spec for a value already in hand: for the keychain
+// backend, buildLocalWrite's `value === undefined` branch is the INTERACTIVE `security -w` one
+// cmdSet's own TTY prompt uses -- routing a renewal or a login through it does not fail, it hangs,
+// waiting for a typist that is never there. Passing `value` here is what selects buildLocalWrite's
+// non-interactive `security -i` branch instead, the same choice cmdMigrate makes at its own call
+// site (:1519) for the same reason: the value is already in hand and there is nothing to prompt
+// for. This is the source's buildKeychainWrite/buildLocalWrite split, expressed here as the `value`
+// option rather than as two separate builders.
+async function writeSecretValue(key, value, { backend = detectLocalBackend(), env = process.env } = {}) {
+    if (!value) {
+        // The invariant belongs here rather than only in cmdSet: a renewal and a login can both be
+        // handed an empty string by a response that parsed, and an empty entry is worse than a
+        // missing one — it reads back as "backend returned empty value", which sends a developer to
+        // retype a secret this tool just erased.
+        throw new VcSecretsError(`refusing to store an empty value for "${key}"`);
+    }
+    const spec = buildLocalWrite(backend, key, env, { tmp: backend === "gpg", value });
+
+    return writeLocalValue(backend, key, spec, value, env);
+}
+
 function buildKeyvaultRead(decl) {
     return { cmd: "az", args: ["keyvault", "secret", "show", "--vault-name", decl.vault, "--name", decl.secret, "--query", "value", "-o", "tsv"],
         timeoutMs: TIMEOUT_AZ_MS, captureStdout: true };
@@ -1259,6 +1282,276 @@ function mapResolveError(backend, name, e) {
     }
 
     return e;
+}
+
+const LOCK_POLL_MS = 250;
+const LOCK_POLL_CEILING_MS = 2_000;
+// A backstop on acquireTokenLock's wait, never the thing that ends it -- the reasoning is at the
+// loop. A test pins both edges of the window: that the cap cannot fire before LOCK_WAIT_MS, and
+// that it does fire when the clock stands still.
+const MAX_LOCK_POLLS = 64;
+
+// The one place the mutex name is built. Three callers write to the same pair of keystore entries
+// — a renewal, a login and a logout — and a lock any of them takes on a different name serialises
+// against nothing while every one of the three still reads as correct.
+//
+// scopeKey MUST be the same scope notion keyFor uses (decl.scope === USER_SCOPE ? USER_SCOPE :
+// cfg.projectId, see keyFor above) — this is load-bearing, not a convenience: the lock and the
+// keystore entries it guards have to agree on what "the same project" means. keyFor merges a
+// project-scope AND a local-scope declaration into ONE keystore namespace (cfg.projectId), on the
+// premise that a local declaration is the same project under a different home. A lock computed
+// from a different notion of scope — the raw `decl.scope` string, say, which is "project" for both
+// but was normalised from "local" — would still serialise correctly by accident here, but the
+// general failure this guards against is real: whatever this function uses to key the lock has to
+// be EXACTLY what keyFor uses to key the entries, or two projects that keyFor treats as separate
+// (different projectId, both scope "project") would collide on a lock computed some other way — or
+// worse, two declarations keyFor treats as the SAME project would fail to serialise against each
+// other at all.
+function tokenLockFor(entryName, decl, cfg, { platform = process.platform, env = process.env } = {}) {
+    const scopeKey = decl.scope === USER_SCOPE ? USER_SCOPE : cfg.projectId;
+
+    return () => cache.acquireLock(cache.lockPathFor(entryName, scopeKey, { platform, env }));
+}
+
+// Waits out whoever holds the token mutex — the one all three writers to the entry pair take —
+// and DECIDES NOTHING about failing to get it. The two callers want opposite things from a failure
+// and say so in their own words at their own call sites; a message written here would be right for
+// at most one of them.
+//
+// The window being waited out is not the one ensureFreshToken already closed between its two cache
+// reads. It is the width of the exchange, where the holder sits on the network with a token it
+// will write the instant Entra answers.
+//
+// A wedged holder costs the ceiling below and a report of "busy"; a DEAD one costs nothing, for
+// the reasons lockPathFor sets out per platform — the kernel frees the abstract name and the pipe,
+// and acquireLock probes and unlinks the darwin path.
+async function acquireTokenLock({ acquireLock, now, sleep, log }) {
+    let sawHolder = false;
+    // Classified in ONE place. Written twice, it is free to drift, and the safe reading of "the
+    // bind stopped working after a holder was seen" is that the holder is still there.
+    const classify = (lock, error) => {
+        if (lock !== null && lock !== cache.HELD_BY_OTHER) {
+            return { lock };
+        }
+        if (lock === cache.HELD_BY_OTHER || sawHolder) {
+            return { lock: null, reason: "busy" };
+        }
+
+        return { lock: null, reason: "unbindable", error };
+    };
+    let failure = null;
+    const attempt = async () => {
+        try {
+            return await acquireLock();
+        } catch (e) {
+            if (e.code !== "EPERM" && e.code !== "EACCES") {
+                // Narrow on purpose. The carve-out exists for ONE measured condition, and a wide
+                // catch launders every other failure — a TypeError from broken wiring, an EMFILE
+                // under fd exhaustion — into "the sandbox refused the bind". Callers then act on a
+                // diagnosis nobody made. ensureFreshToken does not catch at all.
+                throw e;
+            }
+            failure = e;
+
+            return null;
+        }
+    };
+    let lock = await attempt();
+    if (lock !== cache.HELD_BY_OTHER) {
+        return classify(lock, failure);
+    }
+    sawHolder = true;
+    log(`vc-secrets: waiting for an in-flight token renewal\n`);
+    // Deliberately the same ceiling and the same backoff as ensureFreshToken's waiter, because the
+    // critical section being waited out is the same one. Tuning either loop alone reintroduces the
+    // asymmetry the shared constants exist to prevent — a test pins both to these names.
+    const deadline = now() + cache.LOCK_WAIT_MS;
+    let backoff = LOCK_POLL_MS;
+    // Bounded by polls as WELL as by the clock, because the deadline is enforced by an INJECTED
+    // `now`: a wrong default or a frozen stub would spin here forever, and cmdLogin reaches this
+    // line with a single-use authorization code already spent. The cap is the backstop and the
+    // clock is the mechanism — under any advancing clock the deadline is crossed first.
+    // ensureFreshToken's identical loop has no cap on purpose: it has spent nothing and a launch
+    // that hangs is a launch that failed, which is visible.
+    for (let poll = 0; poll < MAX_LOCK_POLLS && now() < deadline; poll += 1) {
+        await sleep(backoff);
+        backoff = Math.min(backoff * 2, LOCK_POLL_CEILING_MS);
+        lock = await attempt();
+        if (lock !== cache.HELD_BY_OTHER) {
+            return classify(lock, failure);
+        }
+    }
+
+    return { lock: null, reason: "busy" };
+}
+
+// The single path both the pre-spawn launch and the mid-session renewal go through. Every
+// dependency is injected for the same reason resolveEnvEntries takes its resolver: what is worth
+// testing here is the ORDER — who exchanges, who waits, and what is released when it throws.
+async function ensureFreshToken({ serverName, readCache, writeCache, exchange, acquireLock,
+    now = Date.now, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
+    if (typeof serverName !== "string" || serverName === "") {
+        // Loud at the wiring seam: without the name every message below sends the developer to
+        // `vc-secrets login undefined`, and a remedy naming the wrong verb is worse than none.
+        throw new VcSecretsError("ensureFreshToken needs the name of the oauth entry it is refreshing");
+    }
+    const signIn = `no usable token for "${serverName}" -- run "vc-secrets login ${serverName}"`;
+    const first = await readCache();
+    if (first.state === "valid") {
+        return first.accessToken;
+    }
+    if (first.state !== "needs-refresh") {
+        throw new VcSecretsError(signIn);
+    }
+    let lock = await acquireLock();
+    if (lock === cache.HELD_BY_OTHER) {
+        // What this launcher needs is a valid access token, and the WINNER writes one — so it
+        // waits for the cache rather than for the lock, and fails naming the neighbour rather
+        // than suggesting a sign-in that would rotate the refresh token a second time.
+        const deadline = now() + cache.LOCK_WAIT_MS;
+        let backoff = LOCK_POLL_MS;
+        while (now() < deadline) {
+            await sleep(backoff);
+            // Backed off rather than a flat 250 ms: on Credential Manager every readCache is a
+            // PowerShell P/Invoke worth one to three seconds, so a fixed fast poll is really
+            // "start powershell.exe as fast as it will start" for the length of the wait.
+            backoff = Math.min(backoff * 2, LOCK_POLL_CEILING_MS);
+            const again = await readCache();
+            if (again.state === "valid") {
+                return again.accessToken;
+            }
+            // The lock is retried, not only the cache. A neighbour can finish WITHOUT publishing
+            // a usable access entry — that write is best-effort by design, and its exchange may
+            // have failed outright — and waiting on the cache alone then burns the whole deadline
+            // and blames a neighbour that released seconds after taking it, for a token this
+            // launcher could have exchanged itself.
+            lock = await acquireLock();
+            if (lock !== cache.HELD_BY_OTHER) {
+                break;
+            }
+        }
+        if (lock === cache.HELD_BY_OTHER) {
+            throw new VcSecretsError(`another vc-secrets is still refreshing the token for "${serverName}" -- it did not finish in time`);
+        }
+    }
+    try {
+        const again = await readCache();   // it may have finished while we waited on the bind
+        if (again.state === "valid") {
+            return again.accessToken;
+        }
+        if (again.state !== "needs-refresh") {
+            // Re-checked rather than assumed still refreshable: a logout landing between the two
+            // reads would otherwise hand `undefined` to the exchange, and Entra's answer to that
+            // names nothing a developer can act on.
+            throw new VcSecretsError(signIn);
+        }
+        let fresh;
+        try {
+            fresh = await exchange(again.refreshToken);
+        } catch (e) {
+            // A refusal means the refresh token is dead and signing in again is the remedy. A
+            // timeout or an unreachable endpoint is not, and the same advice there sends the
+            // developer to a browser that cannot help either.
+            throw e?.refused ? new VcSecretsError(`${e.message} -- run "vc-secrets login ${serverName}"`, e.exitCode) : e;
+        }
+        await writeCache(fresh);
+
+        return fresh.accessToken;
+    } finally {
+        // The load-bearing line: the error table promises the launcher survives a failed renewal,
+        // and that is exactly the case where a leaked holder would never be released — blocking
+        // every other session on this machine until someone reboots.
+        await lock.release();
+    }
+}
+
+// The real backends behind ensureFreshToken's seams. Nothing here decides anything: the storage
+// rules live in vc-secrets-cache.mjs and the protocol in vc-secrets-oauth.mjs.
+//
+// entryName/decl/cfg go to oauthEntryKeys rather than to cache.entryNames (which the source used):
+// oauthEntryKeys already fills that role for this package (it is what keyFor/buildLocalRead agree
+// on — see the comment beside its own test), and it returns FULL three-segment keystore keys
+// ("vc-secrets:<scope>:<name>"), never a bare entry name. Every read/write below is built from one
+// of those full keys.
+function oauthLaunchDeps(entryName, decl, cfg, { backend = detectLocalBackend(), env = process.env,
+    run = runTool, write = writeSecretValue } = {}) {
+    const keys = oauthEntryKeys(entryName, decl, cfg);
+    const readEntry = async (key) => {
+        // keyToPath (not the source's flat `${name}.gpg`) — this package's gpg layout already
+        // namespaces entries by scope, so the file this key resolves to is the one keyToPath
+        // computes everywhere else, not a hand-built path that skips the scope directory.
+        if (backend === "gpg" && !fs.existsSync(keyToPath(key, env))) {
+            return undefined;
+        }
+        // The bare segment after the last colon, for messages only — mapResolveError and the
+        // "treating as absent" notice below read as advice about a keystore entry, not about a
+        // three-segment internal key; writeLocalValue does the same slice for the same reason.
+        const keyName = key.slice(key.lastIndexOf(":") + 1);
+        let raw;
+        try {
+            raw = await run(buildLocalRead(backend, key, env));
+        } catch (e) {
+            if ((backend === "wcm" && e.toolExitCode === 3) || (backend === "keychain" && e.toolExitCode === 44)) {
+                return undefined;   // not stored: "sign in", not a tool failure
+            }
+            throw mapResolveError(backend, keyName, e);
+        }
+        try {
+            return cache.parseEntry(backend === "wcm" ? decodeCredBlobHex(raw).value : raw) ?? undefined;
+        } catch (e) {
+            // An entry written by a NEWER vc-secrets is named once and then treated as absent: the
+            // next step is a sign-in either way, and refusing to launch over a cache this build
+            // cannot read helps nobody.
+            fs.writeSync(2, `vc-secrets: ${e.message} -- treating "${keyName}" as absent\n`);
+
+            return undefined;
+        }
+    };
+
+    return {
+        readCache: async () => {
+            const refresh = await readEntry(keys.refresh);
+            if (refresh?.refreshToken === undefined) {
+                // Short-circuited before the second read: deciding "no token can be obtained
+                // without interaction" is the path with a latency budget on it, and on Credential
+                // Manager each read is a PowerShell P/Invoke worth one to three seconds.
+                return { state: "absent" };
+            }
+            const status = cache.cacheStatus({ refresh, access: await readEntry(keys.access) },
+                decl, Date.now(), os.uptime());
+
+            // The refresh token rides back with the verdict: cacheStatus deliberately returns a
+            // state and nothing else, and the exchange needs the token that state was decided on.
+            return status.state === "needs-refresh" ? { ...status, refreshToken: refresh.refreshToken } : status;
+        },
+        writeCache: async (fresh) => {
+            // RFC 6749 section 6 makes refresh_token optional on the refresh grant. Writing the
+            // entry regardless would serialise `undefined` over a LIVE refresh token, and the
+            // next launch would demand a sign-in that nothing had actually invalidated.
+            if (fresh.refreshToken !== undefined) {
+                try {
+                    await write(keys.refresh, cache.serializeRefresh({ refreshToken: fresh.refreshToken,
+                        tenantId: decl.tenantId, clientId: decl.clientId, scopes: decl.scopes }), { backend });
+                } catch (e) {
+                    // The one irreversible step: Entra invalidated the previous refresh token the
+                    // moment it issued this one, so a failure here IS a signed-out state and must
+                    // name the entry and the remedy rather than the tool that refused.
+                    throw new VcSecretsError(`the renewed refresh token could not be stored in "${keys.refresh}" `
+                        + `(${e.message}) -- run "vc-secrets login ${entryName}"`);
+                }
+            }
+            try {
+                await write(keys.access, cache.serializeAccess(fresh), { backend });
+            } catch (e) {
+                // Best effort by design: losing the access entry costs one exchange next launch.
+                fs.writeSync(2, `vc-secrets: the access entry could not be stored (${e.message}); `
+                    + "the next launch will exchange one\n");
+            }
+        },
+        exchange: (refreshToken) => oauth.exchange(decl.tenantId, oauth.buildTokenBody({ kind: "refresh",
+            clientId: decl.clientId, refreshToken, scopes: decl.scopes })),
+        acquireLock: tokenLockFor(entryName, decl, cfg, { env }),
+    };
 }
 
 function makeSecretResolver(cfg, env = process.env) {
@@ -2250,7 +2543,8 @@ export {
     resolveEnvEntries, detectLocalBackend, redactSecrets, secretsDir, psEncode, psCommand, PS_CRED_READ, PS_CRED_WRITE,
     PS_CRED_DELETE, decodeCredBlobHex, buildLocalRead, buildLocalWrite, buildLocalDelete, deleteEntryIo,
     buildKeyvaultRead, TIMEOUT_LOCAL_MS, TIMEOUT_AZ_MS, VALUE_ON_STDIN,
-    COMMAND_ON_STDIN, quoteForSecurityInteractive,
+    COMMAND_ON_STDIN, quoteForSecurityInteractive, writeSecretValue,
+    tokenLockFor, acquireTokenLock, ensureFreshToken, oauthLaunchDeps,
     runTool, resolveSpawnCommand, buildSpawnInvocation, makeSecretResolver, cmdRun, cmdTask, cmdLaunch, killProcessTree,
     validateLaunchables, LEGACY_ENV_VARS, LEGACY_SECRET_ENV_VARS,
     mapResolveError, applyKeystrokes, promptHidden, cmdSet, cmdUnlock, unlockTargets, cmdDoctor, cmdMigrate, newKeyPresent,
