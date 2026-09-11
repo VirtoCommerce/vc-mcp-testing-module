@@ -31,7 +31,7 @@
     "deployed": {
       "platform": "UNKNOWN",
       "relevant_modules": {
-        "VirtoCommerce.Orders": "3.1015.0-pr-472-dfa3",
+        "VirtoCommerce.Orders": "3.1015.0-pr-472-0fac",
         "VirtoCommerce.Pricing": "3.1006.0",
         "VirtoCommerce.Catalog": "3.1043.0-pr-906-d339"
       }
@@ -142,15 +142,60 @@
     "notes": "All four story ACs graded non-testable or partial at 1d: AC-1 and AC-2 are structural/vague ('is responsible for Data Protection', 'works as expected'); AC-3 and AC-4 are deliverable-presence checks. AC-4 names IEntityDataProtectionService, which does not exist in the shipped diff — only docs/data-protection-architecture.md defines it, marked Status: Proposal and targeting VirtoCommerce.Platform.Core. The 22 gap-ACs, not the story ACs, are the spine of this run."
   },
   "total_cases": 20,
-  "passed": 10,
-  "failed": 7,
+  "passed": 14,
+  "failed": 3,
   "blocked": 3,
   "iterations": {
-    "enabled": false,
-    "rounds": 0,
+    "enabled": true,
+    "rounds": 2,
     "max_rounds": 2,
-    "outcome": "blocked",
-    "per_round": []
+    "outcome": "passed",
+    "per_round": [
+      {
+        "round": 1,
+        "verdict": "FAIL",
+        "build": {
+          "deployed": {
+            "VirtoCommerce.Orders": "3.1015.0-pr-472-dfa3"
+          }
+        },
+        "still_failing": [
+          "R1",
+          "R2",
+          "P1",
+          "P2",
+          "P3",
+          "P4",
+          "R3"
+        ]
+      },
+      {
+        "round": 2,
+        "verdict": "FAIL",
+        "build": {
+          "deployed": {
+            "VirtoCommerce.Orders": "3.1015.0-pr-472-0fac"
+          }
+        },
+        "red_green": {
+          "green": [
+            "R1",
+            "R2",
+            "P1",
+            "P2"
+          ],
+          "still_red": [
+            "P3 under partial grant",
+            "P4 (dev: Ignore)",
+            "R3 (dev: documentation)"
+          ]
+        },
+        "still_failing": [
+          "N1 line-item Discounts widget masks for admin too",
+          "N2 runaway digest loop on an admin session, trigger not isolated"
+        ]
+      }
+    ]
   },
   "new_cases_authored": 20,
   "promotion": {
@@ -212,49 +257,37 @@
     {
       "severity": "Critical",
       "provenance": "in-scope",
-      "summary": "ORDA-108 REGRESSION: store scope moved from unconditional overwrite to Intersect; an empty intersection means NO store filter. A user scoped to Electronics (54 of 1248 orders) receives all 1248 for storeIds=[\"B2B-store\"], [\"ELECTRONICS\"] (case) or even [\"NoSuchStore\"] (fail-open). Identical on /customerOrders/search and /customerOrders/indexed/search. EXPOSURE IS METADATA ONLY: leaked rows carry withPrices:false with zeroed totals and GET by id is fail-closed 403, so number/store/customerName/status/date leak, not money. Reachable by clicking via browser-local saved filters that cross users. Reviewer flagged High; author replied \"By design\".",
+      "summary": "P3 STILL REPRODUCES on -0fac. order:invoice:download gates who may download but not what the document says. Granted without order:read_prices - a combination the product permits and the recommendation does not enforce - the invoice prints Total $0 for CO260909-00001 (real 5215) and CO260909-00002 (real 44.99). Admin control prints real figures through the same viewer.",
       "report": null
     },
     {
       "severity": "High",
       "provenance": "in-scope",
-      "summary": "REGRESSION: the Admin SPA is not prepared for the 403 this PR introduces on GET .../{id}. Clicking an out-of-scope order sends the blade into an AngularJS infinite digest loop ($rootScope:infdig), 184+ occurrences and climbing, 3295 console lines from one click, in the ui-grid watcher. An in-scope order produces about 8 lines and no loop.",
+      "summary": "N1 NEW, introduced by the P2 fix: the line-item Discounts widget masks for EVERY user. Admin sees ##.## where the payload holds discountAmount 12.5 and the adjacent form field shows 12.50. Proven from the deployed bundle: the showPrice filter replaces every digit, so a masked 0.00 renders #.## and a masked 12.50 renders ##.## - the admin string proves the real value reached the widget and was masked there rather than the widget consulting withPrices.",
       "report": null
     },
     {
       "severity": "High",
       "provenance": "in-scope",
-      "summary": "Export fix works but produces an undetectable poison-pill backup. A user with backuprestore rights but without order:read_prices produces a full Data-backup archive of all 1250 orders with every price 0.0 and withPrices:false. Manifest.json carries NO redaction or partial-data marker, the filename and size look normal, and the job completes green with no warning. Restoring it destroys every price and nothing distinguishes it from a complete backup. Admin control on the same stand: total 44.99 / subTotal 89.99. Artifacts: payloads/R2-T2-backup-DENIED.zip vs R2-T2-backup-ADMIN.zip.",
-      "report": null
-    },
-    {
-      "severity": "Critical",
-      "provenance": "pre-existing",
-      "summary": "[PRE-EXISTING, not a regression — the deleted handler called the identical ReduceDetails(Full & ~WithPrices)] ORDA-114: /api/order/payments/search and /shipments/search return real monetary values to a caller denied order:read_prices AND report withPrices:true. 176 non-zero payments totalling 13,235,931.74 in a 200-row sample; max single 2,421,250. Child services are undecorated. REPORTED in comment 109131 on VCST-3912 (operator asked for one consolidated comment rather than separate Bug tickets); 6 screenshots attached and verified rendered via renderedBody.",
-      "report": null
-    },
-    {
-      "severity": "Critical",
-      "provenance": "pre-existing",
-      "summary": "[PRE-EXISTING, not a regression — the deleted handler called the identical ReduceDetails(Full & ~WithPrices)] ORDA-118: ReduceDetails(Full & ~WithPrices) leaves WithDiscounts set, so Discounts[] is never nulled; TaxDetails/FeeDetails are never referenced. 15 of 60 orders leak, 26 nodes, order and shipment level. CO260909-00002 total=0 beside discounts[0].discountAmount=44.995. REPORTED in comment 109131 on VCST-3912 (operator asked for one consolidated comment rather than separate Bug tickets); 6 screenshots attached and verified rendered via renderedBody.",
-      "report": null
-    },
-    {
-      "severity": "Critical",
-      "provenance": "pre-existing",
-      "summary": "[PRE-EXISTING, not a regression — the deleted handler called the identical ReduceDetails(Full & ~WithPrices)] ORDA-113/invoice: the invoice endpoint returns HTTP 200 to a caller denied order:read_prices and renders a PDF stating Total: $0 for an order worth 44.99, without consulting withPrices. Indistinguishable from a genuinely zero order. Server-rendered, outside the ten migrated client files. REPORTED in comment 109131 on VCST-3912 (operator asked for one consolidated comment rather than separate Bug tickets); 6 screenshots attached and verified rendered via renderedBody.",
+      "summary": "N2 runaway digest loop observed on an admin session after account switching: 49125 console lines, 10916 [$rootScope:infdig], 27.6 MB and still climbing after 7 minutes - an order of magnitude worse than the R2 loop just fixed. ui-grid row/col watcher signature. NOT REPRODUCED in four targeted probes, so the trigger is not isolated; reported as observed rather than as a clean repro. Likely related to the browser-scoped (not user-scoped) blade state already recorded.",
       "report": null
     },
     {
       "severity": "High",
-      "provenance": "pre-existing",
-      "summary": "[PRE-EXISTING, not a regression — the deleted handler called the identical ReduceDetails(Full & ~WithPrices)] ORDA-107: indexed/DB search sorted by total returns the exact true descending order of the hidden totals to a denied caller, making every order rankable by value. REPORTED in comment 109131 on VCST-3912 (operator asked for one consolidated comment rather than separate Bug tickets); 6 screenshots attached and verified rendered via renderedBody.",
+      "provenance": "in-scope",
+      "summary": "R3 unchanged on -0fac: a user with backuprestore rights but no order:read_prices still produces a restorable Data-backup archive of 1250 orders with every price 0.0 and no redaction marker in Manifest.json. Developer disposition is to document it. Documenting does not make the archive distinguishable from a complete one at restore time.",
+      "report": null
+    },
+    {
+      "severity": "Medium",
+      "provenance": "in-scope",
+      "summary": "P4 unchanged: sorting by Total still returns the true ranking of hidden totals. Developer marked Ignore; recorded as accepted risk.",
       "report": null
     },
     {
       "severity": "Medium",
       "provenance": "out-of-scope",
-      "summary": "Admin SPA blade state including UNSAVED EDITS survives sign-out and is offered to the next user, and saved filters are browser-local rather than per-user. Write-attribution hazard on a shared workstation, and the click path that makes ORDA-108 reachable without a crafted request. Not caused by this PR.",
+      "summary": "Admin SPA blade state including unsaved edits survives sign-out and is offered to the next user; saved filters are browser-local rather than per-user. Not caused by this PR, and the likely substrate for N2.",
       "report": null
     }
   ],

@@ -3,7 +3,9 @@
 `[Support] #38981 — Price restriction on order, catalog, pricing modules` · Story · High · status `Testing`
 Run: 2026-09-10 · Path **FULL** · Flow `feature-test` · Env target **vcptcore-qa** · Model: [`VCST-3912-2026-09-10.md`](../../../ba/test-models/VCST-3912-2026-09-10.md)
 
-## Verdict — FAIL (7 confirmed defects: 3 from this PR, 4 pre-existing)
+## Verdict — Round 3: 4 of 7 FIXED, 1 still reproduces, 2 accepted by the developer, 2 new
+
+> Round-1/2 detail is kept below for history; **the current state is the Round 3 table at the end of this file.**
 
 > **Three come from this PR:** `ORDA-108` (store scope fails open), the Admin-SPA digest loop on the new 403, and the unmarked price-free backup its own export fix now produces. The other four pre-date it. The other four are real and worth fixing, but the deleted handler behaved identically, so they are *not fixed by* this PR rather than *broken by* it. That distinction drives triage and it was established from the diff, not assumed.
 
@@ -233,3 +235,69 @@ Story ACs first. **1d graded all four non-testable or partial** — two are stru
 - Suite `017` baseline: **293 Critical / 230 High** lint findings, all pre-existing legacy-TestRail-import debt (untagged steps, empty assertions). Not introduced by this run.
 - VirtoOZ `PlatformDeveloperGuide` → *scope-based-permissions* teaches the authorize-then-mutate-criteria pattern **this PR replaces**, using `OrderAuthorizationHandler` as its worked example. Shipping VCST-3912 dates the platform's canonical authorization tutorial. Documentation drift, distinct from AC-4, and owned by platform docs rather than this ticket.
 - Below the severity floor: none. Nothing was executed, so nothing was observed to grade.
+
+---
+
+## Round 3 — re-verification after the developer's fixes (2026-09-11)
+
+Build **`VirtoCommerce.Orders 3.1015.0-pr-472-0fac`** (was `-dfa3`); the pin was already updated on `vcptcore-qa` by the time this round started. Bundle freshness proved twice over: server `app.js` `last-modified: Fri, 11 Sep 2026 10:17:36 GMT`, and the SPA loaded `app.js?v=8DF0FEDE693A000` whose FILETIME decodes to the same 10:17:36.
+
+Both fixture roles were **rebuilt to the developer's published minimum set** — `customer:read · order:access · order:read · platform:module:read · platform:setting:read · store:read`. Note it contains no `platform:access`, no `order:update`, no `order:read_prices`; both accounts still sign in. `AGENT-TEST-ORDER-NOPRICES` additionally carries `order:invoice:download` (deliberate, see P3) and the three `platform:backuprestore:*` permissions (needed to reach export).
+
+Developer commits map one-to-one onto the findings: `63bdb93` store scope · `9c70f5f` payment/shipment · `75b66ef` discounts · `9ac9d61` index-widget permission check · `85ccae8` `order:invoice:download`.
+
+| # | Defect | Dev's disposition | Verified result |
+|---|---|---|---|
+| R1 | Store scope fails open | Fixed | **FIXED.** Out-of-scope → 0, nonexistent store → 0, wrong case → the correct 54. Both `/search` and `/indexed/search`. |
+| R2 | Admin SPA digest loop on 403 | Fixed | **FIXED.** 0 `[$rootScope:infdig]` on an in-scope order (13 lines) and on a deep-linked out-of-scope one (8 lines), stable over a 25 s dwell. The old entry point is also gone, since the grid no longer leaks a clickable row. |
+| P1 | Payment/shipment endpoints leak | Fixed | **FIXED.** 1157 payments and 1363 shipments: 0 non-zero sums, `withPrices:false`. |
+| P2 | Discounts survive redaction | Fixed | **FIXED** for the restricted user, order level and line-item level, on screen and at the API (0 leaking nodes across 60 orders, was 15 orders / 26 nodes). **But it over-corrected — see N1.** |
+| P3 | Invoice prints `$0` | Resolution: new `order:invoice:download`, recommend granting with `order:read_prices` | **STILL REPRODUCES** under a partial grant — see below. |
+| P4 | Sorting reveals the ranking | Ignore | Still reproduces, as expected under that decision. Recorded, not re-litigated. |
+| R3 | Unmarked price-free backup | Resolution: document it | **Unchanged** — re-ran the export on the new build: 1250 orders, all `0.0`, `withPrices:false`, and `Manifest.json` still carries no redaction or partial-data marker. |
+
+### P3 — the gate works, the document does not
+
+The permission exists and gates correctly: a user without `order:invoice:download` gets **403**, and the toolbar button is **hidden** rather than shown-and-failing.
+
+But the recommendation ("grant it together with `order:read_prices`") is not enforced by anything. Granting only the new permission — following the advice halfway — reproduces the original defect exactly:
+
+| Field | `agent-test-noprices` on `CO260909-00001` | admin control |
+|---|---|---|
+| Unit Price | `$0` | `$3450` |
+| Line Price | `$0` | `$10350` |
+| Order Subtotal | `$0` | `$10350` |
+| **Total** | **`$0`** | **`$5215`** |
+
+Same on `CO260909-00002` (`$0` vs `$44.99`). The instrument is sound — admin copies print real figures through the same viewer. So the fix gates *who may download*, not *what the document says*, and the product still permits the grant combination that produces a valid-looking invoice claiming a $5215 order is free.
+
+### N1 — NEW, introduced by the P2 fix: the line-item Discounts widget now masks for everyone
+
+Admin opens `CO260827-00002` → Line items → item row → Discounts widget and sees **`##.##`** where the payload says `discountAmount: 12.5` and the adjacent line-item form field shows `12.50`. A fully entitled user lost a value they are entitled to. The order-level Discounts grid is unaffected (admin correctly sees `45.00`).
+
+**Mechanism, from the deployed bundle** — this is what makes the diagnosis certain rather than inferred. The mask filter replaces every *digit*:
+
+```js
+.filter("showPrice", function(){ return function(e,t){
+    var r=/\d/g;
+    return r.test(e) && arguments.length>1 && !t && (e=String(e).replace(r,"#")), e }})
+```
+
+So the mask preserves digit count. The restricted user's payload carries `0`, which renders `0.00` → **`#.##`**. Admin's payload carries `12.5`, which renders `12.50` → **`##.##`**. The two different mask strings prove the admin's *real* value reached the widget and was masked there — the widget masks unconditionally instead of consulting `withPrices`.
+
+One reassurance that falls out of the same mechanism: there is **no magnitude leak** for the restricted user. The client masks a value the server already zeroed, so the hash count carries no information about the real price.
+
+### N2 — a runaway digest loop on an admin session, not isolated
+
+After one page instance cycled through `agent-test-scoped` → `agent-test-noprices` → `admin`, navigating to an order deep-link produced **49 125 console lines / 10 916 `[$rootScope:infdig]` / 27.6 MB, still climbing seven minutes later** — an order of magnitude worse than the R2 loop that was just fixed (3 295 lines / 184). The watcher signature is ui-grid row/col, not a permission watcher.
+
+**Four targeted probes failed to reproduce it** (fresh-tab admin list 3 errors; fresh-tab admin deep-link 3; admin→admin re-login then list 9; admin→scoped switch then list + blade 10, zero infdig). So: observed and severe, trigger not isolated. Reported as such rather than as a clean repro. Log: `logs/R3-admin-orders-deeplink-console.log`.
+
+Likely related to the account-switching state bleed already recorded in Round 2 (blade state and saved filters are browser-scoped, not user-scoped).
+
+### Also observed
+
+- A 403 deep-link opens an empty "Customer's order" blade with widgets and no data, instead of an access-denied state. Cosmetic; not the old defect.
+- `GET api/platform/settings/VirtoCommerce.Platform.UI.WidgetColorMarkers` returns **401** (not 403) for every account including admin, with an unhandled rejection. Pre-existing.
+- Under the minimum permission set the shipment blade fires 403s on `api/inventory/fulfillmentcenters/search` and `api/shipping/search` as unhandled rejections rather than handled degradation.
+
