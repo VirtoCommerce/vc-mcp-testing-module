@@ -31,7 +31,7 @@
     "deployed": {
       "platform": "UNKNOWN",
       "relevant_modules": {
-        "VirtoCommerce.Orders": "3.1015.0-pr-472-0fac",
+        "VirtoCommerce.Orders": "3.1015.0-pr-472-fb82",
         "VirtoCommerce.Pricing": "3.1006.0",
         "VirtoCommerce.Catalog": "3.1043.0-pr-906-d339"
       }
@@ -142,8 +142,8 @@
     "notes": "All four story ACs graded non-testable or partial at 1d: AC-1 and AC-2 are structural/vague ('is responsible for Data Protection', 'works as expected'); AC-3 and AC-4 are deliverable-presence checks. AC-4 names IEntityDataProtectionService, which does not exist in the shipped diff — only docs/data-protection-architecture.md defines it, marked Status: Proposal and targeting VirtoCommerce.Platform.Core. The 22 gap-ACs, not the story ACs, are the spine of this run."
   },
   "total_cases": 20,
-  "passed": 15,
-  "failed": 4,
+  "passed": 17,
+  "failed": 1,
   "blocked": 2,
   "iterations": {
     "enabled": true,
@@ -252,30 +252,19 @@
     "dismissed": [],
     "report_path": null
   },
-  "bugs_filed": [],
+  "bugs_filed": [
+    {
+      "key": "VCST-5952",
+      "severity": "High",
+      "relationship": "related",
+      "parent_or_linked_ticket": "VCST-3912"
+    }
+  ],
   "bugs_not_filed": [
     {
       "severity": "Critical",
       "provenance": "in-scope",
       "summary": "P3 STILL REPRODUCES on -0fac. order:invoice:download gates who may download but not what the document says. Granted without order:read_prices - a combination the product permits and the recommendation does not enforce - the invoice prints Total $0 for CO260909-00001 (real 5215) and CO260909-00002 (real 44.99). Admin control prints real figures through the same viewer.",
-      "report": null
-    },
-    {
-      "severity": "High",
-      "provenance": "in-scope",
-      "summary": "N1 NEW, introduced by the P2 fix: the line-item Discounts widget masks for EVERY user. Admin sees ##.## where the payload holds discountAmount 12.5 and the adjacent form field shows 12.50. Proven from the deployed bundle: the showPrice filter replaces every digit, so a masked 0.00 renders #.## and a masked 12.50 renders ##.## - the admin string proves the real value reached the widget and was masked there rather than the widget consulting withPrices.",
-      "report": null
-    },
-    {
-      "severity": "High",
-      "provenance": "in-scope",
-      "summary": "N2 REPRODUCIBLE runaway digest loop in the Admin SPA orders grid. Repro in ONE tab: store-scoped user -> UI sign out -> agent-test-noprices -> UI sign out -> admin -> order deep-link. Grows ~3000 console lines / 2.2 MB per 20s WHILE IDLE, reaching 19228 lines / 4272 infdig / 14.3 MB in 2m20s; stops only on navigating away. CONTROL: fresh tab, same browser context, same admin session, same deep-link = 5 lines, 0 infdig - so the cause is the page instance's accumulated state across successive in-tab sign-ins, not the account/order/store/URL. Loops the orders list grid under the blade: two watchers only (fn: r and u.row+\",\"+u.col, ui-grid, AngularJS 1.8.3), paired 34176 times each. Likely needs >=2 sign-in cycles with a permission-scope change, leaving stale ui-grid scope state live when the wider role re-renders.",
-      "report": null
-    },
-    {
-      "severity": "Critical",
-      "provenance": "in-scope",
-      "summary": "R3 PROVEN DESTRUCTIVE: restoring a price-free backup as administrator silently zeroes prices. Measured on one disposable order - 555.55 -> 0.00, line item 555.55 -> 0, both control orders and the order count unchanged (import is a pure upsert). Job log reports Successfully imported with errorCount 0, no warning that the archive was exported without prices and no confirmation dialog. Root cause: RestorePrices runs only when the importing caller CANNOT read prices, so an administrator restoring a backup skips it and writes the zeros. Side effect: the Restore drop zone writes the uploaded file permanently into Backup storage, making any price-free archive a one-click restore target.",
       "report": null
     },
     {

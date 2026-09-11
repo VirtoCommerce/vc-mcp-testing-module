@@ -347,3 +347,22 @@ Grows ~3 000 lines / 2.2 MB per 20 s **while idle**; stops only on navigating aw
 **Hypothesis for the fix:** one re-login is insufficient (admin→admin probe clean), so it likely needs ≥2 sign-in cycles *with a permission-scope change* — stale ui-grid column/scope state from the narrow role surviving sign-out and still live when the wider role re-renders the grid.
 
 Evidence: `logs/R6-A1-*`, `screenshots/R6-A1-infdig-loop-reading1.png`.
+
+---
+
+## Round 4 — build `-fb82`, both remaining defects fixed (2026-09-11)
+
+Pin bump to `-fb82` had been reverted by an unrelated commit (`2d783c8`, a ProfileExperienceApi bump, overwrote the Orders line while editing the same file). Re-pinned in `ecb5934`; deploy green 15:23, module live 15:24.
+
+| # | Defect | State |
+|---|---|---|
+| R1 · R2 · P1 · P2 | store scope · digest loop · payment/shipment · discounts | Fixed, verified (round 3) |
+| **N1** | line-item Discounts widget masked for everyone | **FIXED** — admin now sees `12.50`, restricted user `#.##` (a masked zero, not over-masked). Widget and the form field beside it agree. |
+| **R3** | price-free backup destroyed prices on restore | **FIXED** — probe order kept `777.77` through the same export→strip→restore-as-admin cycle that took `555.55 → 0.00` on `-0fac`. Controls and count unchanged. Fix reads the payload flag: `if (!order.WithPrices \|\| !await CanReadPrices(user, order))`. |
+| P4 | sorting reveals the ranking | Accepted by the developer as `Ignore` |
+| P3 | invoice prints `Total: /usr/bin/bash` under a partial grant | **Open — product decision pending**, not a code question |
+| N2 | blade context not cleared on sign-out | Moved out to **VCST-5952** (platform, Sprint 26-18, assigned to the developer) |
+
+Two false alarms cleared during the N1 check by comparing accounts on the same surface: the order-blade `Discount` `#` is an empty-field placeholder (identical for both users), and the empty Name/Coupon cells are the real data shape.
+
+Still not covered: the storefront/xAPI order surface — the persona has no orders and an order created for it is refused by the resolver (`Access denied`) on customer-identity binding. A stand fixture problem, not a PR problem.
