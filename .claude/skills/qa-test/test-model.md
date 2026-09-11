@@ -317,7 +317,7 @@ is `PRESENT` here** — it passed the same gate before it was written — and ca
 satisfied by recording `Domain map: ABSENT — chain position unverified`; absence is **written down, not
 blocked**. `1e` is also where 2g's provisional all-layer answer is CONFIRMED — Part 0 now exists, so set
 `domain_map.all_layer_confirmed_at: "1e-confirmed"` and correct `all_layer_chain` if the chain disagrees
-with the `1b` guess.
+with the `1b` guess. That correction is the axis working, not a defect.
 
 A missing atomic condition or `ba-system-analyzer` risk area is added before moving on. No fresh-`qa-lead`
 dispatch here — this is the doer's own completeness check.
