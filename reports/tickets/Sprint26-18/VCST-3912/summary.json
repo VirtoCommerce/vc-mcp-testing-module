@@ -260,7 +260,7 @@
     {
       "severity": "Medium",
       "provenance": "out-of-scope",
-      "summary": "P3 invoice prints Total $0 when order:invoice:download is granted without order:read_prices. The gate itself works (403 and hidden button without the permission). Taken OUT OF SCOPE of VCST-3912 by the operator for a separate discussion - comment 109252. Options if taken up: couple the permissions in code, or refuse the invoice when withPrices is false.",
+      "summary": "P3 invoice prints Total $0 when order:invoice:download is granted without order:read_prices. ACCEPTED AS Keep as Is by the team: the download permission is the control, and a user without price rights should simply not be granted it; masking inside a PDF is not wanted. The gate itself was verified working (403 and hidden button without the permission). No action.",
       "report": null
     },
     {

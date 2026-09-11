@@ -371,6 +371,6 @@ Still not covered: the storefront/xAPI order surface — the persona has no orde
 
 All findings in scope of VCST-3912 are fixed and verified on `3.1015.0-pr-472-fb82`: R1 store scope, R2 digest loop, P1 payment/shipment, P2 discounts, N1 discounts widget, R3 backup restore.
 
-Out of the ticket: **P3** (invoice under a partial permission grant) — moved to a separate discussion, gate verified working · **P4** (sorting reveals the ranking) — accepted by the developer as `Ignore` · **N2** (blade context not cleared on sign-out) — filed as **VCST-5952**, platform, Sprint 26-18.
+Out of the ticket: **P3** (invoice) — **Keep as Is**, accepted: the download gate is the control, and masking inside a PDF is not wanted · **P4** (sorting reveals the ranking) — accepted by the developer as `Ignore` · **N2** (blade context not cleared on sign-out) — filed as **VCST-5952**, platform, Sprint 26-18.
 
 **Nothing is left unverified.** The storefront/xAPI surface, previously listed as a gap, is out of the change's reach by construction: the PR registers the protection service under its own interface (`ICustomerOrderDataProtectionService`) and leaves `ICustomerOrderService` / `IIndexedCustomerOrderSearchService` pointing at the raw implementations, so anything injecting those — xAPI included — is untouched. Case `ORD-GQL-014`, authored against that hypothesis, now has a void premise and should be retired (proposal only; retirement is a human call, TRI-006).
