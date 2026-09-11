@@ -1590,3 +1590,356 @@ test("writeSecretValue: an oversize keychain value is refused before the runner 
         (e) => e instanceof m.VcSecretsError && /too large for the keychain/.test(e.message));
     assert.equal(runnerCalls.length, 0, "the runner must never be reached once the guard has refused");
 });
+
+// ---------------------------------------------------------------------------------------------
+// Task 14a: the callback surface -- the loopback listener, handleCallback, the two HTML pages,
+// and the browser opener. Ported from the launcher's own suite (source ranges resolved 2026-09-11).
+// ---------------------------------------------------------------------------------------------
+
+// Every byte this tool prints has to survive the console it is printed to. `doctor` writes its report
+// with `fs.writeSync(2, …)` — raw bytes, deliberately, because a synchronous unbuffered write is what
+// survives an immediate exit — and that bypasses the tty stream node would otherwise use to transcode
+// for the active Windows code page. Measured: on a Russian-locale console an em dash arrived as `тАФ`,
+// which is mojibake in the one place a diagnostic must be legible. So the messages are ASCII, and the
+// transport keeps the property it was chosen for.
+const NON_ASCII = /[^\x00-\x7f]/;
+
+test("mapResolveError and forTerminal: their messages are ASCII too", () => {
+    const cases = [
+        m.mapResolveError("wcm", "n", Object.assign(new Error("x"), { toolExitCode: 3 })),
+        m.mapResolveError("keychain", "n", Object.assign(new Error("x"), { toolExitCode: 44 })),
+        m.mapResolveError("gpg", "n", Object.assign(new Error("decryption failed"), { toolExitCode: 2 })),
+    ];
+    for (const e of cases) {
+        assert.ok(!NON_ASCII.test(e.message), `non-ASCII in a mapped error: ${JSON.stringify(e.message)}`);
+    }
+    // The truncation marker counts: it is appended to text that goes to the same console.
+    assert.ok(!NON_ASCII.test(m.forTerminal("x".repeat(50), 10)), "the truncation marker must be ASCII");
+});
+
+// The opener probe is injected rather than left to the real PATH. With a real `commandOnPath` the
+// linux case asserts whatever this machine happens to have installed: it passes here because
+// wslview and powershell.exe are absent, and would fail on a WSL box that has wslview — an
+// environment-dependent test that reports the machine, not the code.
+const onPath = (...present) => (tool) => present.includes(tool);
+
+test("buildBrowserCommand: one command per platform", () => {
+    assert.deepEqual(m.buildBrowserCommand("linux", {}, "http://x/", onPath("xdg-open")),
+        { cmd: "xdg-open", args: ["http://x/"] });
+    assert.deepEqual(m.buildBrowserCommand("darwin", {}, "http://x/", onPath()),
+        { cmd: "open", args: ["http://x/"] });
+    assert.equal(m.buildBrowserCommand("win32", {}, "http://x/", onPath()).cmd, "cmd");
+});
+
+test("buildBrowserCommand: on WSL the interop opener is preferred over xdg-open", () => {
+    // xdg-open inside WSL opens a Linux browser that may not exist, or nothing at all; wslview
+    // and powershell.exe hand the URL to the Windows default browser, which is where the
+    // developer is actually signed in.
+    assert.equal(m.buildBrowserCommand("linux", {}, "http://x/", onPath("wslview", "xdg-open")).cmd, "wslview");
+    assert.equal(m.buildBrowserCommand("linux", {}, "http://x/", onPath("powershell.exe", "xdg-open")).cmd,
+        "powershell.exe");
+});
+
+test("buildBrowserCommand: no opener at all is a supported path, not a failure", () => {
+    // Measured on one of our machines: no /mnt/c, no cmd.exe on PATH. cmdLogin prints the URL
+    // and keeps waiting on the listener, so sign-in still completes by hand.
+    assert.equal(m.buildBrowserCommand("linux", { VC_SECRETS_WSL_NO_INTEROP: "1" }, "http://x/",
+        onPath("wslview", "xdg-open")), null, "the override must win over anything on PATH");
+    assert.equal(m.buildBrowserCommand("linux", {}, "http://x/", onPath()), null);
+});
+
+test("buildBrowserCommand: a URL carrying & or | survives to the browser on every platform", () => {
+    // The property, stated per platform, because it is not the same property. On linux and darwin the
+    // URL is its own argv element and nothing re-parses it. On win32 that is NOT enough and the
+    // previous version of this test asserted it anyway: cmd.exe re-parses everything after /c, so the
+    // element boundary the assertion checked is invisible to it and the URL truncated at the first &.
+    // Green test, broken launch, measured only when a real sign-in reached a real Windows browser.
+    const nasty = "http://127.0.0.1:1/?code=a&b=c|whoami";
+    for (const platform of ["linux", "darwin"]) {
+        const built = m.buildBrowserCommand(platform, {}, nasty, onPath("xdg-open"));
+        assert.ok(built.args.includes(nasty), `${platform} must pass the URL as one argument`);
+    }
+    const win = m.buildBrowserCommand("win32", {}, nasty, onPath());
+    assert.deepEqual(win.args, [`/c start "" "${nasty}"`], "one verbatim line, with the URL quoted");
+    assert.equal(win.opts.windowsVerbatimArguments, true,
+        "without this node re-quotes the line and the quotes stop protecting anything");
+    assert.match(win.args[0], /\?code=a&b=c\|whoami"$/, "everything after the & must still be there");
+});
+
+test("buildBrowserCommand: a URL containing a double quote is refused, not quoted anyway", () => {
+    // The win32 form embeds the URL in a quoted string, so a quote inside it would end that string
+    // early and hand the rest to cmd.exe as syntax. Cannot happen from outside today — guids,
+    // base64url and configured scopes — so this keeps it that way rather than trusting it stays.
+    assert.throws(() => m.buildBrowserCommand("win32", {}, 'http://127.0.0.1:1/?a="&calc', onPath()),
+        m.VcSecretsError);
+});
+
+test("openBrowser: the spawn options the builder asked for actually reach spawn", async () => {
+    // The other half of the same defect: the win32 spec carries windowsVerbatimArguments and the
+    // inline default dropped spec.opts, so the builder was right and the launch was not. A spec field
+    // nothing reads is worse than no field at all.
+    let seen = null;
+    const spec = { cmd: "cmd", args: ['/c start "" "http://x/?a=1&b=2"'], opts: { windowsVerbatimArguments: true } };
+    m.openBrowser(spec, { spawnProcess: (cmd, args, opts) => {
+        seen = { cmd, args, opts };
+
+        return { unref() {}, on() {} };
+    } });
+    assert.equal(seen.opts.windowsVerbatimArguments, true);
+    assert.equal(seen.opts.detached, true, "and the defaults it does not override are still there");
+    assert.deepEqual(seen.args, spec.args);
+});
+
+test("openBrowser: a missing opener is reported, not thrown", () => {
+    // spawn fails ASYNCHRONOUSLY, so by the time `error` arrives the caller's try/catch is gone and an
+    // unhandled one would end the sign-in on a stack trace -- with the listener already waiting and
+    // the URL already printable. A degradation must read as one.
+    const logged = [];
+    let emit = null;
+    m.openBrowser({ cmd: "xdg-open", args: ["http://x/"] }, {
+        log: (line) => logged.push(line),
+        spawnProcess: () => ({ unref() {}, on(event, fn) { if (event === "error") { emit = fn; } } }),
+    });
+    assert.ok(emit, "openBrowser must subscribe to the child's error");
+    emit(Object.assign(new Error("spawn xdg-open ENOENT"), { code: "ENOENT" }));
+    assert.match(logged.join(""), /could not open a browser \(ENOENT\)/);
+    assert.match(logged.join(""), /by hand/, "and must say what the developer can still do");
+});
+
+const GET = (url) => ({ url, method: "GET" });
+
+test("handleCallback: a mismatched state decides nothing, and says so", () => {
+    // It used to END the sign-in with "state_mismatch". Anything that can reach this port can send
+    // that, so the abort was available to anybody and the message named a cause the developer did not
+    // have. Ignored now -- and reported, so that an error Entra sends without echoing state is still
+    // visible rather than a silent wait.
+    const r = m.handleCallback(GET("/callback?code=abc&state=WRONG"), "RIGHT", "/callback");
+    assert.equal(r.ignore, true);
+    assert.match(r.notice, /state that is not this sign-in/);
+    assert.equal(r.code, undefined, "and the code is not carried forward");
+    assert.equal(r.error, undefined, "nor turned into a failure the caller would report");
+});
+
+test("handleCallback: the matching state yields the code", () => {
+    assert.deepEqual(m.handleCallback(GET("/callback?code=abc&state=RIGHT"), "RIGHT", "/callback"),
+        { code: "abc" });
+});
+
+test("handleCallback: an Entra error carries its AADSTS code into the result", () => {
+    // Entra redirects here when the user is not in the assigned group or declines. Without this
+    // the best `login` can say is "no code received", and the AADSTS string a developer can
+    // actually act on never reaches them.
+    const r = m.handleCallback(
+        GET("/callback?error=access_denied&error_description=AADSTS50105%3A+not+assigned&state=RIGHT"),
+        "RIGHT", "/callback");
+    assert.match(r.error, /access_denied/);
+    assert.match(r.description, /AADSTS50105/);
+    assert.equal(r.code, undefined);
+});
+
+test("handleCallback: an error beats the code, but only once the state matches", () => {
+    // Both halves of a reversed decision. The goal of the old order is kept: with a matching state an
+    // error is reported before the code is looked at, so a developer reads their AADSTS code and not a
+    // generic "no code received". What the old order also permitted is gone: an error whose state does
+    // not match no longer ends anything, because that abort was available to any local process.
+    const real = m.handleCallback(
+        GET("/callback?error=access_denied&error_description=AADSTS50105&code=abc&state=RIGHT"),
+        "RIGHT", "/callback");
+    assert.match(real.error, /access_denied/);
+    assert.match(real.description, /AADSTS50105/);
+
+    const forged = m.handleCallback(
+        GET("/callback?error=access_denied&error_description=AADSTS50105&state=WRONG"), "RIGHT", "/callback");
+    assert.equal(forged.ignore, true);
+    assert.equal(forged.error, undefined);
+});
+
+test("handleCallback: a request to another path is ignored, not treated as a failed sign-in", () => {
+    // A browser fetching /favicon.ico for the "you can close this tab" page must not abort a
+    // sign-in that is about to succeed.
+    assert.equal(m.handleCallback(GET("/favicon.ico"), "RIGHT", "/callback").ignore, true);
+});
+
+test("handleCallback: a stray request on the callback path is ignored, not read as an attack", () => {
+    // The callback moved to "/" to match the registered bare `http://localhost`, so the path no
+    // longer filters anything out. A port scanner, or a browser asking for the root, would reach
+    // the state check and end the wait with "state_mismatch" — aborting a sign-in that was about
+    // to succeed, and telling the developer they are under attack. Under WSL the loopback relay
+    // makes the port reachable from Windows, so this is not hypothetical.
+    assert.equal(m.handleCallback(GET("/"), "RIGHT", "/").ignore, true);
+    assert.equal(m.handleCallback(GET("/?probe=1"), "RIGHT", "/").ignore, true);
+    // A request that claims to be a callback but carries someone else's state is ignored WITH a
+    // notice -- it neither ends the sign-in nor disappears.
+    const wrongState = m.handleCallback(GET("/?code=abc&state=WRONG"), "RIGHT", "/");
+    assert.equal(wrongState.ignore, true);
+    assert.ok(wrongState.notice, "and it must not be silent");
+    // And the real redirect still gets through on the root path — the case no other test covers,
+    // because every one of them passes the old "/callback".
+    assert.deepEqual(m.handleCallback(GET("/?code=abc&state=RIGHT"), "RIGHT", "/"), { code: "abc" });
+});
+
+test("handleCallback: an error carries every other parameter Entra sent, except a code", () => {
+    // Measured: `access_denied` arrived with no error_description at all, and reporting two fixed
+    // fields threw away whatever Entra had sent instead. `code` is excluded rather than assumed
+    // absent — it has no business on an error redirect, and echoing one into a page or a log is the
+    // one thing this must never do.
+    const r = m.handleCallback(
+        GET("/?error=access_denied&error_subcode=cancel&trace_id=t-1&code=SECRET&state=RIGHT"),
+        "RIGHT", "/");
+    assert.equal(r.error, "access_denied");
+    assert.deepEqual(r.extras, [["error_subcode", "cancel"], ["trace_id", "t-1"], ["state", "RIGHT"]]);
+    assert.ok(!JSON.stringify(r).includes("SECRET"), "a code must not survive into the error verdict");
+});
+
+test("the tab title names which sign-in the tab belongs to", () => {
+    // A machine can hold more than one: entries are named per organisation, so two projects can each
+    // have a tab open, and "vc-secrets" on both is the one thing that cannot tell them apart.
+    const title = (html) => /<title>([^<]*)<\/title>/.exec(html)[1];
+    assert.equal(title(m.closeTabPage("ado-oauth-org")), "Signed in - ado-oauth-org");
+    assert.equal(title(m.failedPage({ error: "access_denied", description: "", extras: [] }, "ado-oauth-org")),
+        "Sign-in failed - ado-oauth-org");
+    // Without a name it still says what happened rather than the tool's own name.
+    assert.equal(title(m.closeTabPage()), "Signed in");
+    assert.equal(title(m.failedPage({ error: "x", description: "", extras: [] })), "Sign-in failed");
+    // And the failure title must not read as a success at a glance, which is where a tab title is read.
+    assert.doesNotMatch(title(m.failedPage({ error: "x", description: "", extras: [] }, "org")), /signed in/i);
+});
+
+test("failedPage: renders the reason, and escapes it because the sender chose it", () => {
+    // Anything that can reach the loopback port during a sign-in picks these values, so an
+    // unescaped one would execute as script on this page's own origin.
+    const html = m.failedPage({ error: "bad<x>", description: 'a "quoted" & odd one', extras: [["k", "<v>"]] });
+    assert.ok(html.includes("bad&lt;x&gt;"), html);
+    assert.ok(html.includes("&quot;quoted&quot;"), html);
+    assert.ok(html.includes("&amp; odd"), html);
+    assert.ok(html.includes("&lt;v&gt;"), html);
+    assert.ok(!/<x>|<v>/.test(html), "no raw angle brackets from the query may reach the page");
+});
+
+test("forTerminal: a control byte from the redirect cannot reach the terminal as a command", () => {
+    // The HTML sink escapes; this is the same sender with a different alphabet. CSI would move the
+    // cursor and overwrite what is already on screen, OSC can reach the window title or the
+    // clipboard — and unlike a bad tag, none of it is visible in the text that carried it.
+    const nasty = `a[2Jbcd`;
+    const safe = m.forTerminal(nasty);
+    assert.ok(!/[ --]/.test(safe), `control bytes survived: ${JSON.stringify(safe)}`);
+    assert.match(safe, /^a\?\[2Jb\?c\?d$/, "and the replacement itself must be ASCII");
+});
+
+test("forTerminal: an unbounded value is truncated", () => {
+    assert.equal(m.forTerminal("x".repeat(1000), 10), "xxxxxxxxxx...");
+    assert.equal(m.forTerminal("short", 10), "short");
+});
+
+test("handleCallback: the parameter list a redirect can carry is bounded", () => {
+    // Whatever can reach this port can send thousands. Bounding it in the verdict means the page and
+    // the terminal message inherit one limit instead of each needing its own.
+    const many = Array.from({ length: 100 }, (unused, i) => `p${i}=v${i}`).join("&");
+    const r = m.handleCallback(GET(`/?error=access_denied&state=RIGHT&${many}`), "RIGHT", "/");
+    assert.equal(r.extras.length, m.MAX_ERROR_PARAMS);
+});
+
+test("failedPage: names the usual causes, because a bare access_denied is not actionable", () => {
+    // The first cause is the measured one: opening the printed URL in a browser that carries no work
+    // account returns a bare `access_denied`, and its own page asks for an account to be added to the
+    // browser profile. That is the likely case precisely when the URL is printed, because the
+    // developer then opens it somewhere other than their usual browser.
+    const html = m.failedPage({ error: "access_denied", description: "", extras: [] });
+    assert.match(html, /no work\s+account/i);
+    assert.match(html, /declined consent/i);
+    assert.match(html, /not assigned/i);
+    assert.doesNotMatch(html, /signed in/i, "still must not read as a success at a glance");
+});
+
+test("handleCallback: a non-GET request is ignored", () => {
+    assert.equal(m.handleCallback({ url: "/callback?code=abc&state=RIGHT", method: "POST" },
+        "RIGHT", "/callback").ignore, true);
+});
+
+test("handleCallback: the right path with neither code nor error is an error, not a wait", () => {
+    assert.equal(m.handleCallback(GET("/callback?state=RIGHT"), "RIGHT", "/callback").error, "no_code");
+});
+
+socketTest("listenForCallback: binds loopback only, so the code cannot arrive from the network", async () => {
+    // The authorization code travels in this request. A listener on 0.0.0.0 would accept it from
+    // anywhere routable, and nothing about the successful case would look different — which is
+    // why the one-word change from 127.0.0.1 needs an assertion rather than only a comment.
+    const server = await m.listenForCallback("STATE");
+    try {
+        const addresses = Object.values(os.networkInterfaces()).flat()
+            .filter((i) => i.family === "IPv4" && !i.internal).map((i) => i.address);
+        if (addresses.length === 0) {
+            return;   // nothing routable to probe from; the negative below would prove nothing
+        }
+        const refused = await new Promise((resolve) => {
+            const probe = net.connect({ host: addresses[0], port: server.port });
+            probe.once("connect", () => { probe.destroy(); resolve(false); });
+            probe.once("error", () => resolve(true));
+        });
+        assert.equal(refused, true, `the listener answered on ${addresses[0]}, not just loopback`);
+    } finally {
+        await server.close();
+    }
+});
+
+socketTest("listenForCallback: a refused sign-in does not tell the browser it succeeded", async () => {
+    // The browser is where the developer is looking. "Signed in." after Entra refused them sends
+    // them away from the terminal holding the AADSTS code — defeating the error-before-state
+    // ordering that exists precisely so that code reaches them.
+    const server = await m.listenForCallback("STATE");
+    try {
+        const waiting = server.next();
+        const res = await fetch(`http://127.0.0.1:${server.port}${m.REDIRECT_PATH}`
+            + "?error=access_denied&error_description=AADSTS50105&state=STATE");
+        assert.equal(res.status, 400);
+        const body = await res.text();
+        assert.match(body, /failed/i);
+        assert.doesNotMatch(body, /signed in/i, "the page must not claim a sign-in that did not happen");
+        assert.equal((await waiting).error, "access_denied");
+    } finally {
+        await server.close();
+    }
+});
+
+socketTest("listenForCallback: a forged error is reported and waited past, not obeyed", async () => {
+    // The wiring, not the verdict: handleCallback's decision is unit-tested above, and what this proves
+    // is that an ignore-with-notice really keeps the listener waiting AND really reaches the developer.
+    // Anything on this machine can send that request -- under WSL mirrored, anything on the Windows
+    // side too -- so obeying it would hand every local process an abort button on someone's sign-in.
+    const logged = [];
+    const server = await m.listenForCallback("STATE", { log: (line) => logged.push(line) });
+    try {
+        const waiting = server.next();
+        const forged = await fetch(`http://127.0.0.1:${server.port}${m.REDIRECT_PATH}?error=access_denied`);
+        assert.equal(forged.status, 404, "a request that decides nothing must not be answered as a callback");
+        assert.match(logged.join(""), /state that is not this sign-in/);
+        // And the real one still lands, which is the half that proves the listener was never settled.
+        const real = await fetch(`http://127.0.0.1:${server.port}${m.REDIRECT_PATH}?code=abc&state=STATE`);
+        assert.equal(real.status, 200);
+        assert.deepEqual(await waiting, { code: "abc" });
+    } finally {
+        await server.close();
+    }
+});
+
+socketTest("listenForCallback: a stray request is answered and waited past, the callback ends the wait", async () => {
+    // handleCallback's verdicts are unit-tested; what this proves is the WIRING — that an
+    // `ignore` verdict really does keep the listener waiting rather than resolving with it. A
+    // browser fetching /favicon.ico for the close-this-tab page would otherwise end the sign-in
+    // with no code, and the failure would look like Entra never redirected.
+    const server = await m.listenForCallback("STATE");
+    try {
+        const waiting = server.next();
+        const stray = await fetch(`http://127.0.0.1:${server.port}/favicon.ico`);
+        assert.equal(stray.status, 404);
+        const settled = await Promise.race([waiting, new Promise((r) => setTimeout(() => r("still-waiting"), 50))]);
+        assert.equal(settled, "still-waiting", "a 404 must not end the sign-in");
+
+        const ok = await fetch(`http://127.0.0.1:${server.port}${m.REDIRECT_PATH}?code=abc&state=STATE`);
+        assert.equal(ok.status, 200);
+        assert.match(await ok.text(), /close this tab/i);
+        assert.deepEqual(await waiting, { code: "abc" });
+    } finally {
+        await server.close();
+    }
+});

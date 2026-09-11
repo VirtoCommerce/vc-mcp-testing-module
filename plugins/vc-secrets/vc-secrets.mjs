@@ -4,6 +4,7 @@
 // declaration homes and their precedence.
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1587,6 +1588,239 @@ function oauthLaunchDeps(entryName, decl, cfg, { backend = detectLocalBackend(),
     };
 }
 
+// The interactive sign-in callback surface: the loopback listener that receives Entra's redirect,
+// the leaf that decides what a given request means, the two tiny pages the browser ends up
+// looking at, and the browser opener. No storage, no mutex — that is `login`'s job, not this one's.
+
+// Root, not a descriptive path like "/callback". Entra matches the redirect URI as a string, and
+// the app registration carries the bare `http://localhost` — a registered URI with no path segment
+// matches only a request that has none. A path here is refused with AADSTS50011 while every local
+// test still passes, because nothing local knows what Entra was told.
+const REDIRECT_PATH = "/";
+const MAX_ERROR_PARAMS = 20;
+// The tab title says WHICH sign-in this was, because a machine can hold more than one: entries are
+// named per organisation now, so two projects can each have a tab open and "vc-secrets" on both of
+// them is the one thing a developer cannot use to tell them apart. Escaped although the name is
+// validated `[a-z0-9-]+` at load -- the page should not depend on a check made somewhere else.
+function closeTabPage(entryName = null) {
+    const who = entryName ? `Signed in - ${escapeHtml(entryName)}` : "Signed in";
+
+    return `<!doctype html><meta charset=utf-8><title>${who}</title>`
+        + "<p>Signed in. You can close this tab.";
+}
+// The browser is where the developer is looking. Telling them "Signed in" after Entra refused
+// them sends them away from the terminal that holds the AADSTS code naming what went wrong —
+// which is the very thing the error-before-state ordering in handleCallback exists to surface.
+
+// Everything Entra put in the redirect is in THIS request, so asking the developer to read their own
+// address bar was asking them to fetch what we already hold. `access_denied` measured with no
+// `error_description` at all — and a one-word reason is not something anyone can act on.
+// The terminal is a second sink with a different alphabet and the same sender. A control byte there
+// is a command, not text: CSI can move the cursor and overwrite what is already on screen, and OSC
+// reaches the window title or, on some terminals, the clipboard. Escaping the HTML sink and leaving
+// this one raw would have been protecting the cheaper of the two.
+function forTerminal(value, limit = 200) {
+    // "?" and not U+FFFD: the replacement has to survive the console this is sanitising FOR. The
+    // replacement character is itself non-ASCII, so on the code page that turned an em dash into
+    // mojibake it would arrive as mojibake too -- a sanitiser producing the thing it exists to remove.
+    // Caught by the guard over printable literals, on its own author.
+    const flattened = String(value).replace(/[ --]/g, "?");
+
+    return flattened.length > limit ? `${flattened.slice(0, limit)}...` : flattened;
+}
+
+function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+// Escaped, not because the values are trusted but because they are not: anything that can reach the
+// loopback port during a sign-in chooses them, and an unescaped one would execute as script on this
+// page's own origin.
+function failedPage({ error, description, extras = [] }, entryName = null) {
+    const rows = [["error", error]].concat(description ? [["error_description", description]] : [], extras)
+        .map(([k, v]) => `<tr><td>${escapeHtml(k)}<td>${escapeHtml(v)}`).join("");
+
+    // "Sign-in failed", never "signed in": a tab title is read at a glance, and a test pins that this
+    // page cannot be mistaken for the success one.
+    const who = entryName ? `Sign-in failed - ${escapeHtml(entryName)}` : "Sign-in failed";
+
+    return `<!doctype html><meta charset=utf-8><title>${who}</title>`
+        + "<style>body{font:14px system-ui;margin:2rem}td{padding:.2rem .6rem;vertical-align:top}"
+        + "td:first-child{color:#666;white-space:nowrap}</style>"
+        + "<p><strong>Sign-in failed.</strong> The same reason is printed in the terminal where you ran"
+        + " <code>vc-secrets login</code>."
+        + `<table>${rows}</table>`
+        // Deliberately avoids the words "signed in": a page about a failure that contains them reads
+        // as a success at a glance, and a test pins that.
+        + "<p>An <code>access_denied</code> with no description usually means the browser carried no work"
+        + " account, and its sign-in page asked for one to be added to the browser profile instead."
+        + " The other two causes are a declined consent prompt and an account not assigned to this"
+        + " application -- so check which account the browser used.";
+}
+
+// Binds an ephemeral port on the loopback interface only, and resolves `next()` with the first
+// request that is actually a callback. Everything else is answered 404 and waited past, so a
+// browser fetching /favicon.ico cannot abort a sign-in that is about to succeed.
+function listenForCallback(expectedState, { entryName = null,
+    log = (line) => process.stderr.write(line) } = {}) {
+    return new Promise((resolve, reject) => {
+        let settle = null;
+        const arrived = new Promise((r) => { settle = r; });
+        const server = http.createServer((req, res) => {
+            const verdict = handleCallback(req, expectedState, REDIRECT_PATH);
+            if (verdict.ignore) {
+                if (verdict.notice) {
+                    // Said out loud, because the alternative is a sign-in that waits with no reason
+                    // given. Repeatable by whoever sent it, which is why it is a notice and not a
+                    // failure.
+                    log(`vc-secrets: ${verdict.notice}\n`);
+                }
+                res.writeHead(404).end();
+
+                return;
+            }
+            res.writeHead(verdict.error ? 400 : 200, { "content-type": "text/html; charset=utf-8" })
+                .end(verdict.error ? failedPage(verdict, entryName) : closeTabPage(entryName));
+            settle(verdict);
+        });
+        // `reject` rejects the BIND, and is inert once listen has resolved -- after that a server
+        // error would vanish while next() waited forever. Settling as well makes a listener that dies
+        // mid-sign-in end the wait with a reason instead of hanging. createChannel fixes the same
+        // shape at its own listener.
+        server.once("error", (e) => {
+            reject(e);
+            settle({ error: "listener_failed", description: e.code ?? e.message });
+        });
+        // 127.0.0.1 explicitly, never 0.0.0.0: the authorization code arrives in this request,
+        // and a listener on every interface would accept it from the network.
+        server.listen(0, "127.0.0.1", () => resolve({
+            port: server.address().port,
+            next: () => arrived,
+            close: () => new Promise((done) => server.close(done)),
+        }));
+    });
+}
+
+// The spawned child's own default was silently dropped once before: spec.opts carries per-platform
+// options (windowsVerbatimArguments, say) that the builder decided this launch needs, and the
+// previous inline default silently dropped whatever the builder asked for. A spec field nothing reads
+// is worse than no field — the builder looks correct and the launch is not.
+function openBrowser(spec, { spawnProcess = spawn, log = (line) => process.stderr.write(line) } = {}) {
+    const child = spawnProcess(spec.cmd, spec.args,
+        { stdio: "ignore", detached: true, windowsHide: true, ...spec.opts });
+    // A missing opener fails ASYNCHRONOUSLY, so the caller's try/catch is long gone by then and an
+    // unhandled `error` would end the sign-in on a stack trace. Losing the browser is a degradation:
+    // the URL is printable and the listener is already waiting.
+    child.on("error", (e) => log(`vc-secrets: could not open a browser (${e.code ?? e.message})`
+        + " -- open the sign-in URL by hand\n"));
+
+    return child.unref();
+}
+
+function buildBrowserCommand(platform, env, url, onPath = commandOnPath) {
+    if (platform === "darwin") {
+        return { cmd: "open", args: [url] };
+    }
+    if (platform === "win32") {
+        // The empty string is a title placeholder: `start <url>` would consume the URL as the
+        // window title and open nothing.
+        //
+        // Verbatim, with the URL quoted, because cmd.exe does not use the argv it was handed. It
+        // re-parses everything after /c as one string, where a bare & separates commands — and node
+        // does not quote an argument that has no spaces, so an authorize URL arrives with every &
+        // exposed. Measured on Windows: the browser received the URL truncated at `client_id`, and
+        // Entra answered `AADSTS900144` naming the `scope` it was never sent. The argv-element form
+        // this replaced was green in a test that asserted the element, which is not the property
+        // cmd.exe reads. Same technique buildSpawnInvocation already uses for a .cmd shim.
+        if (url.includes('"')) {
+            // Cannot arrive from the outside today — the URL is built here from guids, base64url and
+            // configured scopes — so this is an invariant made checkable rather than a guess about
+            // input. Thrown before the browser opens, so no authorization code is at stake.
+            throw new VcSecretsError("refusing to open a URL containing a double quote");
+        }
+
+        return { cmd: "cmd", args: [`/c start "" "${url}"`], opts: { windowsVerbatimArguments: true } };
+    }
+    // Named VC_SECRETS_WSL_NO_INTEROP, not the source's MCPW_WSL_NO_INTEROP: this package's own env
+    // var convention (VC_SECRETS_LOCAL_BACKEND, VC_SECRETS_POWERSHELL) and the public-repo rule
+    // against the source tool's name surviving into this one.
+    if (env.VC_SECRETS_WSL_NO_INTEROP === "1") {
+        return null;
+    }
+    // Interop first, and deliberately ahead of xdg-open: inside WSL, xdg-open reaches for a Linux
+    // browser that may not be installed, while these two hand the URL to the Windows default
+    // browser — which is the one the developer is already signed into.
+    if (onPath("wslview")) {
+        return { cmd: "wslview", args: [url] };
+    }
+    if (onPath("powershell.exe")) {
+        return { cmd: "powershell.exe", args: ["-NoProfile", "-Command", "Start-Process", url] };
+    }
+    if (onPath("xdg-open")) {
+        return { cmd: "xdg-open", args: [url] };
+    }
+
+    return null;
+}
+
+// Filters before it interprets. Only a code or an error ends the wait; anything else is answered
+// 404 and the listener keeps waiting.
+function handleCallback(req, expectedState, redirectPath) {
+    if (req.method !== "GET") {
+        return { ignore: true };
+    }
+    const parsed = new URL(req.url, "http://127.0.0.1");
+    if (parsed.pathname !== redirectPath) {
+        return { ignore: true };   // favicon, or any path that is not the callback
+    }
+    // The path stopped discriminating when the callback moved to "/" to match the registered bare
+    // `http://localhost`: every stray loopback GET now reaches this far. A real redirect carries
+    // state and either a code or an error, so a request with none of the three is not a response to
+    // this sign-in. Without this branch such a request falls into the state check below and ends the
+    // wait with "state_mismatch" — aborting the sign-in and telling the developer they are under
+    // attack, when a port scanner or the browser asking for "/" is the whole story. Reachable from
+    // Windows under WSL, where loopback spans the boundary and the port is reachable from processes
+    // outside this kernel — by port forwarding under nat, by a shared stack under mirrored.
+    if (!parsed.searchParams.has("code") && !parsed.searchParams.has("error")
+        && !parsed.searchParams.has("state")) {
+        return { ignore: true };
+    }
+    // AFTER the state check, and this reverses an earlier decision here. The old order read `error`
+    // first so that a genuine Entra failure showed its AADSTS code instead of a mismatch warning --
+    // a good goal, kept below, because an error with a MATCHING state is still reported before the
+    // code is looked at.
+    //
+    // What the old order also allowed: anything able to reach this port sends `?error=whatever` with
+    // no state and ends the sign-in, repeatedly, with a message naming a cause the developer does not
+    // have. The abort is cheap -- `login` is retryable -- but the false diagnosis is not. So a
+    // request whose state does not match this sign-in decides nothing, and says so rather than
+    // vanishing: if Entra ever does redirect an error without echoing state, the notice is what keeps
+    // that visible instead of hanging silently.
+    if (parsed.searchParams.get("state") !== expectedState) {
+        return { ignore: true,
+            notice: "a request reached the callback port carrying a state that is not this sign-in's"
+                + " -- ignored, still waiting" };
+    }
+    const error = parsed.searchParams.get("error");
+    if (error) {
+        // Every remaining parameter, because the useful one is whichever Entra chose to send: a
+        // measured `access_denied` carried no description, and reporting two fixed fields threw the
+        // rest away unseen. `code` is excluded rather than trusted absent — it has no business on an
+        // error redirect, and echoing one into a page or a log is the single thing this must not do.
+        // Bounded here rather than at each sink, so the page and the terminal inherit one limit. A
+        // real redirect carries a handful; anything that can reach this port can send thousands.
+        const extras = [...parsed.searchParams.entries()]
+            .filter(([k]) => !["error", "error_description", "code"].includes(k))
+            .slice(0, MAX_ERROR_PARAMS);
+
+        return { error, description: parsed.searchParams.get("error_description") ?? "", extras };
+    }
+    const code = parsed.searchParams.get("code");
+
+    return code ? { code } : { error: "no_code" };
+}
+
 function makeSecretResolver(cfg, env = process.env) {
     const resolvedValues = [];
     const resolver = async (name, decl) => {
@@ -2578,6 +2812,8 @@ export {
     buildKeyvaultRead, TIMEOUT_LOCAL_MS, TIMEOUT_AZ_MS, VALUE_ON_STDIN,
     COMMAND_ON_STDIN, quoteForSecurityInteractive, writeSecretValue,
     tokenLockFor, acquireTokenLock, ensureFreshToken, oauthLaunchDeps,
+    REDIRECT_PATH, MAX_ERROR_PARAMS, closeTabPage, forTerminal, escapeHtml, failedPage, listenForCallback,
+    openBrowser, buildBrowserCommand, handleCallback,
     runTool, resolveSpawnCommand, buildSpawnInvocation, makeSecretResolver, cmdRun, cmdTask, cmdLaunch, killProcessTree,
     validateLaunchables, LEGACY_ENV_VARS, LEGACY_SECRET_ENV_VARS,
     mapResolveError, applyKeystrokes, promptHidden, cmdSet, cmdUnlock, unlockTargets, cmdDoctor, cmdMigrate, newKeyPresent,
