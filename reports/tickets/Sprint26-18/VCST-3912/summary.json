@@ -197,21 +197,52 @@
       }
     ]
   },
-  "new_cases_authored": 23,
+  "new_cases_authored": 22,
   "promotion": {
-    "automated": [],
+    "automated": [
+      "ORDA-104",
+      "ORDA-105",
+      "ORDA-106",
+      "ORDA-108",
+      "ORDA-109",
+      "ORDA-110",
+      "ORDA-111",
+      "ORDA-113",
+      "ORDA-114",
+      "ORDA-115",
+      "ORDA-116",
+      "ORDA-117",
+      "ORDA-118",
+      "ORDA-121",
+      "ORDA-123",
+      "ORDA-124",
+      "ORDA-125"
+    ],
     "reviewed": [],
     "blocked": [
       {
-        "case": "ORD-GQL-014",
-        "reason": "premise void - the PR leaves ICustomerOrderService pointing at the raw implementation, so the storefront/xAPI surface is out of the change's reach. Retirement proposed, not applied (TRI-006)."
+        "case": "ORDA-112",
+        "reason": "BLOCKED - no system-context export trigger exists on this stand"
       },
       {
-        "case": "ORDA-104..ORDA-122",
-        "reason": "authored as Draft and exercised ad hoc rather than through the suite runner; promotion needs a runner pass."
+        "case": "ORDA-119",
+        "reason": "BLOCKED - depends on ORDA-112"
+      },
+      {
+        "case": "ORDA-122",
+        "reason": "BLOCKED - needs a Chrome DevTools lane, unavailable on the edge-only run"
+      },
+      {
+        "case": "ORDA-120",
+        "reason": "FAIL - a real defect the run surfaced: 60 uncaught i18n TypeErrors on a cold deep-link"
       }
     ],
-    "reverted": []
+    "reverted": [
+      {
+        "case": "ORDA-107",
+        "reason": "retired from the suite - the sort-order disclosure was accepted as Ignore, so the case would have been a permanent red nobody would act on"
+      }
+    ]
   },
   "regression": {
     "c1": {
@@ -223,9 +254,9 @@
         "ORDA-104..ORDA-122",
         "ORD-GQL-014"
       ],
-      "run_id": "manual-api-probe-2026-09-10",
-      "pass_rate": "1 pass / 3 fail / 16 not-run of 20",
-      "skipped_reason": "Not a suite-runner run. Six cases were executed as direct privileged-vs-denied API comparisons against the deployed PR build; the remaining 14 need the store-scoped role, a disposable order with captures/refunds, or a browser lane."
+      "run_id": "REG-2026-09-11-1616",
+      "pass_rate": "17 PASS / 2 FAIL / 3 BLOCKED of 22",
+      "skipped_reason": null
     },
     "c2": {
       "suites": [],
@@ -261,12 +292,6 @@
       "severity": "Medium",
       "provenance": "out-of-scope",
       "summary": "P3 invoice prints Total $0 when order:invoice:download is granted without order:read_prices. ACCEPTED AS Keep as Is by the team: the download permission is the control, and a user without price rights should simply not be granted it; masking inside a PDF is not wanted. The gate itself was verified working (403 and hidden button without the permission). No action.",
-      "report": null
-    },
-    {
-      "severity": "Medium",
-      "provenance": "out-of-scope",
-      "summary": "P4 sorting by Total still returns the true ranking of hidden totals. Accepted by the developer as Ignore.",
       "report": null
     }
   ],

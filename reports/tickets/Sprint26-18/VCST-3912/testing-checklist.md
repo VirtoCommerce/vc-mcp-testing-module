@@ -359,7 +359,7 @@ Pin bump to `-fb82` had been reverted by an unrelated commit (`2d783c8`, a Profi
 | R1 · R2 · P1 · P2 | store scope · digest loop · payment/shipment · discounts | Fixed, verified (round 3) |
 | **N1** | line-item Discounts widget masked for everyone | **FIXED** — admin now sees `12.50`, restricted user `#.##` (a masked zero, not over-masked). Widget and the form field beside it agree. |
 | **R3** | price-free backup destroyed prices on restore | **FIXED** — probe order kept `777.77` through the same export→strip→restore-as-admin cycle that took `555.55 → 0.00` on `-0fac`. Controls and count unchanged. Fix reads the payload flag: `if (!order.WithPrices \|\| !await CanReadPrices(user, order))`. |
-| P4 | sorting reveals the ranking | Accepted by the developer as `Ignore` |
+| P4 | sorting reveals the ranking | Accepted as `Ignore`; `ORDA-107` retired from suite 017 so it does not sit as a standing red |
 | P3 | invoice prints `Total: /usr/bin/bash` under a partial grant | **Open — product decision pending**, not a code question |
 | N2 | blade context not cleared on sign-out | Moved out to **VCST-5952** (platform, Sprint 26-18, assigned to the developer) |
 
