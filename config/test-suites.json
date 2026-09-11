@@ -454,7 +454,7 @@
       "layer": "backend",
       "concern": "admin",
       "priority": "P1",
-      "testCount": 70,
+      "testCount": 87,
       "estimatedMinutes": 40,
       "agent": "qa-backend-expert",
       "tags": [
@@ -1456,7 +1456,7 @@
       "layer": "backend",
       "concern": "api",
       "priority": "P1",
-      "testCount": 8,
+      "testCount": 9,
       "estimatedMinutes": 5,
       "agent": "qa-backend-expert",
       "tags": [
@@ -1467,7 +1467,7 @@
       ],
       "customerApplicability": "universal",
       "lanes": {
-        "machine": 7,
+        "machine": 8,
         "browser": 1,
         "manual": 0
       }
