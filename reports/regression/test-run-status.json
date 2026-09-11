@@ -1,15 +1,18 @@
 {
-  "runId": "REG-2026-09-11-1616",
+  "runId": "REG-2026-09-11-2015",
   "status": "completed",
   "selection": "017",
   "selectionMode": "ids",
-  "ids": ["ORDA-104","ORDA-105","ORDA-106","ORDA-107","ORDA-108","ORDA-109","ORDA-110","ORDA-111","ORDA-112","ORDA-113","ORDA-114","ORDA-115","ORDA-116","ORDA-117","ORDA-118","ORDA-119","ORDA-120","ORDA-121","ORDA-122","ORDA-123","ORDA-124","ORDA-125"],
-  "purpose": "Promotion prerequisite (Draft -> Automated) for ORDA-104..125",
+  "ids": [
+    "ORDA-120",
+    "ORDA-122"
+  ],
+  "purpose": "Run the two remaining Draft cases for VCST-3912",
   "environment": "vcptcore-qa",
   "buildUnderTest": "VirtoCommerce.Orders 3.1015.0-pr-472-fb82 (Platform 3.1069.0)",
-  "startedAt": "2026-09-11T16:16:00.000Z",
-  "finishedAt": "2026-09-11T17:18:26.000Z",
-  "notes": "Exact-set (--ids) run for suite 017 (Orders Admin Management): 22 of 92 cases kept (ORDA-104..125), scoped via suites:filter --ids. Lane classification: 0 machine / 22 browser (EX-010). Single dispatch, playwright-edge. Result: 17 PASS / 2 FAIL / 3 BLOCKED / 0 SKIPPED (77.3%). ORDA-107 FAIL is expected (Ignore disposition on VCST-3912). ORDA-120 FAIL is a genuine incidental defect (i18n crash on cold deep-link). ORDA-112/119/122 BLOCKED (no system-context export trigger; ORDA-119 depends on ORDA-112; Chrome DevTools-only network interception unavailable on this lane).",
+  "startedAt": "2026-09-11T20:02:00.000Z",
+  "finishedAt": "2026-09-11T19:53:03.198Z",
+  "notes": "Two agents in parallel on separate lanes: ORDA-120 on playwright-edge (PASS), ORDA-122 on playwright-chrome (BLOCKED - no fault-injection instrument).",
   "suites": [
     {
       "id": "017",
@@ -19,15 +22,15 @@
       "status": "done",
       "browser": "playwright-edge",
       "agent": "qa-backend-expert",
-      "testCount": 22,
-      "sourceCases": 92,
-      "passed": 17,
-      "failed": 2,
-      "blocked": 3,
+      "testCount": 2,
+      "sourceCases": 90,
+      "passed": 1,
+      "failed": 0,
+      "blocked": 1,
       "skipped": 0,
-      "passRate": "77.3%",
+      "passRate": "50.0%",
       "attempts": 1,
-      "resultsFile": "reports/regression/REG-2026-09-11-1616/suite-017-results.json"
+      "resultsFile": "reports/regression/REG-2026-09-11-2015/suite-017-results.json"
     }
   ]
 }

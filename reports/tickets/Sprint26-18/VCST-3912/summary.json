@@ -207,40 +207,45 @@
       "ORDA-109",
       "ORDA-110",
       "ORDA-111",
+      "ORDA-112",
       "ORDA-113",
       "ORDA-114",
       "ORDA-115",
       "ORDA-116",
       "ORDA-117",
       "ORDA-118",
-      "ORDA-121",
       "ORDA-123",
       "ORDA-124",
       "ORDA-125"
     ],
     "reviewed": [],
-    "blocked": [
-      {
-        "case": "ORDA-112",
-        "reason": "BLOCKED - no system-context export trigger exists on this stand"
-      },
-      {
-        "case": "ORDA-119",
-        "reason": "BLOCKED - depends on ORDA-112"
-      },
-      {
-        "case": "ORDA-122",
-        "reason": "BLOCKED - needs a Chrome DevTools lane, unavailable on the edge-only run"
-      },
-      {
-        "case": "ORDA-120",
-        "reason": "FAILed the run only on a console clause about i18n errors on a cold deep-link - not a defect of this feature and not caused by this PR, so the clause was removed from the case. Its masking assertions passed. Promotable after one re-run."
-      }
-    ],
+    "blocked": [],
     "reverted": [
       {
         "case": "ORDA-107",
         "reason": "retired from the suite - the sort-order disclosure was accepted as Ignore, so the case would have been a permanent red nobody would act on"
+      }
+    ],
+    "retired": [
+      {
+        "case": "ORDA-107",
+        "reason": "Removed - the sort-order disclosure was accepted as Ignore, so the case would be a permanent red rather than coverage."
+      },
+      {
+        "case": "ORDA-119",
+        "reason": "Removed - its passing condition is not satisfiable. Run once end to end (restore job 95363) on a disposable order: the archive carries zeros and the order is absent from storage, so RestorePrices has no stored counterpart to read and no implementation could recover the original amounts. What the run establishes is a configuration rule, not a defect: grant platform:backuprestore:backup together with order:read_prices, the same pairing recommended for order:invoice:download."
+      },
+      {
+        "case": "ORDA-120",
+        "reason": "Removed - the client-timing trio (deep-link, refresh mid-flow, dependency failure) came from an archetype sweep rather than from this feature's fault model. The server strips prices before the response leaves, so the browser never holds a real value that any timing, cache, fault or race could reveal: ORDA-120 passed only on wire-payload evidence that ORDA-113 already asserts at the source, ORDA-121 is the same argument restated, and ORDA-122 cannot fail at all (with the request failing there is no order object, and its cache clause cannot fail for a role the server never sends a real price to). A case that cannot fail against a broken implementation is not coverage."
+      },
+      {
+        "case": "ORDA-121",
+        "reason": "Removed - the client-timing trio (deep-link, refresh mid-flow, dependency failure) came from an archetype sweep rather than from this feature's fault model. The server strips prices before the response leaves, so the browser never holds a real value that any timing, cache, fault or race could reveal: ORDA-120 passed only on wire-payload evidence that ORDA-113 already asserts at the source, ORDA-121 is the same argument restated, and ORDA-122 cannot fail at all (with the request failing there is no order object, and its cache clause cannot fail for a role the server never sends a real price to). A case that cannot fail against a broken implementation is not coverage."
+      },
+      {
+        "case": "ORDA-122",
+        "reason": "Removed - the client-timing trio (deep-link, refresh mid-flow, dependency failure) came from an archetype sweep rather than from this feature's fault model. The server strips prices before the response leaves, so the browser never holds a real value that any timing, cache, fault or race could reveal: ORDA-120 passed only on wire-payload evidence that ORDA-113 already asserts at the source, ORDA-121 is the same argument restated, and ORDA-122 cannot fail at all (with the request failing there is no order object, and its cache clause cannot fail for a role the server never sends a real price to). A case that cannot fail against a broken implementation is not coverage."
       }
     ]
   },
@@ -251,7 +256,7 @@
         "050c"
       ],
       "ids": [
-        "ORDA-104..ORDA-122",
+        "ORDA-104..ORDA-125",
         "ORD-GQL-014"
       ],
       "run_id": "REG-2026-09-11-1616",

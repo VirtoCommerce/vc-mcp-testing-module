@@ -28,8 +28,7 @@ Fixtures seeded on vcptcore-qa: role **`AGENT-TEST-ORDER-NOPRICES`** (all 10 Ord
 | `ORDA-114` | **FAIL (Critical)** | Payment/shipment endpoints return real money **and** falsely report `withPrices:true`. |
 | `ORDA-118` | **FAIL (Critical)** | `discounts[]` survives redaction and reconstructs the hidden total — **and renders as a real number on screen**. |
 | `ORDA-113` | **FAIL (Critical)** | 6 of 8 Admin surfaces mask correctly; the **invoice PDF renders `Total: $0`** and both Discounts blades show real amounts. |
-| `ORDA-120`, `ORDA-121` | **PASS** | Deep-link and refresh both hold masking; no partial save. |
-| `ORDA-122` | **PARTIAL** | Fails closed on a 404 fault; the 500/malformed branch needs the reserved Chrome DevTools lane. |
+| `ORDA-120`, `ORDA-121`, `ORDA-122` | observation only | Deep-link, refresh and fault all hold masking. Later RETIRED - see the case-state section: none of them can fail while the server strips prices before they leave. |
 | `ORDA-108` | **FAIL (Critical)** | **REGRESSION** — an out-of-scope store request returns all 1248 orders instead of the caller's 54. See Round 2. |
 | `ORDA-110` | **PASS** | Restore-on-write via `PUT`: stored `777.77` survived a denied user's save. |
 | `ORDA-104`, `111`, `112`, `115`–`117`, `119`, `ORD-GQL-014` | **NOT RUN** | Need an order with captures/refunds, a resolvable platform-export request shape, or the sample module deployed. |
@@ -50,7 +49,7 @@ Fixtures seeded on vcptcore-qa: role **`AGENT-TEST-ORDER-NOPRICES`** (all 10 Ord
 | **Invoice PDF** | **`Total: $0`**, HTTP 200 | **FAIL** |
 | List grid sorted by Total | `#.##`, but row order = true ranking | **FAIL** |
 
-`ORDA-120` deep-link **PASS** · `ORDA-121` refresh **PASS** (verified there was no partial save; also caught that `press_key('F5')` does not actually reload in Playwright and re-ran with a real navigation rather than reporting a false pass) · `ORDA-122` **PARTIAL** — a 404 fault proved it fails closed, but the 500/malformed-body branch needs Chrome DevTools MCP (reserved lane) · `ORDA-113` third sub-case **BLOCKED** — no custom `CanReadPrices` override is installed on this env.
+The three client-timing observations (deep-link, refresh, fault) all held masking, and the run also caught that `press_key('F5')` does not actually reload in Playwright - re-run with a real navigation rather than reported as a false pass. Their cases were later retired, for the reason given in the case-state section. · `ORDA-113` third sub-case **BLOCKED** — no custom `CanReadPrices` override is installed on this env.
 
 Console: 42 errors for the denied user, **all** 401/403 from modules the narrow fixture role lacks, plus 404 logo assets. **No TypeError and no unhandled `.withPrices` access** — the admin control shows neither, so these are fixture artifacts, not a regression.
 
@@ -137,7 +136,7 @@ So a restore from it destroys every price in the system, and neither the operato
 
 Artifacts: `payloads/R2-T2-backup-DENIED.zip` and `payloads/R2-T2-backup-ADMIN.zip`.
 
-**Not run:** restoring that archive. It would destroy prices on a shared stand, and the round trip (`ORDA-119`) needs an isolated target.
+Restoring that archive WAS exercised later, safely: stripped to one disposable order, over an existing order (ORDA-124, prices survive) and onto a deleted one (see below).
 
 ### Restore-on-write through the UI — PASS
 
@@ -185,10 +184,10 @@ Story ACs first. **1d graded all four non-testable or partial** — two are stru
 | 8 | GET by id/number/outerId: 404 vs 403 does not enable order enumeration | gap-1/2 | ORDA-106 | NOT RUN |
 | 9 | Store scope ∩ requested = ∅ returns zero orders, not all stores | gap-5 | ORDA-108 | NOT RUN — **known-open, marked "By design" in review, no unit test** |
 | 10 | Nested captures/refunds under a payment are zeroed at every depth | gap-4 | ORDA-109 | NOT RUN |
-| 11 | Restore-on-write holds for create, update, patch **and** import | gap | ORDA-110, 119 | NOT RUN |
+| 11 | Restore-on-write holds for update, patch and import over an EXISTING order | gap | ORDA-110, 124 | PASS |
 | 12 | Export by a permitted admin contains real prices | gap | ORDA-111 | NOT RUN |
 | 13 | Export with no `HttpContext` does not silently zero the backup | gap-20 | ORDA-112 | NOT RUN — **known-open, "By design"; contradicts the doc's own rule #4** |
-| 14 | Export → import round trip does not write withheld zeros as real prices | gap | ORDA-119 | NOT RUN |
+| 14 | Export → import round trip does not write withheld zeros as real prices | gap | — | **Condition withdrawn** — see below; it asks for data that exists nowhere |
 | 15 | Independent Payment/Shipment endpoints redact identically | gap-19 | ORDA-114 | NOT RUN — **known-open; the doc states child services are unprotected today** |
 | 16 | A custom `CanReadPrices` on a null principal denies, never 500s | gap-3 | ORDA-115 | NOT RUN — **hypothesis withdrawn.** The base service returns `false` for `user is null` and the sample guards `user != null`; the `cursor[bot]` 500 was fixed between `a2d4cfa` and `dfa3864`. Row retained as a `BL-AUTH-017` guard on the extension point only; non-reproduction is the expected result. |
 | 17 | `Discounts` / `TaxDetails` / `FeeDetails` carry no money after redaction | **new** | ORDA-118 | NOT RUN — **found this run; in no review comment and not in the architecture doc** |
@@ -204,9 +203,7 @@ Story ACs first. **1d graded all four non-testable or partial** — two are stru
 | Condition | Case | Status |
 |---|---|---|
 | All six price surfaces mask for a denied user (order list grid · line items · order-totals widget · invoice · shipment · operation-tree widget) — the inventory comes from the customer's own analysis attachment | ORDA-113 | NOT RUN |
-| Deep-link straight to an order-detail blade masks with no list context loaded (`UIP-DEEP`) | ORDA-120 | NOT RUN |
-| Force-refresh mid-flow preserves masking (`UIP-REFRESH`); bundle hash must be confirmed changed first — Admin SPA carries a 4h `max-age` (`VC-DEPLOY-003`) and a stale bundle masquerades as a masking failure | ORDA-121 | NOT RUN |
-| Payload failure masks **closed** — no price flash (`UIP-NET`) | ORDA-122 | NOT RUN |
+| Client-timing sweep: deep-link (`UIP-DEEP`), force-refresh mid-flow (`UIP-REFRESH`), payload failure (`UIP-NET`) | — | **WAIVED** — observed to hold, but not carried as cases: the server strips prices before they leave, so no client-side timing or fault path has a real value available to reveal. `ORDA-113` asserts the same property directly, at the source |
 | `BL-UI-004` content boundary on the rewritten order-list price cell template | ORDA-113 | NOT RUN |
 | `BL-A11Y-*` on the masked cells | — | **SKIPPED** — the visual lane never dispatched; nothing to audit until the build lands. Not a pass. |
 
@@ -225,7 +222,7 @@ Story ACs first. **1d graded all four non-testable or partial** — two are stru
 
 ## Regression scope
 
-- **C1** — `ORDA-104..ORDA-122` + `ORD-GQL-014`, exact set. **Not run** (blocked).
+- **C1** — `ORDA-104..ORDA-125` + `ORD-GQL-014`, exact set. **Not run** (blocked).
 - **C2** — not scoped and not run: a change-scoped Critical sweep against a build that does not carry the change would measure the old build. Recorded as `not-assessed`, **never as a pass**.
 - **Exclusions** — every suite contributed zero cases this run, because nothing executed.
 
@@ -375,9 +372,9 @@ Out of the ticket: **P3** (invoice) — **Keep as Is**, accepted: the download g
 
 **Nothing is left unverified.** The storefront/xAPI surface, previously listed as a gap, is out of the change's reach by construction: the PR registers the protection service under its own interface (`ICustomerOrderDataProtectionService`) and leaves `ICustomerOrderService` / `IIndexedCustomerOrderSearchService` pointing at the raw implementations, so anything injecting those — xAPI included — is untouched. Case `ORD-GQL-014`, authored against that hypothesis, now has a void premise and should be retired (proposal only; retirement is a human call, TRI-006).
 
-### Regression coverage — final shape (22 cases in suite 017)
+### Regression coverage — final shape
 
-The 19 cases authored in round 1 (`ORDA-104`..`ORDA-122`) needed **no rewriting after the fixes**. They were written under the rule that a row may not certify a defect: each asserted the correct, specification-derived expectation with the suspected defect named only in `Failure_Signals`. So the same rows that were RED against the broken build are the rows that guard the fixed one.
+The cases authored in round 1 (`ORDA-104`..`ORDA-122`) needed **no rewriting after the fixes**. They were written under the rule that a row may not certify a defect: each asserted the correct, specification-derived expectation with the suspected defect named only in `Failure_Signals`. So the same rows that were RED against the broken build are the rows that guard the fixed one.
 
 Three cases added for what the fix round introduced:
 
@@ -391,18 +388,66 @@ All 22 are `Draft`. Promotion to `Automated` needs a suite-runner pass; this run
 
 Proposed retirement: **`ORD-GQL-014`** in suite 050c — its premise is void, since the PR leaves `ICustomerOrderService` pointing at the raw implementation and the storefront surface is out of the change's reach. Retirement is a human call (TRI-006), so it is proposed rather than applied.
 
-### Case state after the run and the two edits
+### Case state after the run and the edits
 
 | | |
 |---|---|
-| **Automated** | 17 — ORDA-104, 105, 106, 108, 109, 110, 111, 113, 114, 115, 116, 117, 118, 121, 123, 124, 125 |
-| **Draft** | 4 — ORDA-112 and 119 (no system-context export trigger on this stand; 119 depends on 112), ORDA-122 (needs a Chrome DevTools lane), ORDA-120 (promotable after one re-run) |
-| **Retired** | ORDA-107 — the sort-order disclosure was accepted as `Ignore`, so the case was removed rather than left as a permanent red |
-
-`ORDA-120` failed the run **only** on a console clause asserting no JS errors on a cold deep-link. The i18n errors it caught are neither a defect of this feature nor caused by this PR — confirmed with the QA lead — so the clause was removed. The case now asserts what it was written for: that deep-linking does not bypass `withPrices`-driven masking, which passed in the run.
+| **Automated** | 17 - ORDA-104, 105, 106, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 123, 124, 125 |
+| **Draft** | 0 |
+| **Retired** | 5 - ORDA-107, ORDA-119, and the client-timing trio ORDA-120 / 121 / 122. Reasons below; none was removed for being red |
 
 `ORDA-115` was held by the promoter on GRD-001 for carrying a `{HYPOTHESIS}` assertion, then grounded against `BL-AUTH-017` and the two null guards in `dfa3864`, and promoted.
 
 Localization check: `order:invoice:download` has a label in **all 10 locale files** (de, en, es, fr, it, ja, pl, pt, ru, zh), alongside `order:read_prices` in the same `permissions` block.
 
-The earlier line saying "All 22 are Draft" is superseded by this table — it was written before the run.
+### Why ORDA-112 was BLOCKED, and what replaced it
+
+The case asked for an export with no HTTP user. Tracing the code settled both halves of that question.
+
+**The mechanism is real and named.** `HangfireUserContextMiddleware` (module `VirtoCommerce.BackgroundJobs`) stamps the enqueuing user onto the job as a client filter and restores it on the worker as a server filter - which is why a background export acts with the rights of whoever started it. For a **recurring** job that same filter substitutes the literal `system:<recurringJobId>`, which is not a real account: `GetCurrentUser()` fails `FindByNameAsync`, `CanReadPrices(null, order)` returns `false`, and every price is stripped.
+
+**Nothing triggers it.** `vc-module-backup-restore` registers no `RecurringJob` and schedules nothing - both export and restore are `[HttpPost]` actions that enqueue from inside the request. The platform has no export controller or job of its own. Of the 26 handlers the BackgroundJobs module registers, the five Orders ones are AdjustInventory, CancelPayment, LogOrderChanges, RefundChanged and SendOrderNotifications; the only export-shaped handlers are Sitemap's, and `ModuleBackgroundJobHandler` is `triggerable: false`.
+
+So the case was testing a hazard with no shipped trigger, which can never run. It was rewritten onto the reachable premise that guards the same regression: **the same export, taken by two users, must diverge.** Re-run as `REG-2026-09-11-1935`, PASS.
+
+| | Orders in archive | `withPrices` | `CO260827-00002` total | item price |
+|---|---|---|---|---|
+| admin (job 95329) | 1251 | `true` x1251 | **284.94** | 249.95 |
+| `agent-test-noprices` (job 95331) | 1251 | `false` x1251 | **0.0** | 0.0 |
+
+The live privileged read of that order was 284.94 before and after both exports. A price-free **admin** archive would now be the visible symptom of a lost identity on the worker.
+
+One thing the trace also closes: the protection decorator is registered under its own interface (`ICustomerOrderDataProtectionService`), not as the implementation of `ICustomerOrderService`. Notification, indexing and event handlers keep resolving the plain services, so none of them can be silently price-blinded by the user who happened to enqueue them.
+
+### ORDA-119 - removed, the condition it asserted is not satisfiable
+
+Reframed off the unreachable system-context premise onto a reachable one - restore a price-blind archive where the orders do **not** already exist - it was run once end to end on a disposable order, and the run is what retired it.
+
+| | before | after the restore |
+|---|---|---|
+| `AGENT-TEST-ORDA119-3912` total | 888.88 | **0** |
+| line-item price | 888.88 | 0 |
+| `withPrices` | `true` | **`true`** |
+
+Restore job 95363, `errorCount: 0`, "Platform restore process completed successfully". Controls `CO260827-00002` (284.94) and `CO260909-00002` (44.99) unchanged, order count back to its pre-case value, disposable order deleted.
+
+**But there is no defect to assert here.** The archive carries zeros and the order no longer exists in storage, so the real amounts exist in neither place. `RestorePrices` reads the stored counterpart through `crudService.GetByIdAsync(order.Id)`; with nothing stored, no implementation could recover 888.88. The case demanded the impossible.
+
+What the run does establish is a **configuration rule, not a code defect**, and it is the same shape as P3: a user holding `platform:backuprestore:backup` without `order:read_prices` produces a backup that silently omits every price, the restore accepts it reporting success, and the restored zeros read back with `withPrices: true` - the flag is computed per response, not stored, so a withheld zero and a real zero become indistinguishable. The loss is irreversible from the moment such a backup is taken. Grant backup rights and `order:read_prices` together, exactly as `order:invoice:download` is to be granted with it.
+
+The same reasoning is why `ORDA-110` scopes restore-on-write to an existing order: the architecture doc's own rule #2 - *"a new entity has no stored counterpart and needs no restore"* - puts a created entity out of scope by design.
+
+### ORDA-120 / 121 / 122 - the client-timing trio, retired together
+
+All three came from a mechanical archetype sweep - *what if the blade is deep-linked, refreshed, or its dependency fails* - rather than from a fault model of this feature. For price protection the answer to all three is the same **by construction**: the server strips prices before the response leaves, so the browser never holds a real value that any timing, cache, fault or race could reveal.
+
+That is why the runs looked the way they did. `ORDA-120` passed, but its decisive evidence was the wire payload (`withPrices: false`, every amount `0`, no `284.94` or `249.95` anywhere), not the UI - and that property is exactly what `ORDA-113` already asserts directly, at the source. `ORDA-121` is the same argument in different words. `ORDA-122` could not fail at all: with the order request failing there is no order object, so "no price rendered" is vacuously true; and its cache clause ("no stale real price") cannot fail for a role the server never sends a real price to.
+
+A case that cannot fail against a broken implementation is not coverage, so all three were removed rather than carried as permanent green or permanent Draft.
+
+**What was genuinely observed along the way is kept as an observation, above:** deep-link, refresh and a 404 fault all held masking. Two incidental findings from those runs, neither filed and neither about this feature:
+
+- Deep-linking a non-existent order id returns `404` and the blade opens an empty, editable "Customer's order" form with no error and no not-found state, logging `Possibly unhandled rejection ... platform.errors.generic-error`.
+- On a cold deep-link the localization resolves differently than after normal navigation (status `New` vs `New en1`, date `2026年8月27日` vs `Aug 27, 2026`) - the known i18n-on-cold-start issue, not a masking defect.
+
+**One tooling fact worth keeping**, because it will block the next person who tries fault injection: patching `XMLHttpRequest` / `fetch` from inside the page is refused by this repo's `enforce-real-user.mjs` hook, which allows only read-only `browser_evaluate` payloads. The constraint is on scripted page mutation, not on which MCP server issues it, so `evaluate_script` on the Chrome DevTools lane is matched too. Real fault injection needs the transport level - Playwright `page.route` in a scripted runner, or DevTools request blocking.
