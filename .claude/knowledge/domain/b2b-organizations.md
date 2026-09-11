@@ -9,6 +9,7 @@ rationale: |
   context step inherits the ticket's narrowness, so this file is the feature-scoped counterpart.
 generated: 2026-09-09
 rev: 1
+amended: 2026-09-11
 stale_after_days: 60
 expires_after_days: 120
 sources:
@@ -64,7 +65,7 @@ hypothesis to contradict, not as authority.
 |---|---|---|
 | **Platform admin** | All of §2. The **only** actor who can set a lockout expiry atomically, write a membership status directly, assign **any platform role**, reveal the hidden columns, and bulk-import members into an org | `CONFIRMED` live |
 | **Org maintainer** (storefront) | `/company/info` edit + addresses + logo; `/company/members` invite / change role / block / unblock / delete / resend / revoke; `Login on behalf` if separately permissioned | `CONFIRMED` live |
-| **Org employee / buyer** | Reads `/company/members` with no Actions column and no Invite button; browses, orders, lists, quotes | **`UNVERIFIED` — gap G1.** Source only (`canManageMembers`, `canShowDropdownFor`) |
+| **Org employee / buyer** | Reads `/company/members` with no Actions column and no Invite button; browses, orders, lists, quotes. Permissions (`roles.csv` `org-employee`): `storefront:organization:view;storefront:user:view` — **the same two `purchasing-agent` holds**, so those two roles do not differ on any storefront RBAC axis | **`UNVERIFIED` — gap G1**, but for lack of an OBSERVATION, not for lack of a fixture: `ACME_VIEWER` is seeded and signable (G1, amended 2026-09-11). Source only so far (`canManageMembers`, `canShowDropdownFor`) |
 | **Personal shopper** | All of `/account/*` **plus `/account/addresses`**; **no `/company/*` at all** | `CONFIRMED` live |
 | **Sales rep** | `/company/sales-reps` renders in the org sidebar; three rep routes are the only ones clearing inherited `requiresOrganization` | out of scope |
 
@@ -510,7 +511,7 @@ org/contact CRUD suite — 53/53!), **`050d`**, `050h`, `021`, `020`, `017`, `06
 
 | # | Gap | State |
 |---|---|---|
-| **G1** | Org-maintainer vs org-employee visibility (`BL-B2B-005`) **live** | **OPEN.** `ORG_USER_EMAIL` is *another maintainer*. The only employee-role fixtures are reserved lane accounts, and signing in as one writes `Contact.CurrentOrganizationId`. Source-confirmed only |
+| **G1** | Org-maintainer vs org-employee visibility (`BL-B2B-005`) **live** | **FIXTURE HALF CLOSED 2026-09-11; live observation still OPEN.** The blocker was addressability, not existence: `ACME_VIEWER` (USR-003, `Organization employee`) and `ACME_ADMIN` (USR-001, `Organization maintainer`) are both seeded in **ORG-001 AcmeCorp**, both resolve via `test-data/aliases.json`, and both carry runtime ids in `aliases.vcst.json` — so `[PRE:SIGNIN_AS:ACME_VIEWER]` works today. `ACME_VIEWER` had **zero consumers** when found. The original note is correct that `ORG_USER_EMAIL` is another maintainer (USR-006, TechFlow) and that USR-020/021 are reserved impersonation accounts; it wrongly generalised from those to "no usable employee fixture". What remains open is the **live observation** — `BL-B2B-005` is still source-only until a run signs in as `ACME_VIEWER` and records the roster. |
 | **G2** | Mobile switcher at source-level detail | **PARTLY CLOSED** by the VCST-5317 run (found live, no lock handling); component internals still source-only |
 | **G3** | `Blocked` status badge, live | **OPEN.** No locked membership among readable fixtures |
 | **G6** | **D6 (gate ≠ list), live** | **OPEN.** The 12-org fixture has 12 *Approved* orgs. Needs 1 Approved + ≥1 Invited/Locked |

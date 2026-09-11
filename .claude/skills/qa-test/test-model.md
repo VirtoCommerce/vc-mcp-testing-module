@@ -206,8 +206,20 @@ is not. One role variant ⇒ the section is absent and clause 12 passes silently
 
 **Where the content comes from.** Roles: the domain map's `### Actors` table (`Actor | Can do | Verdict`).
 Permission strings: [`test-data/b2b/roles.csv`](../../../test-data/b2b/roles.csv). Fixture identities:
-[`scripts/lib/user-roles.mjs`](../../../scripts/lib/user-roles.mjs). An actor whose map verdict is
-`UNVERIFIED` yields a scenario whose expectations are `{HYPOTHESIS}` — inherit the verdict, never launder it.
+[`test-data/aliases.json`](../../../test-data/aliases.json) (the `@td()` registry `[PRE:SIGNIN_AS:]`
+resolves against) and [`scripts/lib/user-roles.mjs`](../../../scripts/lib/user-roles.mjs). An actor whose
+map verdict is `UNVERIFIED` yields a scenario whose expectations are `{HYPOTHESIS}` — inherit the verdict,
+never launder it.
+
+**Name the PERMISSION, not only the role — every role carries its own set, and that set is the
+mechanism.** A role is a label; `roles.csv` `permissions` is what the product actually checks. A scenario
+that says *"the employee cannot invite"* is weaker than one that says *"the employee lacks
+`storefront:user:invite`, so the control is absent AND the mutation is refused"* — the second names what
+would have to change for the expectation to be wrong. **Check the two roles' permission sets genuinely
+differ on the axis under test before building the scenario**: `org-employee` and `purchasing-agent` hold
+the *same two* storefront grants (purchasing is governed by cart/checkout, not RBAC), so a storefront
+difference between them is vacuous by construction — the SECOND RULE's equal-values-on-both-sides defect
+([`.claude/rules/test-data.md`](../../rules/test-data.md) §SECOND RULE).
 
 ### The four rules
 
@@ -251,6 +263,13 @@ is the refusal set rule 1 requires. The fill-in block is in
 Keep each scenario to its actions — this section describes *what a role does and is refused*, not how to
 drive a browser. Steps, selectors and evidence paths belong to the authored case, never here
 ([`.claude/rules/test-data.md`](../../rules/test-data.md) §THIRD RULE).
+
+**A two-role scenario is expressible in ONE case today** — a `[PRE:*]` cluster opens an actor segment
+inside `Steps`, and 64 cases already use it. Worked shape, the three rules it carries, and when to prefer
+`[PRE:SWITCH_ORG]` (one account whose role differs per org — no second token, so the permission-claim
+change is directly assertable): [`knowledge/execution/test-execution-preflight.md`](../../knowledge/execution/test-execution-preflight.md)
+§Example 4. Do not split a role boundary into two cases out of a belief that one case cannot hold two
+actors.
 
 ### What Step 3 does with it
 
