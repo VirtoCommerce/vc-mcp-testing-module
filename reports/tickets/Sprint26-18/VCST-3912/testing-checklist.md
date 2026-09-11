@@ -273,6 +273,10 @@ Same on `CO260909-00002` (`$0` vs `$44.99`). The instrument is sound — admin c
 
 ### N1 — NEW, introduced by the P2 fix: the line-item Discounts widget now masks for everyone
 
+**Reproduced independently by the reporter.** Repro as admin: order **CO260827-00002** (`/#!/workspace/orders?orderId=6bc0acdf-d88d-44d0-b5db-99738863a4f1`) -> Line items -> click row `MIL640X4GLWH` (249.95) -> the line-item **Discounts** widget -> *Discount amount* = `##.##`, while the form field beside it reads `12.50` and `Discount (incl. tax) 15.00`.
+
+**Why it is easy to miss:** of 400 recent orders, **167 carry a line-item discount** and only 46 an order-level one — but **none of the 10 most recent do**. Checking from the top of the order list opens the order-level Discounts blade, which is correct, and leaves the broken widget empty with nothing to mask. Spare repro orders: `CO260827-00001` (29.5), `CO260717-00002` (40), `CO260716-00003` (40).
+
 Admin opens `CO260827-00002` → Line items → item row → Discounts widget and sees **`##.##`** where the payload says `discountAmount: 12.5` and the adjacent line-item form field shows `12.50`. A fully entitled user lost a value they are entitled to. The order-level Discounts grid is unaffected (admin correctly sees `45.00`).
 
 **Mechanism, from the deployed bundle** — this is what makes the diagnosis certain rather than inferred. The mask filter replaces every *digit*:
