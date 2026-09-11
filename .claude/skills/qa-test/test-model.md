@@ -226,6 +226,21 @@ Permission strings: [`test-data/b2b/roles.csv`](../../../test-data/b2b/roles.csv
    already `Deprecated` with *"do not re-author"*. Record `ABSENT — re-scope trigger` instead. This is
    clause 11b applied to a journey rather than a surface.
 
+### Which stamps a role case may honestly carry
+
+Both vocabularies are closed and the appender validates against them, so a role case cannot invent a token.
+
+- **Archetype: `SCOPE`.** Its definition covers this — *"Cross-org / tenancy / **permission-scope leak**"* —
+  but note its **probe question is written cross-tenant** (*"does org A's user reach org B's object"*), so
+  it reads as if org-vs-org were the only shape. A maintainer-vs-employee refusal **inside one org** is the
+  permission-scope half of the same token. Use `SILENT` instead where the risk is a `200` that quietly
+  no-ops rather than a refusal that leaks.
+- **Technique: `FLOW` for the journey row, `DT` for the refusals.** There is no role/RBAC token in
+  [`qa-test-design/test-design-techniques.md`](../qa-test-design/test-design-techniques.md) §0 and this
+  does not add one — a role scenario is a journey per actor (`FLOW`), and its `Not allowed` set is a
+  decision table over actor × operation (`DT`, whose own §4 names permission checks). Reach for `PW` only
+  when the matrix is genuinely `role × org × owner × operation` and too large to enumerate (§6).
+
 ### The shape
 
 Five columns, because the last three are exactly what differs per role — `Sees` and `Can do` are the
