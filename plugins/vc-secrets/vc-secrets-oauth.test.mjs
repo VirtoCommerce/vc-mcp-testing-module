@@ -1,11 +1,25 @@
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import * as m from "./vc-secrets.mjs";              // the launcher
 import * as oauth from "./vc-secrets-oauth.mjs";     // the protocol
+import * as cache from "./vc-secrets-cache.mjs";     // entries, expiry, the lock
 import crypto from "node:crypto";
 import os from "node:os";
 import http from "node:http";
 import net from "node:net";
+import fs from "node:fs";
+import path from "node:path";
+import { spawn } from "node:child_process";
+
+// Two of the acquireLock socket tests below spawn a real second process to race or kill, and each
+// writes its own throwaway script into a fresh tmp dir. Removed here rather than per-test so a
+// thrown assertion still leaves nothing behind.
+const tmpDirs = [];
+after(() => {
+    for (const dir of tmpDirs) {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
 
 test("vc-secrets-oauth throws the same VcSecretsError the launcher's exit-code path recognises", () => {
     // The whole reason VcSecretsError lives in its own module. Two same-named classes would both
@@ -315,10 +329,11 @@ test("parseTokenResponse: only a judged grant is refused — a throttle or an ou
 // So the probe attaches a handler, which makes it async, which is why the skip decision happens
 // inside each test rather than in a module-level constant.
 //
-// Adapted from the source's unix-domain-socket probe (which gated lock-file tests that do not
-// exist in this port yet): the capability under test here is a loopback TCP bind, so the probe
-// binds one instead of a unix socket — probing the wrong permission would answer confidently
-// either way.
+// Adapted from the source's unix-domain-socket probe: the capability under test here is a
+// loopback TCP bind, covering httpsPostForm's socket-drop behaviour, so the probe binds one
+// instead of a unix socket — probing the wrong permission would answer confidently either way.
+// The lock-file tests that need a real unix-socket bind get their own gate and probe further
+// down (canBindLocks/lockTest), because they exercise a different privilege than this one.
 let bindProbe = null;
 function canBindSockets() {
     bindProbe ??= new Promise((resolve) => {
@@ -409,4 +424,579 @@ socketTest("httpsPostForm: a connection dropped after the headers REJECTS, it do
     } finally {
         await new Promise((r) => server.close(r));
     }
+});
+
+// ---------------------------------------------------------------------------------------------
+// vc-secrets-cache.mjs — two keystore entries, their expiry check, and the cross-process refresh
+// lock. Ported from the upstream launcher's cache module and its suite: `c.` below becomes `cache.`,
+// `m.McpwError` becomes `m.VcSecretsError`. `entryNames` has no test here — the source's own is
+// not ported, because `oauthEntryKeys()` in vc-secrets.mjs already fills that role for this
+// package, and a second incompatible name generator would be the defect.
+// ---------------------------------------------------------------------------------------------
+
+// The identity a cache entry must carry to match the OAuth declaration these tests exercise.
+const DECL_IDENTITY = { tenantId: "t", clientId: "c", scopes: ["scope-a", "scope-b"] };
+const DECL = { ...DECL_IDENTITY };
+
+// An access entry exactly as parseTokenResponse produces one, so every expiry assertion below
+// runs against a state production can actually reach. Hand-writing the pair is what made the
+// previous version of the clock check a tautology.
+const UPTIME_AT_ISSUE = 1_000;   // seconds; an arbitrary "the host has been up a while"
+
+function freshAccess(issuedAt, lifetimeSeconds = 3600, uptimeAtIssue = UPTIME_AT_ISSUE) {
+    return oauth.parseTokenResponse(200, JSON.stringify({ access_token: "a", refresh_token: "r",
+        expires_in: lifetimeSeconds }), issuedAt, "code", uptimeAtIssue);
+}
+
+function cacheAt(issuedAt, identity = DECL_IDENTITY) {
+    return { refresh: { refreshToken: "r", ...identity }, access: freshAccess(issuedAt) };
+}
+
+// Reads the cache `elapsed` ms after issue. The two clocks agree unless a case deliberately
+// separates them: `clockElapsed` is what the wall clock believes, `uptimeElapsed` is what the
+// monotonic counter believes, and every interesting case is a disagreement between the two.
+// (Parameter named `entryCache`, not `cache` — the module is imported as `cache` above, and
+// shadowing it here would turn every `cache.cacheStatus` call inside this function into a call on
+// whatever cache entry the caller passed in. Not a silent hazard, though: measured, the shadowed
+// form reddens 18 tests with `cache.cacheStatus is not a function`. The naming stands because the
+// failure is confusing, not because it would be quiet.)
+function statusAfter(entryCache, elapsed, { clockElapsed = elapsed, uptimeElapsed = elapsed,
+    issuedAt = 0, uptimeAtIssue = UPTIME_AT_ISSUE } = {}) {
+    return cache.cacheStatus(entryCache, DECL, issuedAt + clockElapsed, uptimeAtIssue + uptimeElapsed / 1000);
+}
+
+test("cacheStatus: absent when there is no refresh entry", () => {
+    assert.equal(statusAfter({}, 1000).state, "absent");
+});
+
+test("cacheStatus: a usable access entry with no refresh entry is still absent", () => {
+    // Deliberate, not an oversight: spending the access token and only then discovering there
+    // is nothing to renew with trades a clear failure now for an opaque one inside the hour.
+    assert.equal(statusAfter({ access: freshAccess(0) }, 60_000).state, "absent");
+});
+
+test("cacheStatus: a refresh entry with no access entry needs a refresh, not a login", () => {
+    assert.equal(statusAfter({ refresh: { refreshToken: "r", ...DECL_IDENTITY } }, 0).state, "needs-refresh");
+});
+
+test("cacheStatus: identity is checked before the access entry, not after it", () => {
+    // Not ported — the source's suite leaves the ORDER of the two checks unpinned, and every other
+    // identity test here carries an access entry, so all of them pass if the access-entry check is
+    // hoisted above the identity comparison. Measured: under that hoist this case answers
+    // `needs-refresh` instead of `identity-mismatch`, and `needs-refresh` drives an exchange —
+    // spending a refresh token issued for one tenant and client against a different declaration,
+    // which is the outcome the identity check exists to prevent. An absent access entry is the
+    // cheap, expected loss, so this is a state a real cache reaches routinely.
+    const moved = { ...DECL_IDENTITY, tenantId: "00000000-0000-0000-0000-000000000000" };
+    assert.equal(statusAfter({ refresh: { refreshToken: "r", ...moved } }, 0).state, "identity-mismatch");
+});
+
+test("cacheStatus: identity mismatch on each field of the declaration in turn", () => {
+    // One fixture per operand. Without all three, a check comparing only the tenant passes
+    // every test a check comparing all three would, and a moved clientId silently reuses a
+    // refresh token issued to a different application.
+    const moved = {
+        tenantId: { ...DECL_IDENTITY, tenantId: "00000000-0000-0000-0000-000000000000" },
+        clientId: { ...DECL_IDENTITY, clientId: "99999999-9999-9999-9999-999999999999" },
+        scopes: { ...DECL_IDENTITY, scopes: [...DECL_IDENTITY.scopes, "extra/.default"] },
+    };
+    for (const [field, identity] of Object.entries(moved)) {
+        assert.equal(statusAfter(cacheAt(0, identity), 60_000).state, "identity-mismatch",
+            `a moved ${field} must not reuse the cached token`);
+    }
+});
+
+test("cacheStatus: scope set compared as a set, not a string", () => {
+    const reordered = { ...DECL_IDENTITY, scopes: [...DECL_IDENTITY.scopes].reverse() };
+    assert.equal(statusAfter(cacheAt(0, reordered), 60_000).state, "valid");
+});
+
+test("cacheStatus: a scope list of the same length but different members is a mismatch", () => {
+    // The positive control for the set comparison: sorting and joining also makes two lists
+    // of equal length compare equal if only their lengths are checked.
+    const swapped = { ...DECL_IDENTITY,
+        scopes: DECL_IDENTITY.scopes.map((s, i) => (i === 0 ? "other/.default" : s)) };
+    assert.equal(statusAfter(cacheAt(0, swapped), 60_000).state, "identity-mismatch");
+});
+
+test("cacheStatus: one scope holding a space is not the same set as the two it joins to", () => {
+    // What the length comparison is for. Sorting and joining maps ["a b"] and ["a", "b"] to the
+    // same string, so without the length check a single malformed scope entry matches a correct
+    // two-scope declaration and the cached token is reused against a scope set nobody granted.
+    const collided = { ...DECL_IDENTITY, scopes: [[...DECL_IDENTITY.scopes].sort().join(" ")] };
+    assert.equal(collided.scopes.length, 1, "the fixture is only meaningful as a single element");
+    assert.equal(statusAfter(cacheAt(0, collided), 60_000).state, "identity-mismatch");
+});
+
+test("cacheStatus: valid well inside the token's life", () => {
+    const status = statusAfter(cacheAt(0), 60_000);
+    assert.equal(status.state, "valid");
+    assert.equal(status.accessToken, "a", "a valid status must hand over the token it validated");
+});
+
+test("cacheStatus: needs refresh inside the margin, and the margin boundary is inclusive", () => {
+    const lifetime = 3600_000;
+    assert.equal(statusAfter(cacheAt(0), lifetime - cache.MARGIN_MS).state, "needs-refresh",
+        "exactly at the margin is already too late — the call it is about to make outlives it");
+    assert.equal(statusAfter(cacheAt(0), lifetime - cache.MARGIN_MS - 1).state, "valid",
+        "one millisecond outside the margin is still usable");
+});
+
+test("cacheStatus: an expired token is not valid", () => {
+    assert.equal(statusAfter(cacheAt(0), 3600_001).state, "needs-refresh");
+});
+
+test("cacheStatus: a rollback landing inside the token's own lifetime is caught by the anchor", () => {
+    // The case the wall clock alone cannot see, and the whole reason the anchor exists. The host
+    // slept and came back half an hour behind: an hour of real time has passed, so the token is
+    // spent, but the wall clock reports only thirty minutes of it. Before the anchor this read
+    // `valid` and the launcher handed over a dead token — measured, not argued.
+    const spent = statusAfter(cacheAt(0), 3600_000, { clockElapsed: 1800_000 });
+    assert.equal(spent.state, "needs-refresh");
+    // And the wall clock alone still says it is fine, which is what makes the case discriminating.
+    assert.equal(statusAfter(cacheAt(0), 1800_000).state, "valid");
+});
+
+test("cacheStatus: a rollback past the issue time no longer costs a needless exchange", () => {
+    // Before the anchor this had to be treated as a rollback and refreshed, because a clock
+    // reading earlier than the issue time was the only evidence available that something was
+    // wrong. With a second source the truth is visible: one minute of real time has passed and
+    // the token is young, so the wall clock being two hours out is no longer our problem.
+    assert.equal(statusAfter(cacheAt(0), 60_000, { clockElapsed: -2 * 3600_000 }).state, "valid");
+});
+
+test("cacheStatus: a rollback past the issue time with no usable anchor is still refused", () => {
+    // Reboot plus a backwards clock — the one case the anchor cannot cover, since its stored
+    // reading belongs to a boot that is gone. Both sources then place the issue in the future,
+    // and an age that cannot be established is a refusal rather than a guess.
+    assert.equal(statusAfter(cacheAt(0), 60_000,
+        { clockElapsed: -2 * 3600_000, uptimeElapsed: -UPTIME_AT_ISSUE * 1000 + 5_000 }).state,
+    "needs-refresh");
+});
+
+test("cacheStatus: a monotonic counter that missed a suspend is covered by the wall clock", () => {
+    // WSL2 pauses the guest when the Windows host sleeps, so the guest's counter may not tick
+    // across the pause — the anchor's own failure direction, and the reason elapsed is the MAX
+    // of the two rather than the anchor alone. Here the counter believes one minute passed while
+    // the wall clock, correctly, reports the whole hour.
+    assert.equal(statusAfter(cacheAt(0), 3600_000, { uptimeElapsed: 60_000 }).state, "needs-refresh");
+});
+
+test("cacheStatus: after a reboot the anchor is ignored rather than believed", () => {
+    // os.uptime() restarts at zero, so the stored reading is from a boot that no longer exists
+    // and the difference goes negative. A negative elapsed would otherwise INFLATE the remaining
+    // life and make an expired token look freshly issued.
+    const rebooted = statusAfter(cacheAt(0), 3600_000, { uptimeElapsed: -UPTIME_AT_ISSUE * 1000 + 5_000 });
+    assert.equal(rebooted.state, "needs-refresh", "the wall clock still says the hour is up");
+    assert.equal(statusAfter(cacheAt(0), 60_000, { uptimeElapsed: -UPTIME_AT_ISSUE * 1000 + 5_000 }).state,
+        "valid", "and a young token is still usable — a reboot is not itself a reason to re-exchange");
+});
+
+test("cacheStatus: a caller that omits the monotonic reading is stopped, not quietly downgraded", () => {
+    // Omitting it makes byUptime NaN, NaN >= 0 is false, and the function falls back to exactly
+    // the wall-clock-only rule the anchor replaced — no throw, no needs-refresh, nothing red.
+    // There is no production caller yet, so the wiring commit is precisely when that would bite.
+    assert.throws(() => cache.cacheStatus(cacheAt(0), DECL, 60_000), /uptime/i);
+    assert.throws(() => cache.cacheStatus(cacheAt(0), DECL, 60_000, NaN), /uptime/i);
+    assert.throws(() => cache.cacheStatus(cacheAt(0), DECL, undefined, 1060), /now/i);
+});
+
+test("cacheStatus: an entry whose stamps are not real numbers is refused, never aged", () => {
+    // Each of these is a number the arithmetic silently absorbs. Missing obtainedAt makes the
+    // WALL term NaN, and Math.max propagates NaN, so a perfectly honest anchor is destroyed by
+    // it: measured, an entry ten years past its expiry read as valid. `null` is what
+    // JSON.stringify writes for a NaN, so it is reachable from a keystore blob, not only by hand.
+    for (const [field, value] of [["obtainedAt", undefined], ["obtainedAt", null],
+        ["lifetimeMs", null], ["uptimeAtIssue", null], ["uptimeAtIssue", "1000"]]) {
+        const access = { ...freshAccess(0), [field]: value };
+        const entryCache = { refresh: { refreshToken: "r", ...DECL_IDENTITY }, access };
+        assert.equal(cache.cacheStatus(entryCache, DECL, 60_000, UPTIME_AT_ISSUE + 60).state, "needs-refresh",
+            `${field}=${JSON.stringify(value)} must not be aged`);
+    }
+});
+
+test("cacheStatus: an access entry with no lifetime is refused rather than half-checked", () => {
+    const { lifetimeMs, ...noLifetime } = freshAccess(0);
+    assert.equal(lifetimeMs, 3600_000, "the fixture is only meaningful if the field really was there");
+    assert.equal(statusAfter({ refresh: { refreshToken: "r", ...DECL_IDENTITY }, access: noLifetime },
+        60_000).state, "needs-refresh");
+});
+
+test("cacheStatus: an access entry written before the anchor existed is refused, not half-trusted", () => {
+    // Such an entry cannot be checked against a rolled-back clock at all. One extra exchange is
+    // the whole cost of refusing it; accepting it silently reinstates the hole the anchor closed.
+    const { uptimeAtIssue, ...noAnchor } = freshAccess(0);
+    assert.equal(uptimeAtIssue, UPTIME_AT_ISSUE, "the fixture is only meaningful if the field really was there");
+    assert.equal(statusAfter({ refresh: { refreshToken: "r", ...DECL_IDENTITY }, access: noAnchor },
+        60_000).state, "needs-refresh");
+});
+
+test("cacheStatus: a plausible clock nudge does not force a needless exchange", () => {
+    // The guard must fire on a rollback, not on ordinary NTP correction, or every small
+    // adjustment costs a refresh-token rotation. BOTH sources are nudged here: leaving the
+    // anchor honest would let it decide the case, and the allowance itself would go untested.
+    const nudge = -cache.SKEW_TOLERANCE_MS / 2;
+    assert.equal(statusAfter(cacheAt(0), 0, { clockElapsed: nudge, uptimeElapsed: nudge }).state,
+        "valid", "half a minute of correction is not a rollback");
+    const past = -cache.SKEW_TOLERANCE_MS - 1;
+    assert.equal(statusAfter(cacheAt(0), 0, { clockElapsed: past, uptimeElapsed: past }).state,
+        "needs-refresh", "past the allowance, with nothing else to go on, it is a rollback again");
+});
+
+test("cacheStatus: a small negative anchor delta cannot rescue a badly rolled-back clock", () => {
+    // Reboot shortly after the token was issued, plus a clock two hours behind. The anchor's
+    // delta is then negative but TINY, so taking the max of the two would pick it and read the
+    // age as a harmless nudge — turning a two-hour rollback into a token that looks freshly
+    // issued. A negative delta has to be discarded outright, not merely lose a comparison.
+    // Built by hand rather than through statusAfter: this case needs the STORED anchor small,
+    // which is the one thing the helper's defaults fix.
+    const justAfterBoot = 30;   // seconds of uptime when the token was issued
+    const entryCache = { refresh: { refreshToken: "r", ...DECL_IDENTITY },
+        access: freshAccess(0, 3600, justAfterBoot) };
+    assert.equal(cache.cacheStatus(entryCache, DECL, -2 * 3600_000, justAfterBoot - 1).state, "needs-refresh");
+});
+
+test("serialize/parse: a refresh entry round-trips with its identity intact", () => {
+    const entry = { refreshToken: "rt", ...DECL_IDENTITY };
+    assert.deepEqual(cache.parseEntry(cache.serializeRefresh(entry)), { schema: 1, ...entry });
+});
+
+test("serialize/parse: an access entry round-trips with the fields the expiry check reads", () => {
+    const access = freshAccess(1_000);
+    const back = cache.parseEntry(cache.serializeAccess(access));
+    for (const field of ["accessToken", "expiresAt", "obtainedAt", "lifetimeMs", "uptimeAtIssue"]) {
+        assert.equal(back[field], access[field], `${field} must survive the round trip`);
+    }
+});
+
+test("serializeAccess: dropping the anchor on the way to disk is not silently survivable", () => {
+    // JSON.stringify omits an undefined field entirely, so a serializer that forgot uptimeAtIssue
+    // would produce a perfectly valid-looking entry that simply has no rollback protection.
+    const stored = JSON.parse(cache.serializeAccess(freshAccess(1_000)));
+    assert.ok(Object.hasOwn(stored, "uptimeAtIssue"), `the anchor must reach disk: ${Object.keys(stored)}`);
+});
+
+test("parseEntry: rejects a schema version it does not know", () => {
+    assert.throws(() => cache.parseEntry(JSON.stringify({ schema: 99 })), /schema/);
+});
+
+test("parseEntry: unreadable input is absent, and nothing about it is echoed", () => {
+    // Never a rethrow: node embeds the first ten characters of the input in a JSON SyntaxError,
+    // and this input is a keystore blob. Absent is also the actionable answer for whatever calls
+    // this — there is no `login` verb yet (VERBS, vc-secrets.mjs); it arrives with a later task.
+    assert.equal(cache.parseEntry("eyJhbGciOiJSUzI1NiJ9.truncated"), null);
+    assert.equal(cache.parseEntry(""), null);
+});
+
+// lockPathFor now takes a PROJECT axis as well as the entry name (source had only the entry), so
+// every test below is adapted rather than copied: every call takes the extra scope argument. The
+// per-platform tests below and "two projects declaring the same entry name..." further down pin
+// that the scope segment actually reaches the name and that two different scopes never collide on
+// win32, darwin and linux respectively; the remaining tests carry the argument only to keep the
+// call real, since their own subject is the user axis, the entry axis, or a name-injection
+// boundary.
+
+test("lockPathFor: an abstract name on linux, with no filesystem entry", () => {
+    const p = cache.lockPathFor("azure-mcp", "proj", { platform: "linux", userInfo: () => ({ uid: 1000 }) });
+    assert.equal(p[0], "\0", "a leading NUL is what puts the name in the abstract namespace");
+    assert.ok(!p.includes("/"), "an abstract name must not look like a path");
+    assert.ok(Buffer.byteLength(p) <= 100, "sun_path caps the whole name");
+});
+
+test("lockPathFor: two users do not collide on linux either", () => {
+    // The abstract namespace is per network namespace, not per user, so it is machine-global
+    // for the same reason a pipe name is: without the user in the name, one developer's
+    // refresh locks every other account on the host out of theirs.
+    const a = cache.lockPathFor("azure-mcp", "proj", { platform: "linux", userInfo: () => ({ uid: 1000 }) });
+    const b = cache.lockPathFor("azure-mcp", "proj", { platform: "linux", userInfo: () => ({ uid: 1001 }) });
+    assert.notEqual(a, b);
+});
+
+test("lockPathFor: a per-user pipe name on win32", () => {
+    const p = cache.lockPathFor("azure-mcp", "proj", { platform: "win32", userInfo: () => ({ username: "dev" }) });
+    assert.match(p, /^\\\\\.\\pipe\\/);
+    assert.ok(p.includes("dev"), "pipe names are machine-global, so the user must be in the name");
+    assert.ok(p.includes("proj"), "the project axis must reach the name, or two projects share one mutex");
+    const other = cache.lockPathFor("azure-mcp", "other-proj",
+        { platform: "win32", userInfo: () => ({ username: "dev" }) });
+    assert.notEqual(p, other, "two different scopes must not collide on win32");
+});
+
+test("lockPathFor: two users do not collide on win32", () => {
+    const a = cache.lockPathFor("azure-mcp", "proj", { platform: "win32", userInfo: () => ({ username: "ann" }) });
+    const b = cache.lockPathFor("azure-mcp", "proj", { platform: "win32", userInfo: () => ({ username: "bob" }) });
+    assert.notEqual(a, b);
+});
+
+test("lockPathFor: a filesystem path on darwin, outside the secrets directory", () => {
+    // The source additionally asserted the path excluded the substring "mcpw/secrets", justified
+    // by that repository's own permissions.deny patterns matching that substring — a rule that
+    // lives in a repository this package does not ship to, so that half of the check is not
+    // carried over verbatim. The INVARIANT behind it is not void, though: this package has its
+    // own secretsDir() (vc-secrets.mjs), where the gpg-encrypted blobs actually live, and a lock
+    // file must not fall inside it.
+    const p = cache.lockPathFor("azure-mcp", "proj", { platform: "darwin", userInfo: () => ({ uid: 1000 }) });
+    assert.equal(p[0], "/");
+    // Above the length bound deliberately: a relocation into a deep secrets directory trips the
+    // byte count first, and that assertion carries no diagnosis. Order decides which of the two
+    // gets to explain the failure.
+    assert.ok(!p.startsWith(m.secretsDir()), `the lock must not fall inside the secrets directory: ${p}`);
+    assert.ok(Buffer.byteLength(p) <= 100, `sun_path is ~104 bytes on darwin; this is ${Buffer.byteLength(p)}: ${p}`);
+    assert.ok(p.includes("proj"), "the project axis must reach the name, or two projects share one mutex");
+    const other = cache.lockPathFor("azure-mcp", "other-proj",
+        { platform: "darwin", userInfo: () => ({ uid: 1000 }) });
+    assert.notEqual(p, other, "two different scopes must not collide on darwin");
+});
+
+test("lockPathFor: two servers do not share one lock", () => {
+    // The positive control for the per-user tests: a path built from the user alone would pass
+    // all of them while serialising every server in the config against every other.
+    const userInfo = () => ({ uid: 1000, username: "dev" });
+    for (const platform of ["linux", "win32", "darwin"]) {
+        assert.notEqual(cache.lockPathFor("azure-mcp", "proj", { platform, userInfo }),
+            cache.lockPathFor("azure-monitor", "proj", { platform, userInfo }), `${platform} must key the lock by server`);
+    }
+});
+
+test("lockPathFor: a separator in the user or server name cannot reshape the lock", () => {
+    // A Windows domain login is DOMAIN\user, and a backslash left in it nests the pipe name
+    // rather than naming one lock; on darwin a slash walks the lock out of /tmp entirely, and
+    // the directory it lands in decides who may hold it.
+    const win = cache.lockPathFor("azure-mcp", "proj", { platform: "win32", userInfo: () => ({ username: "CONTOSO\\dev" }) });
+    assert.equal(win.slice("\\\\.\\pipe\\".length).includes("\\"), false,
+        `a domain login must not nest the pipe name: ${win}`);
+    const mac = cache.lockPathFor("../../escape", "proj", { platform: "darwin", userInfo: () => ({ uid: 1000 }) });
+    assert.equal(mac.slice("/tmp/".length).includes("/"), false,
+        `a lock must stay in the directory it was given: ${mac}`);
+});
+
+test("lockPathFor: the owner comes from the OS, so the environment cannot name someone else's lock", () => {
+    // Both namespaces are machine-global, and USER/USERNAME are set by whoever starts the process.
+    // Reading them made the lock name a claim rather than an identity: on a shared host an account
+    // could name its lock after another user and hold that user's launches out to the ceiling.
+    const spoofed = { USER: "victim", USERNAME: "victim" };
+    const posix = cache.lockPathFor("azure-mcp", "proj", { platform: "linux", env: spoofed, userInfo: () => ({ uid: 1000 }) });
+    assert.ok(posix.includes("1000"), `the uid decides the name: ${posix}`);
+    assert.equal(posix.includes("victim"), false, "the environment must not reach the lock name");
+    const win = cache.lockPathFor("azure-mcp", "proj",
+        { platform: "win32", env: spoofed, userInfo: () => ({ username: "real" }) });
+    assert.ok(win.includes("real") && !win.includes("victim"), `win32 reads the OS too: ${win}`);
+});
+
+test("lockPathFor: a uid with no passwd entry falls back to the environment rather than failing", () => {
+    // os.userInfo() throws where the uid has no passwd entry — a container, a stripped image. A
+    // launcher must not die there, so the environment stays as a last resort; the cost is that two
+    // such accounts can share a name, wait out the ceiling and fail, which is why it is last.
+    const p = cache.lockPathFor("azure-mcp", "proj", { platform: "linux", env: { USER: "dev" },
+        userInfo: () => { throw Object.assign(new Error("no passwd entry"), { code: "ENOENT" }); } });
+    assert.ok(p.includes("dev"), `the environment is the fallback, not the default: ${p}`);
+});
+
+test("two projects declaring the same entry name do not share one mutex", () => {
+    // The source namespaces the lock by USER because both namespaces are machine-global. A
+    // project is a second axis with the same property, and nothing in the source says so — it
+    // never had two.
+    const a = cache.lockPathFor("ado", "p1", { platform: "linux", userInfo: () => ({ uid: 1000 }) });
+    const b = cache.lockPathFor("ado", "p2", { platform: "linux", userInfo: () => ({ uid: 1000 }) });
+    assert.notEqual(a, b);
+    assert.match(a, /^\0vc-secrets-1000-p1-ado\.lock$/);
+});
+
+// The socket tests below never execute where binding is refused, and a skipped test is not
+// evidence. These drive the same decisions through the injection seam, so every branch —
+// including the two macOS-only ones nobody here can reach — is settled by an assertion.
+const inUse = () => Object.assign(new Error("bind: address already in use"), { code: "EADDRINUSE" });
+const fakeServer = () => ({ close: (done) => done() });
+
+test("acquireLock: a free name yields a holder that can release", async () => {
+    const got = await cache.acquireLock("\0free", { bind: async () => fakeServer() });
+    assert.notEqual(got, cache.HELD_BY_OTHER);
+    await got.release();
+});
+
+test("acquireLock: an occupied abstract name or pipe means a live holder, with no reclaim", async () => {
+    // The kernel frees both namespaces when the holder dies, so occupied cannot mean stale —
+    // and probing or removing here is what would resurrect the two-holder race.
+    for (const name of ["\0vc-secrets-dev-proj-azure-mcp.lock", "\\\\.\\pipe\\vc-secrets-dev-proj-azure-mcp-lock"]) {
+        const calls = [];
+        const got = await cache.acquireLock(name, {
+            bind: async () => { throw inUse(); },
+            probe: async () => { calls.push("probe"); return false; },
+            remove: () => calls.push("remove"),
+        });
+        assert.equal(got, cache.HELD_BY_OTHER, name);
+        assert.deepEqual(calls, [], `${name} must not be probed or unlinked`);
+    }
+});
+
+test("acquireLock: an error that is not EADDRINUSE is raised, not read as contention", async () => {
+    // EPERM or EACCES reported as "someone else holds it" would make the launcher wait out the
+    // whole timeout and then blame a neighbour for a permission problem.
+    await assert.rejects(() => cache.acquireLock("\0denied", {
+        bind: async () => { throw Object.assign(new Error("listen EPERM"), { code: "EPERM" }); },
+    }), /EPERM/);
+});
+
+test("acquireLock: on a path, a live holder is not evicted", async () => {
+    const calls = [];
+    const got = await cache.acquireLock("/tmp/vc-secrets-dev-proj-azure-mcp.lock", {
+        bind: async () => { throw inUse(); },
+        probe: async () => true,
+        remove: () => calls.push("remove"),
+    });
+    assert.equal(got, cache.HELD_BY_OTHER);
+    assert.deepEqual(calls, [], "unlinking a live holder's socket is the two-holder race");
+});
+
+test("acquireLock: on a path, a socket a killed holder left behind is reclaimed", async () => {
+    let bound = 0;
+    const removed = [];
+    const got = await cache.acquireLock("/tmp/vc-secrets-dev-proj-azure-mcp.lock", {
+        bind: async () => { if (bound++ === 0) { throw inUse(); } return fakeServer(); },
+        probe: async () => false,
+        remove: (p) => removed.push(p),
+    });
+    assert.notEqual(got, cache.HELD_BY_OTHER);
+    assert.deepEqual(removed, ["/tmp/vc-secrets-dev-proj-azure-mcp.lock"]);
+    assert.equal(bound, 2, "the reclaim must actually re-bind, not just unlink");
+});
+
+test("acquireLock: losing the reclaim race waits, it does not kill the launch", async () => {
+    // The branch a previous draft got wrong. An EADDRINUSE on the RE-bind is an ordinary
+    // contended outcome; escaping the try makes it an unhandled rejection, which the launcher's
+    // run path turns into process.exit — so the server never starts at all.
+    const got = await cache.acquireLock("/tmp/vc-secrets-dev-proj-azure-mcp.lock", {
+        bind: async () => { throw inUse(); },
+        probe: async () => false,
+        remove: () => {},
+    });
+    assert.equal(got, cache.HELD_BY_OTHER);
+});
+
+test("acquireLock: HELD_BY_OTHER cannot be mistaken for an absent lock", async () => {
+    // A null or undefined sentinel would let a call site write `if (!lock)` and proceed to
+    // exchange concurrently with the holder — the precise thing the lock exists to stop.
+    const got = await cache.acquireLock("\0busy", { bind: async () => { throw inUse(); } });
+    assert.ok(got, "the sentinel must be truthy");
+    assert.equal(typeof cache.HELD_BY_OTHER, "symbol");
+});
+
+test("LOCK_WAIT_MS outlasts the holder's whole critical section, not just its exchange", () => {
+    // The holder cannot release before both keystore entries are written — releasing earlier
+    // hands the waiter a refresh token Entra has already rotated away. So the waiter has to
+    // cover the exchange AND both writes; covering only the exchange abandons a neighbour who
+    // was two slow keystore calls from publishing. The three constants live in three modules
+    // and nothing but this line relates them.
+    assert.ok(cache.LOCK_WAIT_MS > oauth.TIMEOUT_OAUTH_MS + 2 * m.TIMEOUT_LOCAL_MS,
+        `LOCK_WAIT_MS=${cache.LOCK_WAIT_MS} must exceed ${oauth.TIMEOUT_OAUTH_MS} + 2 * ${m.TIMEOUT_LOCAL_MS}`);
+});
+
+test("the margin covers the tick, the exchange, the skew allowance and a worst-case call",
+    { todo: true }, () => {
+    // Four terms live in three modules and nothing else connects them. Cannot be written yet:
+    // RENEWAL_TICK_MS arrives with Task 20. Then the relation is
+    //   MARGIN_MS >= RENEWAL_TICK_MS + TIMEOUT_OAUTH_MS + SKEW_ALLOWANCE + WORST_CALL
+    });
+
+// acquireLock binds a UNIX socket (abstract on linux, a filesystem path on darwin) — a different
+// privilege from socketTest's loopback TCP probe above. Measured on this sandbox: TCP loopback
+// bind is permitted, both an abstract AND a filesystem unix-socket bind are EPERM. So reusing
+// socketTest here would answer "can bind" and every test below would then fail EPERM, reading as
+// a regression rather than a sandbox restriction — a probe of the wrong privilege answers
+// confidently either way. This exact defect has already been fixed once in this file, in the
+// OTHER direction: socketTest's own probe was adapted FROM a unix-domain-socket probe TO a TCP
+// one, because at the time this file had no lock-file tests to gate at all. This commit adds
+// them, with their own probe of the privilege they actually use.
+let lockBindProbe = null;
+function canBindLocks() {
+    lockBindProbe ??= new Promise((resolve) => {
+        const probe = net.createServer();
+        probe.once("error", () => resolve(false));
+        probe.once("listening", () => probe.close(() => resolve(true)));
+        probe.listen(cache.lockPathFor("selftest-" + process.pid, "proj",
+            { platform: process.platform, env: process.env }));
+    });
+
+    return lockBindProbe;
+}
+
+// Unlike socketTest, a skip here is NOT a signal that the probe is broken — it is the expected
+// outcome in the Claude Code sandbox, where a unix-domain-socket bind IS refused (EPERM). All
+// four lockTest cases skip there, and a green in-sandbox run proves less than it looks like:
+// measured, a mutation where release() never closes the server is fully green in-sandbox and
+// only dies when the suite runs outside it.
+const lockTest = (name, fn) => test(name, async (t) => {
+    if (!(await canBindLocks())) {
+        t.skip("needs an environment that permits a unix-domain-socket bind");
+
+        return;
+    }
+    await fn(t);
+});
+
+// The module URL every spawned-process test below imports by dynamic `import()` — computed once
+// from this test file's own URL, so it resolves regardless of the process's working directory.
+const cacheModuleUrl = new URL("./vc-secrets-cache.mjs", import.meta.url).href;
+
+lockTest("acquireLock: a second acquisition while held reports the holder, not null", async () => {
+    const p = cache.lockPathFor("t1-" + process.pid, "proj", { platform: process.platform, env: process.env });
+    const first = await cache.acquireLock(p);
+    assert.notEqual(first, cache.HELD_BY_OTHER);
+    assert.equal(await cache.acquireLock(p), cache.HELD_BY_OTHER);
+    await first.release();
+});
+
+lockTest("acquireLock: succeeds again after release", async () => {
+    const p = cache.lockPathFor("t2-" + process.pid, "proj", { platform: process.platform, env: process.env });
+    const first = await cache.acquireLock(p);
+    await first.release();
+    const second = await cache.acquireLock(p);
+    assert.notEqual(second, cache.HELD_BY_OTHER);
+    await second.release();
+});
+
+lockTest("acquireLock: a holder killed without releasing does not block the next launch", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-lock-"));
+    tmpDirs.push(dir);
+    const script = path.join(dir, "holder.mjs");
+    const name = "t3-" + process.pid;
+    fs.writeFileSync(script, `
+        import(${JSON.stringify(cacheModuleUrl)}).then((c) => {
+            c.acquireLock(c.lockPathFor(${JSON.stringify(name)}, "proj", { platform: process.platform, env: process.env }))
+                .then(() => { process.stdout.write("held\\n"); setInterval(() => {}, 1000); });
+        });
+    `);
+    const holder = spawn(process.execPath, [script], { stdio: ["ignore", "pipe", "inherit"] });
+    await new Promise((r) => holder.stdout.once("data", r));   // it holds the lock now
+    holder.kill("SIGKILL");
+    await new Promise((r) => holder.once("exit", r));
+    const got = await cache.acquireLock(cache.lockPathFor(name, "proj", { platform: process.platform, env: process.env }));
+    assert.notEqual(got, cache.HELD_BY_OTHER, "a killed holder must not lock the machine out");
+    await got.release();
+});
+
+lockTest("acquireLock: exactly one of two racing processes holds it", async () => {
+    // The single-process cases above cannot see the race that matters: two launchers arriving
+    // at the same lock at the same moment. Two real processes can.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-lock-"));
+    tmpDirs.push(dir);
+    const script = path.join(dir, "racer.mjs");
+    const name = "t4-" + process.pid;
+    fs.writeFileSync(script, `
+        import(${JSON.stringify(cacheModuleUrl)}).then((c) => {
+            c.acquireLock(c.lockPathFor(${JSON.stringify(name)}, "proj", { platform: process.platform, env: process.env }))
+                .then((r) => { process.stdout.write(r === c.HELD_BY_OTHER ? "lost" : "won");
+                               setTimeout(() => process.exit(0), 400); })
+                .catch((e) => { process.stdout.write("threw:" + e.code); process.exit(1); });
+        });
+    `);
+    const run = () => new Promise((resolve) => {
+        const p = spawn(process.execPath, [script], { stdio: ["ignore", "pipe", "inherit"] });
+        let out = "";
+        p.stdout.on("data", (d) => { out += d; });
+        p.once("exit", () => resolve(out));
+    });
+    const outcomes = await Promise.all([run(), run()]);
+    assert.equal(outcomes.filter((x) => x === "won").length, 1, `exactly one winner, got ${outcomes}`);
+    assert.equal(outcomes.filter((x) => x === "lost").length, 1, `exactly one loser, got ${outcomes}`);
 });
