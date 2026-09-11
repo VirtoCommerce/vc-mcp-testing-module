@@ -1742,9 +1742,9 @@ function buildBrowserCommand(platform, env, url, onPath = commandOnPath) {
 
         return { cmd: "cmd", args: [`/c start "" "${url}"`], opts: { windowsVerbatimArguments: true } };
     }
-    // Named VC_SECRETS_WSL_NO_INTEROP, not the source's MCPW_WSL_NO_INTEROP: this package's own env
-    // var convention (VC_SECRETS_LOCAL_BACKEND, VC_SECRETS_POWERSHELL) and the public-repo rule
-    // against the source tool's name surviving into this one.
+    // Named to match this package's own override convention (VC_SECRETS_LOCAL_BACKEND,
+    // VC_SECRETS_POWERSHELL), not the source's launcher-prefixed spelling -- the public-repo rule
+    // is that the source tool's own name must not survive into this one, env vars included.
     if (env.VC_SECRETS_WSL_NO_INTEROP === "1") {
         return null;
     }
