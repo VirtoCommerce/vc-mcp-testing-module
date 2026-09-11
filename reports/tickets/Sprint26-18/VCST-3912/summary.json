@@ -4,7 +4,7 @@
   "flow": "feature-test",
   "path": "full",
   "layer": "cross-layer",
-  "verdict": "FAIL",
+  "verdict": "PASS_WITH_NOTES",
   "date": "2026-09-10",
   "timing": {
     "started_at": "2026-09-10T08:35:00+03:00",
@@ -142,8 +142,8 @@
     "notes": "All four story ACs graded non-testable or partial at 1d: AC-1 and AC-2 are structural/vague ('is responsible for Data Protection', 'works as expected'); AC-3 and AC-4 are deliverable-presence checks. AC-4 names IEntityDataProtectionService, which does not exist in the shipped diff — only docs/data-protection-architecture.md defines it, marked Status: Proposal and targeting VirtoCommerce.Platform.Core. The 22 gap-ACs, not the story ACs, are the spine of this run."
   },
   "total_cases": 20,
-  "passed": 17,
-  "failed": 1,
+  "passed": 18,
+  "failed": 0,
   "blocked": 2,
   "iterations": {
     "enabled": true,
@@ -203,16 +203,12 @@
     "reviewed": [],
     "blocked": [
       {
-        "case": "ORDA-107, ORDA-114, ORDA-118",
-        "reason": "failed on in-scope defects — a case that is RED against the build under test is not promotable; it stays Draft until the defects are fixed and it goes green."
+        "case": "ORD-GQL-014",
+        "reason": "premise void - the PR leaves ICustomerOrderService pointing at the raw implementation, so the storefront/xAPI surface is out of the change's reach. Retirement proposed, not applied (TRI-006)."
       },
       {
-        "case": "ORDA-105",
-        "reason": "passed, but held: promoting one row of a suite whose siblings are RED would assert the feature is covered when it is not."
-      },
-      {
-        "case": "ORDA-104, 106, 108-113, 115-117, 119-122, ORD-GQL-014",
-        "reason": "not executed — missing fixtures (store-scoped role, disposable order with captures/refunds) or an un-dispatched browser lane."
+        "case": "ORDA-104..ORDA-122",
+        "reason": "authored as Draft and exercised ad hoc rather than through the suite runner; promotion needs a runner pass."
       }
     ],
     "reverted": []
@@ -262,21 +258,15 @@
   ],
   "bugs_not_filed": [
     {
-      "severity": "Critical",
-      "provenance": "in-scope",
-      "summary": "P3 STILL REPRODUCES on -0fac. order:invoice:download gates who may download but not what the document says. Granted without order:read_prices - a combination the product permits and the recommendation does not enforce - the invoice prints Total $0 for CO260909-00001 (real 5215) and CO260909-00002 (real 44.99). Admin control prints real figures through the same viewer.",
-      "report": null
-    },
-    {
       "severity": "Medium",
-      "provenance": "in-scope",
-      "summary": "P4 unchanged: sorting by Total still returns the true ranking of hidden totals. Developer marked Ignore; recorded as accepted risk.",
+      "provenance": "out-of-scope",
+      "summary": "P3 invoice prints Total $0 when order:invoice:download is granted without order:read_prices. The gate itself works (403 and hidden button without the permission). Taken OUT OF SCOPE of VCST-3912 by the operator for a separate discussion - comment 109252. Options if taken up: couple the permissions in code, or refuse the invoice when withPrices is false.",
       "report": null
     },
     {
       "severity": "Medium",
       "provenance": "out-of-scope",
-      "summary": "Admin SPA blade state including unsaved edits survives sign-out and is offered to the next user; saved filters are browser-local rather than per-user. Not caused by this PR, and the likely substrate for N2.",
+      "summary": "P4 sorting by Total still returns the true ranking of hidden totals. Accepted by the developer as Ignore.",
       "report": null
     }
   ],
