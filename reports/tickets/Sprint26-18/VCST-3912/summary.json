@@ -142,9 +142,9 @@
     "notes": "All four story ACs graded non-testable or partial at 1d: AC-1 and AC-2 are structural/vague ('is responsible for Data Protection', 'works as expected'); AC-3 and AC-4 are deliverable-presence checks. AC-4 names IEntityDataProtectionService, which does not exist in the shipped diff — only docs/data-protection-architecture.md defines it, marked Status: Proposal and targeting VirtoCommerce.Platform.Core. The 22 gap-ACs, not the story ACs, are the spine of this run."
   },
   "total_cases": 20,
-  "passed": 14,
-  "failed": 3,
-  "blocked": 3,
+  "passed": 15,
+  "failed": 4,
+  "blocked": 2,
   "iterations": {
     "enabled": true,
     "rounds": 2,
@@ -273,9 +273,9 @@
       "report": null
     },
     {
-      "severity": "High",
+      "severity": "Critical",
       "provenance": "in-scope",
-      "summary": "R3 unchanged on -0fac: a user with backuprestore rights but no order:read_prices still produces a restorable Data-backup archive of 1250 orders with every price 0.0 and no redaction marker in Manifest.json. Developer disposition is to document it. Documenting does not make the archive distinguishable from a complete one at restore time.",
+      "summary": "R3 PROVEN DESTRUCTIVE: restoring a price-free backup as administrator silently zeroes prices. Measured on one disposable order - 555.55 -> 0.00, line item 555.55 -> 0, both control orders and the order count unchanged (import is a pure upsert). Job log reports Successfully imported with errorCount 0, no warning that the archive was exported without prices and no confirmation dialog. Root cause: RestorePrices runs only when the importing caller CANNOT read prices, so an administrator restoring a backup skips it and writes the zeros. Side effect: the Restore drop zone writes the uploaded file permanently into Backup storage, making any price-free archive a one-click restore target.",
       "report": null
     },
     {

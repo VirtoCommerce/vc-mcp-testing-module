@@ -3,7 +3,7 @@
 `[Support] #38981 — Price restriction on order, catalog, pricing modules` · Story · High · status `Testing`
 Run: 2026-09-10 · Path **FULL** · Flow `feature-test` · Env target **vcptcore-qa** · Model: [`VCST-3912-2026-09-10.md`](../../../ba/test-models/VCST-3912-2026-09-10.md)
 
-## Verdict — Round 3: 4 of 7 FIXED, 1 still reproduces, 2 accepted by the developer, 2 new
+## Verdict — Round 3: 4 of 7 FIXED, 1 still reproduces, 2 new, and R3 proven destructive
 
 > Round-1/2 detail is kept below for history; **the current state is the Round 3 table at the end of this file.**
 
@@ -305,3 +305,24 @@ Likely related to the account-switching state bleed already recorded in Round 2 
 - `GET api/platform/settings/VirtoCommerce.Platform.UI.WidgetColorMarkers` returns **401** (not 403) for every account including admin, with an unhandled rejection. Pre-existing.
 - Under the minimum permission set the shipment blade fires 403s on `api/inventory/fulfillmentcenters/search` and `api/shipping/search` as unhandled rejections rather than handled degradation.
 
+### R3 restore — CONFIRMED DESTRUCTIVE (closed 2026-09-11, was the last open gap)
+
+Done safely on the reporter's suggestion: export a price-free backup as `agent-test-noprices`, strip the archive to **one disposable order**, restore as **admin**. Source review first established the import is a pure upsert (`DoImportAsync` → `DeserializeArrayWithPagingAsync<CustomerOrder>(..., SaveChangesAsync, ...)` — no delete, no truncate), so the blast radius is whatever the archive carries.
+
+| Entity | Before | After |
+|---|---|---|
+| `AGENT-TEST-RESTORE-3912` Total | **555.55** | **0.00** |
+| its line item, Price per item | **555.55** | **0** |
+| `CO260909-00002` control | 44.99 | unchanged |
+| `CO260827-00002` control | 284.94 | unchanged |
+| order count | 1249 | unchanged |
+
+Job log in full, `errorCount: 0`: `Starting platform import... / Importing 'VirtoCommerce.Orders' / Successfully imported 'VirtoCommerce.Orders'`. No warning, no confirmation dialog.
+
+**Root cause** — `if (!await CanReadPrices(user, order)) await RestorePrices(order);`. Restoration runs only when the importing caller *cannot* read prices. A backup is restored by an administrator, who can, so it is skipped and the zeros overwrite the real values. The safeguard protects the caller who does not need it and stands down for the one who does.
+
+**Side effect:** uploading a local file through the Restore drop zone writes it permanently into Backup storage (24 → 25 entries) — upload and stored-archive list are the same storage, so a price-free archive uploaded once is a one-click restore target thereafter.
+
+**Request shape** (not discoverable from the API alone): `POST /api/assets?folderUrl=backups` (multipart) → `GET /api/platform/export/manifest/load?fileUrl=…` → `POST /api/platform/import` (JSON, with `fileUrl` naming the stored asset **and** the full `exportManifest` object; an empty body returns 200 and starts a no-op job).
+
+Cleanup: probe order deleted (count back to 1248). The uploaded 1.7 KB archive could not be removed via any assets/export route — it lives in backup storage, not the assets folder — so it needs manual deletion. It contains one zeroed test order that no longer exists, so restoring it would merely recreate a test order.
