@@ -156,8 +156,19 @@ the chain's question, and equal values on both sides of a distinction under test
 
 ## Artifact A — test cases, authored into the durable suites (FULL only)
 
-Derive cases from the Test Model's scenarios + chain diagrams + `1d` AC conditions (story + gap-ACs) +
-`E2E-*` scenarios + `BL-*` / `ECL-*` + domain checklists.
+Derive cases from the Test Model's scenarios + chain diagrams + **Part 0r role scenarios, when the model
+carries them** + `1d` AC conditions (story + gap-ACs) + `E2E-*` scenarios + `BL-*` / `ECL-*` + domain
+checklists.
+
+**Part 0r — author a case from EVERY `Not allowed` item, not just from the action rows.** The action rows
+give the role's journey; the `Not allowed` items give the refusals, and the refusals are the half that
+discriminates — a permission bug passes every positive-path case by construction. Each refusal case
+asserts **at the server, with that role's own token**, that the call is refused AND that nothing
+persisted; a missing button is a separate, weaker assertion, not a substitute. Stamp them
+`Archetype:SCOPE` (or `SILENT` where the risk is a `200` that quietly no-ops). Target the layer's e2e
+suite — `concern: e2e` in `config/test-suites.json`. A role the model marked `FIXTURE-GAP` authors no
+case here: it went to `3a` as fixture demand, and authoring against an `@td()` that does not resolve is
+the defect `td:validate` exists to catch.
 
 **Author from the model AS AMENDED by Step 3x, not from the model as `1e` left it.** The discovery lane
 runs concurrently with 3a and closes before this artifact for exactly this reason
@@ -166,8 +177,9 @@ its **model amendments** (a `GAP` cell that is now a scenario #, a reverse edge 
 variant nobody enumerated), its **`{HYPOTHESIS}` → `{OBSERVED}` grounding** per row, and its **`PROMOTE`d
 net-new scenarios**, which are authored **in this run** rather than deferred. The grounding is the one that
 changes the output most: a row whose oracle the lane observed gets an assertion that can be *graded*,
-where the same row authored blind gets a presence check or a `{HYPOTHESIS}` that 5g will hold (`GRD-001`
-escalates a surviving hypothesis to Blocker in a promoted case). A row the lane could not reach is authored
+where the same row authored blind gets a presence check or a `{HYPOTHESIS}` that holds the row at `Draft`
+when someone later tries to promote it (`GRD-001` escalates a surviving hypothesis to Blocker in a
+promoted case). A row the lane could not reach is authored
 knowing it is still a hypothesis — that is a fine outcome; silently not knowing which is not.
 
 - **New feature / Story** → **author new** enriched-CSV cases.
@@ -213,8 +225,10 @@ Naming every target suite up front is also what makes the Step-3b fan-out safe, 
 
 Each authored case stamps its scenario row's archetype and technique into the free-text `References`
 column: `Archetype:<TOKEN> · Technique:<TOKEN>` (+ `Probe:VC-*-NNN` when the row came from a
-`vc-bug-catalog` Detection probe). The appender **rejects a row without them**. No new CSV column: these
-join the `Synced:` / `Audited:` / `Promoted:` stamps `References` already carries.
+`vc-bug-catalog` Detection probe; + `Role:<role-id>` when it came from a Part 0r role scenario, so a later
+reader can tell whose refusal the case defends). The appender **rejects a row without the two mandatory
+stamps**; `Probe:` and `Role:` are provenance, optional and unvalidated. No new CSV column: these join the
+`Synced:` / `Audited:` / `Promoted:` stamps `References` already carries.
 
 ### Scaffold before authoring — never hand-type the boilerplate
 
@@ -268,7 +282,8 @@ Never a hand-rolled append. Existing-suite sync/review edits happen in place. `-
 an ID already used anywhere under `regression/suites/`.
 
 **`Draft` is required, not a placeholder.** These cases are grounded and promotable only after Step 4
-executes them live; 5g does the `Draft → Automated` flip. A deliberate `{HYPOTHESIS}` — a genuinely unknown
+executes them live, and they **stay `Draft` when this run ends** — the `Draft → Automated` flip is
+[`/qa-test-lifecycle`](../../commands/qa-test-lifecycle.md)'s pass (`/qa-test`'s own `5g` was removed 2026-09-10). A deliberate `{HYPOTHESIS}` — a genuinely unknown
 expected value phrased as a question — is legal **only** at `Draft`. The runner does not skip `Draft`, so
 Step 4's scoped regression *will* run them; that is the point.
 
@@ -293,9 +308,8 @@ ground at full strength. Three rules on it:
 - **Allocate fresh.** A genuinely new row gets its own `tc:alloc` block; never reach for a block a
   previous round already spent.
 - **Author it before the round that executes it.** A case authored after the final round is `Draft`
-  with evidence nowhere — PR-002 at 5g, held forever. If that happens anyway, record it in
-  `summary.json.promotion.blocked` with exactly that reason rather than leaving it silently
-  unpromoted.
+  with evidence nowhere, which holds it at PR-002 forever whenever someone tries to promote it. If that
+  happens anyway, say so in the run's hand-off rather than leaving it silently unpromotable.
 
 ## Step 3b — author Artifact A in parallel, ONE BATCH PER EXECUTION SURFACE (FULL only)
 
@@ -320,7 +334,7 @@ introduce:
 | 1 | `npm run tc:alloc` and hand each batch **only its own** `--id-block` | `--check-global-ids` reads the corpus at APPEND time, so two batches both pass and then both write. A cross-suite duplicate ID silently overwrites the other suite's per-case results and failure evidence at run time. `tc:scaffold` refuses to spill past its block. |
 | 2 | Author the **`[JOURNEY]` / `Technique:FLOW` case itself**, before fan-out, and put it in every batch brief as the baseline they refine | It traverses the whole chain by definition. Per-layer batches each writing their own produce N partial journeys and no owner of the chain — the failure the 71-case storefront suite that placed zero orders represents. |
 | 3 | Resolve **every blank cell** of the 1e variants × links matrix and assign each cell to exactly one batch | Cell ownership is what makes duplication structurally impossible. With it there is no cross-batch dedup pass to run; without it two batches both claim a cell, or both skip it. |
-| 4 | Compile a per-layer **authoring pack** into the brief — the extracted `BL-*`/`ECL-*` rule text (`npm run bl:extract -- --domain <d>` · `npm run ecl:extract -- --domain <d>`), the batch's matrix rows, the journey case, the layer's selectors/schema fragments. **Cut the schema fragments from the snapshot `1b` item 2d refreshed, and stamp the pack with its rev.** This is the worked case of a pattern every fan-out now shares — what may be packed, what must stay a path, and why: [`dispatch-pack.md`](dispatch-pack.md) | Step 2 already loaded the oracles once. Four agents re-reading `business-logic.md` + ECL + `critical-ui-scope` + `vc-bug-catalog` + `graphql-schema.md` is 4× the dominant token cost for zero extra information — that alone can make the fan-out cost more than it saves. The pack is also the fan-out's single point of contract failure: cut from an unrefreshed snapshot it distributes one stale contract to every batch at once, and the resulting cases fail at Step 4 as what look like product defects ([`contract-refresh.md`](contract-refresh.md) §4). A GraphQL batch reads `test-data/graphql/index.json` before authoring a new fixture — 74 ops already exist. |
+| 4 | Compile a per-layer **authoring pack** into the brief — the extracted `BL-*`/`ECL-*` rule text (`npm run bl:extract -- --domain <d>` · `npm run ecl:extract -- --domain <d>`), the batch's matrix rows, the journey case, **the Part 0r role scenarios whose refusals this batch owns (rows, not a path — they are small, per-batch, and an agent handed only a path re-reads the whole model)**, the layer's selectors/schema fragments. **Cut the schema fragments from the snapshot `1b` item 2d refreshed, and stamp the pack with its rev.** This is the worked case of a pattern every fan-out now shares — what may be packed, what must stay a path, and why: [`dispatch-pack.md`](dispatch-pack.md) | Step 2 already loaded the oracles once. Four agents re-reading `business-logic.md` + ECL + `critical-ui-scope` + `vc-bug-catalog` + `graphql-schema.md` is 4× the dominant token cost for zero extra information — that alone can make the fan-out cost more than it saves. The pack is also the fan-out's single point of contract failure: cut from an unrefreshed snapshot it distributes one stale contract to every batch at once, and the resulting cases fail at Step 4 as what look like product defects ([`contract-refresh.md`](contract-refresh.md) §4). A GraphQL batch reads `test-data/graphql/index.json` before authoring a new fixture — 74 ops already exist. |
 
 **Batch contract** (each batch is one `test-management-specialist`):
 
@@ -340,7 +354,8 @@ Because each batch self-lints, the Step-3 gate becomes confirmation rather than 
 
 **Ordering constraint: Artifact A waits for the whole Step-3 wave — do NOT overlap authoring with `3a` or
 `3x`.** Fan-out buys nothing if the fixtures do not resolve yet, and a batch authored beside `3x` is
-authored from exactly the guesses that lane exists to replace. `3a ‖ 3x ‖ B` are concurrent with each
+authored from exactly the guesses that lane exists to replace. **This constraint is untouched by the
+2026-09-10 restructure** — what changed is that nothing waits for authoring to FINISH except `4c`. `3a` and `3x` are concurrent with each
 other; **A alone is downstream of all three**
 ([`SKILL.md`](SKILL.md) §What must NOT be parallelised). The fan-out this section describes is *within*
 Artifact A — one batch per execution surface, once the wave has closed.
@@ -383,20 +398,22 @@ never the round sections.
 
 ---
 
-## Artifact C — TWO runs, because "did this ticket pass" and "did this break anything else" are two questions
+## Artifact C — ONE run: does *this ticket's* set pass?
 
-**C1 gates the verdict; C2 gates the release.** They used to be one `/qa-regression` invocation
-(`--cases critical --also-ids <new ids>`) executed at Step 4, which put a ~40-minute suite sweep on the
-critical path to a verdict that never depended on it: 5c's criteria are atomic conditions, reconciled ACs,
-DoD items, `BL-*` and IN-SCOPE bugs — every one of them a claim about *this ticket*. A Critical case failing
-in some other suite is, by 5a's own provenance rules, PRE-EXISTING or OUT-OF-SCOPE, and neither of those
-fails the ticket. The one exception (an IN-SCOPE finding surfacing in a neighbouring suite) is real, and
-§5r handles it by amending a verdict that has been *recorded and not yet published*.
+**C1 gates the verdict, and nothing else runs from here.** Artifact C used to be two runs — C1 plus a
+change-scoped Critical sweep (C2) — folded into one `/qa-regression --cases critical --also-ids <new ids>`
+invocation at Step 4. That put a ~40-minute suite sweep on the critical path to a verdict that never
+depended on it: 5c's criteria are atomic conditions, reconciled ACs, DoD items, `BL-*` and IN-SCOPE bugs —
+every one of them a claim about *this ticket*. A Critical case failing in some other suite is, by 5a's own
+provenance rules, PRE-EXISTING or OUT-OF-SCOPE, and neither fails the ticket.
+
+Moving the sweep after the verdict (`5r`, 2026-09-02) fixed the latency and left the cost. **On 2026-09-10
+it was removed outright**: a release-scoped sweep is a *release* decision, and it now belongs to a
+deliberate [`/qa-regression`](../../commands/qa-regression.md) run by whoever is cutting one.
 
 | | Question | Selection | Runs |
 |---|---|---|---|
-| **C1** | Do *this ticket's* cases pass? | `/qa-regression <target suite ids> --ids <new Draft ids + every Step-2a RE-BASE id>` | **Step 4** |
-| **C2** | Did the change break anything else? | `regression:select … --target 40` → `--cases critical` | **5r**, after 5c, overlapped with 5d + drafting 5e |
+| **C1** | Do *this ticket's* cases pass? | `/qa-regression <target suite ids> --ids <new Draft ids + every Step-2a `REPAIR` id + every `RE-BASE` id>` — **every case this run wrote or changed** | **`4c`**, scope assembled at A's append ([`qa-test.md`](../../commands/qa-test.md) §C1) |
 
 Three consequences worth stating:
 
@@ -404,61 +421,21 @@ Three consequences worth stating:
   exact set answer different questions, and accepting both leaves *"did `--ids` narrow the tier, or extend
   it"* unanswerable. It also reads no `Priority` at all, so an unreadable one is not a finding on the C1
   path — the same property `5k`'s RED→GREEN track already relies on.
-- **`--also-ids` disappears from this pipeline.** It existed to smuggle this run's own cases into a
-  tier-filtered sweep; with the sweep moved off the verdict path, those cases have a run of their own.
-  `--also-ids` survives in `5k`'s C2, where a tier sweep genuinely does need to carry named ids.
-- **A skipped C1 is stated.** A run that authored no cases and disposed no `RE-BASE` has an empty exact set
-  and no C1 — say so. An omitted regression track reads exactly like a passing one, which is §2's rule
+- **`--also-ids` is gone from this pipeline entirely.** It existed to smuggle this run's own cases into a
+  tier-filtered sweep. There is no tier-filtered sweep here any more, and the run's own cases have a run of
+  their own. It survives on `/qa-regression` for callers that genuinely want a tier union plus named cases.
+- **A skipped C1 is stated.** A run that authored no cases and disposed no `REPAIR`/`RE-BASE` has an empty
+  exact set and no C1 — say so. A run that authored no cases but *did* dispose one has a complete set at
+  `2a`, and C1 dispatches beside `4a` rather than waiting on a gate with nothing to rule on. An omitted regression track reads exactly like a passing one, which is §2's rule
   applied one level up.
 
-**`5k` reached this split first**, for the same reason, and [`modes.md`](modes.md) §The two tracks of round
-N+1 is now named in these terms rather than in its own.
-
-### C2's selection — critical cases, in 40 minutes
-
-**On `--iterate`, round N+1 re-derives this scope from the FIX’s diff**
-(`regression:select --repo <name> --diff <fix-PR range>`) — round 1’s selection was computed from the
-*ticket’s* diff and cannot know what the fix touched — and runs it as a **second** `/qa-regression`
-alongside a separate `--ids` run of exactly the previously-failed cases, so the RED→GREEN pass rate and
-the release gate’s ≥80% floor stay two different numbers ([`modes.md`](modes.md) §5k §The two tracks).
-
-The scope is **case-level, not suite-level.** Selecting whole suites is what made a search-change run plan
-all 44 cases of suite `004` — 6 of them Critical, 19 skipped outright.
-
-1. **Suites** — start deterministic, not from judgment:
-   ```bash
-   npm run regression:select -- --repo <repo> --changed-files <file> --target 40 --json
-   ```
-   `--target` trims against the predicted **makespan across the three lanes** (real wall-clock, not a sum of
-   suite minutes) and **refuses to trim the risk floor** (P0 + `critical-ui-scope`), so a tight budget can
-   never quietly delete the P0 gate. Add the suites covering the Done Epic siblings this story integrates
-   with, and the target suite(s) that received new `Draft` cases.
-2. **Cases** — `--cases critical`. Critical is ~22% of the corpus by count and ~23% by estimated minutes,
-   which is what puts the run inside the window. **No `--also-ids` here** — this run's own new cases have
-   their own exact-set run (C1), which is the whole point of the split.
-3. **State the budget, don't just trust it.** Report the predicted makespan and **every suite `--target`
-   excluded**. `scripts/lib/suite-selection.ts` documents its own cost model as wrong by **×18–×88** for
-   runner-native suites (`050m` declares 245 min, ran in 2.77), so until `npm run regression:recalibrate`
-   has real observations the number is a hint, not a fact.
-
-**Worked example — and it shows why both knobs are needed.** A `vc-frontend` checkout-path change with
-`--target 40` selects 14 suites and predicts **71 minutes**, over budget: 13 of the 14 are **risk floor**
-(P0 + `critical-ui-scope`), which `--target` refuses to trim, so it reports the overrun instead of cheating
-it. `--target` alone therefore cannot deliver the window. Those 14 suites hold 369 cases / 232 predicted
-minutes, of which **120 are Critical → ~79 lane-minutes → ~26 minutes across the three lanes.** The case
-filter is what cuts *inside* a floor suite, which is the only place left to cut. One suite in that set
-(`048c`) has **no Critical case at all** and contributes nothing — name it in the report; a suite that
-disappears silently reads exactly like a suite that passed.
-
-Output the concrete suite ID list with a one-line rationale each (`config/test-suites.json` is the source of
-truth for what a selection expands to; don't restate counts). **5r** runs it as its own `/qa-regression`
-run; **never fold suite IDs into a ticket agent's prompt**
-(`feedback_long_runner_sessions_unreliable`).
-
-**The scope is still computed at Step 3, even though the run is at 5r.** It is derived from the ticket's
-diff, which does not change between Step 3 and the verdict, and computing it here means 5r can dispatch the
-instant 5c is recorded rather than spending a turn on `regression:select` first — the latency this split
-exists to remove.
+**If you DO want the release sweep**, it is [`/qa-regression`](../../commands/qa-regression.md) with
+`regression:select --repo <repo> --changed-files <file> --target 40 --json` then `--cases critical` — a
+case-level selection, because selecting whole suites is what made a search-change run plan all 44 cases of
+suite `004`, 6 of them Critical and 19 skipped outright. `--target` trims against predicted **makespan**
+and refuses to trim the risk floor (P0 + `critical-ui-scope`), and its cost model is documented wrong by
+**×18–×88** for runner-native suites, so treat the number as a hint. That is a note for the human running
+it, not a step of this pipeline.
 
 ---
 

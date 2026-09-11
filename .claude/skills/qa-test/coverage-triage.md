@@ -34,7 +34,7 @@ the Test Model names as a regression surface in its own words — selects 31 sui
 sales-rep, and likewise reports `unmappedPaths: []`. A gap that announces itself is a gap you fix;
 this one reports success.
 
-**2. The change-scoped sweep (now C2) applies `--cases critical`**, which drops the High rows where most label and
+**2. A change-scoped release sweep applies `--cases critical`**, which drops the High rows where most label and
 route assertions live: 091 carries 24 High, 093 carries 29.
 
 **3. A row that never executes is never triaged**, so 5a cannot reach it however good it is.
@@ -105,7 +105,7 @@ and every hit takes exactly one value.
 | Disposition | The row is | Action | Timing |
 |---|---|---|---|
 | **`CONFIRMED`** | still correct under the change | nothing | — |
-| **`REPAIR`** | **mechanically** stale — a renamed selector, a moved route, a removed arg, a dead `@td()` alias — so it cannot execute at all | `/qa-review-tests file <suite> --fix`, under Phase 4b's write-scope ceiling + revert-on-regression | **before** the run |
+| **`REPAIR`** | **mechanically** stale — a renamed selector, a moved route, a removed arg, a dead `@td()` alias — so it cannot execute at all | `/qa-review-tests file <suite> --fix`, under Phase 4b's write-scope ceiling + revert-on-regression, **then carry the row into C1's `--ids`** | fixed **before** the run, **executed BY it** |
 | **`RE-BASE`** | asserting an **expected value** the change contradicts | keep the assertion as it stands; carry the case into **C1's `--ids`** | resolved **by** the run, at 5a |
 | **`SUPERSEDED`** | asserting a surface the change removes | a proposal, recorded — never an edit | human |
 
@@ -138,8 +138,11 @@ written before the change, executed against the change.
 
 ### 3b. Two hard rules
 
-**A `FILTERED_OUT` row disposed `RE-BASE` MUST be carried in C1's `--ids`** — or its disposition is
-`CONFIRMED`/`SUPERSEDED` with a stated reason. A `RE-BASE` that never executes is precisely the
+**A `FILTERED_OUT` row disposed `REPAIR` or `RE-BASE` MUST be carried in C1's `--ids`** — or its
+disposition is `CONFIRMED`/`SUPERSEDED` with a stated reason. **`REPAIR` was added to this rule on
+2026-09-10**: the fix is applied before the run, so until the run executes it nothing has verified that
+the case can now reach its own assertion — a repaired-but-unrun row is the same invisible class as an
+undisposed `RE-BASE`, arrived at from the other direction. C1 is *every case this run wrote or changed*. A `RE-BASE` that never executes is precisely the
 invisible class this axis exists to find; leaving one undisposed re-creates the gap inside the
 mechanism built to close it. This is the same rule Artifact C already follows for its Scope
 Exclusions, one layer down.
@@ -218,6 +221,31 @@ holes lie.
   (→ a `1e` matrix cell) or a term worded differently in the CSVs than in the diff, and those need
   opposite responses, so the tool must not silently pick one.
 
+### A change with NO domain: `--domain` does not under-run, it runs WIDE and WRONG
+
+**`--domain` is the wrong scope flag for a change that has no domain** — a token-layer, UI-kit or
+design-system change (`ticket-routing.md` §5c's `ui-kit` shape class). Scope matching is exact against the
+manifest's `domain`/`tags`, which is correct when the change belongs somewhere; when it belongs
+*everywhere*, the domains you can name are the ones you happened to think of.
+
+Measured on VCST-5653 (a focus-ring token replacement). Scoped `--domain cross-cutting,branding` with six
+observables and three oracles: **18 suites in scope, 447 rows scanned, 26 at risk.** A corpus-wide sweep on
+the same terms: **62 rows across 13 suites** — adding `b2b`, `bopis`, `configurable-products`,
+`customer-reviews`, `loyalty`, `sales-rep`, `search`, `notifications`. **More suites scanned, fewer hits
+found**: the scoped run was not narrow, it was aimed by the wrong vocabulary.
+
+**The failure is silent and reads as coverage.** Nothing in the output says *the axis you scoped by does not
+apply to this change* — a `26 at risk` line looks exactly like a `62 at risk` line that found less.
+
+So for a domainless change: **pair `tc:scope` with a corpus-wide pass and scope by `--suite` from what that
+returns**, not by `--domain` alone. Record **the literal invocation** in the artifact — a hit count whose
+command line is unrecorded is a claim a verifier cannot reproduce, and `5b` has rejected a run for exactly
+that. Name the zero-contributing suites too; an unlisted suite and an empty one read the same.
+
+Turning this from a discipline into a tool behaviour — a `--surface` / `--all-domains` mode, or a warning
+when the diff is `ui-kit/**` or token paths while `--domain` is set — is `docs/repo-findings-backlog.md`
+B-33, and is not implemented.
+
 ### Worked example — VCST-5733
 
 ```
@@ -243,10 +271,8 @@ blockers hid: in scope, invalidated by the rename, and not in any run the ticket
   citation resolves) vs Dimension 6 (it is the *right* citation).
 - **It does not retire anything.** `SUPERSEDED` is a proposal. TRI-006 keeps deprecation human, and
   `tc:demote` may only reach `Manual` — a rule a change-scoped triage has no standing to relax.
-- **It never reverts with git.** A `REPAIR` that regresses `suites:review` is undone by re-editing the
-  row or by reading the baseline from `git show HEAD:<path>` into the scratchpad. Several sessions
-  hold uncommitted work in this tree, and a tree-wide `git checkout`/`restore` is unrecoverable for
-  all of them (`.claude/rules/regression.md` §WORKING IN A SHARED TREE).
+- **Undoing a `REPAIR` is a row-level edit.** A `REPAIR` that regresses `suites:review` is undone by
+  re-editing the row, or by reading the baseline from `git show HEAD:<path>` into the scratchpad.
 - **It does not widen the oracle-amendment path.** The `1e` model already routes an invariant that
   needs amending to `/qa-review-oracles`; this axis only finds the **cases** citing it, which is the
   half nothing was doing.

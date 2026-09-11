@@ -8,6 +8,96 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Semver 
 
 ---
 
+## `playwright-firefox` verified click-capable, and `@playwright/mcp` is now pinned — 2026-09-11
+
+Re-verified the firefox lane live against vcst-qa: a popover click (`Currency` reached `[expanded]`
+with all 9 options rendered — a real DOM change, not a no-op return) and a navigation click
+(`Sign in` → `/sign-in`), 0 console errors, no timeouts. The preceding 4 days of transcripts hold 43
+firefox calls with **zero** errors, 6 of them clicks. The 2026-09-08 occlusion-pref fix holds.
+
+Also found and closed a version split. `.mcp.json` launched all three Playwright lanes with
+`@playwright/mcp@latest` (resolving to 0.0.80) while `package.json`, `PLAYWRIGHT_MCP_PACKAGE` in
+`ci/lib/lane-mcp.ts` and `/project-init`'s `gen-mcp.mjs` all pin 0.0.77 — so interactive runs were
+not reproducing CI, and the bare-screenshot path contract `/qa-bug`'s `_incoming/` reconcile depends
+on is written against 0.0.77. Nothing had failed only because two firefox builds happened to be
+installed; three accumulated builds (1532/1533/1542) were the tell. Lanes are pinned to 0.0.77, which
+resolves to the repo's own `node_modules` copy with no npx fetch. `docs/onboarding.md` had been
+telling every clone to use `@latest` — fixed, with the reasoning.
+
+**A pinned `@playwright/mcp` is now the SECOND prerequisite for this lane**, alongside the
+server restart: an `@latest` bump swaps the binary that reads
+`config/mcp-playwright-firefox.config.json`, and each release demands its own browser build (a miss
+fails at launch with *"Executable doesn't exist"*). Recorded in `browser-quirks.md` §Firefox,
+`rules/agents.md`, `browser-lanes.md` and `browserPool[1].constraint`. Stale "firefox cannot click"
+assertions were retired from `ROUTING.md`, `suite-manifest.ts` and `sync-test-suites.ts` — the latter
+also carried a root cause that the 2026-09-08 probe disproved (it blamed the `@playwright/mcp` layer,
+not Windows occlusion tracking).
+
+## The auto-fix ladder now asks *where* the red was observed — 2026-09-10
+
+`/qa-fix` shipped a fix that does not work, at `HIGH` confidence, past a fully green CI and a human
+review: VCST-5940, an Admin SPA preview iframe that rendered the literal text of an Angular
+interpolation instead of the email body. `/qa-verify-fix` reproduced the bug **3/3** on the exact
+deployed artifact. The reproduction had been a Node scratch harness asserting the controller's
+*assignment timing*; the ticket's *Actual result* was a statement about a rendered DOM. **A green test
+of the wrong property is worse than no test** — it manufactures confidence that survives review, CI
+and a human.
+
+**The pipeline knew and could not act.** The run recorded `"G2_reproduce_red": "PASS_PROXY"` and a
+truthful `limits[]` saying the customer-visible outcome was unverified — then reported
+`"confidence": "HIGH"`. `PASS_PROXY` was vocabulary with no consequence anywhere in the ladder, and the
+only executable CI gate was `confidence === "LOW"`. The honesty was present; the gate was not.
+
+**G2 gained the MEDIUM RULE.** If the *Actual result* describes something visible only in a rendered
+DOM — text wrong, literal, missing or stale; an element absent or not updating; overlap, clipping,
+misalignment — the red MUST be a rendered-DOM observation. For a module Admin SPA that is the visual
+render harness against the real blade and the real `platform.css`, with the real controller loaded
+**even when the diff is pure JS**. A Node/xUnit proof may accompany it, never replace it. jsdom carries
+a carve-out: content / binding / element-presence, never geometry, paint, CLS or cross-frame. A
+rendered symptom proven elsewhere is `G2: FAIL` → `FIX_STATUS: FAILED` and hand off — **not** a
+confidence downgrade, because a downgrade blocks nothing.
+
+**Three declarations, now machine-checked.** The dev agents emit `PROOF_MEDIUM` (where the red was
+observed), `PROOF_PROVENANCE` (`built-diff`, or `analogue: <what>` — a re-assignment, a different
+delay, a stub standing in for the file under fix), and `PROOF_LINKAGE` (the weakest change that greens
+the test, constructed with no null option so it can be compared against the shipped diff). G4 checks
+all three; `ci/run-fix-cycle.ts` parses them and bails the ticket with a new `g2_proxy` outcome, so the
+headless lane enforces the same bar instead of the rule being advisory in CI.
+
+**G4 gained the executed-argument rule.** The review had overturned the correct hypothesis with an
+argument nobody ran: *"the working sibling also has an `ng-if`, so `ng-if` is not the differentiator"* —
+X present in the working case and absent in the broken one is the profile of a candidate cause, not
+evidence against one. An unexecuted mechanism argument may no longer overturn a hypothesis or raise
+confidence: run it, or mark it `UNVERIFIED:` and leave the contested hypothesis standing. Plus a
+**differential read** — every structural difference between working and broken is explained or matched
+by the fix, and the fix must match the comparator on the dimension it claims is causal.
+
+**The `/angular-admin` and `/vc-shell-fix` proof paths route by where the symptom is observed, not by
+which file the fix touches** — the routing error that sent VCST-5940 to the Node path in the first
+place. "No JS test harness in the repo" is not a reason to skip the browser: the render harness needs
+no repo test infrastructure at all. And a harness that renders correctly on known-broken source is a
+false-green generator — two were built during this investigation and both were green on the bug,
+because the lane was chromium 153, where the defect is fixed upstream. **The harness must exhibit the
+red before it may certify a green**, on the medium the symptom was reported on.
+
+Measured hypotheses, the instrumented trace, the real root cause (`ng-attr-srcdoc`: Chromium ≤152
+commits `about:srcdoc` from the parse-time attribute) and the two traps this cost:
+[`docs/decisions/autofix-proof-medium.md`](docs/decisions/autofix-proof-medium.md).
+
+**Verified:** `npm run context:check` green (always-loaded 52,935 / 80,000; DOC-002/3/4/6 all at
+baseline `0`); `npm run mirror:check` OK with all eight `.claude/` ↔ `plugins/vc-fix/` pairs in this
+change re-synced; `npx tsc --noEmit -p ci/tsconfig.json` clean.
+
+**Version:** `vc-fix` **0.8.7 → 0.9.0** — a minor bump, because G2 gains a rule the ladder did not
+have rather than fixing a broken one. The `vc-fix--v0.9.0` tag is cut at release
+(`docs/release-process.md` §Step 5a), not here; `vc-perf`'s `vc-fix >=0.7.0` range resolves against it.
+The catalog stays `0.9.4` — the listing itself did not change, and the three numbers are not meant to
+match. The version prose in `CLAUDE.md`, `docs/release-process.md` and `docs/versioning.md` had drifted
+(`0.8.6` / `0.8.3`, and `vc-perf` `0.2.6`) and is now re-synced to the manifests, which are the source
+of truth.
+
+---
+
 ## The doc gate was measuring the wrong thing — all three ratchets now at zero — 2026-09-08
 
 `npm run context:check` ratchets three rules over `CLAUDE.md` + `.claude/**`. **All three were

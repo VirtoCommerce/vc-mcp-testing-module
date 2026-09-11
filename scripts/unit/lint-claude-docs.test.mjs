@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BUDGET, BASELINE, alwaysLoadedFiles, measureBudget, isPlaceholderPath, isEphemeralPath, citationTarget, citedFromRoot, pathResolves, headingMatch, DERIVED_COUNT_RE, isTranscribedCount, MAY_NOT_EXIST, classifyScript, ratchet, lint } from '../maintenance/lint-claude-docs.mjs';
+import { BUDGET, BASELINE, alwaysLoadedFiles, measureBudget, isPlaceholderPath, isEphemeralPath, citationTarget, citedFromRoot, pathResolves, headingMatch, DERIVED_COUNT_RE, isTranscribedCount, MAY_NOT_EXIST, classifyScript, ratchet, lint, isGitIgnored, promptFiles, checkPromptBudget, PROMPT_BASELINE_PATH } from '../maintenance/lint-claude-docs.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -57,9 +57,76 @@ test('THIS checkout: always-loaded set within budget, no line over the cap, no r
   for (const k of Object.keys(BASELINE)) assert.ok(r.counts[k] <= BASELINE[k], k);
 });
 
+// --- BUDGET-004: the prompt-body budget + its per-file ratchet ------------------------------------
+//
+// BUDGET-001/002 cap the always-loaded tier and BUDGET-003 warns about SKILL.md bodies. Neither ever
+// measured `.claude/commands/` or `.claude/agents/`, so a prompt file was budgeted by which DIRECTORY
+// it sat in rather than by what it costs — a 71K-char command was exempt while the same bytes in a
+// SKILL.md were flagged. These pin the rule that closed that, and the two clauses that make it a
+// ratchet rather than an exemption list (graduated entries, stale entries) — without those, the
+// baseline decays into a permanent licence.
+
+test('promptFiles = commands + agents + SKILL.md, and NOT supporting files / knowledge / rules', () => {
+  const files = promptFiles(ROOT);
+  assert.ok(files.length > 0);
+  for (const f of files) {
+    assert.ok(/^\.claude\/(commands|agents|skills)\//.test(f), `out of scope: ${f}`);
+    if (f.startsWith('.claude/skills/')) assert.ok(f.endsWith('/SKILL.md'), `supporting files are progressive disclosure, not a prompt body: ${f}`);
+  }
+  assert.ok(!files.some((f) => f.startsWith('.claude/knowledge/')), 'knowledge is reference data read by lookup, never a prompt body');
+  assert.ok(!files.some((f) => f.startsWith('.claude/rules/')), 'rules are BUDGET-001/002 — measuring them twice would double-count');
+  assert.ok(files.includes('.claude/commands/qa-test.md') && files.some((f) => f.startsWith('.claude/agents/')), 'commands and agents must both be in scope');
+});
+
+test('checkPromptBudget: the four verdicts', () => {
+  const L = BUDGET.promptBodyChars;
+  const src = { under: 'x'.repeat(100), grew: 'x'.repeat(L + 500), shrank: 'x'.repeat(L - 1), fresh: 'x'.repeat(L + 1) };
+  const read = (f) => src[f];
+  const exists = (f) => f in src;
+
+  // in baseline, still over, but SMALLER than its entry -> allowed (it shrank)
+  let r = checkPromptBudget(['grew'], { grew: L + 900 }, read, exists);
+  assert.equal(r.breaches.length, 0, 'a listed file that shrank must pass');
+  assert.equal(r.over.length, 1, 'still over budget, so still reported');
+
+  // in baseline, GREW past its entry -> fail
+  r = checkPromptBudget(['grew'], { grew: L + 100 }, read, exists);
+  assert.equal(r.breaches.length, 1);
+  assert.match(r.breaches[0].reason, /GREW/);
+
+  // NOT in baseline and over budget -> fail (a new prompt is born under budget)
+  r = checkPromptBudget(['fresh'], {}, read, exists);
+  assert.equal(r.breaches.length, 1);
+  assert.match(r.breaches[0].reason, /not in the baseline/);
+
+  // in baseline but now UNDER budget -> fail, the entry must be deleted, or it licenses re-growth
+  r = checkPromptBudget(['shrank'], { shrank: L + 5000 }, read, exists);
+  assert.equal(r.breaches.length, 1);
+  assert.match(r.breaches[0].reason, /GRADUATED/);
+
+  // a baseline entry whose file is gone -> fail, a rename must not leave a licence behind
+  r = checkPromptBudget(['under'], { 'gone.md': 99999 }, read, exists);
+  assert.equal(r.breaches.length, 1);
+  assert.match(r.breaches[0].reason, /stale baseline entry/);
+
+  // the happy path: under budget, unlisted
+  assert.deepEqual(checkPromptBudget(['under'], {}, read, exists), { over: [], breaches: [] });
+});
+
+test('THIS checkout: no BUDGET-004 breach, and every baseline entry is live and in scope', () => {
+  const r = lint(ROOT);
+  assert.deepEqual(r.prompts.breaches, [],
+    `BUDGET-004 breached. A prompt over ${BUDGET.promptBodyChars} must move detail down a tier (CLAUDE.md §Where the rules live) — never re-baseline to fit. Re-baseline ONLY to record a deliberate, already-shrunk file: npm run context:check:baseline`);
+  const inScope = new Set(promptFiles(ROOT));
+  for (const f of Object.keys(r.promptBaseline)) {
+    assert.ok(inScope.has(f), `stale baseline entry (not a prompt file in scope): ${f} in ${PROMPT_BASELINE_PATH}`);
+    assert.ok(r.promptBaseline[f] > BUDGET.promptBodyChars, `${f} is baselined at ${r.promptBaseline[f]}, which is not over budget — the entry should not exist`);
+  }
+});
+
 test('every path the linter emits is posix — no path.sep leaks (the 2026-09-08 windows-latest red leg)', () => {
   const r = lint(ROOT);
-  const all = [...alwaysLoadedFiles(ROOT), ...r.budget.perFile.map((p) => p.file), ...r.skillsOver.map((s) => s.file), ...r.findings.map((x) => x.file)];
+  const all = [...alwaysLoadedFiles(ROOT), ...r.budget.perFile.map((p) => p.file), ...r.skillsOver.map((s) => s.file), ...promptFiles(ROOT), ...r.prompts.over.map((p) => p.file), ...Object.keys(r.promptBaseline), ...r.findings.map((x) => x.file)];
   assert.ok(all.length > 0);
   for (const p of all) assert.ok(!p.includes('\\'), `backslash in emitted path: ${p}`);
   assert.ok(alwaysLoadedFiles(ROOT).slice(1).every((f) => f.startsWith('.claude/rules/')));
@@ -122,6 +189,20 @@ test('pathResolves accepts root-relative AND citing-file-relative, which is how 
   // The exact defect this found: from .claude/knowledge/execution/, ../../ is .claude/, not the root.
   assert.ok(!pathResolves('.claude/knowledge/execution/test-data-authoring.md', '../../scripts/lib/seed-common.mjs', exists));
   assert.ok(pathResolves('.claude/knowledge/execution/test-data-authoring.md', '../../../scripts/lib/seed-common.mjs', exists));
+});
+
+test('isGitIgnored: an EMPTY check-ignore pattern is not a match — the gate must be able to fail on Windows', () => {
+  // Measured 2026-09-10 on git 2.55.0.windows.5: in THIS repo `git check-ignore -q '<anything>/'`
+  // exited 0, attributed to a BLANK .gitignore line, while a fresh repo exited 1. The DOC-003 caller
+  // probes `cited + '/'` for every unresolved citation, so that turned EVERY dangling path into
+  // "ignored": `lint()` reported 0 findings corpus-wide on Windows while CI on Linux reported 31, and
+  // a PR shipped a citation to a file that had just been deleted. A gate that cannot fail on half the
+  // team's machines is worse than no gate, because it is trusted.
+  assert.equal(isGitIgnored('zzz-no-such-directory/', ROOT), false, 'a nonexistent directory is not ignored');
+  assert.equal(isGitIgnored('.claude/skills/qa-test/zzz-deleted.md/', ROOT), false, 'nor is a deleted file probed as a dir');
+  // ...and a real rule still matches, in both the bare and the trailing-slash form.
+  assert.equal(isGitIgnored('node_modules', ROOT), true);
+  assert.equal(isGitIgnored('results/', ROOT), true);
 });
 
 test('a reports/ citation is ephemeral; a durable path is not', () => {
