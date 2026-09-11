@@ -374,3 +374,19 @@ All findings in scope of VCST-3912 are fixed and verified on `3.1015.0-pr-472-fb
 Out of the ticket: **P3** (invoice) — **Keep as Is**, accepted: the download gate is the control, and masking inside a PDF is not wanted · **P4** (sorting reveals the ranking) — accepted by the developer as `Ignore` · **N2** (blade context not cleared on sign-out) — filed as **VCST-5952**, platform, Sprint 26-18.
 
 **Nothing is left unverified.** The storefront/xAPI surface, previously listed as a gap, is out of the change's reach by construction: the PR registers the protection service under its own interface (`ICustomerOrderDataProtectionService`) and leaves `ICustomerOrderService` / `IIndexedCustomerOrderSearchService` pointing at the raw implementations, so anything injecting those — xAPI included — is untouched. Case `ORD-GQL-014`, authored against that hypothesis, now has a void premise and should be retired (proposal only; retirement is a human call, TRI-006).
+
+### Regression coverage — final shape (22 cases in suite 017)
+
+The 19 cases authored in round 1 (`ORDA-104`..`ORDA-122`) needed **no rewriting after the fixes**. They were written under the rule that a row may not certify a defect: each asserted the correct, specification-derived expectation with the suspected defect named only in `Failure_Signals`. So the same rows that were RED against the broken build are the rows that guard the fixed one.
+
+Three cases added for what the fix round introduced:
+
+| Case | Guards |
+|---|---|
+| `ORDA-123` | `order:invoice:download` gates the invoice independently of `order:read_prices` — three roles (neither / download only / both), endpoint status and toolbar visibility must agree |
+| `ORDA-124` | Restoring a backup exported without prices must not overwrite stored prices — the data-destruction guard, with control orders to prove the import stayed a per-entity upsert |
+| `ORDA-125` | A user **with** `order:read_prices` sees real amounts in the line-item Discounts widget — the over-masking direction, which is how that surface failed once already |
+
+All 22 are `Draft`. Promotion to `Automated` needs a suite-runner pass; this run exercised them ad hoc (direct API comparison and two browser sessions), which proves the behaviour but is not the runner evidence `5g` requires.
+
+Proposed retirement: **`ORD-GQL-014`** in suite 050c — its premise is void, since the PR leaves `ICustomerOrderService` pointing at the raw implementation and the storefront surface is out of the change's reach. Retirement is a human call (TRI-006), so it is proposed rather than applied.
