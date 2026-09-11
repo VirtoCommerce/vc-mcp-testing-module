@@ -397,10 +397,12 @@ Proposed retirement: **`ORD-GQL-014`** in suite 050c — its premise is void, si
 |---|---|
 | **Automated** | 17 — ORDA-104, 105, 106, 108, 109, 110, 111, 113, 114, 115, 116, 117, 118, 121, 123, 124, 125 |
 | **Draft** | 4 — ORDA-112 and 119 (no system-context export trigger on this stand; 119 depends on 112), ORDA-122 (needs a Chrome DevTools lane), ORDA-120 (promotable after one re-run) |
-| **Retired** | ORDA-107 — the sort-order disclosure was accepted as , so the case was removed rather than left as a permanent red |
+| **Retired** | ORDA-107 — the sort-order disclosure was accepted as `Ignore`, so the case was removed rather than left as a permanent red |
 
- failed the run **only** on a console clause asserting no JS errors on a cold deep-link. The i18n errors it caught are neither a defect of this feature nor caused by this PR, so the clause was removed; the case now asserts what it was written for — that deep-linking does not bypass masking — which passed in the run.
+`ORDA-120` failed the run **only** on a console clause asserting no JS errors on a cold deep-link. The i18n errors it caught are neither a defect of this feature nor caused by this PR — confirmed with the QA lead — so the clause was removed. The case now asserts what it was written for: that deep-linking does not bypass `withPrices`-driven masking, which passed in the run.
 
- was held by the promoter on GRD-001 for carrying a  assertion, then grounded against  and the two null guards in  and promoted.
+`ORDA-115` was held by the promoter on GRD-001 for carrying a `{HYPOTHESIS}` assertion, then grounded against `BL-AUTH-017` and the two null guards in `dfa3864`, and promoted.
 
-Localization check:  has a label in **all 10 locale files** (de, en, es, fr, it, ja, pl, pt, ru, zh), alongside  in the same  block.
+Localization check: `order:invoice:download` has a label in **all 10 locale files** (de, en, es, fr, it, ja, pl, pt, ru, zh), alongside `order:read_prices` in the same `permissions` block.
+
+The earlier line saying "All 22 are Draft" is superseded by this table — it was written before the run.
