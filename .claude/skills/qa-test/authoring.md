@@ -156,8 +156,19 @@ the chain's question, and equal values on both sides of a distinction under test
 
 ## Artifact A — test cases, authored into the durable suites (FULL only)
 
-Derive cases from the Test Model's scenarios + chain diagrams + `1d` AC conditions (story + gap-ACs) +
-`E2E-*` scenarios + `BL-*` / `ECL-*` + domain checklists.
+Derive cases from the Test Model's scenarios + chain diagrams + **Part 0r role scenarios, when the model
+carries them** + `1d` AC conditions (story + gap-ACs) + `E2E-*` scenarios + `BL-*` / `ECL-*` + domain
+checklists.
+
+**Part 0r — author a case from EVERY `Not allowed` item, not just from the action rows.** The action rows
+give the role's journey; the `Not allowed` items give the refusals, and the refusals are the half that
+discriminates — a permission bug passes every positive-path case by construction. Each refusal case
+asserts **at the server, with that role's own token**, that the call is refused AND that nothing
+persisted; a missing button is a separate, weaker assertion, not a substitute. Stamp them
+`Archetype:SCOPE` (or `SILENT` where the risk is a `200` that quietly no-ops). Target the layer's e2e
+suite — `concern: e2e` in `config/test-suites.json`. A role the model marked `FIXTURE-GAP` authors no
+case here: it went to `3a` as fixture demand, and authoring against an `@td()` that does not resolve is
+the defect `td:validate` exists to catch.
 
 **Author from the model AS AMENDED by Step 3x, not from the model as `1e` left it.** The discovery lane
 runs concurrently with 3a and closes before this artifact for exactly this reason
@@ -214,8 +225,10 @@ Naming every target suite up front is also what makes the Step-3b fan-out safe, 
 
 Each authored case stamps its scenario row's archetype and technique into the free-text `References`
 column: `Archetype:<TOKEN> · Technique:<TOKEN>` (+ `Probe:VC-*-NNN` when the row came from a
-`vc-bug-catalog` Detection probe). The appender **rejects a row without them**. No new CSV column: these
-join the `Synced:` / `Audited:` / `Promoted:` stamps `References` already carries.
+`vc-bug-catalog` Detection probe; + `Role:<role-id>` when it came from a Part 0r role scenario, so a later
+reader can tell whose refusal the case defends). The appender **rejects a row without the two mandatory
+stamps**; `Probe:` and `Role:` are provenance, optional and unvalidated. No new CSV column: these join the
+`Synced:` / `Audited:` / `Promoted:` stamps `References` already carries.
 
 ### Scaffold before authoring — never hand-type the boilerplate
 

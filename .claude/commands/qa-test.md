@@ -205,7 +205,7 @@ until `5g` promotion left the pipeline on 2026-09-10.)
 | Gate | Where | Verified by |
 |---|---|---|
 | Reachable at all | 1r (FULL) | inline — **never a PASS/FAIL on the ticket**; `BLOCKED` ends the run early |
-| Model complete | 1e (12 clauses) | inline (doer's own check) |
+| Model complete | 1e (13 clauses) | inline (doer's own check) |
 | Existing coverage disposed | Step 2a | inline — re-derived at `3-cases` (`tc:scope`, same args) |
 | Discovery folded in | Step 3x (FULL) | inline — never blocks; unreached charter items are named |
 | **Checklist + data ready** | **`3-exec`** | **inline** — releases 4a. `npm run verify:gate -- --gate 3-exec` (no `--suite`: nothing is authored yet) |
@@ -468,11 +468,11 @@ Distil `1c` + `1d` + `1a` into the **fault model** Step 3 authors cases from, wr
 Mermaid; the condition space is built per link on top of it.
 
 **Shape:** [`.claude/templates/test-model.md`](../templates/test-model.md). **Methodology, the eight rules
-the scenario table must satisfy, the twelve-clause gate and the worked references:**
+the scenario table must satisfy, Part 0r role scenarios, the thirteen-clause gate and the worked references:**
 [`skills/qa-test/test-model.md`](../skills/qa-test/test-model.md). Read the latter before writing the model —
 the gate below is only its checklist.
 
-**Gate (inline, 12 clauses — every one contradictable):** flow/type/path set + atomic conditions + BL/ECL/
+**Gate (inline, 13 clauses — every one contradictable):** flow/type/path set + atomic conditions + BL/ECL/
 domains/risk areas · `Value chain` complete **with the `flowchart` in the file** · `Mechanism coverage
 matrix` with **no blank cells** + `Reverse edges` resolved · **the matrix's AXES are derived from the
 mechanism, not from the scenario table** (see below) · first scenario row is the `Technique:FLOW`
@@ -481,7 +481,14 @@ names what it dropped** · every row carries all five (cell · defect hypothesis
 oracle) · every oracle is `{BL}`/`{SPEC}`/`{DOC}` or says what would make it one · the `Archetype sweep`,
 `UIP sweep` and `Probes carried in` rows are **PRESENT** in the model · **11 `Chain position` states this
 ticket's chain as a SLICE of the domain chain — the links it touches AND the links it does not** ·
-**11b every matrix VARIANT resolves to a surface the domain map enumerates.**
+**11b every matrix VARIANT resolves to a surface the domain map enumerates** ·
+**12 when the matrix carries >1 ROLE variant, `Part 0r` role scenarios are present, every scenario carries a
+`Not allowed` line, and every role resolves to a fixture alias or `FIXTURE-GAP`** (absent + silent pass when
+there is only one role — the clause is conditional by design).
+
+**Step 3 authors a case from EVERY `Not allowed` item**, asserted at the server with that role's own token.
+That is the `SCOPE` coverage Part 0r exists to buy, and it is the row most often deferred as "negative
+testing we can add later".
 
 **Clauses 11 and 11b read the `domain_map` token (2g); they never re-derive it.** `PRESENT`/`STALE` ⇒ both
 bind against the map's inventory (on `STALE`, a variant resolving only to a stale surface is recorded as
