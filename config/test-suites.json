@@ -473,7 +473,7 @@
     {
       "id": "017b",
       "name": "Orders Admin Management — Orders > Order Widgets",
-      "file": "regression\\suites\\Backend\\orders\\017b-orders-order-widgets.csv",
+      "file": "regression/suites/Backend/orders/017b-orders-order-widgets.csv",
       "domain": "purchase-flow",
       "layer": "backend",
       "concern": "admin",
