@@ -227,6 +227,26 @@ on any env."*
 | `vc-storefront` (the LEGACY ASP.NET storefront) | the `storefront:*` namespace — `VirtoCommerce.Storefront.Model/Security/SecurityConstants.cs`. Real, but a different product; inert in the SPA |
 | the server | the SAME xapi string, via `CheckAuthAsync` in `vc-module-profile-experience-api` `ProfileSchema.cs` (`InviteUserCommand` → `MyOrganizationUserInvite`, `UpdateOrganizationCommand` → `MyOrganizationEdit`) |
 
+**And separate the two halves, because only one is a product invariant:**
+
+| Claim | Status |
+|---|---|
+| *"the Invite button requires `xapi:my_organization:user:invite`"* | **PRODUCT** — asserted by `members.vue` and enforced by `CheckAuthAsync`. Safe to assert. |
+| *"`org-employee` lacks that permission"* | **ENVIRONMENT** — no platform module seeds these roles at all. `org-maintainer`/`purchasing-agent`/`org-employee` come from deployment seed data, and the **two first-party seeds already disagree**: `vc-sample-data/Setup/adminOnlySample/PlatformEntries.json` grants `org-employee` only `storefront:organization:view`, while `vc-storefront`'s `SecurityConstants.cs` grants it that **plus** `storefront:user:view`. There is no canonical mapping to assert. |
+
+So a role scenario **asserts the permission→gate binding and VERIFIES the role→permission binding as a
+precondition**, read from `me.permissions` at run time. Writing the second as an assertion tests our own
+seed. (`Customer.MembershipRolesWhitelist` ships the three role *names* as an allow-list of selectable
+strings — `vc-module-customer` `ModuleConstants.cs` — but names are not grants.)
+
+**Invariants that ARE product and are worth a scenario**, all source-verified: effective roles are the
+**union of three sources** — `Organization.Roles` ∪ `OrganizationMembership.Roles` (`MergeRoles`,
+`DistinctBy(RoleId)`) ∪ the account's global roles (`GlobalRolesResolver`) — folded into the token by
+`OrganizationIdClaimProvider` **additively** (`existingPermissions.Add`, so an org switch never drops a
+global grant); permissions ride as repeated **`permission`** claims scoped by **`organization_id`**; they
+are recalculated **only at sign-in**; and a blocking membership status or lockout **zeroes the org-scoped
+terms** while leaving global ones intact.
+
 Three consequences a role scenario must respect:
 
 1. **Two controls on one page can have different gates.** On `/company/members`, *Invite members* needs
