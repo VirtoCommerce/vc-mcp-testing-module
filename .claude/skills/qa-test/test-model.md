@@ -211,15 +211,36 @@ resolves against) and [`scripts/lib/user-roles.mjs`](../../../scripts/lib/user-r
 map verdict is `UNVERIFIED` yields a scenario whose expectations are `{HYPOTHESIS}` — inherit the verdict,
 never launder it.
 
-**Name the PERMISSION, not only the role — every role carries its own set, and that set is the
-mechanism.** A role is a label; `roles.csv` `permissions` is what the product actually checks. A scenario
-that says *"the employee cannot invite"* is weaker than one that says *"the employee lacks
-`storefront:user:invite`, so the control is absent AND the mutation is refused"* — the second names what
-would have to change for the expectation to be wrong. **Check the two roles' permission sets genuinely
-differ on the axis under test before building the scenario**: `org-employee` and `purchasing-agent` hold
-the *same two* storefront grants (purchasing is governed by cart/checkout, not RBAC), so a storefront
-difference between them is vacuous by construction — the SECOND RULE's equal-values-on-both-sides defect
-([`.claude/rules/test-data.md`](../../rules/test-data.md) §SECOND RULE).
+**Name the PERMISSION, not only the role — and take it from the PRODUCT, never from a fixture file.** A
+role is a label; the permission string is what the product checks. But
+[`test-data/b2b/roles.csv`](../../../test-data/b2b/roles.csv) is a **seeding contract**, not an oracle:
+`ensureRoles()` *creates* those roles via `PUT /api/platform/security/roles` with exactly those strings, so
+asserting against it tests our own fixture and cannot fail. The domain map says as much — b2b `G15`: *"No
+doc states which permissions `Organization maintainer` / `Purchasing agent` / `Organization employee` carry
+on any env."*
+
+**The product's permission surface, established from source 2026-09-11 — cite this, do not re-derive:**
+
+| Consumer | What it reads |
+|---|---|
+| `vc-frontend` (the Vue SPA) | **Four strings, total** — `xapi:my_organization:edit`, `xapi:my_organization:user:invite`, `xapi:my_organization:order:view` (`client-app/core/enums/permissions.enum.ts`) and `platform:security:loginOnBehalf`. **No `storefront:*` namespace exists in it.** |
+| `vc-storefront` (the LEGACY ASP.NET storefront) | the `storefront:*` namespace — `VirtoCommerce.Storefront.Model/Security/SecurityConstants.cs`. Real, but a different product; inert in the SPA |
+| the server | the SAME xapi string, via `CheckAuthAsync` in `vc-module-profile-experience-api` `ProfileSchema.cs` (`InviteUserCommand` → `MyOrganizationUserInvite`, `UpdateOrganizationCommand` → `MyOrganizationEdit`) |
+
+Three consequences a role scenario must respect:
+
+1. **Two controls on one page can have different gates.** On `/company/members`, *Invite members* needs
+   `…user:invite`, while the per-row Actions menu needs `canManageMembers` = `…my_organization:edit` **OR**
+   `platform:security:loginOnBehalf`. Treating "can manage members" as one boolean mis-predicts any role
+   holding one and not the other.
+2. **`isAdministrator` short-circuits every gate.** `useUser.checkPermissions()` returns true immediately
+   for an admin, before looking at any permission. A role-boundary case must assert neither actor is an
+   administrator, or it can pass for the wrong reason.
+3. **Equal-by-absence is not equal-by-grant.** `org-employee` and `purchasing-agent` are indistinguishable
+   to the SPA — not because they share a permission, but because **neither holds any string it reads**. A
+   scenario expecting a storefront difference between them cannot pass; one asserting the non-difference
+   must say *why*, or it documents a fixture artifact rather than a product rule (SECOND RULE,
+   [`.claude/rules/test-data.md`](../../rules/test-data.md)).
 
 ### The four rules
 
