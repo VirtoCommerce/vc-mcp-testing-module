@@ -1,36 +1,58 @@
 {
-  "runId": "REG-2026-09-11-2015",
+  "runId": "REG-2026-09-10-1453",
   "status": "completed",
-  "selection": "017",
-  "selectionMode": "ids",
-  "ids": [
-    "ORDA-120",
-    "ORDA-122"
-  ],
-  "purpose": "Run the two remaining Draft cases for VCST-3912",
-  "environment": "vcptcore-qa",
-  "buildUnderTest": "VirtoCommerce.Orders 3.1015.0-pr-472-fb82 (Platform 3.1069.0)",
-  "startedAt": "2026-09-11T20:02:00.000Z",
-  "finishedAt": "2026-09-11T19:53:03.198Z",
-  "notes": "Two agents in parallel on separate lanes: ORDA-120 on playwright-edge (PASS), ORDA-122 on playwright-chrome (BLOCKED - no fault-injection instrument).",
+  "startedAt": "2026-09-10T14:53:00Z",
+  "finishedAt": "2026-09-10T13:17:12.096Z",
+  "selection": "006,050d --ids (exact-set, VCST-5317 / qa-test Step 4c C1)",
+  "env": "vcst",
+  "ticket": "VCST-5317",
+  "noPromote": true,
+  "note": "C1 ticket-regression run for VCST-5317. Exact 9-case scope: 006 (7 cases, MULTI_ORG_TF_BR_ALT) + 050d (2 cases, MULTI_ORG_TF_BR). No promotion, no tracker filing.",
   "suites": [
     {
-      "id": "017",
-      "name": "Orders Admin Management",
-      "file": "regression/suites/Backend/orders/017-orders-admin-management.csv",
+      "id": "006",
+      "name": "B2B Organization",
+      "file": "regression/suites/Frontend/b2b/006-b2b-organization.csv",
+      "status": "done",
+      "browser": "playwright-chrome",
+      "agent": "qa-frontend-expert",
       "lane": "browser",
+      "testCount": 7,
+      "layer": "Frontend",
+      "scopedIds": [
+        "B2C-ORG-041",
+        "B2C-ORG-047",
+        "B2C-ORG-066",
+        "B2C-ORG-067",
+        "B2C-ORG-068",
+        "B2C-ORG-069",
+        "B2C-ORG-070"
+      ],
+      "pass": 4,
+      "fail": 2,
+      "blocked": 1,
+      "skipped": 0,
+      "attempts": 1
+    },
+    {
+      "id": "050d",
+      "name": "GraphQL xProfile",
+      "file": "regression/suites/Backend/graphql/050d-graphql-xprofile.csv",
       "status": "done",
       "browser": "playwright-edge",
       "agent": "qa-backend-expert",
+      "lane": "browser",
       "testCount": 2,
-      "sourceCases": 90,
-      "passed": 1,
-      "failed": 0,
-      "blocked": 1,
+      "layer": "Backend",
+      "scopedIds": [
+        "PRF-GQL-092",
+        "PRF-GQL-093"
+      ],
+      "pass": 1,
+      "fail": 1,
+      "blocked": 0,
       "skipped": 0,
-      "passRate": "50.0%",
-      "attempts": 1,
-      "resultsFile": "reports/regression/REG-2026-09-11-2015/suite-017-results.json"
+      "attempts": 1
     }
   ]
 }
