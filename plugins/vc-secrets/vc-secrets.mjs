@@ -794,6 +794,13 @@ const VALUE_ON_STDIN = "<VALUE_ON_STDIN>";
 // its interactive mode reads COMMANDS there, which keeps the value out of argv. spec.stdinCommand builds
 // the line from the value runTool is handed.
 const COMMAND_ON_STDIN = "<COMMAND_ON_STDIN>";
+// security(1) reads that command line into a fixed buffer and, past the limit, SPLITS rather than
+// refusing: the first half stores a TRUNCATED value and the tail runs as a second command whose name
+// is escaped fragments of the value, echoed in stderr where runTool's whole-value redaction cannot
+// match them. On a refresh Entra has already invalidated the previous token by that point, so the
+// truncated entry is a signed-out state. The wcm path needs no twin of this -- its own script refuses
+// at 2560 bytes (exit 4) -- and gpg has no command line to overflow.
+const SECURITY_LINE_LIMIT = 4095;
 
 // Quoting for `security -i`'s own tokenizer: double quotes with backslash escapes. A newline cannot be
 // quoted into it at all — it ends the command — so the caller must not offer one.
@@ -1003,8 +1010,16 @@ function buildLocalWrite(backend, key, env = process.env, { tmp = false, value =
         // is what keeps the value out of argv and out of this machine's process list.
         if (!/[\r\n]/.test(value)) {
             return { cmd: "security", args: ["-i"], stdinData: COMMAND_ON_STDIN,
-                stdinCommand: (v) => `add-generic-password -U -a ${quoteForSecurityInteractive(account)} `
-                    + `-s ${quoteForSecurityInteractive(key)} -w ${quoteForSecurityInteractive(v)}\n`,
+                stdinCommand: (v) => {
+                    const line = `add-generic-password -U -a ${quoteForSecurityInteractive(account)} `
+                        + `-s ${quoteForSecurityInteractive(key)} -w ${quoteForSecurityInteractive(v)}\n`;
+                    if (Buffer.byteLength(line) > SECURITY_LINE_LIMIT) {
+                        throw new VcSecretsError(`value too large for the keychain: entry "${key}" needs `
+                            + `${Buffer.byteLength(line)} bytes on one command line; limit ${SECURITY_LINE_LIMIT}`);
+                    }
+
+                    return line;
+                },
                 timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: false };
         }
 
@@ -1078,10 +1093,10 @@ function deleteEntryIo(backend = detectLocalBackend(), env = process.env, { run 
 // Shared by cmdSet's non-interactive branch and cmdMigrate: runs a write `spec` built with a
 // value already in hand. gpg gets an atomic tmp-then-rename so a reader never observes a
 // partially-written or empty file; the other backends write in one shot.
-async function writeLocalValue(backend, key, spec, value, env = process.env) {
+async function writeLocalValue(backend, key, spec, value, env = process.env, run = runTool) {
     if (backend !== "gpg") {
         try {
-            await runTool(spec, { stdinValue: value, redactValues: [value] });
+            await run(spec, { stdinValue: value, redactValues: [value] });
         } catch (e) {
             // Only the size error. mapResolveError reads wcm exit 3 as "not found — run set", a
             // READ-path diagnosis: on a write it names a failure that did not happen and
@@ -1099,7 +1114,7 @@ async function writeLocalValue(backend, key, spec, value, env = process.env) {
     const finalPath = keyToPath(key, env);
     const tmpPath = `${finalPath}.tmp`;
     try {
-        await runTool(spec, { stdinValue: value, redactValues: [value] });
+        await run(spec, { stdinValue: value, redactValues: [value] });
         fs.chmodSync(tmpPath, 0o600);
         fs.renameSync(tmpPath, finalPath);
     } catch (e) {
@@ -1117,10 +1132,13 @@ async function writeLocalValue(backend, key, spec, value, env = process.env) {
 // cmdSet's own TTY prompt uses -- routing a renewal or a login through it does not fail, it hangs,
 // waiting for a typist that is never there. Passing `value` here is what selects buildLocalWrite's
 // non-interactive `security -i` branch instead, the same choice cmdMigrate makes at its own call
-// site (:1519) for the same reason: the value is already in hand and there is nothing to prompt
+// site for the same reason: the value is already in hand and there is nothing to prompt
 // for. This is the source's buildKeychainWrite/buildLocalWrite split, expressed here as the `value`
-// option rather than as two separate builders.
-async function writeSecretValue(key, value, { backend = detectLocalBackend(), env = process.env } = {}) {
+// option rather than as two separate builders. The split only: the source's composeStdin also carried
+// a line-length refusal, restored in buildLocalWrite above, because this package's three-segment key
+// is longer than the source's two-segment one and eats most of the margin the source measured.
+async function writeSecretValue(key, value, { backend = detectLocalBackend(), env = process.env,
+    run = runTool } = {}) {
     if (!value) {
         // The invariant belongs here rather than only in cmdSet: a renewal and a login can both be
         // handed an empty string by a response that parsed, and an empty entry is worse than a
@@ -1129,8 +1147,16 @@ async function writeSecretValue(key, value, { backend = detectLocalBackend(), en
         throw new VcSecretsError(`refusing to store an empty value for "${key}"`);
     }
     const spec = buildLocalWrite(backend, key, env, { tmp: backend === "gpg", value });
+    // Composed once here purely to validate. The runner composes it only AFTER spawning, so without
+    // this call an oversize value leaves an orphaned `security -i` waiting on a stdin that never
+    // arrives, until the runner's own timeout kills it -- and the refusal would hold only for
+    // whichever runner is wired in. The result is discarded: the builder is pure and the runner
+    // composes it again for real.
+    if (spec.stdinCommand) {
+        spec.stdinCommand(value);
+    }
 
-    return writeLocalValue(backend, key, spec, value, env);
+    return writeLocalValue(backend, key, spec, value, env, run);
 }
 
 function buildKeyvaultRead(decl) {
@@ -1287,13 +1313,17 @@ function mapResolveError(backend, name, e) {
 const LOCK_POLL_MS = 250;
 const LOCK_POLL_CEILING_MS = 2_000;
 // A backstop on acquireTokenLock's wait, never the thing that ends it -- the reasoning is at the
-// loop. A test pins both edges of the window: that the cap cannot fire before LOCK_WAIT_MS, and
-// that it does fire when the clock stands still.
+// loop. 64 polls of a backoff that doubles to LOCK_POLL_CEILING_MS run to 123.75 s -- measured by
+// driving the loop against a clock that never advances, not derived on paper -- versus a 45 s
+// LOCK_WAIT_MS. Nearly three times the deadline, so under any advancing clock the deadline is
+// crossed first and this cap never fires.
 const MAX_LOCK_POLLS = 64;
 
-// The one place the mutex name is built. Three callers write to the same pair of keystore entries
-// — a renewal, a login and a logout — and a lock any of them takes on a different name serialises
-// against nothing while every one of the three still reads as correct.
+// The one place the mutex name is built. Three writers share the same pair of keystore entries —
+// a renewal, a login and a logout — and a lock any of them takes on a different name serialises
+// against nothing while every one of the three still reads as correct. Only the renewal is ported
+// so far; the two sign-in verbs land later, which is why the name is built here once rather than
+// at each call site as it is needed.
 //
 // scopeKey MUST be the same scope notion keyFor uses (decl.scope === USER_SCOPE ? USER_SCOPE :
 // cfg.projectId, see keyFor above) — this is load-bearing, not a convenience: the lock and the
@@ -1314,9 +1344,9 @@ function tokenLockFor(entryName, decl, cfg, { platform = process.platform, env =
 }
 
 // Waits out whoever holds the token mutex — the one all three writers to the entry pair take —
-// and DECIDES NOTHING about failing to get it. The two callers want opposite things from a failure
-// and say so in their own words at their own call sites; a message written here would be right for
-// at most one of them.
+// and DECIDES NOTHING about failing to get it. Its two callers are the login and logout verbs,
+// neither of them ported yet; they want opposite things from a failure and each words its own
+// message at its own call site, so a message written here would be right for at most one of them.
 //
 // The window being waited out is not the one ensureFreshToken already closed between its two cache
 // reads. It is the width of the exchange, where the holder sits on the network with a token it
@@ -1364,13 +1394,15 @@ async function acquireTokenLock({ acquireLock, now, sleep, log }) {
     log(`vc-secrets: waiting for an in-flight token renewal\n`);
     // Deliberately the same ceiling and the same backoff as ensureFreshToken's waiter, because the
     // critical section being waited out is the same one. Tuning either loop alone reintroduces the
-    // asymmetry the shared constants exist to prevent — a test pins both to these names.
+    // asymmetry the shared constants exist to prevent, and nothing but these two names connects the
+    // loops — so each is driven separately and its own observed sleep sequence asserted.
     const deadline = now() + cache.LOCK_WAIT_MS;
     let backoff = LOCK_POLL_MS;
     // Bounded by polls as WELL as by the clock, because the deadline is enforced by an INJECTED
-    // `now`: a wrong default or a frozen stub would spin here forever, and cmdLogin reaches this
-    // line with a single-use authorization code already spent. The cap is the backstop and the
-    // clock is the mechanism — under any advancing clock the deadline is crossed first.
+    // `now`: a frozen stub would spin here forever, and the login verb -- not ported yet -- reaches
+    // this line with a single-use authorization code already spent, so a hang there costs the code
+    // itself. The cap is the backstop and the clock is the mechanism — under any advancing clock
+    // the deadline is crossed first.
     // ensureFreshToken's identical loop has no cap on purpose: it has spent nothing and a launch
     // that hangs is a launch that failed, which is visible.
     for (let poll = 0; poll < MAX_LOCK_POLLS && now() < deadline; poll += 1) {
@@ -1385,9 +1417,10 @@ async function acquireTokenLock({ acquireLock, now, sleep, log }) {
     return { lock: null, reason: "busy" };
 }
 
-// The single path both the pre-spawn launch and the mid-session renewal go through. Every
-// dependency is injected for the same reason resolveEnvEntries takes its resolver: what is worth
-// testing here is the ORDER — who exchanges, who waits, and what is released when it throws.
+// The single path the pre-spawn launch and the mid-session renewal will both go through; the
+// launcher wiring that reaches it lands with the launch verb. Every dependency is injected for the
+// same reason resolveEnvEntries takes its resolver: what is worth testing here is the ORDER — who
+// exchanges, who waits, and what is released when it throws.
 async function ensureFreshToken({ serverName, readCache, writeCache, exchange, acquireLock,
     now = Date.now, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
     if (typeof serverName !== "string" || serverName === "") {
@@ -1531,7 +1564,7 @@ function oauthLaunchDeps(entryName, decl, cfg, { backend = detectLocalBackend(),
             if (fresh.refreshToken !== undefined) {
                 try {
                     await write(keys.refresh, cache.serializeRefresh({ refreshToken: fresh.refreshToken,
-                        tenantId: decl.tenantId, clientId: decl.clientId, scopes: decl.scopes }), { backend });
+                        tenantId: decl.tenantId, clientId: decl.clientId, scopes: decl.scopes }), { backend, env });
                 } catch (e) {
                     // The one irreversible step: Entra invalidated the previous refresh token the
                     // moment it issued this one, so a failure here IS a signed-out state and must
@@ -1541,7 +1574,7 @@ function oauthLaunchDeps(entryName, decl, cfg, { backend = detectLocalBackend(),
                 }
             }
             try {
-                await write(keys.access, cache.serializeAccess(fresh), { backend });
+                await write(keys.access, cache.serializeAccess(fresh), { backend, env });
             } catch (e) {
                 // Best effort by design: losing the access entry costs one exchange next launch.
                 fs.writeSync(2, `vc-secrets: the access entry could not be stored (${e.message}); `

@@ -1111,10 +1111,16 @@ test("ensureFreshToken: a REFUSED exchange names the login verb; an unreachable 
 test("ensureFreshToken: a cache that stops being refreshable while we wait for the lock is not exchanged", async () => {
     // A logout landing between the two reads. Trusting the first verdict hands `undefined` to
     // the exchange, and Entra's answer to that names nothing the developer can act on.
+    //
+    // The exchange stub returns a real-shaped token rather than undefined: if the guard right
+    // below (`again.state !== "needs-refresh"`) is ever removed, exchange still succeeds and
+    // ensureFreshToken RESOLVES instead of throwing, so assert.rejects fails on its own terms (no
+    // rejection happened) instead of on an incidental "Cannot read properties of undefined
+    // (reading 'accessToken')" TypeError that names nothing about the guard actually missing.
     let exchanged = 0, reads = 0;
     await assert.rejects(() => m.ensureFreshToken(DEPS({
         readCache: async () => (++reads === 1 ? { state: "needs-refresh", refreshToken: "r1" } : { state: "absent" }),
-        exchange: async () => { exchanged++; },
+        exchange: async () => { exchanged++; return { accessToken: "must-not-be-used", refreshToken: "must-not-be-used" }; },
     })), /vc-secrets login azure-mcp/);
     assert.equal(exchanged, 0);
     assert.equal(reads, 2, "the re-read under the lock is what makes this decidable");
@@ -1238,13 +1244,49 @@ test("oauthLaunchDeps.writeCache: a refresh token that cannot be stored names th
             && /vc-secrets login azure-mcp/.test(e.message));
 });
 
-test("oauthLaunchDeps.writeCache: a failed ACCESS write is a warning, not a lost renewal", async () => {
+test("oauthLaunchDeps.writeCache: forwards env to both the refresh and the access write", async () => {
+    // Measured hazard (gpg, a custom XDG_CONFIG_HOME): readEntry resolves paths through
+    // keyToPath(key, env) using the CALLER's env, but writeCache's two write(...) calls omitted
+    // env, so writeSecretValue fell back to process.env. Reads and writes then land in two
+    // different homes, readCache never sees what writeCache just wrote, and EVERY launch
+    // re-exchanges -- rotating the refresh token a second time on top of the rotation Entra
+    // already did the moment it issued the one just stored. Unreachable today (no production
+    // caller passes a custom env yet), so this test is what keeps the fix from regressing back.
+    const seenEnvs = [];
+    const customEnv = { USER: "u", XDG_CONFIG_HOME: "/custom/home" };
+    const deps = m.oauthLaunchDeps("azure-mcp", LAUNCH_DECL, LAUNCH_CFG, { backend: "keychain", env: customEnv,
+        write: async (key, value, opts) => { seenEnvs.push(opts && opts.env); } });
+    await deps.writeCache({ accessToken: "a2", refreshToken: "r2", expiresAt: 9e15,
+        obtainedAt: 1, lifetimeMs: 3600_000, uptimeAtIssue: 1 });
+    assert.equal(seenEnvs.length, 2, `expected one write for the refresh entry and one for the access entry, got ${seenEnvs.length}`);
+    assert.ok(seenEnvs.every((e) => e === customEnv),
+        `both writes must forward the caller's env, not fall back to process.env: got ${JSON.stringify(seenEnvs)}`);
+});
+
+test("oauthLaunchDeps.writeCache: a failed ACCESS write is a warning, not a lost renewal", async (t) => {
     // Asymmetric on purpose: losing the access entry costs one exchange next launch, so failing
     // the renewal over it would throw away a refresh token that was just successfully rotated.
+    //
+    // The warning is the ONLY signal that the write failed -- deleting the fs.writeSync(2, ...)
+    // line leaves this test green otherwise, since not-throwing is not evidence the warning
+    // fired. Captured here by mocking fs.writeSync itself (what the production code actually
+    // calls, on fd 2), since this path runs in-process rather than through a spawned CLI whose
+    // stderr a subprocess capture could read instead.
+    const stderr = [];
+    t.mock.method(fs, "writeSync", (fd, str) => {
+        if (fd !== 2) {
+            throw new Error(`unexpected fs.writeSync(${fd}, ...) in this test`);
+        }
+        stderr.push(str);
+
+        return Buffer.byteLength(str);
+    });
     const deps = m.oauthLaunchDeps("azure-mcp", LAUNCH_DECL, LAUNCH_CFG, { backend: "keychain",
         write: async (name) => { if (name.endsWith("-access")) { throw new Error("full"); } } });
     await deps.writeCache({ accessToken: "a2", refreshToken: "r2", expiresAt: 9e15,
         obtainedAt: 1, lifetimeMs: 3600_000, uptimeAtIssue: 1 });
+    assert.equal(stderr.length, 1, `expected exactly one stderr warning, got ${stderr.length}`);
+    assert.match(stderr[0], /the access entry could not be stored \(full\); the next launch will exchange one/);
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -1293,6 +1335,97 @@ test("acquireTokenLock: an error that is not a refused bind is not laundered int
         sleep: async () => {},
         log: () => {},
     }), (e) => e === boom);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Review fix round: acquireTokenLock's OWN wait was completely unpinned. Measured by the
+// reviewer: lowering MAX_LOCK_POLLS from 64 to 1 left the whole suite green. Root cause: every
+// test above drives a FROZEN clock or a small, controlled number of attempts, so none of them
+// can tell "the deadline ended the wait" apart from "the poll cap ended the wait". The first two
+// tests below close that gap, driving an ADVANCING clock; the other two pin the classification and
+// the log line, for which a frozen clock is the right instrument. All four drive acquireTokenLock
+// DIRECTLY — no vehicle needed, it is exported and callable on its own.
+// ---------------------------------------------------------------------------------------------
+
+test("acquireTokenLock: the poll cap is a backstop, not the terminator of the wait", async () => {
+    // Under an advancing clock the LOCK_WAIT_MS deadline must be what ends the wait; the poll cap
+    // must never fire first. Must go red when MAX_LOCK_POLLS is lowered enough to end the loop
+    // before the deadline is reached (measured: 64 -> 1 does this).
+    let elapsed = 0;
+    const result = await m.acquireTokenLock({
+        acquireLock: async () => cache.HELD_BY_OTHER,
+        now: () => 1_000 + elapsed,
+        sleep: async (ms) => { elapsed += ms; },
+        log: () => {},
+    });
+    assert.deepEqual(result, { lock: null, reason: "busy" });
+    assert.ok(elapsed >= cache.LOCK_WAIT_MS,
+        `the deadline must be what ends the wait, not the poll cap: waited only ${elapsed}, need >= ${cache.LOCK_WAIT_MS}`);
+});
+
+test("acquireTokenLock: seed, doubling and ceiling of its own wait", async () => {
+    // Declared locally rather than imported, same discipline as the source's own pinned-copy
+    // test: the point is to pin the numbers this loop actually PRODUCES, not to track whatever
+    // the module constant currently says. Driven directly (not through ensureFreshToken, which
+    // has its own, separate loop with its own pinned test a few tests up) -- a change to
+    // acquireTokenLock's seed/ceiling alone must redden only this test, not the other loop's.
+    const LOCK_POLL_SEED = 250;
+    const LOCK_POLL_CEILING = 2_000;
+    const slept = [];
+    let elapsed = 0;
+    const result = await m.acquireTokenLock({
+        acquireLock: async () => cache.HELD_BY_OTHER,
+        now: () => 1_000 + elapsed,
+        sleep: async (ms) => { slept.push(ms); elapsed += ms; },
+        log: () => {},
+    });
+    assert.deepEqual(result, { lock: null, reason: "busy" });
+    assert.deepEqual(slept.slice(0, 4), [LOCK_POLL_SEED, LOCK_POLL_SEED * 2, LOCK_POLL_SEED * 4, LOCK_POLL_CEILING],
+        `backoff seed, doubling, ceiling: got ${slept.slice(0, 4)}`);
+    assert.ok(slept.every((ms) => ms <= LOCK_POLL_CEILING), "the ceiling must hold for the whole wait");
+    assert.ok(elapsed >= cache.LOCK_WAIT_MS && elapsed < cache.LOCK_WAIT_MS + LOCK_POLL_CEILING,
+        `the wait ended at ${elapsed}, outside [${cache.LOCK_WAIT_MS}, ${cache.LOCK_WAIT_MS + LOCK_POLL_CEILING})`);
+});
+
+test("acquireTokenLock: sawHolder survives a later unbindable attempt -- still busy, not unbindable", async () => {
+    // Once HELD_BY_OTHER has been seen, a LATER bind failure (EPERM/EACCES) must still classify
+    // as "busy", not "unbindable" -- the diagnosis is "another session is refreshing", not "the
+    // sandbox refused the bind". Must go red when `|| sawHolder` is dropped from classify.
+    let calls = 0;
+    const eperm = Object.assign(new Error("Operation not permitted"), { code: "EPERM" });
+    const result = await m.acquireTokenLock({
+        acquireLock: async () => {
+            calls += 1;
+            if (calls === 1) {
+                return cache.HELD_BY_OTHER;
+            }
+            throw eperm;
+        },
+        now: () => 0,
+        sleep: async () => {},
+        log: () => {},
+    });
+    assert.deepEqual(result, { lock: null, reason: "busy" },
+        `a holder seen once must keep classifying a later unbindable attempt as busy, got ${JSON.stringify(result)}`);
+    assert.ok(calls >= 2, `the second, unbindable attempt must actually run: only ${calls} call(s)`);
+});
+
+test("acquireTokenLock: a contended bind announces itself through the log seam", async () => {
+    let calls = 0;
+    const logged = [];
+    const result = await m.acquireTokenLock({
+        acquireLock: async () => {
+            calls += 1;
+
+            return calls === 1 ? cache.HELD_BY_OTHER : { release: async () => {} };
+        },
+        now: () => 0,
+        sleep: async () => {},
+        log: (line) => logged.push(line),
+    });
+    assert.ok(result.lock, "the lock must be granted once the holder clears");
+    assert.ok(logged.some((l) => /waiting for an in-flight token renewal/.test(l)),
+        `the wait must announce itself through the log seam: got ${JSON.stringify(logged)}`);
 });
 
 test("ensureFreshToken: the contended wait's backoff and ceiling bound the deadline it enforces", async () => {
@@ -1388,4 +1521,72 @@ lockTest("tokenLockFor: user scope keys the lock on USER_SCOPE, ignoring cfg.pro
         }
         await holder.release();
     }
+});
+
+// ---------------------------------------------------------------------------------------------
+// Review fix round: the restored keychain line-length refusal (buildLocalWrite's `security -i`
+// stdinCommand branch) and its EAGER check in writeSecretValue, before any process is spawned.
+// security(1) reads that command line into a fixed buffer and, past the limit, SPLITS rather
+// than refusing: the first half stores a TRUNCATED value and the tail runs as a second command.
+// ---------------------------------------------------------------------------------------------
+
+test("buildLocalWrite(keychain).stdinCommand: composes up to the line limit, refuses one byte past it", () => {
+    // The limit mirrors SECURITY_LINE_LIMIT in vc-secrets.mjs — declared with the stdin-composition
+    // constants near COMMAND_ON_STDIN, not next to the buildLocalWrite branch that enforces it
+    // (not exported, so restated here -- same discipline as the lock tests' locally-declared
+    // backoff constants above: pin the value the guard actually enforces, not a re-export of it).
+    //
+    // The boundary is DERIVED, not hardcoded: the composed overhead (the account, the key, and
+    // the fixed "add-generic-password ..." text) is measured here from the real builder with a
+    // short known-length filler, so a change to the key shape (e.g. a longer project id) moves
+    // the boundary this test pins right along with it, instead of silently under- or over-testing.
+    const SECURITY_LINE_LIMIT = 4095;
+    const env = { USER: "u" };
+    const key = "vc-secrets:demo-project:oauth-azure-mcp-refresh";
+    const spec = m.buildLocalWrite("keychain", key, env, { value: "x" });
+
+    // A filler value whose every byte is plain ASCII (no quote/backslash to escape) contributes
+    // exactly its own length to the composed line; everything else is the fixed overhead.
+    const probeLen = 16;
+    const overhead = Buffer.byteLength(spec.stdinCommand("x".repeat(probeLen))) - probeLen;
+    const maxValueLen = SECURITY_LINE_LIMIT - overhead;
+
+    const atLimit = spec.stdinCommand("x".repeat(maxValueLen));
+    assert.equal(Buffer.byteLength(atLimit), SECURITY_LINE_LIMIT,
+        `the largest composing value must land exactly on the limit, got ${Buffer.byteLength(atLimit)} bytes`);
+
+    assert.throws(() => spec.stdinCommand("x".repeat(maxValueLen + 1)), (e) => {
+        assert.ok(e instanceof m.VcSecretsError, `expected a VcSecretsError, got ${e}`);
+        assert.ok(e.message.includes(key), `must name the entry: ${e.message}`);
+        assert.ok(e.message.includes(String(SECURITY_LINE_LIMIT + 1)), `must carry the composed byte count: ${e.message}`);
+        assert.ok(e.message.includes(String(SECURITY_LINE_LIMIT)), `must carry the limit: ${e.message}`);
+
+        return true;
+    });
+});
+
+test("writeSecretValue: an oversize keychain value is refused before the runner is ever reached", async () => {
+    // The refusal itself is pinned by the test above; what this pins is that it happens EARLY. The
+    // runner composes spec.stdinCommand only AFTER it has spawned, so without writeSecretValue's own
+    // validating call an oversize value leaves an orphaned `security -i` waiting on a stdin that
+    // never arrives, until the runner's timeout kills it.
+    //
+    // Asserted through the INJECTED runner rather than by watching for a real process: a spawn can
+    // only be observed after it has already happened, so "no marker file yet" is a race that reports
+    // success most of the time while the child ran every time. The fake runner mimics the real one --
+    // record the call, and only then compose -- so deleting the early call fails THIS assertion
+    // rather than the rejection, which the downstream guard would satisfy either way.
+    const runnerCalls = [];
+    const run = async (spec, { stdinValue } = {}) => {
+        runnerCalls.push(spec);
+        if (spec.stdinCommand) {
+            spec.stdinCommand(stdinValue);
+        }
+    };
+    const key = "vc-secrets:demo-project:oauth-azure-mcp-refresh";
+    const oversized = "x".repeat(5000);   // past the limit regardless of the composed overhead
+    await assert.rejects(
+        () => m.writeSecretValue(key, oversized, { backend: "keychain", env: { USER: "u" }, run }),
+        (e) => e instanceof m.VcSecretsError && /too large for the keychain/.test(e.message));
+    assert.equal(runnerCalls.length, 0, "the runner must never be reached once the guard has refused");
 });
