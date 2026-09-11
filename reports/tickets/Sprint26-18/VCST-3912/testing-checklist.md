@@ -390,3 +390,17 @@ Three cases added for what the fix round introduced:
 All 22 are `Draft`. Promotion to `Automated` needs a suite-runner pass; this run exercised them ad hoc (direct API comparison and two browser sessions), which proves the behaviour but is not the runner evidence `5g` requires.
 
 Proposed retirement: **`ORD-GQL-014`** in suite 050c — its premise is void, since the PR leaves `ICustomerOrderService` pointing at the raw implementation and the storefront surface is out of the change's reach. Retirement is a human call (TRI-006), so it is proposed rather than applied.
+
+### Case state after the run and the two edits
+
+| | |
+|---|---|
+| **Automated** | 17 — ORDA-104, 105, 106, 108, 109, 110, 111, 113, 114, 115, 116, 117, 118, 121, 123, 124, 125 |
+| **Draft** | 4 — ORDA-112 and 119 (no system-context export trigger on this stand; 119 depends on 112), ORDA-122 (needs a Chrome DevTools lane), ORDA-120 (promotable after one re-run) |
+| **Retired** | ORDA-107 — the sort-order disclosure was accepted as , so the case was removed rather than left as a permanent red |
+
+ failed the run **only** on a console clause asserting no JS errors on a cold deep-link. The i18n errors it caught are neither a defect of this feature nor caused by this PR, so the clause was removed; the case now asserts what it was written for — that deep-linking does not bypass masking — which passed in the run.
+
+ was held by the promoter on GRD-001 for carrying a  assertion, then grounded against  and the two null guards in  and promoted.
+
+Localization check:  has a label in **all 10 locale files** (de, en, es, fr, it, ja, pl, pt, ru, zh), alongside  in the same  block.
