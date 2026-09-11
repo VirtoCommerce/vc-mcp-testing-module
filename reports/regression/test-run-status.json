@@ -1,30 +1,33 @@
 {
-  "runId": "REG-2026-09-08-0931",
+  "runId": "REG-2026-09-11-1616",
   "status": "completed",
-  "startedAt": "2026-09-08T07:32:13Z",
-  "finishedAt": "2026-09-08T07:39:59Z",
-  "selection": "001 --ids CAT-049 — round 3 re-verification after the marketplace-cache hook patch",
-  "env": "vcst",
-  "sprint": "Sprint26-17",
-  "note": "Round 3, CAT-049 only. Round 2 (REG-2026-09-07-2255) BLOCKED it: the hook that executes is C:/Users/mutyk/.claude/plugins/cache/vc-tools/vc-fix/0.8.7/hooks/enforce-real-user.mjs, not either repo copy, and it lacked the og:/twitter: allowlist entry. That cache copy has now been patched locally (backup .bak-pre-og-20260908-0930) and verified ALLOW by direct invocation. CAT-040/CAT-041 results stay in REG-2026-09-07-2255 and are not re-run.",
+  "selection": "017",
+  "selectionMode": "ids",
+  "ids": ["ORDA-104","ORDA-105","ORDA-106","ORDA-107","ORDA-108","ORDA-109","ORDA-110","ORDA-111","ORDA-112","ORDA-113","ORDA-114","ORDA-115","ORDA-116","ORDA-117","ORDA-118","ORDA-119","ORDA-120","ORDA-121","ORDA-122","ORDA-123","ORDA-124","ORDA-125"],
+  "purpose": "Promotion prerequisite (Draft -> Automated) for ORDA-104..125",
+  "environment": "vcptcore-qa",
+  "buildUnderTest": "VirtoCommerce.Orders 3.1015.0-pr-472-fb82 (Platform 3.1069.0)",
+  "startedAt": "2026-09-11T16:16:00.000Z",
+  "finishedAt": "2026-09-11T17:18:26.000Z",
+  "notes": "Exact-set (--ids) run for suite 017 (Orders Admin Management): 22 of 92 cases kept (ORDA-104..125), scoped via suites:filter --ids. Lane classification: 0 machine / 22 browser (EX-010). Single dispatch, playwright-edge. Result: 17 PASS / 2 FAIL / 3 BLOCKED / 0 SKIPPED (77.3%). ORDA-107 FAIL is expected (Ignore disposition on VCST-3912). ORDA-120 FAIL is a genuine incidental defect (i18n crash on cold deep-link). ORDA-112/119/122 BLOCKED (no system-context export trigger; ORDA-119 depends on ORDA-112; Chrome DevTools-only network interception unavailable on this lane).",
   "suites": [
     {
-      "id": "001",
-      "name": "Catalog Navigation",
-      "file": "regression/suites/Frontend/catalog/001-catalog-navigation.csv",
+      "id": "017",
+      "name": "Orders Admin Management",
+      "file": "regression/suites/Backend/orders/017-orders-admin-management.csv",
+      "lane": "browser",
       "status": "done",
-      "browser": "playwright-chrome",
-      "agent": "qa-frontend-expert",
-      "testCount": 1,
-      "layer": "Frontend",
-      "pass": 0,
-      "fail": 1,
-      "blocked": 0,
+      "browser": "playwright-edge",
+      "agent": "qa-backend-expert",
+      "testCount": 22,
+      "sourceCases": 92,
+      "passed": 17,
+      "failed": 2,
+      "blocked": 3,
       "skipped": 0,
+      "passRate": "77.3%",
       "attempts": 1,
-      "scopedIds": [
-        "CAT-049"
-      ]
+      "resultsFile": "reports/regression/REG-2026-09-11-1616/suite-017-results.json"
     }
   ]
 }
