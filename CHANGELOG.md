@@ -8,9 +8,672 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Semver 
 
 ---
 
+## `playwright-firefox` verified click-capable, and `@playwright/mcp` is now pinned — 2026-09-11
+
+Re-verified the firefox lane live against vcst-qa: a popover click (`Currency` reached `[expanded]`
+with all 9 options rendered — a real DOM change, not a no-op return) and a navigation click
+(`Sign in` → `/sign-in`), 0 console errors, no timeouts. The preceding 4 days of transcripts hold 43
+firefox calls with **zero** errors, 6 of them clicks. The 2026-09-08 occlusion-pref fix holds.
+
+Also found and closed a version split. `.mcp.json` launched all three Playwright lanes with
+`@playwright/mcp@latest` (resolving to 0.0.80) while `package.json`, `PLAYWRIGHT_MCP_PACKAGE` in
+`ci/lib/lane-mcp.ts` and `/project-init`'s `gen-mcp.mjs` all pin 0.0.77 — so interactive runs were
+not reproducing CI, and the bare-screenshot path contract `/qa-bug`'s `_incoming/` reconcile depends
+on is written against 0.0.77. Nothing had failed only because two firefox builds happened to be
+installed; three accumulated builds (1532/1533/1542) were the tell. Lanes are pinned to 0.0.77, which
+resolves to the repo's own `node_modules` copy with no npx fetch. `docs/onboarding.md` had been
+telling every clone to use `@latest` — fixed, with the reasoning.
+
+**A pinned `@playwright/mcp` is now the SECOND prerequisite for this lane**, alongside the
+server restart: an `@latest` bump swaps the binary that reads
+`config/mcp-playwright-firefox.config.json`, and each release demands its own browser build (a miss
+fails at launch with *"Executable doesn't exist"*). Recorded in `browser-quirks.md` §Firefox,
+`rules/agents.md`, `browser-lanes.md` and `browserPool[1].constraint`. Stale "firefox cannot click"
+assertions were retired from `ROUTING.md`, `suite-manifest.ts` and `sync-test-suites.ts` — the latter
+also carried a root cause that the 2026-09-08 probe disproved (it blamed the `@playwright/mcp` layer,
+not Windows occlusion tracking).
+
+## The auto-fix ladder now asks *where* the red was observed — 2026-09-10
+
+`/qa-fix` shipped a fix that does not work, at `HIGH` confidence, past a fully green CI and a human
+review: VCST-5940, an Admin SPA preview iframe that rendered the literal text of an Angular
+interpolation instead of the email body. `/qa-verify-fix` reproduced the bug **3/3** on the exact
+deployed artifact. The reproduction had been a Node scratch harness asserting the controller's
+*assignment timing*; the ticket's *Actual result* was a statement about a rendered DOM. **A green test
+of the wrong property is worse than no test** — it manufactures confidence that survives review, CI
+and a human.
+
+**The pipeline knew and could not act.** The run recorded `"G2_reproduce_red": "PASS_PROXY"` and a
+truthful `limits[]` saying the customer-visible outcome was unverified — then reported
+`"confidence": "HIGH"`. `PASS_PROXY` was vocabulary with no consequence anywhere in the ladder, and the
+only executable CI gate was `confidence === "LOW"`. The honesty was present; the gate was not.
+
+**G2 gained the MEDIUM RULE.** If the *Actual result* describes something visible only in a rendered
+DOM — text wrong, literal, missing or stale; an element absent or not updating; overlap, clipping,
+misalignment — the red MUST be a rendered-DOM observation. For a module Admin SPA that is the visual
+render harness against the real blade and the real `platform.css`, with the real controller loaded
+**even when the diff is pure JS**. A Node/xUnit proof may accompany it, never replace it. jsdom carries
+a carve-out: content / binding / element-presence, never geometry, paint, CLS or cross-frame. A
+rendered symptom proven elsewhere is `G2: FAIL` → `FIX_STATUS: FAILED` and hand off — **not** a
+confidence downgrade, because a downgrade blocks nothing.
+
+**Three declarations, now machine-checked.** The dev agents emit `PROOF_MEDIUM` (where the red was
+observed), `PROOF_PROVENANCE` (`built-diff`, or `analogue: <what>` — a re-assignment, a different
+delay, a stub standing in for the file under fix), and `PROOF_LINKAGE` (the weakest change that greens
+the test, constructed with no null option so it can be compared against the shipped diff). G4 checks
+all three; `ci/run-fix-cycle.ts` parses them and bails the ticket with a new `g2_proxy` outcome, so the
+headless lane enforces the same bar instead of the rule being advisory in CI.
+
+**G4 gained the executed-argument rule.** The review had overturned the correct hypothesis with an
+argument nobody ran: *"the working sibling also has an `ng-if`, so `ng-if` is not the differentiator"* —
+X present in the working case and absent in the broken one is the profile of a candidate cause, not
+evidence against one. An unexecuted mechanism argument may no longer overturn a hypothesis or raise
+confidence: run it, or mark it `UNVERIFIED:` and leave the contested hypothesis standing. Plus a
+**differential read** — every structural difference between working and broken is explained or matched
+by the fix, and the fix must match the comparator on the dimension it claims is causal.
+
+**The `/angular-admin` and `/vc-shell-fix` proof paths route by where the symptom is observed, not by
+which file the fix touches** — the routing error that sent VCST-5940 to the Node path in the first
+place. "No JS test harness in the repo" is not a reason to skip the browser: the render harness needs
+no repo test infrastructure at all. And a harness that renders correctly on known-broken source is a
+false-green generator — two were built during this investigation and both were green on the bug,
+because the lane was chromium 153, where the defect is fixed upstream. **The harness must exhibit the
+red before it may certify a green**, on the medium the symptom was reported on.
+
+Measured hypotheses, the instrumented trace, the real root cause (`ng-attr-srcdoc`: Chromium ≤152
+commits `about:srcdoc` from the parse-time attribute) and the two traps this cost:
+[`docs/decisions/autofix-proof-medium.md`](docs/decisions/autofix-proof-medium.md).
+
+**Verified:** `npm run context:check` green (always-loaded 52,935 / 80,000; DOC-002/3/4/6 all at
+baseline `0`); `npm run mirror:check` OK with all eight `.claude/` ↔ `plugins/vc-fix/` pairs in this
+change re-synced; `npx tsc --noEmit -p ci/tsconfig.json` clean.
+
+**Version:** `vc-fix` **0.8.7 → 0.9.0** — a minor bump, because G2 gains a rule the ladder did not
+have rather than fixing a broken one. The `vc-fix--v0.9.0` tag is cut at release
+(`docs/release-process.md` §Step 5a), not here; `vc-perf`'s `vc-fix >=0.7.0` range resolves against it.
+The catalog stays `0.9.4` — the listing itself did not change, and the three numbers are not meant to
+match. The version prose in `CLAUDE.md`, `docs/release-process.md` and `docs/versioning.md` had drifted
+(`0.8.6` / `0.8.3`, and `vc-perf` `0.2.6`) and is now re-synced to the manifests, which are the source
+of truth.
+
+---
+
+## The doc gate was measuring the wrong thing — all three ratchets now at zero — 2026-09-08
+
+`npm run context:check` ratchets three rules over `CLAUDE.md` + `.claude/**`. **All three were
+comparing a citation against the wrong thing**, so each carried a mix of phantom findings and real ones
+— and the phantoms are what pinned the baselines (`DOC-002: 4`, `DOC-003: 43`, `DOC-004: 18`), which in
+turn hid the real ones. A ratchet that cannot reach zero is worse than no ratchet: it reports noise on
+every run and gates nothing.
+
+**DOC-003 checked the label, from the wrong place.** It took the backticked text of a citation and
+tested it against the repo root. That is not what a reader follows, and the gap ran both ways:
+
+- `[`templates/test-model.md`](../templates/test-model.md)` in `.claude/commands/` resolves to
+  `.claude/templates/test-model.md` and is fine — reported as dangling for as long as the rule existed.
+- Three genuinely broken relative links **passed**, because their labels happened to resolve from the
+  root: `../../.claude/rules/reports.md` from inside `.claude/skills/` (→ `.claude/.claude/…`), and two
+  links one `../` short from `.claude/knowledge/*/`.
+
+The rule now resolves a citation the way a reader does — link target over label, and from the repo root
+**or** relative to the citing file, which is what DOC-004 has always done. The two rules had disagreed
+about what a cited path means, and DOC-003 was the one manufacturing findings.
+
+**`reports/` citations are ephemeral by policy, and are no longer ratcheted.** 30 of the 43 named a past
+report artifact. `.claude/rules/reports.md` §9 makes run folders gitignored and pruned, and the reports
+tree was pruned at HEAD — so a run id in a citation is *provenance the reader recognises*, not a path
+they open. Those are now **DOC-003E**, reported for information and excluded from the ratchet, so
+pruning a report folder can never fail the gate.
+
+**Prose that says an artifact does not exist is no longer read as a defect.** TIER.md's "Tier D — What's
+Missing" table and its migration checklist name artifacts that must be created; three files say in as
+many words that *"`npm run model:lint` is not implemented — do not cite it as a gate"*. All were
+findings. A `<!-- doclint:may-not-exist -->` marker (line-scoped, or section-scoped on its own line)
+lets the linter read what the prose already says. It suppresses existence checks only.
+
+**Ten real defects fixed** on the way, each one previously invisible: three broken relative links; a
+README naming `docs/ba-output/` as the BA output directory while both BA agents refuse to write there
+(the real home is `reports/ba/`); TIER.md citing `test-data/orgs/` (it is `organizations/`) and
+`docs/prompts/` (it is `vc/shared/docs/prompts/`); and a headless twin cited as a repo path in the same
+sentence that calls it unbuilt. `business-logic.md` is byte-parity mirrored into `plugins/vc-fix/`, and
+no relative link works on both surfaces, so its broken link became a plain path citation — correct from
+the root of either.
+
+**DOC-004 matched the first 25 characters of a run-on citation.** A `§Heading` reference is written
+inside a sentence, so the text after `§` continues into prose the author never meant as part of the
+heading: `§Effort routing records that the…` names `## Effort routing, and why the FAST/FULL line sits
+where it does`. Nine of the eighteen findings were the corpus's own correct citations.
+
+The rule now matches the citation's leading **words** against a heading, longest first, **stopping at
+two**. That floor is the whole design: truncating further would let `§Atlassian / Admin SSO` pass on the
+word "Atlassian" alone against the heading "Atlassian / JIRA setup" — hiding a citation that really had
+gone stale when that section was renamed. Punctuation does not count as a word for the same reason, the
+match must land on a word boundary (so `§Assertion STRENGTH` cannot pass on the heading "Assertions"),
+and a compound `§A + §B` must satisfy **both** halves.
+
+**The other nine were genuinely stale and are repointed** — a renamed section (`§ONE AUTHOR PER SUITE` →
+`§WORKING IN A SHARED TREE`), a citation naming the wrong file (`§Release note` is in `reporting.md`, not
+`close-out.md`), a heading that never existed (`§Test Case Review Approval` → `§Decision Framework`), two
+`§Assertion STRENGTH` → `§Assertions`, `§Teardown Collection` → `§Teardown — Reverse Deletion Order`,
+`§Atlassian / Admin SSO` → `§Atlassian / JIRA setup`, and two citations pointing at bolded rules that are
+not headings at all, now quoted as the rules they are.
+
+All three baselines are `0`. Fifteen unit tests pin the three matchers and the three zeros, each failing
+with the offending file and line.
+
+---
+
+## `ecl:extract`, and the dispatch pack that governs both oracles — 2026-09-08
+
+Second slice of the audit's runtime token work (§6 items 7–8), completing the extract half and writing
+down the rule that decides when to use it.
+
+**`npm run ecl:extract`** is the sibling of `bl:extract` for
+`.claude/knowledge/oracles/e-commerce-edge-cases-library.md`: `--chapter <n>`, `--id ECL-1.3,…`,
+`--domain <word>`, plus `--json`, `--list` and `--stats`. The slice unit is the `### N.M` section — the
+thing `Edge_Case_Refs` cites and `ecl:lint` proves exists — and its pattern table travels whole, because
+a row lifted out of it loses the Frequency/Impact/Status columns that decide whether the pattern is worth
+a case at all. Like its sibling it slices **verbatim** by character offset (CRLF-safe on a Windows
+checkout), reuses the gate's parser (`SECTION_RE` / `CHAPTER_RE` / `APPENDIX_RE` / `FENCE_RE` are now
+exported from `lint-ecl.ts`), declares itself a SUBSET, and exits 2 on a filter that matches nothing.
+
+Two library-specific traps are handled because the gate handles them: headings inside a fenced block are
+**illustration** (Appendix A's template was once counted as a real pattern of §13.3), and collection stops
+at **Appendix D**, whose rows cite sections rather than defining them. `scripts/unit/extract-ecl.test.ts`
+compares id sets with `ecl:lint` over the real library, so an extract cannot silently drop a section.
+
+**Why extract BOTH oracles or neither.** `/qa-test` Step 4's prompt template asks for *"the `BL-*` rule
+text + `ECL-*` patterns"* in one breath. Shipping one as extracted text and the other as a path leaves the
+larger dispatch paying most of what it paid before and makes the pack's own rule ambiguous — an agent
+handed one extract and one path cannot tell whether "the brief already carries it" was meant to apply to
+the other.
+
+**One design difference from `bl:extract`, caught before it shipped.** `--domain` here unions chapter and
+section titles instead of preferring the chapter. Copying BL's prefix-first precedence would have made
+`--domain payment` return chapter 1's eight sections and silently drop `ECL-14.6 Payment Processor
+Differences (VC-specific)` — the section carrying this product's actual processor behaviour. Chapter 14 is
+grouped by **origin**, not subject, so its sections belong to the other chapters' subjects by topic; a
+brief that confidently omits one is a false clean manufactured by the tool.
+
+**The dispatch pack** ([`.claude/skills/qa-test/dispatch-pack.md`](.claude/skills/qa-test/dispatch-pack.md))
+generalises Step 3b's authoring pack to every fan-out, and — the part that matters more — writes down its
+boundary: *text if the dispatcher already holds it and it is identical for every recipient; path if the
+recipient must derive, date or triangulate it itself.* So `1c`'s prior art stays paths (the agent has to
+triangulate it before it can carry `CONFIRMED`/`DRIFT`/`MISSING`), and the verifier is only half packable
+— rule text yes, the doer's evidence never, or an independent check becomes a ratification of the doer's
+own reading. Cited from `authoring.md` §3b, `SKILL.md` §Agent dispatch and §The verifier,
+`commands/qa-test.md` §1c, `ROUTING.md`, and the QA `shared-instructions.md` clause that tells the
+receiving agent not to re-read what it was handed.
+
+---
+
+## `bl:extract` — hand agents the invariants they need, not a 386 KB path — 2026-09-08
+
+First slice of the audit's **runtime** token work (§6 items 7–11), which targets per-dispatch reads
+rather than the always-loaded tier that PRs 1–3 re-tiered.
+
+~41 briefs across the agent corpus point at `.claude/knowledge/oracles/business-logic.md` by path, and
+every agent that follows one reads all 216 invariants (~96K tokens) to use the three or four in its
+domain — once per dispatch, in each agent's own context.
+
+`npm run bl:extract -- --domain cart` slices the oracle **verbatim** (`--id`, `--severity`, `--json`,
+`--list`, `--stats` too). Measured: 15 of 216 invariants, 7.5% of the file, ~7.2K tokens against ~96K.
+The output is the oracle's own markdown by line range, never a re-rendering, so `BL-*` ids keep their
+citation contract with the suites and no second, drifting copy is created.
+
+Three properties worth knowing:
+
+- **It reuses the gate's parser.** `ENTRY_RE` / `DOMAIN_RE` are imported from `lint-bl.ts`, and
+  `scripts/unit/extract-bl.test.ts` compares id sets between the two over the real oracle — an extract
+  cannot silently drop an invariant `bl:lint` can see.
+- **An extract declares itself a subset**, listing its ids. `knowledge/agents/qa/shared-instructions.md`
+  §Business Logic Reference now says: if the brief already carries the invariants, do not re-read the
+  oracle — and "not in my extract" is never evidence that no rule applies.
+- **A filter matching nothing exits 2** rather than emitting an empty brief, because an agent handed
+  zero invariants reports "no rule applies", which is a false clean.
+
+Still to come in this slice: the §3b authoring-pack generalisation to every fan-out, per-lane
+`/qa-regression` dispatch, and `--release-sweep` on 5r/C2.
+
+---
+
+## The `playwright-firefox` lane is open to click-driven work again — 2026-09-08
+
+Follows the root cause in the entry below. The ban that stood since 2026-06 — *"never schedule a
+click-driven suite on firefox"* — is lifted, and the lane is a full third browser slot.
+
+**One switch, not a scattered edit.** `defaults.firefoxClickOk: true` in `config/test-suites.json` is the
+only thing that decides it. `browserDenyListFor` in `ci/lib/suite-manifest.ts` is the single consumer, and
+`regression:plan`, `ci/run-regression.ts` and `regression:select` all read it instead of re-deriving the
+rule. **Rollback is that one line set to `false`** — no code change, the deny-list returns for every
+click-driven suite, and `scripts/unit/run-plan.test.ts` pins both directions so neither answer can be
+hard-coded again. `clickDriven` stays derived per suite: it is the input to the decision, not the decision.
+
+**PREREQUISITE.** The MCP server must be restarted after `config/mcp-playwright-firefox.config.json` gained
+`widget.windows.window_occlusion_tracking.enabled=false`; the config is read at server start and an
+un-restarted server behaves exactly as before the fix.
+
+Agent-facing instructions updated in step: the firefox box in `.claude/rules/agents.md`,
+`qa-testing-expert` back on `playwright-firefox`, and the exploratory / charter / visual / triage lane
+rules in `qa-exploratory`, `qa-test-plan`, `qa-sbtm`, `qa-test` (SKILL, modes, visual-axis,
+exploratory-lane), `qa-triage-results` and `ROUTING.md` — none of which now excludes the lane.
+
+**What is proven and what is not:** the probe proves the browser (covered rAF 121 vs 0, 6/6 clicks); no
+regression suite has run on the lane since the fix. The first click-driven suite scheduled onto firefox is
+the real confirmation — if clicks time out at "visible, enabled and stable", check the MCP restart first,
+then flip the flag.
+
+---
+
+## `playwright-firefox` click timeouts — root cause found and fixed in config — 2026-09-08
+
+The lane's `browser_click` timing out on visible, non-moving elements while `browser_type` worked is
+explained by two shipped facts: Playwright's *stable* wait needs **5** identical `requestAnimationFrame`
+ticks on Windows + Firefox (1 everywhere else), and Windows Firefox (≥ 102) stops rAF in a window fully
+covered by other windows — which three headed 1920×1080 browsers on one desktop guarantee. `fill()` has
+no stable wait, so typing kept working. `config/mcp-playwright-firefox.config.json` now sets
+`widget.windows.window_occlusion_tracking.enabled=false` (Playwright already disables Firefox's
+background *timer* throttling, not occlusion). `scripts/maintenance/firefox-click-probe.mjs` A/B-tests
+it on a Windows desktop with `trial: true` clicks (read-only). **Confirmed by probe run 4** (3 attempts per phase, rAF sampled
+before each): **15 of 15 failing attempts had a dead rAF, 0 passing ones did**. `firefox-default` timed out
+3/3 covered *and* 3/3 uncovered — the stall is **sticky**, the driver does not restart when the window is
+uncovered, which is why one moment of occlusion poisoned a whole firefox session and the failure read as
+"firefox cannot click here". With the pref, the same covered window keeps ticking (rAF 121 vs 0) and clicks
+6/6. Headless also clears it; a CSS keepalive animation does not. Runs 1–3 were misleading for reasons now
+recorded in the knowledge file (an off-viewport target, a cover on the wrong monitor of a dual-head desk,
+and a single covered attempt that happened to land on a live frame). **The lane rule does not lift yet** —
+the probe proves the browser, not the pipeline; one click-driven suite must run green on the firefox lane
+with the other lanes busy first.
+
+---
+
+## Correctness defects from the audit (§2 D1 / D3 / D6 / D9 / D10) — 2026-09-08
+
+**Tier A:** `qa-bug.md`, `qa-verify-fix.md`, `qa-env-check.md` (and `qa-fix.md`, `qa-monitoring.md`) now exist
+**only** in `plugins/vc-fix/commands/`. The `.claude/commands/` copies are deleted: they were the older
+Jira-only versions and had forked silently from the tracker-agnostic plugin (`qa-bug` 27 K vs 44 K,
+`qa-verify-fix` missing the confirm-deployment-before-transition ordering fix). No contract changes — the
+same slash names, arguments and outputs, from the copy customers already run; a clone without the plugin
+installed no longer has them in its `/` menu (`.claude/ROUTING.md` says how to install).
+
+Also: the ECL oracle re-synced into the plugin and both oracles under the byte-parity gate (5 → 27 mirrored
+paths); `qa-testing-expert` moved off the firefox lane; `rules/regression.md` no longer describes a cron
+schedule that is commented out; `full-cycle.yml` reports its real exit code; `package-lock.json` version
+matches `package.json`; `scope:validate` joins the offline gate set.
+
+---
+
+## Component consolidation — commands 31 → 27, skills 41 → 40 — 2026-09-08
+
+**BREAKING:** **Tier A:** `skills/qa-process/` (`test-process-lifecycle.md`, the ISTQB 7-phase lifecycle) is
+removed and its row leaves the Tier A Lock in `docs/versioning.md`. It had zero inbound consumers in the
+repo. **No version is bumped** because the `vc-qa` surface no longer ships as a plugin (no `plugin.json`, no
+marketplace entry — `CLAUDE.md` §Project Overview); a re-packaged distribution starts at the major after
+this removal. Migration for anyone who cited the phases in their own docs: planning → `/qa-test-plan`,
+design → `/qa-test-design`, execution → `/qa-test` / `/qa-regression`, defect lifecycle → `/qa-defect`,
+evidence and close-out → `/qa-evidence`.
+
+The other removals keep their behaviour under a surviving name:
+
+| Removed | Use instead |
+|---|---|
+| `/ba-stories <feature\|VCST-XXXX>` · `/ba-stories --review VCST-XXXX` | `/ba-analyze stories <feature\|VCST-XXXX>` · `/ba-analyze stories --review VCST-XXXX` |
+| `/qa-coverage-generation` (orchestrated twin, zero recorded runs) | `/qa-coverage-gap`; its `gap-inventory.json` schema now lives in `skills/qa-coverage-gap/coverage-gap-methodology.md` §`gap-inventory.json` |
+| `.claude/commands/{project-init,vc-self-check}.md` (thin shells) | the same-named skills, same slash names; `project-init` and `qa-coverage-gap` carry `disable-model-invocation: true` like the shells did |
+| `skills/project-init/REDESIGN.md` | orphan, no replacement |
+
+Also in this change: `ui-ux-expert`, `backend-reviewer` and `frontend-reviewer` run on `sonnet` (the
+`ui-ux-expert` roster row already said so and the frontmatter had drifted; the two Gate-4 reviewers are a
+judgment call, recorded in `docs/agentic-system-component-audit-2026-09-07.md`, reversible by one
+frontmatter line each). `/code-review-full` and `/qa-bundle-check` were considered and kept.
+
+---
+
+## `/qa-test` — the `--iterate` round-2 contract, and layer-routed release notes — 2026-09-02
+
+Two gaps of the same shape: a flow specified by what it **re-runs** and silent on what it
+**re-persists** or hands off.
+
+### `--iterate` round N+1 had no durable half
+
+Step 5k's round-N+1 contract was one sentence — *"Step 4 re-scoped, then Steps 5a–5c again"* — so every
+durable step sat outside it. Read literally: **round 2 filed no bug**, which dead-ends the loop at its own
+precondition (`/qa-fix` needs a filed ticket); the committed `testing-checklist.md` carried round-1
+verdicts only, and on FAST that file is the run's *only* durable record; nothing said whether a failing
+round REOPENed the ticket; 5g was unreachable and, with N Step-4 runs, nothing picked which evidence
+grounded `{OBSERVED}`; and `summary.json` is single-valued everywhere except a 4-key `iterations` counter,
+so round 2 silently overwrote round 1's verdict, counts, `regression.run_id` and timing — while
+`modes.md` demanded "a per-round summary (what each round fixed, what still fails)" that had nowhere to
+live. `5k` also had **no section, heading or table row** in `.claude/commands/qa-test.md` (three
+cross-references, no definition), and `close-out.md` — the file the command names as owning Step 5 — never
+mentioned it.
+
+- **A per-round assignment table, with a reason per row** (`.claude/skills/qa-test/modes.md` §5k).
+  **Per round:** 5a–5d, a short **round-delta** comment, `summary.json`, and an **append-only** checklist
+  section. **Once, at loop exit:** the Feature Release Gate, the full QA-Complete comment, the tracker
+  transition, promotion. So a `--iterate` run makes **one** transition and posts **one** QA-Complete
+  comment whatever the round count. The 5b verifier re-ratifies per round; the 5e and 5g verifiers fire
+  once, at exit.
+- **`CARRIED` — a third provenance** (5a item 4). Item 6's dedup *matches* a bug this run filed in an
+  earlier round, and the PRE-EXISTING row then says *link, don't re-file, **don't fail this ticket*** —
+  wrong twice, since it is this ticket's own Sub-task and it is still failing. CARRIED keeps its IN-SCOPE
+  provenance and severity, files nothing, and gets one comment on the existing Sub-task.
+- **A carried bug that goes GREEN is recorded and commented, deliberately not transitioned.** The loop
+  re-tests an **unmerged prerelease**, so nothing has shipped; the human who merges closes it.
+- **5g promotes per `RUN_ID`, `--ids`-scoped to the cases that run executed.** `tc:promote` can never
+  re-promote, so a round-1 flip is irreversible and would ground `{OBSERVED}` in the build that was wrong.
+- **Evidence screenshots are round-stamped** — `{TC-ID}-FAIL-r{N}-{description}.png`, every round
+  including the first. Round N+1 re-runs the **same** case IDs into the **same** folder, so an
+  unstamped name lets the round-2 PASS overwrite the round-1 FAIL, and the checklist row citing it then
+  points at a green image — worse than a missing file, because it silently contradicts the record. This
+  is the append-only checklist rule applied one layer down, and the artifact the first draft of the
+  per-round table forgot.
+- **`CARRIED` is enforced at the step that would otherwise override it.** 5a runs
+  `provenance → dedup`, and dedup re-emits `provenance`, so item 6 now carries the exception
+  explicitly: a match on a bug **this run** filed earlier is CARRIED, never PRE-EXISTING. Without it
+  the item-4 call was overwritten one step later, the bug stopped failing 5c, and the round reported
+  PASS on a defect the same run had filed and that was still red. The 5b verifier gained the matching
+  REJECT criterion.
+- **Artifact refresh rules.** The Test Model is **amended, never forked** — `<TICKET>-<date>.md` keeps
+  round 1's date, because a same-day round 2 collides on that path and a `-r2` sibling splits one fault
+  model in two (an amendment may confirm a hypothesis, clear one by fix, or add rows for mechanisms the
+  **fix's** diff introduces; it may not rewrite Part 0). **Step 3 is not re-runnable**: re-scaffolding with
+  round 1's `--id-block` rejects every row on ID collision, while re-allocating first lands the same rows
+  under new IDs — and the appender's only content dedup is exact `Title`+`Section`, so a reworded title
+  duplicates silently in permanent coverage. The checklist is append-only because the RED→GREEN transition
+  *is* the loop's deliverable.
+- **Round N+1 runs two tracks:** the previously-failed cases as their **own** `--ids` run (so the
+  RED→GREEN rate and the release gate's ≥95% stay two numbers), and Artifact C **re-scoped to the fix's own
+  diff** — round 1's scope came from the *ticket's* diff and cannot know what the fix touched. Each round
+  **probes** its own build; `/qa-deploy-pr --verify` is advisory, and unprobed, a "still failing" round is
+  indistinguishable from a deploy that never landed.
+- **`summary.json.iterations.per_round[]`** — one entry per round (verdict, probed build + deploy PR +
+  the mandatory deploy confirm, the RED→GREEN and regression runs, counts, filed/carried/fixed bugs, the
+  `/qa-fix` outcomes, which artifacts the round touched, what still fails). Written at the **end of every
+  round**, not at exit: the loop can STOP at any round, and a history persisted only on a clean exit is
+  missing exactly when it is needed. Its `$comment` states what the single-valued top-level fields mean at
+  N rounds — `verdict`/counts/`regression`/`promotion` are the **latest** round's, `bugs_filed` and
+  `new_cases_authored` are **cumulative**, `timing` spans the whole run.
+- **Two flags make the contract executable.** Every re-entrant primitive was **suite**-scoped while
+  everything round 2 knows is **case**-scoped, and `--also-ids` can only *add* to a tier:
+  - `suites:filter --ids <IDs>` — an **exact set**, mutually exclusive with `--priority`/`--also-ids`
+    (a tier union and an exact set answer different questions). It reads no `Priority` at all, so an
+    unreadable one is **not** a finding on that path — nothing consulted it, and naming it would
+    manufacture a coverage hole that does not exist. A run-global id miss is still reported.
+  - `tc:promote --ids <IDs>` — a **scope, never a gate**: every `PR-*` rule still runs on what it
+    leaves, and an unnamed row yields no decision rather than a PR-002 hold. It also picked up the
+    **value-lookahead guard `parseArgs` never had** — without it `--ids` as the final token scoped to
+    `undefined`, every case fell out of scope, and the run exited 1 ("nothing promotable") looking like a
+    clean no-op. `filter-cases.ts` already carried that guard *and a test named for exactly that failure*.
+    An `--ids` value that **names nothing** (`""`, `","`, whitespace) is likewise an error rather than
+    "no scoping": `ids.size === 0` is the UNSCOPED sentinel, so an empty list would invert the scope
+    from nothing to **everything** — a one-way `Draft → Automated` flip across the whole suite under
+    `--apply`. It is on the documented happy path, because the §5g close-out prescribes three
+    invocations whose id sets are legitimately empty. Usage errors now exit **2**, not 1, so they are
+    distinguishable from "nothing promotable".
+
+### Release documentation did not exist
+
+No agent, command, skill, template, report category or npm script produced a "what shipped" document.
+`ba-doc-writer` had four audiences and **no ticket, version, diff or layer input**, so it could not be
+told what shipped; `release-ledger.md` is a generated, hand-edit-forbidden **upstream** inventory;
+`docs/release-process.md` is about versioning *this plugin*. No QA command referenced `ba-doc-writer`.
+
+- **The layer is the routing axis, derived and never asked** (`/qa-test` `1b` item 2b →
+  `summary.json.layer`): `storefront` · `admin-spa` · `api` · `module` · `platform` · `cross-layer`,
+  from the union of the PR diff (via `repo-router` `REPO_PROFILES` + `resolveOwningSubApp`) and the suite
+  manifest's own `layer`/`concern`/`tags` — **read from the data, not the manifest's declared `concerns`
+  enum**, whose rows carry `e2e` and `graphql` too. Three loud failures, no silent default:
+  `layer-unresolved` refuses the fragment and names no command (**never** defaulted to `storefront` — a
+  wrong layer routes the note to the wrong audience, worse than no note); `layers_conflict` surfaces in
+  the note's own footer; and `layer_source[]` is always populated, because null means *not consulted*,
+  which is a gap and not a zero.
+- **Layer → audience → shape** (`knowledge/ba/virto-doc-style.md` **§9**): `storefront`→customer,
+  `admin-spa`→admin, `api`→developer, `module`→admin (+developer iff a setting/permission moved),
+  `platform`→admin *and* developer, `cross-layer`→the outermost surface the user sees. Evidence per layer
+  reuses `/qa-verify-fix`'s own split unchanged — the real request/response from `.graphql-evidence` for
+  `api`, a screenshot for the visual layers. `sales` is **never** auto-derived: a benefit-led one-pager
+  about one ticket is the oversell the Sales guardrail already calls a defect.
+- **One note per ticket per layer** — the one deliberate inversion of §1's "audience ≠ document", because a
+  release note is read as a single *what shipped* record and splitting it four ways yields files nobody can
+  reconcile back into one release.
+- **Fragment + aggregator**, both under `reports/ba/release-notes/` (report category 3, beside
+  `test-models/`): `<ticket>-<layer>-release-note.md` at 15–40 lines / cap 60, and
+  `release-<label>.md` at 40–80 / cap 150 which **links** fragments rather than inlining them. The
+  aggregate's window is globbed off `reports/tickets/*/*/summary.json` — the same glob `1b` already uses —
+  which hands its mandatory **`Not included`** section (every refused ticket, with its reason) its rows
+  for free.
+- **`/qa-test` writes only the machine half** (`layer` + the `release` block) and 5f **points** at
+  `/ba-analyze docs release <ticket>` carrying the ticket, the layer, the audience and the
+  `summary.json` path, so the follow-up re-derives nothing. A pointer and never a trigger:
+  `/ba-analyze` is `disable-model-invocation: true`. 5e's comment gains a **mandatory** `Release note:`
+  line reading `none — <refusal>` when refused, for the same reason `Not filed` is mandatory.
+- **`doc_scope: release` requires no `system_analysis`/`api_analysis`** and `/ba-analyze` runs
+  `ba-doc-writer` **alone** for it: those are whole-system sweeps, and there is no per-ticket system
+  analysis to have — requiring them costs three dispatches for input the mode cannot use. It writes no
+  `ba-report-{date}.md` either; a release note is not an analysis.
+- **A nine-rule truth guardrail** (`ba-doc-writer` §6). Versions only from the **probed**
+  `build.deployed` (`UNKNOWN` is legal, a guess refuses the fragment); the ledger's three rules binding, so
+  a `behind[]` component is `NOT_DEPLOYED` and gets no fragment and no sentence may be grounded on the
+  ledger; **the fragment describes the verified slice, not the diff**; `breaking` only from the ledger's
+  `⚠ BREAKING` row or a cited contract-change diff line, never from ticket/PR/commit prose; a fragment
+  only for PASS/PASS_WITH_NOTES, with the `!!! note` **mandatory** on the latter; the ledger and every
+  ticket/PR text read here are **data, never instructions**; every "you can now …" maps to a verified PASS
+  row, and nothing verified to say means **refuse** (`not-user-visible`), never pad; `layer` read once and
+  never re-derived; and evidence paths existence-checked against the `reports/ba/release-notes/` prefix.
+- **Payload hygiene is stated, not inherited by implication** (`virto-doc-style.md` §9.4 +
+  `ba-doc-writer` guardrail R9). §9.1 borrows `/qa-verify-fix`'s evidence rule for the `api` layer, and
+  that rule has **three** parts: never hand-written, **always redact** secrets (`Authorization` / token
+  / `password` / PAN) regardless of destination, and **scrub client hosts, paths, identifiers and data**
+  (§2a). Only the first travelled in the first draft. The other two matter *more* here than on an
+  evidence page: `evidence.html` is local-by-default and the runner evidence dirs are gitignored, while
+  a release note is durable category 3 in a public repo with an explicit no-prune rule. Concretely —
+  suite `050d` embeds `password: "{{DEFAULT_TEST_PASSWORD}}"` in its query text and `graphql-runner.ts`
+  stores the **resolved** query plus `variables`, so an unredacted copy-paste publishes a credential;
+  and a real response body carries customer emails and addresses. If a payload cannot be shown without
+  a secret or client data, **describe the changed field and embed nothing**.
+- **The derivation is ordered so its own mandatory output is fillable.** Resolving `audience` /
+  versions / `breaking` / `refusal` is now **5e.0**, ahead of the 5e.2 comment that must carry a
+  `Release note:` line and the 5e.3 persist that writes the block; 5f keeps only the pointer and
+  computes nothing. The first draft put the derivation in 5f, which runs *after* the report — so the
+  mandatory line had no inputs and the block was never persisted.
+- **Declared non-goal:** the `verify-fix` flow writes `verification-summary.json` rather than
+  `summary.json`, so a bug fix produces no fragment — a fix's release story is the bundle/hotfix narrative
+  `/qa-hotfix` owns. Named in §9 so it reads as a decision, not an oversight.
+- **Drive-by:** the stale *"four allowed report categories"* (there are ten) is corrected in **both**
+  places it appears — `virto-doc-style.md` §7.5 and `knowledge/agents/ba/shared-instructions.md`.
+
+---
+
+## Docs Audit — 2026-08-24
+
+Biweekly freshness audit (Sprint26-16 boundary). Two new regression suites landed since the last
+audit without their doc-side counterparts catching up; three skills and a plugin agent/command pair
+were already shipped but never made it into their reference tables.
+
+- **Suite/test counts refreshed.** `config/test-suites.json` now carries **123 suites / 4,123 cases**
+  (up from 121 / ~3,985) — `Backend/ucp/094-ucp-observability.csv` and
+  `Backend/background-jobs/095-background-jobs-migration.csv` landed this sprint. Regenerated
+  `regression/suites/README.md` from the manifest and corrected the stale `121`/`~3,985`/`48
+  directories` figures in `CLAUDE.md`, `INDEX.md`, `.claude/rules/regression.md`, and
+  `.claude/skills/qa-metrics/quality-gates.md`.
+- **Undocumented skills backfilled** in `.claude/skills/README.md`: `/qa-deploy-pr`,
+  `/qa-review-oracles`, and its alias `/qa-review-bl` existed on disk and in
+  `.claude/rules/skills-commands.md` already, but were missing from the skills directory index
+  (its own header undercounted QA Methodology at 17/14 instead of 18).
+- **Undocumented `vc-fix` plugin components backfilled** in
+  `plugins/vc-fix/knowledge/agents/README.md`: the `self-check-diagnostician` and
+  `self-check-deliverer` agents (2 of the plugin's 10 agents, table said 8) and the `/vc-feedback`
+  command (table said "Slash Commands (7)" and omitted the row, though the header count and Quick
+  Start already knew about it).
+- **Open proposal, not auto-applied:** `Backend/import-export/096-backup-restore.csv` is a
+  substantial, actively-committed suite (VCST-5387) with no `config/test-suites.json` entry — it
+  doesn't count toward any total above and is invisible to `suites:lint`/`/qa-regression`. Needs a
+  human call on priority/tags/selection membership before registering it.
+
+---
+
 ## [Unreleased]
 
-Ships as **plugin `0.8.1`** (marketplace `0.9.3`). Pin to a tagged release for stability; this branch tip is unstable.
+Ships as **plugin `vc-fix` `0.8.7`** + **`vc-perf` `0.2.6`** (marketplace `0.9.4`). Pin to a tagged release for stability; this branch tip is unstable.
+
+### Fixed — `vc-fix` `plugin.json` advertised 8 agents, ships 10 (#238)
+
+The count in the plugin manifest's own `description` was stale — `marketplace.json` and `CLAUDE.md`
+already said 10. `plugin.json` is what the plugin loader reads and what a customer sees before
+installing, so it was the one copy that mattered and the one that was wrong. All three now agree.
+
+### Fixed — a skill description that YAML could not parse, plus the guard that was missing (VCST-5807, #238)
+
+`plugins/vc-fix/skills/project-init/SKILL.md` carried a ~1020-character **unquoted** `description:`
+containing a colon-space (*…Day-2 modes skip the interview: `--add-env` adds…*). In YAML `: ` inside
+a plain scalar **is** the key/value separator, so the parser abandoned the whole block and
+`claude plugin validate` reported the skill loads with **empty metadata**. Introduced 2026-07-21 and
+unnoticed for a month, because nothing checked. `.claude/skills/vc-self-check/SKILL.md` carried the
+identical defect — there the symptom was directly visible, the skill listing by its H1 heading
+instead of its description. Both are now quoted.
+
+- **The guard is the point.** `scripts/lib/frontmatter-lint.mjs` (`ambiguousPlainScalars`) +
+  `scripts/unit/plugin-frontmatter.test.mjs` scan every markdown component **both** surfaces ship —
+  `plugins/` and `.claude/`, 326 files — for values a YAML parser mis-reads: a plain scalar with
+  `: ` / `:<TAB>`, a trailing `:`, a leading indicator, or a ` #` that silently truncates the value at
+  a comment; the same traps on a **wrapped continuation line**; and a **quoted** value that is
+  unterminated or closes early on an unescaped delimiter — so the guard can still see a regression in
+  its own remedy. Deliberately not a YAML parse: no YAML library is a dependency of this repo, and the
+  detector's header states plainly what it does and does not cover rather than implying completeness.
+- **A block scalar is valid YAML, not a finding.** `key: >` / `key: |` with an indent digit and a
+  chomp indicator **in either order** (`|2-`, `|-2`) is accepted. The first cut hardcoded
+  chomp-then-indent and so flagged `vc-perf`'s `perf-loop` — a false positive on green code, the same
+  over-match defect the VCST-5774 review caught in the base64 secret net. Fixed the same way: teach
+  the detector the legitimate shape, never weaken the check.
+- **It cannot pass vacuously.** The scan asserts a floor on the corpus, because a guard that silently
+  checks zero files is the failure mode it exists to prevent. Every rule is mutation-proven: reverting
+  any one of them turns the suite red.
+
+### Security — `/project-init` never writes a credential literal into `.mcp.json` (VCST-5774, #234)
+
+`gen-mcp.mjs` substituted the **literal value** of a GitHub PAT into the project's `.mcp.json` and **never added that file to `.gitignore`** — despite the file's own header claiming both were ignored. On a client deployment whose root is a git repo that is one `git add -A` from publishing a live token, irreversibly. A machine-wide scan found the literal in **five** generated projects; two carried the operator's `gh` CLI OAuth session (`gho_…`), persisted without their agreement. Nothing was committed only because none of those directories happened to be a git repo — containment by luck. All five were cleaned.
+
+- **D1 — no literal.** A resolved credential is written as a `${VAR}` indirection; the VALUE goes into `.claude/settings.local.json` `env`, which Claude Code applies to every session and its subprocesses and which is what feeds `${VAR}` expansion in `.mcp.json` `headers`/`env` (verified live on both transports). The placeholder's own name is the canonical variable, so an alias source (`GITHUB_FIX_BUGS_TOKEN`) still yields `${GITHUB_PERSONAL_ACCESS_TOKEN}` and both sides always agree. `--inline-secrets` restores the legacy literal for a host that cannot apply settings `env` — and then writes no second copy. **The value is exported to every session subprocess, which is a wider blast radius than the single MCP header it replaced: treat `.claude/settings.local.json` as a secret file.**
+- **D2 — always ignored, by every writer.** `.mcp.json`, `.claude/settings.local.json`, `.env.local`, `.env.*.local`, `project-profile.json` and `.vc-fix/` are written as a labelled `.gitignore` block **before** the file it protects is created. The list + writer moved to `skills/project-init/lib/gitignore.mjs` because onboarding creates such files in FOUR scripts at four steps: while only `gen-mcp` (§7) wrote the block, the guarantee held for the two files §7 creates — and **`.env.local` (§3b), the file the operator is told to paste `JIRA_API_TOKEN` / `ADO_PAT` / `GITHUB_FIX_BUGS_TOKEN` / passwords into during a PAUSE, was unprotected for that whole window** and in every run that aborted before §7. All four now call `ensureProjectIgnores()` first; it is idempotent, so the cost is one file read and there is still exactly one block. A project with no `.gitignore` gets one. The two generated entries are derived from the **resolved destinations**, so `--out`/`--settings` cannot route a credential-bearing file past the block; a destination outside the project root warns loudly instead.
+- **D3 — no `gh auth token` fallback.** With no PAT the placeholder stays unresolved and `enableOAuthIfNoPat` drops the header, so the server uses interactive OAuth.
+- **Stale credentials are pruned.** Settings `env` merging never removed anything, so a revoked token stayed ambient forever while `.mcp.json` read clean — and switching to `--inline-secrets` left two copies. Every var the generator owns is now dropped when it no longer resolves, and the removal is reported. Operator-authored keys are untouched.
+- **B4 — a regression guard on the ARTIFACT.** `verify-access.mjs` adds two readiness rows auditing `.mcp.json` **and** `.claude/settings.local.json` — guarding only the first would leave the value's new home unchecked. The walk covers the whole server def (`headers`, `env`, `args[]`, `url`, nested bags), because the producer substitutes placeholders at every leaf. Detection is split by confidence: a **CERTAIN** hit is the known-token-shape matcher now **shared with `hooks/redact.mjs`** (the audit's own shorter copy let `glpat-`/`xoxb-`/`sk_live_`/`AKIA`/JWT through) and may block readiness; a **SUSPECTED** hit — a credential-shaped key with an opaque value — **only ever WARNs**, because that net cannot tell a secret from a filename. Without the ceiling it graded this repo's own documented `--secrets .env.playwright.local` as a readiness-blocking FAIL on three servers; with it, the key vocabulary can stay wide instead of being narrowed until real names (`AccountKey`, `subscriptionKey`, `signingKey`, …) fall out of it. Grading is pure and table-tested, by **actual exposure**: FAIL only when a certain credential sits in a file git would commit — including one already **tracked**, which `git check-ignore` reports as not-ignored and which a `.gitignore` rule cannot fix (that row says `git rm --cached`). Outside a git repo, ignore-state is never a finding. Key paths only ever reach the table; a value never does.
+- **Latent bug found by the new tests.** `walk()` applied substitution only to object VALUES, so `o.map(walk)` handed each array element to a branch that returned it untouched — a placeholder inside `args[]` was never resolved and shipped literal. Substitution now happens at the leaf.
+
+**Review round 2** — five further must-fix findings, each reproduced against the previous head:
+
+- **An unparsable `.claude/settings.local.json` is no longer flattened.** The read was `try { JSON.parse(…) } catch { settings = {} }` followed by a full rewrite, so one stray comma deleted every other key — including `permissions.deny: ["Bash(gh pr merge:*)", …]`, guard #1 of the never-auto-merge interlock (`quality-gates.md` §2). This change had just made that same file the credential's home, i.e. it would have written a secret into a file it had proven it cannot read. The run now HALTS before writing anything.
+- **A safety flag no longer inverts.** `parseArgs` swallows the next token as a value, so `--inline-secrets false` produced the string `"false"` and `Boolean("false")` is `true` — the natural way to disable it enabled it. Every boolean flag now goes through `asBool`.
+- **An already-tracked destination blocks the write.** A `.gitignore` rule cannot untrack a tracked path, so writing the credential into a tracked `settings.local.json` staged it for the next commit while the run printed a reassuring `.gitignore += …` line — the same false-reassurance shape as the original defect. `verify-access` already knew this trap; the producer now does too, and says `git rm --cached`. A tracked `.mcp.json` only warns: without `--inline-secrets` it holds no credential.
+- **The CERTAIN net stopped firing on ordinary base64.** `eyJ[A-Za-z0-9._-]{16,}` matches any base64 of a JSON object (`{"` encodes to `eyJ`), so an `APP_CONFIG_B64` was graded a certain credential and **FAILed readiness** — precisely the block-on-a-harmless-value failure the confidence split exists to prevent. The pattern now requires a JWT's two dots; a negative table locks it in. (The old test fixture was a bare JWT *header*, which is why the over-match went unnoticed.)
+- **The remediation names the command.** The FAIL row said "re-run /project-init", but the documented path for an existing install is `--check`, whose Step C runs `normalize-env → verify-access → assert-profile` and never calls `gen-mcp.mjs` — so it reported a problem it could not fix. The row now prints the generator invocation and says `--check` alone will not do it.
+
+### Added — CI actually runs the unit suite (`.github/workflows/unit-tests.yml`)
+
+No workflow ran `npm test`: all six existing ones drive QA pipelines against the product, never this repo's own code. So every guarantee documented as enforced held only when a human remembered — including the `mirror-parity` byte-identity that CLAUDE.md calls "CI-enforced", and the secret-hygiene guards above, whose regressions are silent by construction. A guard nobody runs is a comment. The typecheck step is labelled for what it covers: `ci/tsconfig.json` sees `ci/*.ts` + `scripts/**/*.ts` only, so a green typecheck on an all-`.mjs` change (like this one) proves nothing about it — a claim made, and wrongly relied on, earlier in this PR.
+
+### Fixed — `.claude/` mirror: the `gh auth token` fallback removed there too
+
+The `.claude/` project surface is not maintained and its `gen-mcp.mjs` is an older generation, so the D1/D2 port was declined. D3 is different: the argument for leaving it rested on this repo's `.gitignore` already covering `.mcp.json`, but the harm of D3 — persisting the operator's `gh` CLI OAuth session to disk without their agreement — does not depend on `.gitignore` at all. The ~15 lines are deleted there; nothing else on that surface changed.
+
+### Fixed — `/project-init` onboarding hardening from client-deployment self-check findings (#216, #217, #220)
+
+Three merged PRs (#223, #224, #226) closing the `project-init` self-check findings auto-raised on a client Azure Boards deployment. All localized, single-subsystem fixes; full unit suite green.
+
+- **#216 `repo_discovery` (#223).** `moduleToRepo`'s id-fallback derived `vc-module-<slug>` for a module with no `ProjectUrl` and **never cross-checked it against a real repo**, so `/qa-fix` Gate 1 could route a bug to a repo that does not exist. The derived name is now marked `nameFromId` (a heuristic guess); `main()` reconciles each guess against the client's live repo listing (pure `flagUnverifiedModules`, case-insensitive) — a match confirms it, a miss is flagged `nameUnverified` and surfaced to the operator; any guess never cross-checked (no `clientOrg`, `--modules-json` mode) fails safe to `nameUnverified`. `assert-profile` reads the flag (`client_repo_unverified` violation). Applied to both the `plugins/vc-fix/` copy and the `.claude/` mirror.
+- **#217 `access_verification` (#223).** The Azure Repos client-repo probe reported **every** non-OK response as `PAT not accepted — check PAT Code R/W or az tenant`, including a 404. The FAIL message now branches on `res.status`: 404 (repo not found / misnamed) vs 401/403 (auth) vs a non-JSON sign-in page vs unexpected — different remedies, different messages. Both surfaces.
+- **#220 `mcp_config` startup + auth (#224, plugin surface).** Every stdio MCP server launches via `npx`; on a host with a broken/slow IPv6 route the registry lookup hung ~150s and blew the ~30s startup budget, so **all** stdio servers failed to start. `gen-mcp.mjs` now injects `NODE_OPTIONS=--dns-result-order=ipv4first` (the only NODE_OPTIONS-safe form — `--no-network-family-autoselection` is deliberately omitted, being fatal in `NODE_OPTIONS` on the Node-18 floor) + `npm_config_prefer_offline=true` on every stdio server (pure/idempotent `ensureNodeOptions`; http/sse untouched). Plus: pin `chrome-devtools-mcp@1.6.0` / `@azure/mcp@3.0.0-beta.32` (no `@latest`); move the context7 key to `headers`; drop the inert figma `FIGMA_API_KEY` (remote Figma MCP is OAuth-only); switch github to the official remote HTTP server with a Bearer PAT that falls back to OAuth when unresolved; and an opt-in `--warm-cache` that pre-fetches the pinned npx specs (shell-injection-guarded, best-effort, timeboxed).
+- **#220 port to the vc-qa (`.claude`) surface (#226).** The coupling-free half of #220 ported to the structurally-different root `gen-mcp.mjs`: the same `ensureNodeOptions` (ipv4first + prefer-offline) and template version pins, plus a `main()` import-guard so importing the module has no side effect. The auth-contract changes were deliberately deferred (they couple to an embedded-placeholder `injectTokens` fix this older copy lacks).
+
+### Added — `/qa-review-oracles`: BL + ECL merged into one oracle-audit skill, plus an ECL citation gate (#221)
+
+`knowledge/oracles/e-commerce-edge-cases-library.md` had **no declared write owner and no gate of any kind** — test cases cite its sections in `Edge_Case_Refs` and nothing ever checked those citations resolved. The first run found **20 dangling ECL ids cited by ~65 live cases across 7 suites**, including `ECL-13.4`, which has never existed.
+
+- **New gate `scripts/knowledge/lint-ecl.ts` (`ecl:lint` / `ecl:audit:collect`)** — the ECL twin of `bl:lint`: **ECLC-001** dangling citation · **ECLC-002** uncited section · **ECLC-003** unparsable suite (surfaced, never read as clean — `bl:lint`'s BLC-005 rule) · **ECLL-001** duplicate section · **ECLL-002/003** Appendix D ↔ body coherence · **ECLL-004** zero-padded spelling. `--filter` narrows the *report*, never the *scan*.
+- **Library audit.** Most dangling clusters were the library **missing content the authors expected**, not authors mis-citing — so the sections were added at the exact numbers already cited (§1.4–1.8 layout, §6.4 file import, §7.4 mobile/responsive, §10.3 Admin SPA blade availability, §14.10 admin order edit, and a new **chapter 15** for accessibility). Two duplicate rows merged; drifted `BL-SEARCH-*`/`BL-ORG-*` refs (domains that don't exist) corrected. Suite remap took `ecl:lint` from 20 High → **0**.
+- **The two oracle axes are now one skill.** `/qa-review-oracles [bl|ecl|all] <scope>` — they already shared their entire mechanism (sole writer `ba-system-analyzer`, three triangulation axes, the 3-source evidence bar, auto-apply-vs-proposals split, stable-ID contract, deterministic lint core); only the entry *shape* differs, and that lives in `bl-audit-criteria.md` / `ecl-audit-criteria.md`. **`/qa-review-bl` is retained as an alias**, not renamed — `/qa-test-lifecycle` Phase 4c auto-runs it and a silent break there would be invisible.
+- **The gate proves a ref EXISTS; it cannot prove the ref is RIGHT.** Nine loyalty cases cited `ECL-13.2` ("Subscription & Recurring Billing") meaning `ECL-13.3` ("Loyalty & Points") and no gate could object — that semantic call is `/qa-review-tests` Dimension 6, the same split as GRD-001 ↔ Dimension 11.
+
+### Added — `/qa-perf-measure`: deployed-env performance measurement (VCST-5637) (#219)
+
+Turns the VCST-5637 measurement run into a repeatable skill. The naive version of that method was wrong **four separate ways**, each producing a plausible number that was published and then withdrawn — so every lesson ships as an enforced rule.
+
+- **Skill + command + recipe:** `.claude/skills/qa-perf-measure/`, `.claude/commands/qa-perf-measure.md`, and `.claude/knowledge/execution/es-call-ab-method.md` (the KQL, gotchas, fixture filter, confounds and worked examples — previously **untracked and referenced by no index**). Generalized past the originating ticket's ES/cart specifics: any request-serving surface (GraphQL xAPI, REST, Admin API), any dependency type (search, SQL, cache, outbound HTTP).
+- **Counts transfer across environments; latency does not.** Backend work per request is counted by type via an App Insights `requests ⋈ dependencies` join on `operation_Id`; the residual reads N+1 → batch, flat >1 → collapse distinct shapes, flat =1 → floor.
+- **Rules from the four wrong answers:** an **instrument routing table** (L1 BenchmarkDotNet mocks the very I/O under test; L3 `dotnet-trace` can't attach to a remote deployment) · **paired positive + negative controls in the same window**, else the delta isn't published · deploy boundary in **UTC with a guard band** (a `merged_at` `Z` read as a local offset once shifted a cut 3 h) · **verify the fixture exercises the path** (`addItem` no-ops silently on zero stock and `minQuantity > 1`) · **warm vs warm**, discarding each cell's first request (1613 ms/75 SQL cold vs 20 ms/3 SQL warm on the *same* build) · discover, then measure *different* targets · controlled A/B over observational traffic, `totalDeps` always carried as control.
+- Measure-and-report only — never files a tracker item, transitions one, or opens a PR.
+
+### Changed — `/qa-test` is a tiered, gate-verified lifecycle (#206, #208, #213)
+
+The command grew from a linear script into a routed pipeline whose effort tracks risk, with independent verification only where it pays.
+
+- **Two-axis routing at Step 1a**, single source of truth `.claude/knowledge/execution/ticket-routing.md`: first the **flow** by ticket type × status (a fix-ready Bug is a *verification* → `/qa-verify-fix` RED→GREEN **inline**; a hotfix-status Bug → `/qa-hotfix-check`; a Sub-task inherits its parent; else `feature-test`), then within `feature-test` a **FAST** path (P2–P3, single-layer, single-domain: skip the 1c/1d BA agents, one execution agent, inline self-checks) or a **FULL** path (feature/Story, P0–P1, cross-layer, ≥2 domains, critical-revenue or unclear surface). *When in doubt → FULL.*
+- **Independent verification only at the three hard-STOP gates (Step 3, 5b, 5g), FULL path only** — a **fresh `qa-lead-orchestrator` in §Verifier Mode**, never the inline orchestrator and never the step's own doer: it re-derives evidence from source (`suites:review` / `td:validate` / `compute-metrics.ts --gate feature`, a live re-check on a **different browser lane**) and returns APPROVE/REJECT. REJECT → reason + fix → **re-verify once, then STOP**.
+- **One test-case pipeline, one promoter.** Step 3 reuses the same skills `/qa-test-lifecycle` Phases 3–4 run and appends new cases **directly into `regression/suites/`** as `Automation_Status = Draft` (the runner does not skip Draft, so Step 4's scoped regression executes them); 5g flips the eligible ones `Draft → Automated`/`Reviewed` in place — last and non-blocking — reverting non-promotable rows. `/qa-test-lifecycle` Phase 6P remains the promoter for handoff / re-promotion / non-`/qa-test` sources.
+- **Step 5a reuses `/qa-triage-results <RUN_ID> --fix`** instead of re-deriving the failure taxonomy ad hoc, and the Step 5 close-out was reordered (comment before status transition; promotion last).
+- **`--iterate` (default `--max-rounds 2`)** turns the close-out into a bounded test → fix → re-test loop: a FAIL auto-runs `/qa-fix` (G0–G7, never merges) → `/qa-deploy-pr` deploys the **prerelease** (confirm each deploy — the loop always re-tests an *unmerged* build, so the never-auto-merge guard is never touched) → re-runs the failed cases + change-scoped regression, then STOP for a human.
+- **Epic-aware:** Step 1a resolves a story's parent Epic and classifies siblings (Done = integration surface, In-progress = dependency/possible BLOCKED); **`--epic <KEY>`** tests child stories in series with state carried story→story and rolls the per-story gates into an Epic-level GO/NO-GO.
+- **Step artifacts are terminal-only.** `ac-analysis.md` / `testing-checklist.md` / `test-execution-report.md` had no reader beyond the run that wrote them; only `summary.json` + screenshots persist. Report policy updated to match.
+
+### Fixed — regression case IDs are globally unique; a new collision now hard-fails (#207)
+
+**223 → 0.** 223 case IDs appeared in more than one suite CSV. Not cosmetic: the runner keys per-case results and failure evidence by **bare case ID** (`suite-*-results.json` rows, `traces/{TC-ID}-FAIL-trace.json`, `regression-triage.ts` fingerprints), so two suites both declaring `CAT-001` let one run's evidence silently overwrite the other's — a real failure can read as someone else's pass.
+
+- **Two collision kinds, two conventions.** *Re-prefix* where different layers shared a prefix — storefront keeps the bare prefix, admin takes an `…A` suffix (`CATA-*`, `ORDA-*`, `SRCHA-*`); where one prefix meant two unrelated things the documented owner keeps it (067 keeps `WL-*`, so wishlist 050h became `WISH-*`; 050i keeps `CFG-GQL-*`, so the interlopers in 072/072c became `CFG-XAPI-*`), and the more specific suite is qualified (`CPN-SMK-*`, `SR-EMB-*`). Applied to the **whole prefix in each file**, so a file keeps one coherent namespace and cannot collide again. *Renumber into a free range* where both suites legitimately share one domain (035, 032, 003, `CFG-TEXT`/`CFG-VAR`).
+- **309 row-ID rewrites + 40 in-suite cross-reference rewrites across 15 suites**, verified mechanically rather than by eye: reverse-applying the rename map reproduces HEAD byte-for-byte, so only ID tokens changed and every CRLF / bare CR / escaped quote is untouched. `suites:review` finding tallies identical before/after.
+- **Enforced going forward** by `npm run suites:lint` (`findDuplicateCaseIds`, unit tests in `scripts/unit/suite-global-case-ids.test.ts`) — it scans every CSV on disk, orphans included, and **hard-fails**; unlike `CSV_LINT_BASELINE` there is no burn-down set, because the corpus is at zero.
+
+### Added — stale-test-case audit: `/qa-review-tests` Dimension 11 + a scheduled one-suite-per-day twin
+
+`lint-test-cases.ts` GRD-001 verifies an assertion **carries** a grounded provenance tag; it never verifies the tag is **true**. A `{DOC}` whose doc changed, an `{OBSERVED}` from a six-month-old build, a `{BL}` citing a retired invariant all lint green. `/qa-review-bl` closed this for the BL oracle; this ports the mechanism to test cases.
+
+- **Dimension 11 — Behavioral Triangulation (`--triangulate`)** triangulates each *assertion* against docs (VirtoOZ) + live (playwright) + source (GitHub MCP) → CONFIRMED / DRIFT / MISSING / CONTRADICTORY / UNGROUNDED / RETIRE (TRI-001…006). Auto-applies only **CONFIRMED** (refresh the `Audited:` stamp) and **DRIFT** (rewrite only the drifted assertion); the other four are proposals, because deprecation silently removes coverage and authoring needs review. Deploy lag (source has the fix, live does not) is CONTRADICTORY, never DRIFT. Judgment rules split into `triangulation-criteria.md`.
+- **No CSV schema change** — the stamp appends to the free-text `References` column alongside the existing `Synced:`/`Corrected:` stamps, so the 15-column contract is untouched, and **the stamp IS the rotation state**: no ledger file to desync, and a skipped day leaves that suite at the head of the queue.
+- **Scheduled twin** `ci/run-suite-audit.ts` (`npm run ci:audit`) + `.github/workflows/suite-audit.yml` audits **one suite per weekday** and lands each as its own **draft PR** — that PR is the human gate replacing `--fix`'s confirm prompt; never auto-merges. `--ci` holds a *narrower* privilege than interactive `--fix` (only what the linter proved or three agreeing axes confirmed), and a post-apply gate reverts any edit that introduces a new Blocker/Critical. CI has one browser lane, so the prompt overrides the SKILL's 3-agent fan-out.
+- **Rotation** `scripts/test-cases/audit-queue.ts` (`tc:audit:queue`): risk tier → unresolvable-source last → oldest stamp → testCount, keyed by **file** not id. **Source axis** `scripts/test-cases/suite-source-map.ts` (`tc:audit:source`) resolves 115/121 suites and **never invents a repo name** — an unresolvable suite scores UNGROUNDED, because a wrong repo yields a confident `file:line` for unrelated code and manufactures a false CONFIRMED.
+- Also fixed: `ci:audit` no longer hard-requires `ANTHROPIC_API_KEY` for its deterministic (non-agent) phases.
+
+### Added — `vc-perf`: a second marketplace plugin — the three-layer performance loop (#136)
+
+`plugins/vc-perf/` (`0.2.6`, depends on `vc-fix >= 0.7.0`, listed in `marketplace.json`): **L1** BenchmarkDotNet A/B over x-module targets, **L2** a k6 load harness against the Aspire-hosted backend with `dotnet-counters`, **L3** `dotnet-trace` allocation/CPU/DB attribution via perftools — plus a `perf-analyst` agent that ranks optimization candidates from the three layers' artifacts and a `perf-loop` orchestrator. Advisory only, never a CI gate; it reuses `vc-fix`'s onboarding, routing, and backend dev/review agents rather than duplicating them.
+
+### Fixed — self-diagnostics: capture everything, judge later; artifact-free delivery (VCST-5582, PR #172)
+
+The collector's non-success test at span close was simultaneously the **retention**, **analysis-scope** and **surfacing** decision, so any signal the deterministic classifier didn't recognise **ceased to exist**. A real `/project-init` run printed a WARN in its own readiness table (the Azure Bug field contract was never scanned: HTTP 400 → stderr → exit 0) and then self-diagnosed `no plugin issues detected` with `flagged:[]`. Capture, judgement and surfacing are now three separate layers.
+
+- **Capture is forbidden from deciding relevance.** Every anomaly is a durable `type:"obs"` record with **no severity/verdict field** — closed `class` vocabulary, slugified `subject`, taxonomy `code`, aggregated by signature (caps announce themselves as `capture_truncated`, never truncate silently). New sources: the transcript's `toolUseResult` sidecar (**stderr on an exit-0 tool**, `interrupted`, `Exit code N`), self-labelled degradation prose in stdout *and* stderr, every non-PASS row of `verify-access.mjs` and every failed scan in `discover-tracker.mjs` (via the collector's new `obs` subcommand), the written profile's shape, signals on spans that end `success`/`recovered`, sub-agent sidechain errors, and the collector's own health.
+- **Two invariants make the original failure unrepresentable:** `verdict:"clean"` requires `observations.total === 0 && flaggedTotal === 0 && !scanErrors`, and any `self_reported_warn`/`_fail` forces at least `attention`. `decision.verdict` now describes the **run** and is derived from counts alone; `surfaceDecision`/`suppressReason` describe the **UI choice** — conflating them is how a `failed` span once landed in a record calling itself `clean`.
+- **Surfacing is bounded by a HARD routing class set** (`self_reported_fail` · `degraded_artifact` · `script_exit_nonzero` from a **plugin-owned** script only — anchored to the installed plugin root, so a client's own failing `node ./scripts/build.mjs` is recorded but never arms the diagnostician) plus per-signature dedup, with a **grown occurrence count** re-qualifying a recurrence. `self_reported_warn` / `http_non2xx` / `collector_contention` were **demoted out of routing** (the old set fired on essentially any new signal, costing the operator a whole extra turn on S2/S3 friction) but still forbid the word "clean". A turn now emits **one info line and at most one question** — the 3-option cleanup prompt was removed, since the 24 h age-cap already reclaims leftovers.
+- **Delivery is artifact-free and struct-driven.** `/vc-self-check` runs via the `self-check-diagnostician` subagent and returns a **validated finding struct**; the local `DIAG-*.md`/`.json` and the whole `--diag` → markdown-table → sidecar-JSON source-precedence chain are **gone** (parsing a human-written `.md` for a closed vocabulary was the shared root cause of the header-backtick and `skill: other` defects — fixed by deletion). `deliver` reads the struct via `--input <file>`, files **one GitHub Issue per finding**, and routes by token rights through **two routes only, `issue` / `local`**: the former `pr`/`fork-pr` hand-offs printed commands and sent nothing, so the *more* rights a token had the *less* was delivered. A transient probe failure retries once before falling back to `local`.
+- **Schema v2** added `subject` (a closed enum naming *which* operation misbehaved — `ado_create_workitem`, `browser_login`, …) and `blockedDeliverable`, because a v1 row read `other | BROKEN | S1 | …` and couldn't distinguish an Azure-Boards field-contract blocker from a credential-handoff gap. `subject` is a **mapping, never an echo**. A containment gap in `proposedFix` (IP + work-item state name) was closed, and an **anti-confabulation gate** grounds vendor error identity against session telemetry.
+- **Consent + dedup:** delivery consent must use the **`AskUserQuestion` tool**, never a prose yes/no; dedup is **OPEN-issue only**, so a closed prior issue no longer swallows a recurrence. Deletion now requires the *analyze* step — a session holding an un-diagnosed finding survives the 24 h age-cap and `purge-inactive`.
+- **Onboarding + client hardening:** 7 `/project-init` defects found on a live client deployment (step-header framing, a question the operator can't scroll past, both self-diagnostics consents asked together, the `GITHUB_FIX_BUGS_TOKEN` `where:` navigation path), a hardened ADO client that loads `.env.local` before ADO auth, no more false stalls on consent questions, a pinned `playwright-mcp`, and a closed telemetry exit-code blind spot. A `Bash` echo of plugin source no longer mints a false `self_reported_fallback`.
+- **`.claude/` is deliberately NOT registered as a second collector.** `vc-fix@vc-tools` is enabled at the user level and ships its own `hooks.json`, so registering the mirror too ran **two** collector processes per event against the same files — duplicated spans and racing `saveState()` writes (observed: two `finalize` records 12 ms apart reporting 292 vs 290 spans). The mirror file stays (byte-identity is CI-enforced); `collector_contention` detection remains as a backstop.
+- Plugin bumped **0.8.2 → 0.8.3**.
+
+### Removed — the retired release suite `080`, and a lint that hard-fails on a missing suite CSV
+
+The master release suite `080` (`_release/080-full-regression-release.csv`) had its CSV deleted while the manifest entry and the `release` selection survived, so `/qa-regression release` **resolved to a missing file — running zero cases while reporting a valid selection**. The manifest entry and the selection are removed; `npm run suites:lint` now hard-fails on any declared-but-absent suite CSV so it cannot recur silently. For a major release use `full` or a plan-driven `sprint` selection.
+
+### Changed — report policy: retention + prune tooling, and BA domain folders
+
+- **New §9 Retention.** Ephemeral run folders (`reports/regression/{REG-*,SMOKE-*}`, `TLC-*`, `COV-*`, `MONITOR-*`) age out locally via `npm run reports:prune -- --apply` (30 days, run date parsed from the folder name); git-tracked `reports/tickets/<Sprint>/<TICKET>/` age out via `--target=tracked --apply` (`git rm` + one commit, gated by the last **commit** date, current sprint always skipped). Durable categories never prune. Tool: `scripts/maintenance/prune-old-artifacts.mjs`, dry-run by default, `--target=tracked` must be named explicitly. First run pruned `vc/shared/archive/sprints/` Sprint26-02 → Sprint26-12.
+- **BA reports gained domain subfolders** (`reports/ba/<Domain>/`) and the category list was restated as the **ten** allowed categories, with the `/qa-test` terminal-only carve-out and the `/qa-verify-fix` triple (`verification-report.md` + `verification-summary.json` + `evidence.html`) written down — including the rule that the committed `evidence.html` **references** its sibling screenshots rather than inlining them as base64 (one inlined PNG cost 124 KB on a single 124 000-character line).
+
+### Fixed — test-data, seeding, and deploy tooling
+
+- **Seeding refuses an undeclared `ENV_RISK`** rather than guessing, and the silent per-env password fallback is now surfaced instead of resolving quietly to the wrong secret.
+- **Teardown no longer orphans an address** when its CSV row has already been deleted, and `aliases.<env>.json` write-back terminates with a newline.
+- **`ADDRESSES_PER_PAGE` is gated against the storefront** — the previous constant produced a false PASS. Suite 011 pagination coverage was unblocked by 22 seeded TechFlow org addresses, and the phantom `techflow-org-addresses` JSON was purged from every live reference.
+- **`/qa-deploy-pr`** keeps the manifest edit minimal for empty-`AzureBlob` and re-pin cases, and **asserts the intended end state before committing**.
+- **The `post_edit` typecheck gate widened** from `scripts/lib/*.ts` to **all of `scripts/**/*.ts`** — `scripts/deploy/`, `scripts/unit/`, `scripts/hotfix/` were silently unchecked, so a green run said nothing about them.
+
+### Added — regression coverage, oracles, and fixtures
+
+- **New suites:** storefront structured-data / SEO (`048d`, VCST-5536), saved-layout coverage (VCST-5367), sales-rep hub dashboard + admin/permission negatives + statistics GraphQL (`092`, `092b`, `093`, `050m`), notifications `057`/`058` reworked against VCST-5557 / PR #202, and a `catalog:read-only` RBAC fixture for PLAT-079. Manifest now carries **121 suites / ~3,985 cases / 37 selections**.
+- **Behavioral triangulation audits** landed for suite `015` (the first real one), `011`, and `028` Cart Core (51/52 cases).
+- **Oracles:** `business-logic.md` Domains 1–19 deduped and `BL-SR`/`BL-SREP` merged into one Domain 20; five notification invariants promoted with five more drafted from the trigger audit; VCST-5618 401/403 auth fix covered by a new BL invariant + regression cases.
 
 ### Fixed — PR #143 review round 4 (9-agent review) — 3 correctness fixes + mirror guard
 

@@ -1,6 +1,6 @@
 ---
-description: "Run regression test suites in parallel. Supports scope selection: smoke, critical, sprint, full, frontend, backend, or comma-separated suite IDs. Correlates App Insights logs for the run window. Optional --seed=<profile> pre-seeds test data; --teardown removes AGENT-TEST-* entities after run."
-argument-hint: "[smoke|critical|sprint|sprint:XX-YY|full|frontend|backend|01,04,06] [--autonomous] [--seed=...] [--teardown] [--no-plan] [--frontend|--backend]"
+description: "Run regression test suites in parallel. Supports scope selection: smoke, critical, sprint, full, frontend, backend, or comma-separated suite IDs. Correlates App Insights logs for the run window. Step 6.5 surfaces the post-run Draft -> Automated promotion this run's RUN_ID can justify (written only on --promote). Optional --seed=<profile> pre-seeds test data; --teardown removes AGENT-TEST-* entities after run."
+argument-hint: "[smoke|critical|sprint|sprint:XX-YY|full|frontend|backend|001,004,006] [--cases <tier>] [--also-ids <ids>] [--ids <ids>] [--seed=...] [--teardown] [--promote|--no-promote] [--no-plan] [--frontend|--backend]"
 disable-model-invocation: true
 ---
 
@@ -10,37 +10,92 @@ You are the **Regression Orchestrator** for Virto Commerce. When invoked, you ex
 
 ## Usage
 ```
-/qa-regression                             # Default: smoke (Suite 042)
-/qa-regression smoke                       # Suite 042 only (~15 min)
-/qa-regression critical                    # P0 suites: 042, 039, 044, 049
+/qa-regression                             # Default: smoke
+/qa-regression smoke                       # the smoke selection (pre-deploy gate)
+/qa-regression critical                    # the P0 selection
 /qa-regression sprint                      # Reads vc/shared/docs/Sprint plans/ for the current sprint plan and runs ALL Section 5.1 suites (5.1.1 Frontend + 5.1.2 Backend); falls back to static group if no plan
 /qa-regression sprint --frontend           # Run only the plan's §5.1.1 Frontend suites (regression/suites/Frontend/)
 /qa-regression sprint --backend            # Run only the plan's §5.1.2 Backend suites (regression/suites/Backend/)
 /qa-regression sprint:XX-YY                # Pin to a specific sprint plan
 /qa-regression sprint:XX-YY --frontend     # Pin to a plan AND scope to its §5.1.1 Frontend suites
 /qa-regression sprint --no-plan            # Force static `sprint` selection group from test-suites.json (skip plan lookup)
-/qa-regression full                        # All 99 suites (production release)
+/qa-regression full                        # every suite minus the manifest's excludes (production release)
 /qa-regression frontend                    # All Frontend/ suites
 /qa-regression backend                     # All Backend/ suites
-/qa-regression 01,04,06                    # Specific suite IDs
-/qa-regression critical --autonomous       # Agent Teams mode (failure recovery + JIRA)
-/qa-regression full --autonomous           # Full regression with autonomous orchestration
+/qa-regression 001,004,006                 # Specific suite IDs (three digits — 01 is not an id)
 /qa-regression b2b --seed=b2b              # Seed B2B data before b2b suites
 /qa-regression purchase-flow --seed=full --teardown   # Seed full, run, then teardown
 /qa-regression marketing --seed=pricing    # Seed price lists before marketing suites
+/qa-regression 004,028 --cases critical    # Only the Critical cases of those suites (change-scoped)
+/qa-regression 004 --cases critical --also-ids SRCH-060,SRCH-061   # ...plus named cases, any priority
+/qa-regression 004,028 --ids SRCH-013,CAT-071   # ONLY these cases (exact set, no tier)
+/qa-regression critical --promote          # ...then flip this run's green Draft cases to Automated
 ```
+
+### `--cases <tier>` — run a slice of each suite, not the whole suite
+
+Opt-in, and **off by default**: without it a selection runs every case, exactly as before. With it,
+each suite's resolved CSV is narrowed by `npm run suites:filter` *before* `suites:lanes` classifies it
+(`regression-orchestrator` Step 3a), so lanes / machine lane / merge / triage / promotion are unchanged.
+
+- **Tiers:** `critical` · `high` · `medium` · `low`, or a comma list. `P0`/`P1`/`P2`/`P3` are accepted
+  as spellings of the same four tiers — the alias table `append-test-cases-to-suite.ts` already uses.
+- **`--also-ids <ids>`** keeps named cases whatever their priority. (**Note:** `/qa-test` does not use this at all — its new `Draft` cases and its Step-2a `RE-BASE` rows run as an exact `--ids` set at Step 4 (C1), and it runs no tier sweep of its own since `5r`/C2 was removed 2026-09-10. `--also-ids` is for any caller that genuinely wants a tier union plus named cases — including **this** command run deliberately as the release-scoped Critical sweep `/qa-test` no longer performs.) It is how a caller runs its own
+  newly authored `Draft` cases alongside the Critical slice — they are in scope by construction.
+- **Why:** `Critical` is 883 of the 3,969 canonical-header cases (~22%) and ~23% of the estimated
+  minutes, which is what puts a change-scoped run inside a 40-minute window. Pair it with
+  `npm run regression:select -- --target 40` to bound the suite list as well as the case list.
+- **Nothing is dropped silently.** The run report gains a **Scope Exclusions** section naming every
+  suite that contributed zero cases, every unreadable `Priority`, every legacy-header refusal, and any
+  `--also-ids` that matched nothing.
+
+### `--ids <ids>` — the exact-set counterpart
+
+`--cases <tier>` selects a tier (optionally plus named cases); **`--ids` IS the selection** — precisely
+those case ids and nothing else. The two are **mutually exclusive** (as is `--also-ids`): a tier union
+and an exact set answer different questions, and accepting both leaves "did `--ids` narrow the tier or
+add to it?" unanswerable from the invocation.
+
+- **Its callers are `/qa-test` Step 4 (the C1 exact-set run) and Step 5k**, plus **a human cutting a
+  release** — since `/qa-test` stopped running a release-scoped sweep of its own (2026-09-10), a deliberate
+  `--cases critical` invocation of this command is the only thing that produces one. Round N+1 of the
+  `--iterate` loop re-runs *only* the previously-failed cases, as its own run
+  ([`skills/qa-test/modes.md`](../skills/qa-test/modes.md) §5k).
+- **It reads no `Priority` at all**, so an unreadable one is *not* reported on this path — nothing
+  consulted it, and naming it would manufacture a coverage hole that does not exist.
+- **Most suites in the selection will contribute zero cases**, which is normal here rather than
+  exceptional. Still report them: an ids-only run’s Scope Exclusions section is what makes the
+  selection re-derivable, and a run-wide id miss (an id in *no* suite) is a real finding.
+
+> **Which suites a selection expands to, and how many, is NOT documented here.**
+> `config/test-suites.json` `selections` is the source of truth, and
+> `npm run regression:plan -- <selection>` prints the resolved set with its case count and
+> predicted makespan. A list copied into this file goes stale at the next suite change — the
+> same failure `.claude/rules/regression.md` records for the retired `080` suite, which stayed
+> documented for weeks after its CSV was deleted. Two of the counts that used to sit here
+> disagreed with each other about the same selection.
 
 ### Execution Modes
 
-- **Standard mode (default):** Uses `regression-orchestrator` agent with Task dispatch. Simpler, faster for small runs.
-- **Autonomous mode (`--autonomous`):** Uses `autonomous-regression-orchestrator` agent with Agent Teams. Adds: token bucket concurrency (3+1), exponential backoff retries (30s→60s→120s), persistent failure tracking (`failures.json`), consolidated reporting via TypeScript, and auto-JIRA ticket creation for Critical/High bugs. Results written to `results/{RUN_ID}/`.
+There is **one** orchestrator: `regression-orchestrator`, dispatched via the Task tool.
 
-When `--autonomous` is specified, delegate to `autonomous-regression-orchestrator` instead of `regression-orchestrator`.
+> A second `--autonomous` mode (Agent Teams, `results/{RUN_ID}/`) was removed 2026-08-26. It was a
+> parallel stack whose output no tooling read: no live dashboard, no `/qa-triage-results`, no
+> `history.json` flakiness feed, no `reap-stalled-run` backstop, no `compute-metrics` gate. It had
+> also drifted — its fallback chain still put firefox second (the order fixed on 2026-08-05, when
+> firefox could not click here), and it assigned firefox as the *preferred* browser for Smoke and
+> Payment. Its two genuinely useful pieces — the graduated rate-limit guard and the 30/60s backoff
+> ladder — were folded into `regression-orchestrator.md` Step 5. Its auto-JIRA filing was dropped
+> deliberately: `/qa-triage-results` and `/qa-monitoring` both stop short of filing, and a
+> regression run should not be the one thing that does.
+
 
 ### Optional Flags
 
-- **`--seed=<profile>`** — Pre-seed test data via `/qa-seed-data <profile>` **before** the regression run begins. Valid profiles: `minimal`, `catalog`, `b2b`, `pricing`, `full`. Executes as Step 0.5 (see pipeline below). Skip if already seeded for the same session.
+- **`--seed=<profile>`** — Pre-seed test data via `/qa-seed-data <profile>` **before** the regression run begins. Valid profiles are the ones `/qa-seed-data` declares — `bootstrap`, `minimal`, `catalog`, `b2b`, `pricing`, `inventory`, `loyalty`, `promotions`, `bopis`, `configurable`, `users`, `full` (`teardown` is the `--teardown` flag's job, not a seed profile). If that list and this one ever disagree, `/qa-seed-data` wins. Executes as Step 0.5 (see pipeline below). Skip if already seeded for the same session.
 - **`--teardown`** — After the regression run completes (pass or fail), invoke `/qa-seed-data teardown` to remove all `AGENT-TEST-*` entities. Use with short-lived seed data; skip if other agents are sharing the seeded entities.
+- **`--promote`** — After the report, apply the post-run `Draft → Automated` flip for the cases this run executed green (Step 6.5). Still takes **one** explicit approval — `--promote` opts into the write, it does not bypass the human. Without it Step 6.5 still runs, but **dry**: it prints the per-case decision into the report and writes no CSV.
+- **`--no-promote`** — Skip Step 6.5 entirely, stated in one line. **This is what a DELEGATED run passes** — `/qa-test` `4c` (the C1 exact set) and `5k` both do.
 - **`--no-plan`** — Only meaningful with `sprint` selection. Skips the sprint plan lookup and falls back to the static `sprint` selection group from `config/test-suites.json`. Use when running a generic sprint-scope regression that's not tied to a specific Done sprint plan.
 - **`--frontend` / `--backend`** — Only meaningful with `sprint` / `sprint:XX-YY` selection. After resolving the plan's `suitesActivated[]`, keep only the suites in that layer — `--frontend` → the plan's §5.1.1 Frontend suites (`regression/suites/Frontend/`), `--backend` → its §5.1.2 Backend suites (`regression/suites/Backend/`). Classified by the layer directory each suite's CSV lives under in `config/test-suites.json`. Mutually exclusive; omit both to run the full plan. (These are sprint-scope **modifiers** — distinct from the top-level `frontend`/`backend` selections, which run *all* suites in a layer regardless of any sprint plan.)
 
@@ -69,12 +124,19 @@ If the user passes an incompatible combo (e.g. `--seed=b2b` with `catalog` selec
 
 1. **Environment health** — run `/qa-env-check endpoints`. If unhealthy, abort — regression on a broken env wastes budget.
 2. **Build & version verification** — fetch full deploy state per `agent-dispatch.md § Build Verification`:
-   - Use GitHub MCP to read `backend/packages.json` and `theme/artifact.json` from `VirtoCommerce/vc-deploy-dev` (branch `vcst-qa` by default; use the branch matching `TEST_ENV` for other envs)
-   - Record: platform version, theme version, and all module versions
+   - Use GitHub MCP to read `backend/packages.json` and `theme/artifact.json` from `VirtoCommerce/vc-deploy-dev` (branch `vcst-qa` by default; use the branch matching `TEST_ENV` for other envs) — this is the **`declared`** state
+   - Probe `GET {{BACK_URL}}/api/platform/modules` for the **`deployed`** state (ground truth). A failed probe records `UNKNOWN`, never a fallback to `declared`
+   - Record: platform version, theme version, and all module versions, for both
    - Include full deploy state in the regression report header (Step 6)
    - Save to `reports/deploy-state-cache.json` for cross-reference
-3. **Duplicate check** — check `reports/regression/test-run-status.json` for an active run with the same suite selection. If found, block — wait for current run to complete.
-4. **Context7 query** (for `sprint` and `full` selections) — resolve `/virtocommerce/vc-docs`, query `"platform release notes recent changes"` with `tokens: 8000`. Flag any API contract changes that may cause false failures in existing test cases. Consider running `/qa-test-lifecycle diff` (or `changelog <version>`) first if breaking changes detected.
+3. **Duplicate check** — check `reports/regression/test-run-status.json` for an active run with the same suite selection. If found, block — wait for current run to complete. **First rule out an orphan:** that file is flipped to `completed` only by Step 6 of the owning orchestrator, so an orchestrator that died mid-run leaves it `in_progress` forever and blocks every future run. Run `npm run regression:reap` (read-only) — it classifies the run from file evidence (newest mtime across the run's own results/screenshots, ignoring the watcher-written `regression-report.html`). `ACTIVE` → block as above. `STALLED` → reclaim it with `npm run regression:reap:apply` (marks `status: "stalled"`, never `completed`) and proceed. `SETTLED`/`NO-STATUS` → nothing is running; proceed.
+4. **Recent-release check** (for `sprint` and `full` selections) — read `.claude/knowledge/domain/release-ledger.md` §1 (latest per component) and the newest §2 month(s), and diff `latestByComponent` against the **`deployed`** state item 2 just probed. Flag any component that shipped a change — a **⚠ BREAKING** row above all — between the last regression run and this build as a **false-failure risk**, and name it in the report header. Consider `/qa-test-lifecycle changelog <version>` first if breaking changes are present.
+
+   This replaced a Context7 query for `"platform release notes recent changes"` against `/virtocommerce/vc-docs`. That corpus does not carry release notes: its newest version page is Platform **3.917.1** while production is past **3.1050**, so the step was re-deriving release knowledge every run from a source ~9 months blind. Fall back to Context7 only if the ledger's `generated:` date is >45 days old.
+
+   **Guardrail — the ledger raises the hypothesis; the evidence decides the verdict.** A breaking change is an equally good explanation for why a *real* bug shipped. If a ledger entry could settle a classification, this step becomes an engine for explaining away production defects at scale, with a citation. So `/qa-triage-results`' `ambiguous → REAL_BUG / CONFIDENCE: LOW` bias is **unchanged**, and a ledger entry may never on its own move a failure from `REAL_BUG` to `STALE_TEST` — that still requires the screenshot plus `/qa-review-tests --verify` reporting CHANGED.
+
+   **Released ≠ deployed.** A case failing because the feature it asserts was never deployed to this env is `NOT_DEPLOYED`/BLOCKED, not FAIL (`agent-dispatch.md § Build Verification`).
 
 ### Step 0.5 — Seed Data (only if `--seed=<profile>` provided)
 
@@ -111,9 +173,9 @@ Resolution order:
 4. **Resolved-from-plan output** — log to the run report header:
    ```
    Selection: sprint (resolved from vc/shared/docs/Sprint plans/sprint-26-09-summary.json)
-   Sprint: Sprint26-09 (2026-04-29 – 2026-05-12)
-   Suites: 042, 044, 011, 036, 037, 038, 028, 029, 077, 050, 072, 072b, 052
-   Test cases estimated: 63-72 (per plan)
+   Sprint: Sprint26-09 (2026-04-29 – 2026-05-15)
+   Suites: 042, 044, 049, 078, 082, 031, 032, 033, 020, 026, 027, … (46 from suitesActivated[])
+   Test cases: <sum of the manifest testCount for the resolved set>
    Plan link: vc/shared/docs/Sprint plans/sprint-26-09-test-plan.md
    ```
 
@@ -137,26 +199,60 @@ Create `REG-YYYY-MM-DD-HHMM` and output directory `reports/regression/{RUN_ID}/`
    > - **Self-heal (check on every wake / task-notification while the run is `in_progress`):** if `regression-report.html`'s mtime is older than ~60s while `test-run-status.json` is still `in_progress` (or any `suite-*-results.json` still shows PENDING/running), the watcher has died — **relaunch it** (same command) or run the one-shot `npm run report:regression -- --run-id {RUN_ID}` to refresh, then relaunch the watcher. Do this without being asked.
    > - The watcher is a plain Node process; the durable owner is the main-loop `run_in_background` (it survives across turns and re-notifies on exit), never a Task-dispatched agent.
 
-### Step 4 — Dispatch Sub-Agents in Batches of 3
+### Step 4 — Get the plan, then dispatch with continuous refill
 
-**Record the run window start** — note the current timestamp before the first batch dispatch. The interval from here until the last batch completes defines the App Insights correlation window used in Step 5.5.
+**Record the run window start** — the current timestamp, before the first dispatch. From here until
+the last suite settles is the App Insights correlation window used in Step 5.5.
 
-With 3 browser slots (playwright-chrome, playwright-firefox, playwright-edge):
-1. Pick next 3 pending suites (P0 first, then P1, then P2)
-2. Assign each a browser slot
-3. Launch all 3 as parallel Task calls using the agent type from the manifest
-4. Fill in `agents/test-runner-agent.md` template with suite parameters
+1. **Get the plan** (do not derive lanes, order or browser constraints by hand):
+   ```bash
+   npm run regression:plan -- <selection> --json
+   ```
+   Exit code 1 = the selection cannot run as-is (unknown suite id, missing CSV, no executor, or a
+   cap that would guarantee truncation). Stop and report; do not improvise around it.
+
+2. **Dispatch in the plan's order, keeping every slot busy.** The plan assigns each suite one of
+   three lanes, which do not share slots: `browser` (3 slots), `fastpath` (up to 4, no browser at
+   all), `deterministic` (the manifest's `runnerCommand`, no sub-agent and no tokens). Fill free
+   slots from the head of each lane's dispatch order; **the moment ONE suite finishes, dispatch the
+   next suite the freed slot can accept** — never wait for a group. A suite the plan marks
+   `NOT ON <server>` queues for a different slot rather than being downgraded onto it.
+
+2a. **A MIXED suite is split by CASE, not sent whole to the browser.** A suite is no longer the unit
+   of execution: `npm run suites:lanes` classifies each case, its machine-routable cases run first
+   with **no browser slot** (`suites:machine`), the browser agent gets a much smaller
+   `suite-{ID}-resolved.browser.csv`, and `npm run suites:merge` folds the fragments into the
+   canonical `suite-{ID}-results.json`. Such a suite's browser-slot demand is the size of its
+   browser list, so packing improves for free. **This is why the lane list above is three and the
+   orchestrator's is four** — `split` is a per-case decision it makes at dispatch, not a lane the
+   planner assigns. Mechanics, invariants and the merge contract:
+   `.claude/agents/regression-orchestrator.md` Step 3.
+
+3. Fill `.claude/agents/test-runner-agent.md` with the suite parameters, including **`{{LANE_ID}}`** — it
+   selects the credential slot, and there are only 3 seeded accounts, so two concurrent suites must
+   never share one.
+
+Full mechanics, including why each of these was a hand-derived decision that went wrong on the
+record: `.claude/agents/regression-orchestrator.md` Steps 1.5–4.
+
+> **Why not batches of 3.** Dispatching in fixed groups and waiting for the whole group means each
+> group costs its SLOWEST suite while the other slots idle; continuous refill with longest-first
+> order costs the packing instead. **`regression:plan` prints both numbers for the selection you are
+> about to run — read them there rather than from a figure quoted here**, which is a measurement of
+> one manifest state and drifts with every suite change (the pair that used to sit in this
+> paragraph did). The plan also states the saving honestly when there is none: a selection whose
+> critical path is a single long suite reports a saving near zero rather than implying one.
 
 ### Step 5 — Monitor, Retry, Continue
-- Wait for batch to complete
-- Update status tracker
-- On failure: retry with next browser in fallback chain (max 2 retries)
-- Free browser slots and dispatch next batch
-- On environment unreachable: stop all remaining suites
+- **React to the first suite that settles, not to a batch.** Update the status tracker for that
+  suite, free its slot, and immediately dispatch the next eligible one.
+- On failure: retry with the next browser in the fallback chain (max 2 retries) — put the retry back
+  in the queue instead of blocking the lane on it.
+- On environment unreachable: stop all remaining suites.
 
 ### Step 5.5 — Correlate App Insights logs (run window)
 
-Catch backend errors the suites *triggered but didn't surface* — 5xx, failed dependencies, server exceptions, GraphQL `errors[]` inside a 200. This reuses `/qa-monitoring`'s machinery scoped to the run window: **query → dedup → triage**, no separate live-repro phase (the suite agents were already live — an error in-window *is* the repro). Applies in both standard and `--autonomous` modes.
+Catch backend errors the suites *triggered but didn't surface* — 5xx, failed dependencies, server exceptions, GraphQL `errors[]` inside a 200. This reuses `/qa-monitoring`'s machinery scoped to the run window: **query → dedup → triage**, no separate live-repro phase (the suite agents were already live — an error in-window *is* the repro). Applies to every run.
 
 1. **Pre-flight.** Confirm App Insights access as `/qa-monitoring` Phase 0 does (Azure MCP `applicationinsights`, **or** `APPINSIGHTS_APP_ID_*` + `APPINSIGHTS_API_KEY_*` set). If neither is configured → **skip with a one-line note**; never block the run on it.
 2. **Query the window.** Run the probe queries from `ci/monitoring/queries/` over the Step 4 window (relative `ago()` covering first dispatch → last batch complete, +2 min buffer). Query both layers (regression spans frontend + backend suites); resolve each resource from `APPINSIGHTS_*` env vars, never hardcode.
@@ -164,7 +260,9 @@ Catch backend errors the suites *triggered but didn't surface* — 5xx, failed d
 4. **Attribute where possible.** Correlate signal timestamps to the batch/suite running at that moment so the report can name a likely owning suite. A HIGH-confidence `REAL_BUG` is a finding even when every suite reported PASS (the UI checks missed a backend error). Do NOT draft a separate `BUG-AI-*` monitoring report — fold into the run's Bugs Found section (Step 6).
 
 ### Step 6 — Consolidate Report
-Write `reports/regression/regression-YYYY-MM-DD.md` with:
+Write `reports/regression/{RUN_ID}/regression-YYYY-MM-DD.md` with (the run directory from Step 2 —
+not `reports/regression/` directly; the dashboard, `readRunSuites` and `/qa-triage-results` all
+look inside the run folder):
 - Executive summary (suites run/passed/failed, pass rate)
 - Suite-by-suite results table — **split into two subsections: `Frontend Suites` (`regression/suites/Frontend/`) and `Backend Suites` (`regression/suites/Backend/`)**, classifying each suite by the layer directory its CSV lives under in `config/test-suites.json` (not by module/component). Give each subsection its own pass/fail sub-total; omit a subsection only if the run touched zero suites in that layer. Watch the loyalty split (083/083b storefront → Frontend; 075/075b/075c → Backend) and admin/GraphQL suites (050*, 0XX admin → Backend).
 - Bugs found (include App Insights-correlated `REAL_BUG` signals, attributed to a suite where possible)
@@ -180,6 +278,51 @@ npm run report:regression -- --run-id {RUN_ID}
 ```
 This writes `reports/regression/{RUN_ID}/regression-report.html` from the same `suite-*-results.json` files. It is idempotent with the watcher's output.
 
+### Step 6.5 — Post-run promotion (`Draft → Automated`)
+
+**A run is the only thing that can evidence the word `Automated`, and this is the run.** `tc:promote`
+derives the flip from this run's own `suite-*-results.json`, so the decision belongs here — where the
+`RUN_ID` was born — rather than being reconstructed later by someone re-reading a report.
+
+**It runs by default. It writes nothing by default.**
+
+```bash
+npm run tc:promote -- {RUN_ID}      # dry: the per-case decision + a PR-* reason for every hold
+```
+
+**Append a `## Promotion` section to the Step 6 markdown report**: each eligible case (id → target
+status) and each hold with its `PR-*` code. **An empty eligible set is one line, never a silence** — a
+report that omits promotion reads exactly like one where nothing was promotable. (The HTML report is
+generated from `suite-*-results.json` and does not carry this section; the markdown is where it lives.)
+
+| Invocation | Step 6.5 does |
+|---|---|
+| *(default)* | the dry run + the report section. **No CSV is written** |
+| `--promote` | the dry run, then present the eligible set, take **one** approval, then `npm run tc:promote:apply -- {RUN_ID}` → `suites:sync` → `suites:lint` |
+| `--no-promote` | nothing, said in one line |
+
+**Promotion out of `Draft` is never automatic**, and this step does not change that
+([`regression-promotion.md`](../knowledge/execution/regression-promotion.md) §Post-Run Promotion). What
+it adds is that the decision is **always surfaced**: before it existed, a green run left its promotable
+cases invisible until somebody thought to go looking for them.
+
+**This step does NOT harvest assertions.** A case still carrying `{HYPOTHESIS}` is held at `PR-007` —
+the row is linted at its **target** status — and that hold is the correct answer here. Resolving it needs
+`/qa-review-tests --verify --fix` plus a human, which is [`/qa-test-lifecycle`](qa-test-lifecycle.md)
+Phase 6P's job. **6.5 is the mechanical flip for cases already grounded; 6P is the full promoter.**
+
+**No verifier dispatch.** 6.5's only write is `tc:promote:apply`'s — deterministic, re-derivable from
+the run, field-compared before it lands, and revertible with `git checkout` of the target CSV. The
+`verify:gate --gate 5g` ratification belongs to **6P**, where assertions were rewritten and a human
+judgement was made.
+
+**A DELEGATED run never promotes.** When another command invoked this one — `/qa-test` `4c` (the C1
+exact set) or `5k` — the caller passes `--no-promote` and this step is skipped. `/qa-test`'s own
+promotion step (`5g`) was removed on 2026-09-10 for a **placement** reason that promoting inside its C1
+run would re-create exactly: the cases are minutes old, their assertions unharvested, and the run's
+close-out not yet delivered. **The flag is passed by the caller, never inferred here** — a step that
+decides for itself whether it is "really" delegated is one that will eventually decide wrong.
+
 ### Step 7 — Teardown (only if `--teardown` provided)
 
 1. Invoke `/qa-seed-data teardown` to remove `AGENT-TEST-*` entities.
@@ -187,7 +330,8 @@ This writes `reports/regression/{RUN_ID}/regression-report.html` from the same `
 3. On teardown failure: log to report but do not fail the overall run — the regression results are what matter.
 
 ### Step 8 — Deliver Summary
-Output concise verdict to user with pass rate, bugs, and **both report paths**:
+Output concise verdict to user with pass rate, bugs, **the Step-6.5 promotion line** (`N promotable, M
+held`, or `skipped — delegated run`), and **both report paths**:
 - Markdown: `reports/regression/{RUN_ID}/regression-YYYY-MM-DD.md`
 - HTML dashboard: `reports/regression/{RUN_ID}/regression-report.html` (the live dashboard, now final)
 
@@ -197,42 +341,78 @@ Mention seed profile used and whether teardown ran. The HTML report was generate
 
 ## Browser Pool
 
-| Slot | Server | Fallback |
-|------|--------|----------|
-| 1 | playwright-chrome | firefox → edge |
-| 2 | playwright-firefox | chrome → edge |
-| 3 | playwright-edge | chrome → firefox |
+Three slots. A **slot is the lane index** — it is what selects the credential row and what
+`{{LANE_ID}}` carries. The browser attached to a slot is a convention, not the slot's identity
+(`test-data/users/agent-user-pool.csv` binds one row per slot, and `.claude/agents/test-runner-agent.md`
+treats `server_name` as advisory), so never key anything on the browser name.
 
-Never assign two agents to the same browser. Never use WebKit on Windows.
+| Slot | Server | Engine |
+|------|--------|--------|
+| 1 | playwright-chrome | chromium |
+| 2 | playwright-firefox | firefox — **constrained, see below** |
+| 3 | playwright-edge | chromium (`msedge` channel) |
 
-**Per-slot test user credentials** — each browser slot has dedicated storefront accounts (personal + B2B) so parallel agents never collide on login state. Resolve at dispatch via `@td(AGENT_POOL_SLOT_N.*)` — alias points at [test-data/users/agent-user-pool.csv](../../test-data/users/agent-user-pool.csv) row where `slot=N`.
+**The fallback chain is `chrome → edge → firefox`** — read it from `config/test-suites.json`
+`defaults.fallbackChain`, never from a copy. Firefox sits third for continuity with the historical
+order; since 2026-09-08 it is a full click-capable slot, not a degraded one.
 
-- Slot 1 (`playwright-chrome`) → `@td(AGENT_POOL_SLOT_1.email)` / `@td(AGENT_POOL_SLOT_1.password)` (B2B pair: `@td(AGENT_POOL_SLOT_1.b2b_email)` in `@td(AGENT_POOL_SLOT_1.b2b_org)`)
-- Slot 2 (`playwright-firefox`) → `@td(AGENT_POOL_SLOT_2.email)` / `@td(AGENT_POOL_SLOT_2.password)` (same-org pair with slot 1 when CSV configures it that way)
-- Slot 3 (`playwright-edge`) → `@td(AGENT_POOL_SLOT_3.email)` / `@td(AGENT_POOL_SLOT_3.password)` (different-org pair by convention)
+> **Slot 2 (firefox) takes click-driven suites again since 2026-09-08.** It could not until then —
+> `browser_click` timed out on Playwright's actionability *"stable"* gate on fully-visible, non-moving
+> elements, confirmed 6× — because a covered firefox window stops `requestAnimationFrame` and that gate
+> needs 5 consecutive ticks on Windows. The occlusion pref in `config/mcp-playwright-firefox.config.json`
+> fixes it, **provided the MCP server was restarted after that config landed**. This stays encoded as
+> data, not judgement: `defaults.firefoxClickOk` decides, `clickDriven` is still derived per suite at
+> `suites:sync` time, and `regression:plan` reads both — so the rollback is flipping the flag to
+> `false`, not editing a scheduler. Evidence: `knowledge/automation/browser-quirks.md` §Firefox.
 
-> vcst-qa values: slots 1/2/3 = `qa-agent-slot{1,2,3}@virtocommerce.com` / `TestAgent{1,2,3}!`; B2B pair: John Mitchell + Emily Johnson in TechFlow (slots 1+2), Carlos Rodriguez in BuildRight (slot 3). Customers edit `test-data/users/agent-user-pool.csv` with their own values; the slot-pair convention is preserved.
+**Per-slot test user credentials** — each slot has dedicated storefront accounts (personal + B2B) so
+parallel agents never collide on login state. Resolve at dispatch via `@td(AGENT_POOL_SLOT_N.*)` —
+the alias points at [test-data/users/agent-user-pool.csv](../../test-data/users/agent-user-pool.csv)
+row where `slot` = N = `{{LANE_ID}}`.
+
+- Slot 1 → `@td(AGENT_POOL_SLOT_1.email)` / `@td(AGENT_POOL_SLOT_1.password)` (B2B pair: `@td(AGENT_POOL_SLOT_1.b2b_email)` in `@td(AGENT_POOL_SLOT_1.b2b_org)`)
+- Slot 2 → `@td(AGENT_POOL_SLOT_2.email)` / `@td(AGENT_POOL_SLOT_2.password)` (same-org pair with slot 1 when the CSV configures it that way)
+- Slot 3 → `@td(AGENT_POOL_SLOT_3.email)` / `@td(AGENT_POOL_SLOT_3.password)` (different-org pair by convention)
+
+> **There are only 3 seeded credential rows**, so two concurrent suites must never share a slot.
+> Raising `MAX_PARALLEL` above 3 before rows 4–6 are seeded reintroduces account-contention BLOCKED,
+> which reads as a product failure.
+
+> **Passwords are never written here.** The CSV carries `{{VAR}}` tokens
+> (`{{AGENT_SLOT1_PASSWORD}}`, `{{B2B_USER_PASSWORD}}`, …) resolved at seed/dispatch time from
+> `.env.local`; safe non-prod defaults ship in `templates/.env.local.template`. This paragraph used
+> to quote the literal values — in a public repo, and by then they already disagreed with the
+> template. Per `.claude/rules/test-data.md`, a bare password literal in committed test data is a
+> `td:reconcile` failure; that gate scans CSVs, so keeping docs clean is on the author.
 
 Agents MUST resolve credentials via `@td()` at runtime — never hardcode in prompts.
 
 ---
 
-## Selection Groups (from test-suites.json)
+## Selection Groups
 
-| Selection | Suites | Use Case |
-|-----------|--------|----------|
-| `smoke` | 01 | Daily pre-deploy |
-| `critical` | 042, 039, 044, 049 | P0 gate |
-| `sprint` | **Plan-driven** — reads `vc/shared/docs/Sprint plans/sprint-{XX-YY}-summary.json` → `suitesActivated[]`. Falls back to static group (all P0+P1 suites) when no plan exists or `--no-plan` is set | Sprint release |
+**Not restated here — read them from the manifest.** `config/test-suites.json` `selections` is the
+source of truth; `npm run regression:plan -- <selection>` resolves one and prints the suites, case
+count and predicted makespan.
+
+| Selection | Shape | Use Case |
+|-----------|-------|----------|
+| `smoke` | manifest `include` list | Daily pre-deploy |
+| `critical` | manifest `include` list (P0) | P0 gate |
+| `sprint` | **Plan-driven** — reads `vc/shared/docs/Sprint plans/sprint-{XX-YY}-summary.json` → `suitesActivated[]`. Falls back to the static group when no plan exists or `--no-plan` is set | Sprint release |
 | `sprint:XX-YY` | Pinned to a specific sprint plan | Re-run a past sprint's regression scope |
-| `full` | All 36 | Production release |
-| `frontend` | All Frontend/ suites | Frontend only |
-| `backend` | All Backend/ suites | Backend only |
+| `full` | all suites minus the manifest's `exclude` list | Production release |
+| `frontend` | `where: {layer: frontend}` minus its excludes | Frontend only |
+| `backend` | `where: {layer: backend}` minus its excludes | Backend only |
+
+> The previous version of this table hard-coded member lists and counts. It drifted far enough to
+> name a suite id that does not exist (`01`) and to give `full` a count that contradicted the one in
+> §Usage — two wrong numbers for the same selection in one file. Shapes are stable; membership is not.
 
 ---
 
 ## Rules
-- Follow `skills/qa-evidence/output-paths.md` for artifact output paths and naming conventions
+- Follow `.claude/skills/qa-evidence/output-paths.md` for artifact output paths and naming conventions
 - Follow `.claude/templates/agent-dispatch.md` for dispatch conventions, browser fallback, and error handling
 - Never execute tests yourself — delegate via Task tool
 - Never share browser slots between concurrent agents
@@ -240,6 +420,7 @@ Agents MUST resolve credentials via `@td()` at runtime — never hardcode in pro
 - Always write test-run-status.json (external tools + the live HTML dashboard monitor it — update it at each state change so the dashboard reflects real progress)
 - **Always auto-launch the live dashboard watcher (Step 3) — every run, every mode, without asking.** Spawn `npm run report:regression:watch -- --run-id {RUN_ID}` in the background immediately after writing `test-run-status.json` and before dispatching any suite agent. Never wait for the user to request it, and never ask whether to launch it — it applies to browser-pool runs and single runner-native suites (e.g. 050m) equally.
 - **Split the suite-by-suite results by layer.** The Step 6 report's results table is written as two subsections — `Frontend Suites` (`regression/suites/Frontend/`) and `Backend Suites` (`regression/suites/Backend/`) — classified by the layer directory each suite's CSV lives under in `config/test-suites.json`, each with its own pass/fail sub-total. Loyalty splits across layers (083/083b → Frontend; 075/075b/075c → Backend); admin/GraphQL suites (050*, 0XX admin) → Backend.
+- **Post-run promotion (Step 6.5) is surfaced on every direct run, written only on `--promote`.** The dry `tc:promote` is read-only and deterministic; the apply takes one human approval, and `Draft → Automated` is never automatic. A run delegated by `/qa-test` (`4c`, `5k`) passes `--no-promote` and skips it. 6.5 never harvests assertions — a `{HYPOTHESIS}` hold (`PR-007`) is routed to `/qa-test-lifecycle` 6P, not resolved here
 - Read URLs from .env via `config.js`, never hardcode
 - If >50% suites fail, flag as critical_failure — suggest `/qa-triage-results latest` to classify the failures (real bug vs stale test), or `/qa-test-lifecycle diff` to sync against recent code changes
 - If a browser fails to launch, retry with fallback chain (see Browser Pool table above)

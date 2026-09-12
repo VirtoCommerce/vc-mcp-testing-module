@@ -53,7 +53,7 @@ Layered loader order (later overrides earlier):
 3. `.env.local` — gitignored secrets. Per-env via `USER_PASSWORD_${TEST_ENV.upper()}` suffix promotion.
 4. `.env` — legacy fallback for backwards-compat.
 
-Three buckets per `docs/configuration.md`:
+Three buckets — this table is the definition; there is no separate configuration doc:
 
 | Bucket | Source | Examples |
 |--------|--------|----------|
@@ -101,6 +101,12 @@ Check which MCP servers are configured and reachable. Source of truth: customer'
 | `claude_ai_VirtoOZ_for_virtocommerce_com_docs` | `/vc-docs` (primary) |
 
 Optional MCPs missing = warning, not failure. The dependent skill prints a clear error at runtime. **The tracker/host rows are profile-gated** — check 6 probes only the axis the profile actually uses (an Azure-Boards deployment doesn't need `atlassian`; an Azure-Repos client doesn't need `github` for its own code).
+
+**Configured ≠ working — probe the credential, don't just count the server (VCST-5702 ITEM 3).** A server present in `.mcp.json` with an unresolved placeholder key reads as "configured", then every dependent call fails at runtime (observed: `.mcp.json` shipped a literal `<CONTEXT7_API_KEY>`; the server registered, then `/qa-bug` Step 0 died with `Invalid API key … should start with 'ctx7sk'`). So for each credentialed MCP:
+
+- **Flag any header/env value still matching `/^<.*>$/` as `NOT READY`, naming the key** (e.g. `context7: NOT READY — CONTEXT7_API_KEY is still the placeholder <CONTEXT7_API_KEY>`). A placeholder is a hard NOT READY, never a silent pass.
+- **Run ONE lightweight live probe per credentialed MCP** and report `NOT READY` on an auth failure — for `context7`, `resolve-library-id` on a known library (e.g. `react`); the tracker/host axes already probe live in check 6.
+- **Warn that plaintext secrets do not belong in `.mcp.json`** — reference the env var instead (`"Authorization": "Bearer ${CONTEXT7_API_KEY}"`, value in `.env.local`), so a key is never committed and rotation is one place.
 
 ### 5. Plugin Local State
 

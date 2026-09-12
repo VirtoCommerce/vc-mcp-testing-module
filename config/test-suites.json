@@ -3,8 +3,8 @@
   "_meta": {
     "version": "3.0",
     "description": "Regression test suite manifest for parallel orchestration with module-aligned directories under Frontend/Backend layers",
-    "generated": "2026-07-31",
-    "totalSuites": 119,
+    "generated": "2026-09-11",
+    "totalSuites": 138,
     "csvFormat": "Enriched Agent-Native CSV (ID, Title, Section, Priority, Business_Rule, Edge_Case_Refs, Preconditions, Test_Data, Steps, Assertions, Cross_Layer_Checks, Failure_Signals, Cleanup, References, Automation_Status)",
     "domains": [
       "purchase-flow",
@@ -27,15 +27,18 @@
       "non-functional",
       "api",
       "admin"
-    ]
+    ],
+    "classifierVersion": "1.2.0"
   },
   "defaults": {
     "preferredBrowser": "playwright-chrome",
     "fallbackChain": [
       "playwright-chrome",
-      "playwright-firefox",
-      "playwright-edge"
+      "playwright-edge",
+      "playwright-firefox"
     ],
+    "firefoxClickOk": true,
+    "_comment_fallbackChain": "Chromium-family FIRST (chrome -> edge), firefox third. `firefoxClickOk: true` means the firefox lane takes click-driven suites like any other slot — set it to false to restore the deny-list (one-line rollback, no code change; `browserDenyListFor` in ci/lib/suite-manifest.ts is the only consumer). HISTORY: firefox could not click here (browser_click resolved the element then timed out on Playwright's 'visible, enabled and stable' gate), confirmed 6x 2026-06-01 -> 2026-08-05, and sat SECOND in this chain until 2026-08-05 so a failed first attempt fell straight onto it. ROOT CAUSE 2026-09-08: a covered firefox window stops requestAnimationFrame (Windows occlusion tracking) and Playwright's stable check needs 5 CONSECUTIVE rAF ticks on Windows+Firefox (1 elsewhere), so it never completes; the stall is sticky, the driver does not restart when uncovered. FIXED by widget.windows.window_occlusion_tracking.enabled=false in config/mcp-playwright-firefox.config.json (covered rAF 121 vs 0, 6/6 clicks). Evidence and the rollback signal: .claude/knowledge/automation/browser-quirks.md section Firefox.",
     "maxRetries": 2,
     "retryDelayMs": 30000,
     "rateLimitDelayMs": 60000,
@@ -56,7 +59,8 @@
       "serverName": "playwright-firefox",
       "browserName": "firefox",
       "channel": null,
-      "status": "available"
+      "status": "available",
+      "constraint": "Full third slot for click-driven work since 2026-09-08, PROVIDED the MCP server was restarted after config/mcp-playwright-firefox.config.json gained widget.windows.window_occlusion_tracking.enabled=false — without that pref a covered firefox window stops requestAnimationFrame and every browser_click times out on the 'stable' actionability gate (browser_type and navigation keep working). Re-verified live 2026-09-11 (popover click reached [expanded], navigation click landed, 0 errors). Second prerequisite added 2026-09-11: @playwright/mcp must stay PINNED in .mcp.json — an @latest entry swaps the server binary that reads this config, and each release demands its own browser build. If clicks start timing out on this lane again: check the MCP restart and the pin first, then set defaults.firefoxClickOk=false to re-deny click-driven suites. Detail: .claude/knowledge/automation/browser-quirks.md section Firefox."
     },
     {
       "slot": 3,
@@ -75,7 +79,7 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 26,
+      "testCount": 27,
       "estimatedMinutes": 13,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -84,7 +88,8 @@
         "categories",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "002",
@@ -94,7 +99,7 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 31,
+      "testCount": 32,
       "estimatedMinutes": 24,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -103,7 +108,8 @@
         "product-detail",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "003",
@@ -123,7 +129,8 @@
         "range-facets",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "004",
@@ -133,7 +140,7 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 41,
+      "testCount": 44,
       "estimatedMinutes": 19,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -142,7 +149,8 @@
         "results",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "005",
@@ -152,7 +160,7 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 41,
+      "testCount": 47,
       "estimatedMinutes": 23,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -161,7 +169,8 @@
         "advanced",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "006",
@@ -171,7 +180,7 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 40,
+      "testCount": 70,
       "estimatedMinutes": 28,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -184,7 +193,8 @@
         "b2b",
         "hybrid"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "007",
@@ -194,7 +204,7 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 31,
+      "testCount": 50,
       "estimatedMinutes": 20,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -203,7 +213,8 @@
         "shared-lists",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "008",
@@ -213,7 +224,7 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 36,
+      "testCount": 40,
       "estimatedMinutes": 25,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -228,7 +239,8 @@
         "b2b",
         "hybrid"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "009",
@@ -247,7 +259,8 @@
         "configurations",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "010",
@@ -271,7 +284,8 @@
         "b2b",
         "hybrid"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "011",
@@ -291,7 +305,8 @@
         "sprint"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "011b",
@@ -301,7 +316,7 @@
       "layer": "frontend",
       "concern": "e2e",
       "priority": "P1",
-      "testCount": 26,
+      "testCount": 30,
       "estimatedMinutes": 130,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -315,7 +330,8 @@
         "b2b",
         "hybrid"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "012",
@@ -338,7 +354,8 @@
         "b2c",
         "hybrid"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "013",
@@ -361,18 +378,19 @@
         "b2b"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "014",
-      "name": "Orders Frontend",
+      "name": "Orders Frontend — History, Detail, Status & Reorder",
       "file": "regression/suites/Frontend/orders/014-orders-frontend.csv",
       "domain": "purchase-flow",
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 98,
-      "estimatedMinutes": 65,
+      "testCount": 51,
+      "estimatedMinutes": 34,
       "agent": "qa-frontend-expert",
       "tags": [
         "orders",
@@ -382,7 +400,30 @@
         "sprint"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
+    },
+    {
+      "id": "014b",
+      "name": "Orders Frontend — Returns, Documents & Date Filtering",
+      "file": "regression/suites/Frontend/orders/014b-orders-frontend-returns-filtering.csv",
+      "domain": "purchase-flow",
+      "layer": "frontend",
+      "concern": "functional",
+      "priority": "P1",
+      "testCount": 47,
+      "estimatedMinutes": 31,
+      "agent": "qa-frontend-expert",
+      "tags": [
+        "orders",
+        "frontend",
+        "returns",
+        "filtering",
+        "sprint"
+      ],
+      "envRiskGate": "staging",
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "015",
@@ -402,7 +443,8 @@
         "sprint"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "017",
@@ -426,7 +468,8 @@
         "orders"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "018",
@@ -482,7 +525,7 @@
       "layer": "backend",
       "concern": "admin",
       "priority": "P1",
-      "testCount": 54,
+      "testCount": 65,
       "estimatedMinutes": 29,
       "agent": "qa-backend-expert",
       "tags": [
@@ -493,7 +536,8 @@
         "sprint"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "021",
@@ -512,7 +556,8 @@
         "sprint"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "023",
@@ -617,7 +662,7 @@
       "layer": "backend",
       "concern": "admin",
       "priority": "P1",
-      "testCount": 51,
+      "testCount": 71,
       "estimatedMinutes": 23,
       "agent": "qa-backend-expert",
       "tags": [
@@ -631,7 +676,13 @@
         "customer"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true,
+      "lanes": {
+        "machine": 1,
+        "browser": 70,
+        "manual": 0
+      }
     },
     {
       "id": "027b",
@@ -659,7 +710,13 @@
         "customer"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true,
+      "lanes": {
+        "machine": 9,
+        "browser": 9,
+        "manual": 0
+      }
     },
     {
       "id": "028",
@@ -680,7 +737,8 @@
         "revenue-critical",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "029",
@@ -699,7 +757,8 @@
         "persistence",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "030",
@@ -709,7 +768,7 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 18,
+      "testCount": 19,
       "estimatedMinutes": 13,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -718,7 +777,8 @@
         "anonymous",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "031",
@@ -737,7 +797,8 @@
         "register",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "032",
@@ -747,7 +808,7 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 18,
+      "testCount": 20,
       "estimatedMinutes": 15,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -757,7 +818,8 @@
         "permissions",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "033",
@@ -776,7 +838,8 @@
         "account-menu",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "034",
@@ -800,7 +863,8 @@
         "store"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "035",
@@ -824,7 +888,8 @@
         "store"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "036",
@@ -843,7 +908,8 @@
         "pickup",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "037",
@@ -862,7 +928,8 @@
         "pickup",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "038",
@@ -881,7 +948,8 @@
         "pickup",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "039",
@@ -906,7 +974,8 @@
         "cybersource"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "040a",
@@ -931,7 +1000,8 @@
       "customerApplicability": "universal",
       "references": [
         "VCST-5009"
-      ]
+      ],
+      "clickDriven": true
     },
     {
       "id": "040b",
@@ -956,7 +1026,8 @@
       "customerApplicability": "universal",
       "references": [
         "VCST-5162"
-      ]
+      ],
+      "clickDriven": true
     },
     {
       "id": "040c",
@@ -979,7 +1050,8 @@
       ],
       "envRiskGate": "staging",
       "customerApplicability": "universal",
-      "notes": "Datatrans is the only redirect processor. Redirect to /checkout/payment is the DESIGNED flow — never mark cases BLOCKED on the redirect."
+      "notes": "Datatrans is the only redirect processor. Redirect to /checkout/payment is the DESIGNED flow — never mark cases BLOCKED on the redirect.",
+      "clickDriven": true
     },
     {
       "id": "041",
@@ -1007,7 +1079,8 @@
         "datatrans"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "042",
@@ -1032,7 +1105,8 @@
         "security",
         "regression"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "043",
@@ -1050,7 +1124,8 @@
         "ga4",
         "tracking"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "044",
@@ -1070,7 +1145,8 @@
         "csrf",
         "daily"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "045",
@@ -1088,7 +1164,8 @@
         "wcag",
         "a11y"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "046",
@@ -1106,7 +1183,8 @@
         "localization",
         "languages"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "047",
@@ -1124,7 +1202,8 @@
         "core-web-vitals",
         "load-time"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "048",
@@ -1141,7 +1220,8 @@
         "cross-browser",
         "compatibility"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "048c",
@@ -1172,6 +1252,29 @@
       "customerApplicability": "universal"
     },
     {
+      "id": "048d",
+      "name": "Structured Data & SEO (storefront)",
+      "file": "regression/suites/Frontend/cross-cutting/048d-structured-data-seo.csv",
+      "domain": "cross-cutting",
+      "layer": "frontend",
+      "concern": "non-functional",
+      "priority": "P2",
+      "testCount": 7,
+      "estimatedMinutes": 12,
+      "agent": "qa-frontend-expert",
+      "tags": [
+        "seo",
+        "structured-data",
+        "json-ld",
+        "opengraph",
+        "brand-profile",
+        "homepage",
+        "cross-cutting"
+      ],
+      "customerApplicability": "universal",
+      "clickDriven": true
+    },
+    {
       "id": "049",
       "name": "Platform API",
       "file": "regression/suites/Backend/api/049-platform-api.csv",
@@ -1179,7 +1282,7 @@
       "layer": "backend",
       "concern": "api",
       "priority": "P0",
-      "testCount": 46,
+      "testCount": 48,
       "estimatedMinutes": 23,
       "agent": "qa-backend-expert",
       "tags": [
@@ -1199,7 +1302,7 @@
       "layer": "backend",
       "concern": "api",
       "priority": "P1",
-      "testCount": 47,
+      "testCount": 57,
       "estimatedMinutes": 32,
       "agent": "qa-backend-expert",
       "tags": [
@@ -1210,7 +1313,12 @@
         "price-filter-bva",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 56,
+        "browser": 1,
+        "manual": 0
+      }
     },
     {
       "id": "050b1",
@@ -1220,7 +1328,7 @@
       "layer": "backend",
       "concern": "api",
       "priority": "P1",
-      "testCount": 20,
+      "testCount": 21,
       "estimatedMinutes": 16,
       "agent": "qa-backend-expert",
       "tags": [
@@ -1230,7 +1338,13 @@
         "cart-quantity",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 19,
+        "browser": 1,
+        "manual": 0,
+        "deprecated": 1
+      }
     },
     {
       "id": "050b2",
@@ -1250,7 +1364,12 @@
         "coupons",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 14,
+        "browser": 2,
+        "manual": 0
+      }
     },
     {
       "id": "050b3",
@@ -1270,7 +1389,12 @@
         "checkout",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 22,
+        "browser": 1,
+        "manual": 0
+      }
     },
     {
       "id": "050b4",
@@ -1291,7 +1415,12 @@
         "schema-coverage",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 23,
+        "browser": 8,
+        "manual": 0
+      }
     },
     {
       "id": "050b5",
@@ -1312,7 +1441,12 @@
         "regression-guard",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 12,
+        "browser": 0,
+        "manual": 0
+      }
     },
     {
       "id": "050c",
@@ -1331,7 +1465,12 @@
         "xorder",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 7,
+        "browser": 1,
+        "manual": 0
+      }
     },
     {
       "id": "050d",
@@ -1341,7 +1480,7 @@
       "layer": "backend",
       "concern": "api",
       "priority": "P1",
-      "testCount": 49,
+      "testCount": 60,
       "estimatedMinutes": 14,
       "agent": "qa-backend-expert",
       "tags": [
@@ -1351,7 +1490,12 @@
         "registration",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 47,
+        "browser": 13,
+        "manual": 0
+      }
     },
     {
       "id": "050e",
@@ -1371,7 +1515,12 @@
         "page-context",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 10,
+        "browser": 0,
+        "manual": 0
+      }
     },
     {
       "id": "050f",
@@ -1390,7 +1539,12 @@
         "xcms",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 19,
+        "browser": 0,
+        "manual": 0
+      }
     },
     {
       "id": "050g",
@@ -1409,7 +1563,12 @@
         "cross-cutting",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 4,
+        "browser": 0,
+        "manual": 0
+      }
     },
     {
       "id": "050h",
@@ -1419,7 +1578,7 @@
       "layer": "backend",
       "concern": "api",
       "priority": "P1",
-      "testCount": 27,
+      "testCount": 35,
       "estimatedMinutes": 21,
       "agent": "qa-backend-expert",
       "tags": [
@@ -1428,7 +1587,13 @@
         "wishlist",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true,
+      "lanes": {
+        "machine": 34,
+        "browser": 0,
+        "manual": 1
+      }
     },
     {
       "id": "050i",
@@ -1448,7 +1613,12 @@
         "configurations",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 60,
+        "browser": 0,
+        "manual": 0
+      }
     },
     {
       "id": "050j",
@@ -1469,7 +1639,12 @@
         "marketing",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 19,
+        "browser": 1,
+        "manual": 0
+      }
     },
     {
       "id": "050k",
@@ -1490,7 +1665,12 @@
         "bopis",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 11,
+        "browser": 0,
+        "manual": 0
+      }
     },
     {
       "id": "050l",
@@ -1500,7 +1680,7 @@
       "layer": "backend",
       "concern": "api",
       "priority": "P2",
-      "testCount": 15,
+      "testCount": 18,
       "estimatedMinutes": 13,
       "agent": "qa-backend-expert",
       "tags": [
@@ -1512,7 +1692,12 @@
       "requiresModules": [
         "push-messages"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "lanes": {
+        "machine": 18,
+        "browser": 0,
+        "manual": 0
+      }
     },
     {
       "id": "050m",
@@ -1522,8 +1707,37 @@
       "layer": "backend",
       "concern": "api",
       "priority": "P1",
-      "testCount": 98,
+      "testCount": 129,
       "estimatedMinutes": 245,
+      "agent": "qa-backend-expert",
+      "tags": [
+        "graphql",
+        "xapi",
+        "sales-rep",
+        "b2b",
+        "scoped-schema"
+      ],
+      "requiresModules": [
+        "sales-rep"
+      ],
+      "customerApplicability": "reference",
+      "lanes": {
+        "machine": 126,
+        "browser": 0,
+        "manual": 0,
+        "deprecated": 3
+      }
+    },
+    {
+      "id": "050m2",
+      "name": "GraphQL xAPI — Sales Rep, procedural (multi-tool: shell + query)",
+      "file": "regression/suites/Backend/graphql/050m2-graphql-sales-rep-procedural.csv",
+      "domain": "sales-rep",
+      "layer": "backend",
+      "concern": "api",
+      "priority": "P1",
+      "testCount": 1,
+      "estimatedMinutes": 8,
       "agent": "qa-backend-expert",
       "tags": [
         "graphql",
@@ -1555,7 +1769,12 @@
         "asset-url",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 9,
+        "browser": 0,
+        "manual": 0
+      }
     },
     {
       "id": "051",
@@ -1579,7 +1798,8 @@
         "catalog"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "052",
@@ -1602,7 +1822,8 @@
         "catalog"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "053",
@@ -1626,7 +1847,8 @@
         "catalog"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "054",
@@ -1636,7 +1858,7 @@
       "layer": "backend",
       "concern": "admin",
       "priority": "P1",
-      "testCount": 29,
+      "testCount": 32,
       "estimatedMinutes": 20,
       "agent": "qa-backend-expert",
       "tags": [
@@ -1649,7 +1871,8 @@
         "pricing"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "055",
@@ -1673,7 +1896,8 @@
         "pricing"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "056",
@@ -1683,7 +1907,7 @@
       "layer": "backend",
       "concern": "admin",
       "priority": "P1",
-      "testCount": 43,
+      "testCount": 48,
       "estimatedMinutes": 30,
       "agent": "qa-backend-expert",
       "tags": [
@@ -1696,7 +1920,8 @@
         "inventory"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "057",
@@ -1719,7 +1944,8 @@
         "notifications"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "058",
@@ -1742,7 +1968,8 @@
         "notifications"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "059",
@@ -1766,18 +1993,19 @@
         "cms"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "060",
-      "name": "Page Builder — Design & Content",
+      "name": "Page Builder — Designer, Content & Storefront",
       "file": "regression/suites/Backend/page-builder/060-page-builder-design-content.csv",
       "domain": "content-cms",
       "layer": "backend",
       "concern": "admin",
       "priority": "P1",
-      "testCount": 101,
-      "estimatedMinutes": 60,
+      "testCount": 58,
+      "estimatedMinutes": 30,
       "agent": "qa-backend-expert",
       "tags": [
         "cms",
@@ -1790,7 +2018,34 @@
         "cms"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
+    },
+    {
+      "id": "060b",
+      "name": "Page Builder — Field Types, Asset Library & Operations",
+      "file": "regression/suites/Backend/page-builder/060b-page-builder-fields-assets.csv",
+      "domain": "content-cms",
+      "layer": "backend",
+      "concern": "admin",
+      "priority": "P1",
+      "testCount": 70,
+      "estimatedMinutes": 30,
+      "agent": "qa-backend-expert",
+      "tags": [
+        "cms",
+        "design",
+        "content",
+        "builder",
+        "assets",
+        "sprint"
+      ],
+      "requiresModules": [
+        "cms"
+      ],
+      "envRiskGate": "staging",
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "061",
@@ -1800,7 +2055,7 @@
       "layer": "backend",
       "concern": "admin",
       "priority": "P1",
-      "testCount": 47,
+      "testCount": 48,
       "estimatedMinutes": 33,
       "agent": "qa-backend-expert",
       "tags": [
@@ -1887,6 +2142,31 @@
       "customerApplicability": "reference"
     },
     {
+      "id": "064b",
+      "name": "CSV Export — File Name Template (VCST-5745)",
+      "file": "regression/suites/Backend/import-export/064b-csv-export-filename.csv",
+      "domain": "platform-config",
+      "layer": "backend",
+      "concern": "admin",
+      "priority": "P1",
+      "testCount": 9,
+      "estimatedMinutes": 12,
+      "agent": "qa-backend-expert",
+      "tags": [
+        "csv",
+        "export",
+        "filename",
+        "settings",
+        "security",
+        "sprint"
+      ],
+      "requiresModules": [
+        "import-export"
+      ],
+      "envRiskGate": "staging",
+      "customerApplicability": "reference"
+    },
+    {
       "id": "065",
       "name": "Shipping",
       "file": "regression/suites/Backend/shipping/065-shipping.csv",
@@ -1955,7 +2235,8 @@
         "whitelabeling"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "068",
@@ -1977,7 +2258,8 @@
         "push-messages"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "069",
@@ -2020,7 +2302,8 @@
         "responsive",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "071",
@@ -2040,18 +2323,19 @@
         "favicon",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "072",
-      "name": "Configurable Products UI",
+      "name": "Configurable Products UI — Sections, Cart & Checkout",
       "file": "regression/suites/Frontend/configurable-products/072-configurable-products-ui.csv",
       "domain": "catalog-search",
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 113,
-      "estimatedMinutes": 54,
+      "testCount": 57,
+      "estimatedMinutes": 27,
       "agent": "qa-frontend-expert",
       "tags": [
         "configurable-products",
@@ -2060,7 +2344,8 @@
         "widget",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "072b",
@@ -2079,7 +2364,8 @@
         "admin-to-storefront",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "072c",
@@ -2099,7 +2385,8 @@
         "security",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "072d",
@@ -2119,7 +2406,30 @@
         "validation",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
+    },
+    {
+      "id": "072e",
+      "name": "Configurable Products UI — Conditional Sections & Field Behaviour",
+      "file": "regression/suites/Frontend/configurable-products/072e-configurable-products-conditional-sections.csv",
+      "domain": "catalog-search",
+      "layer": "frontend",
+      "concern": "functional",
+      "priority": "P1",
+      "testCount": 56,
+      "estimatedMinutes": 27,
+      "agent": "qa-frontend-expert",
+      "tags": [
+        "configurable-products",
+        "storefront",
+        "pdp",
+        "widget",
+        "conditional-sections",
+        "sprint"
+      ],
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "073",
@@ -2190,7 +2500,8 @@
         "loyalty"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "075b",
@@ -2200,7 +2511,7 @@
       "layer": "backend",
       "concern": "api",
       "priority": "P1",
-      "testCount": 11,
+      "testCount": 13,
       "estimatedMinutes": 15,
       "agent": "qa-backend-expert",
       "tags": [
@@ -2215,7 +2526,13 @@
         "loyalty"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true,
+      "lanes": {
+        "machine": 8,
+        "browser": 4,
+        "manual": 1
+      }
     },
     {
       "id": "075c",
@@ -2239,7 +2556,67 @@
         "loyalty"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "lanes": {
+        "machine": 10,
+        "browser": 0,
+        "manual": 0
+      }
+    },
+    {
+      "id": "075d",
+      "name": "Loyalty Missions",
+      "file": "regression/suites/Backend/loyalty/075d-loyalty-missions.csv",
+      "domain": "customer-b2b",
+      "layer": "backend",
+      "concern": "api",
+      "priority": "P1",
+      "testCount": 34,
+      "estimatedMinutes": 12,
+      "agent": "qa-backend-expert",
+      "tags": [
+        "loyalty",
+        "missions",
+        "graphql",
+        "api",
+        "sprint"
+      ],
+      "requiresModules": [
+        "loyalty"
+      ],
+      "envRiskGate": "staging",
+      "customerApplicability": "reference",
+      "lanes": {
+        "machine": 28,
+        "browser": 0,
+        "manual": 4,
+        "deprecated": 2
+      }
+    },
+    {
+      "id": "075e",
+      "name": "Loyalty Missions Admin",
+      "file": "regression/suites/Backend/loyalty/075e-loyalty-missions-admin.csv",
+      "domain": "customer-b2b",
+      "layer": "backend",
+      "concern": "admin",
+      "priority": "P1",
+      "testCount": 23,
+      "estimatedMinutes": 20,
+      "agent": "qa-backend-expert",
+      "tags": [
+        "loyalty",
+        "missions",
+        "admin",
+        "admin-spa",
+        "sprint"
+      ],
+      "requiresModules": [
+        "loyalty"
+      ],
+      "envRiskGate": "staging",
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "076",
@@ -2271,7 +2648,7 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 63,
+      "testCount": 65,
       "estimatedMinutes": 37,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -2282,7 +2659,8 @@
         "sprint"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "077b",
@@ -2302,18 +2680,19 @@
         "storefront",
         "VCST-4896"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "078",
-      "name": "Backend Smoke Tests",
+      "name": "Backend Smoke — Platform, API & GraphQL",
       "file": "regression/suites/Backend/smoke/078-backend-smoke-tests.csv",
       "domain": "cross-cutting",
       "layer": "backend",
       "concern": "functional",
       "priority": "P0",
-      "testCount": 115,
-      "estimatedMinutes": 83,
+      "testCount": 27,
+      "estimatedMinutes": 20,
       "agent": "qa-backend-expert",
       "tags": [
         "smoke",
@@ -2323,14 +2702,78 @@
         "admin",
         "api",
         "graphql",
-        "orders",
-        "catalog",
-        "pricing",
-        "inventory",
         "auth",
         "regression"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
+    },
+    {
+      "id": "078b",
+      "name": "Backend Smoke — Catalog, Search & Pricing Admin",
+      "file": "regression/suites/Backend/smoke/078b-backend-smoke-catalog-pricing.csv",
+      "domain": "cross-cutting",
+      "layer": "backend",
+      "concern": "functional",
+      "priority": "P0",
+      "testCount": 31,
+      "estimatedMinutes": 22,
+      "agent": "qa-backend-expert",
+      "tags": [
+        "smoke",
+        "daily",
+        "pre-deploy",
+        "admin",
+        "catalog",
+        "pricing",
+        "inventory",
+        "regression"
+      ],
+      "customerApplicability": "universal",
+      "clickDriven": true
+    },
+    {
+      "id": "078c",
+      "name": "Backend Smoke — Orders, Customers & Marketing Admin",
+      "file": "regression/suites/Backend/smoke/078c-backend-smoke-commerce.csv",
+      "domain": "cross-cutting",
+      "layer": "backend",
+      "concern": "functional",
+      "priority": "P0",
+      "testCount": 29,
+      "estimatedMinutes": 21,
+      "agent": "qa-backend-expert",
+      "tags": [
+        "smoke",
+        "daily",
+        "pre-deploy",
+        "admin",
+        "orders",
+        "regression"
+      ],
+      "customerApplicability": "universal",
+      "clickDriven": true
+    },
+    {
+      "id": "078d",
+      "name": "Backend Smoke — Content & Admin Workflows",
+      "file": "regression/suites/Backend/smoke/078d-backend-smoke-content-workflows.csv",
+      "domain": "cross-cutting",
+      "layer": "backend",
+      "concern": "functional",
+      "priority": "P0",
+      "testCount": 28,
+      "estimatedMinutes": 20,
+      "agent": "qa-backend-expert",
+      "tags": [
+        "smoke",
+        "daily",
+        "pre-deploy",
+        "admin",
+        "regression"
+      ],
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "079",
@@ -2356,7 +2799,8 @@
         "marketing"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "081",
@@ -2380,7 +2824,8 @@
         "PR-129",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "082",
@@ -2400,7 +2845,8 @@
         "security",
         "sprint"
       ],
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "083",
@@ -2420,7 +2866,8 @@
         "currency-override",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "083b",
@@ -2430,7 +2877,7 @@
       "layer": "frontend",
       "concern": "e2e",
       "priority": "P1",
-      "testCount": 7,
+      "testCount": 8,
       "estimatedMinutes": 15,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -2440,7 +2887,58 @@
         "multi-currency",
         "sprint"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
+    },
+    {
+      "id": "083c",
+      "name": "Loyalty Missions Storefront",
+      "file": "regression/suites/Frontend/loyalty/083c-loyalty-missions-storefront.csv",
+      "domain": "customer-b2b",
+      "layer": "frontend",
+      "concern": "functional",
+      "priority": "P1",
+      "testCount": 84,
+      "estimatedMinutes": 75,
+      "agent": "qa-frontend-expert",
+      "tags": [
+        "loyalty",
+        "missions",
+        "account",
+        "modal",
+        "a11y",
+        "sprint"
+      ],
+      "requiresModules": [
+        "loyalty"
+      ],
+      "customerApplicability": "reference",
+      "clickDriven": true
+    },
+    {
+      "id": "083d",
+      "name": "Loyalty Missions E2E",
+      "file": "regression/suites/Frontend/loyalty/083d-loyalty-missions-e2e.csv",
+      "domain": "customer-b2b",
+      "layer": "frontend",
+      "concern": "e2e",
+      "priority": "P1",
+      "testCount": 8,
+      "estimatedMinutes": 40,
+      "agent": "qa-frontend-expert",
+      "tags": [
+        "loyalty",
+        "missions",
+        "e2e",
+        "checkout",
+        "mixed-cart",
+        "sprint"
+      ],
+      "requiresModules": [
+        "loyalty"
+      ],
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "084",
@@ -2459,7 +2957,8 @@
         "cms",
         "admin",
         "sprint"
-      ]
+      ],
+      "clickDriven": true
     },
     {
       "id": "085",
@@ -2481,7 +2980,8 @@
       "requiresModules": [
         "task-management"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "086",
@@ -2503,7 +3003,12 @@
         "customer-reviews"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "lanes": {
+        "machine": 16,
+        "browser": 0,
+        "manual": 0
+      }
     },
     {
       "id": "087",
@@ -2525,7 +3030,13 @@
         "customer-reviews"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true,
+      "lanes": {
+        "machine": 12,
+        "browser": 0,
+        "manual": 3
+      }
     },
     {
       "id": "088",
@@ -2535,7 +3046,7 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P2",
-      "testCount": 11,
+      "testCount": 28,
       "estimatedMinutes": 15,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -2547,7 +3058,8 @@
         "customer-reviews"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "universal"
+      "customerApplicability": "universal",
+      "clickDriven": true
     },
     {
       "id": "089",
@@ -2557,7 +3069,7 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 48,
+      "testCount": 55,
       "estimatedMinutes": 84,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -2570,7 +3082,8 @@
       "requiresModules": [
         "sales-rep"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "090",
@@ -2580,7 +3093,7 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 20,
+      "testCount": 22,
       "estimatedMinutes": 45,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -2593,7 +3106,8 @@
       "requiresModules": [
         "sales-rep"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "091",
@@ -2603,7 +3117,7 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 35,
+      "testCount": 58,
       "estimatedMinutes": 71,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -2616,31 +3130,8 @@
       "requiresModules": [
         "sales-rep"
       ],
-      "customerApplicability": "reference"
-    },
-    {
-      "id": "092",
-      "name": "Sales Rep — Admin Embedded App (back-office)",
-      "file": "regression/suites/Backend/sales-rep/092-sales-rep-admin-embedded-app.csv",
-      "domain": "sales-rep",
-      "layer": "backend",
-      "concern": "functional",
-      "priority": "P1",
-      "testCount": 22,
-      "estimatedMinutes": 95,
-      "agent": "qa-backend-expert",
-      "tags": [
-        "sales-rep",
-        "admin",
-        "embedded-app",
-        "backend",
-        "b2b",
-        "feature-gated"
-      ],
-      "requiresModules": [
-        "sales-rep"
-      ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "092",
@@ -2663,7 +3154,179 @@
       "requiresModules": [
         "sales-rep"
       ],
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
+    },
+    {
+      "id": "092b",
+      "name": "Sales Rep — Admin Embedded App (back-office)",
+      "file": "regression/suites/Backend/sales-rep/092b-sales-rep-admin-embedded-app.csv",
+      "domain": "sales-rep",
+      "layer": "backend",
+      "concern": "functional",
+      "priority": "P1",
+      "testCount": 22,
+      "estimatedMinutes": 95,
+      "agent": "qa-backend-expert",
+      "tags": [
+        "sales-rep",
+        "admin",
+        "embedded-app",
+        "backend",
+        "b2b",
+        "feature-gated"
+      ],
+      "requiresModules": [
+        "sales-rep"
+      ],
+      "customerApplicability": "reference",
+      "clickDriven": true
+    },
+    {
+      "id": "093",
+      "name": "Sales Rep — Hub Dashboard (storefront)",
+      "file": "regression/suites/Frontend/sales-rep/093-sales-rep-hub-dashboard-storefront.csv",
+      "domain": "sales-rep",
+      "layer": "frontend",
+      "concern": "functional",
+      "priority": "P1",
+      "testCount": 63,
+      "estimatedMinutes": 61,
+      "agent": "qa-frontend-expert",
+      "tags": [
+        "sales-rep",
+        "storefront",
+        "hub-dashboard",
+        "saved-layout",
+        "b2b",
+        "feature-gated"
+      ],
+      "requiresModules": [
+        "sales-rep"
+      ],
+      "customerApplicability": "reference",
+      "clickDriven": true
+    },
+    {
+      "id": "094",
+      "name": "UCP Observability",
+      "file": "regression/suites/Backend/ucp/094-ucp-observability.csv",
+      "domain": "observability",
+      "layer": "backend",
+      "concern": "api",
+      "priority": "P2",
+      "testCount": 23,
+      "estimatedMinutes": 35,
+      "agent": "qa-backend-expert",
+      "tags": [
+        "ucp",
+        "observability",
+        "telemetry",
+        "mcp",
+        "appinsights",
+        "opentelemetry"
+      ],
+      "customerApplicability": "universal",
+      "requiresModules": [
+        "VirtoCommerce.UCP",
+        "VirtoCommerce.OpenTelemetry",
+        "VirtoCommerce.ApplicationInsights"
+      ],
+      "notes": "VCST-5544. Needs App Insights READ access (AAD via Connect-AzAccount, or APPINSIGHTS_API_KEY_BACKEND) — without it every telemetry assertion is unverifiable, not failing. Adaptive sampling on the AI resource (~1-in-8) means a single request may leave no telemetry: repeat >=14x or disable sampling before concluding a signal is absent. 4 cases are Manual (InputCaptureMode matrix + bridge-off + breaking-change communication) and need an ISOLATED stand: the settings bind through a cached IOptions and are read only at startup, so each change is an appsettings edit + platform restart. Excluded from the backend/full selections until /qa-test 5g promotion — 19 cases are still Draft and UCPO-005/014/018 intentionally document defects that are OPEN."
+    },
+    {
+      "id": "095",
+      "name": "Background Jobs — Hangfire Migration",
+      "file": "regression/suites/Backend/background-jobs/095-background-jobs-migration.csv",
+      "domain": "background-jobs",
+      "layer": "backend",
+      "concern": "api",
+      "priority": "P1",
+      "testCount": 52,
+      "estimatedMinutes": 90,
+      "agent": "qa-backend-expert",
+      "tags": [
+        "background-jobs",
+        "platform",
+        "migration",
+        "hangfire",
+        "api",
+        "security"
+      ],
+      "requiresModules": [
+        "background-jobs"
+      ],
+      "envRiskGate": "staging",
+      "customerApplicability": "reference",
+      "notes": "VCST-5490. _COVERAGE-GAP (2026-08-17): RefundChangedJobHandler and CancelPaymentJobHandler have REGISTRATION + SECURITY-GATE coverage only (BGJ-006 flags both triggerable=false; BGJ-009 enqueue-refused for CancelPaymentJobHandler; BGJ-010 enqueue-refused for RefundChangedJobHandler) — their BUSINESS OUTCOME is NOT covered on any environment. Two cases (former BGJ-030 CancelPaymentJobHandler trigger path, former BGJ-031 RefundChangedJobHandler via Return resolution) were authored, evidence-checked live, and REMOVED rather than left permanently BLOCKED. Why: (1) no void/cancel REST route exists at all — only capture/refund; (2) neither payment gateway on this env supports refund — DefaultManualPaymentMethod returns 200 {succeeded:false, errorCode:\"PAYMENT_FAILED\"} (a leaked EF DbUpdateException), SkyflowPaymentMethod returns 200 {succeeded:false, errorCode:\"INVALID_REQUEST_ERROR\", errorMessage:\"Payment method does not support refund\"}; (3) seeded fixtures carry 0 payment transactions (paymentStatus=Paid was set directly by the seeder, nothing to refund against); (4) the only other candidate trigger — VirtoCommerce.Return's resolution field — does NOT create a payment refund: `resolution` is a free-text nullable string (not an enum), all 4 pre-existing returns with resolution=\"refund\" have orders with refunds=0 (two still payment-status New), and neither Return creation nor Return approval (New->Approved) raises an order event (confirmed live: modifiedDate/changelog/all Hangfire queues unchanged). There is no reachable path to either handler's business outcome on any environment available to this suite. What a future environment would need to re-add these cases: a refund-capable payment gateway (neither DefaultManualPaymentMethod nor Skyflow qualifies) PLUS an order whose payment carries a real captured transaction (not a directly-seeded PaymentStatus=Paid with no transaction history) — that precondition should gate re-authoring, not just re-running. IDs BGJ-030/BGJ-031 are retired, not reused."
+    },
+    {
+      "id": "096",
+      "name": "Backup Restore — PR Verification Log",
+      "file": "regression/suites/Backend/import-export/096-backup-restore.csv",
+      "domain": "platform-config",
+      "layer": "backend",
+      "concern": "api",
+      "priority": "P1",
+      "testCount": 75,
+      "estimatedMinutes": 38,
+      "agent": "qa-backend-expert",
+      "tags": [
+        "verification",
+        "api",
+        "rest",
+        "platform",
+        "import",
+        "export"
+      ],
+      "customerApplicability": "universal",
+      "envRiskGate": "staging"
+    },
+    {
+      "id": "097",
+      "name": "Sales Rep — Customer Orders (storefront)",
+      "file": "regression/suites/Frontend/sales-rep/097-sales-rep-customer-orders-storefront.csv",
+      "domain": "sales-rep",
+      "layer": "frontend",
+      "concern": "functional",
+      "priority": "P1",
+      "testCount": 37,
+      "estimatedMinutes": 40,
+      "agent": "qa-frontend-expert",
+      "tags": [
+        "sales-rep",
+        "storefront",
+        "customer-orders",
+        "orders",
+        "b2b",
+        "feature-gated"
+      ],
+      "requiresModules": [
+        "sales-rep"
+      ],
+      "customerApplicability": "reference",
+      "clickDriven": true
+    },
+    {
+      "id": "098",
+      "name": "Product Compare v2",
+      "file": "regression/suites/Frontend/catalog/098-product-compare.csv",
+      "domain": "catalog-search",
+      "layer": "frontend",
+      "concern": "functional",
+      "priority": "P2",
+      "testCount": 35,
+      "estimatedMinutes": 26,
+      "agent": "qa-frontend-expert",
+      "tags": [
+        "catalog",
+        "compare",
+        "product-compare",
+        "storefront",
+        "sprint"
+      ],
+      "customerApplicability": "universal",
+      "clickDriven": true
     }
   ],
   "selections": {
@@ -2671,13 +3334,19 @@
     "smoke": {
       "include": [
         "042",
-        "078"
+        "078",
+        "078b",
+        "078c",
+        "078d"
       ]
     },
     "critical": {
       "include": [
         "042",
         "078",
+        "078b",
+        "078c",
+        "078d",
         "039",
         "044",
         "049"
@@ -2703,7 +3372,8 @@
         "002",
         "003",
         "051",
-        "053"
+        "053",
+        "098"
       ]
     },
     "search": {
@@ -2716,6 +3386,7 @@
     "orders": {
       "include": [
         "014",
+        "014b",
         "015",
         "017",
         "018",
@@ -2791,7 +3462,10 @@
       },
       "exclude": [
         "050m",
-        "092"
+        "050m2",
+        "092",
+        "092b",
+        "094"
       ]
     },
     "sprint": {
@@ -2802,6 +3476,7 @@
         "046",
         "047",
         "050m",
+        "050m2",
         "063",
         "068",
         "069",
@@ -2809,26 +3484,38 @@
         "089",
         "090",
         "091",
-        "092"
+        "092",
+        "092b",
+        "093",
+        "097"
       ]
     },
     "full": {
       "all": true,
       "exclude": [
         "050m",
+        "050m2",
         "089",
         "090",
         "091",
-        "092"
+        "092",
+        "092b",
+        "093",
+        "096",
+        "097"
       ]
     },
     "sales-rep": {
       "include": [
         "050m",
+        "050m2",
         "089",
         "090",
         "091",
-        "092"
+        "092",
+        "092b",
+        "093",
+        "097"
       ]
     },
     "domain:purchase-flow": {
@@ -2896,7 +3583,8 @@
         "concern": "api"
       },
       "exclude": [
-        "050m"
+        "050m",
+        "050m2"
       ]
     },
     "concern:admin": {
@@ -2913,7 +3601,9 @@
         "075b",
         "075c",
         "083",
-        "083b"
+        "083b",
+        "083c",
+        "083d"
       ]
     },
     "customer-reviews": {

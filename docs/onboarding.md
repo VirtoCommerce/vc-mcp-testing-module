@@ -6,7 +6,7 @@
 >
 > | | **`vc-fix` plugin** | **Full `vc-qa` toolset** |
 > |---|---|---|
-> | What | The bug-lifecycle slice: setup, bug filing, autofix, verification, monitoring, self-diagnostics (8 agents / 16 skills / 8 commands). | The whole crew: regression, BA analysis, ~110 reference suites, test-data + authoring framework (19 agents / 38 skills / 30 commands). |
+> | What | The bug-lifecycle slice: setup, bug filing, autofix, verification, monitoring, self-diagnostics (10 agents / 16 skills / 8 commands). | The whole crew: regression, BA analysis, ~121 reference suites, test-data + authoring framework (17 agents / 40 skills / 31 commands). |
 > | How you get it | `/plugin install vc-fix@vc-tools` from the marketplace. | **Clone this repo** — `.claude/` components auto-load in the checkout. **Not** marketplace-installable. |
 > | This guide | **Install & Verify** below. | Everything **after Verify** (regression selections, module subsetting, suite authoring). |
 >
@@ -188,12 +188,21 @@ Install these via Claude Code's MCP settings (`.mcp.json` or `claude_code/settin
 ```jsonc
 {
   "mcpServers": {
-    "playwright-chrome":  { "command": "npx", "args": ["@playwright/mcp@latest", "--config", "config/mcp-playwright-chrome.config.json"] },
-    "playwright-firefox": { "command": "npx", "args": ["@playwright/mcp@latest", "--config", "config/mcp-playwright-firefox.config.json"] },
-    "playwright-edge":    { "command": "npx", "args": ["@playwright/mcp@latest", "--config", "config/mcp-playwright-edge.config.json"] }
+    "playwright-chrome":  { "command": "npx", "args": ["@playwright/mcp@0.0.77", "--config", "config/mcp-playwright-chrome.config.json"] },
+    "playwright-firefox": { "command": "npx", "args": ["@playwright/mcp@0.0.77", "--config", "config/mcp-playwright-firefox.config.json"] },
+    "playwright-edge":    { "command": "npx", "args": ["@playwright/mcp@0.0.77", "--config", "config/mcp-playwright-edge.config.json"] }
   }
 }
 ```
+
+**Pin the version — never `@playwright/mcp@latest`.** The pin must match `package.json`'s
+`@playwright/mcp` devDependency and `PLAYWRIGHT_MCP_PACKAGE` in `ci/lib/lane-mcp.ts`; `/project-init`'s
+`gen-mcp.mjs` emits it for the same reason. Two things break on drift: each MCP release bundles its own
+`playwright-core`, which demands a specific browser build — one you may not have, so an `@latest` bump
+fails the lane at launch mid-run with *"Executable doesn't exist"* — and bare-screenshot path resolution
+is version-specific, which `/qa-bug`'s `_incoming/` reconcile depends on
+([`.claude/skills/qa-evidence/output-paths.md`](../.claude/skills/qa-evidence/output-paths.md)). An
+unpinned lane also stops reproducing what `ci/run-regression.ts` runs.
 
 Optional (each gates specific skills):
 - **postman** — enables `/qa-postman`, `/qa-api test`
@@ -269,7 +278,6 @@ After your first green `/qa-smoke`:
 - Try a focused regression: `/qa-regression critical`
 - Run a design audit: `/qa-design <your storefront page>`
 - Explore the agent set: `knowledge/agents/README.md`
-- Read the methodology: `skills/qa-process/test-process-lifecycle.md`
 
 **Week 1:**
 - Identify vcst-specific suites that don't apply to your deployment; add them to your local suite-skip list.

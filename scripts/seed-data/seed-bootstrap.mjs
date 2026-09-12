@@ -45,20 +45,28 @@ const passthrough = process.argv.slice(2).filter((a) => a === '--dry-run' || a =
  * block a full clean). Invoked with `npm run seed:bootstrap -- --teardown`.
  */
 const TEARDOWN_STEPS = [
+  // Wishlists are carts referencing products AND a security account, so they go before both.
+  { name: 'wishlists', script: 'wishlists/seed-wishlists.mjs', args: ['--teardown'] },
   // Orders/quotes reference products + users, so sweep them FIRST (before the entities they point at).
   { name: 'quotes', script: 'orders/seed-quotes.mjs', args: ['--teardown'] },
   { name: 'orders', script: 'orders/seed-order-states.mjs', args: ['--teardown'] },
   { name: 'white-labeling', script: 'white-labeling/seed-white-labeling.mjs', args: ['--teardown'] },
   { name: 'rbac', script: 'platform/seed-backoffice-rbac.mjs', args: ['--teardown'] },
   { name: 'cms-pages', script: 'cms/seed-pagebuilder-pages.mjs', args: ['--teardown'] },
+  // Missions before programs: a mission's SKU targets are children of the mission, and the reverse
+  // order would leave them orphaned behind a deleted parent.
+  { name: 'loyalty-missions', script: 'loyalty/seed-loyalty-missions.mjs', args: ['--teardown'] },
   { name: 'loyalty', script: 'loyalty/seed-loyalty.mjs', args: ['--teardown'] },
   { name: 'loyalty-fixtures', script: 'loyalty/seed-loyalty-fixtures.mjs', args: ['--teardown'] },
   { name: 'promotions', script: 'promotions/seed-promotions.mjs', args: ['--teardown'] },
   { name: 'b2b-addresses', script: 'b2b/seed-b2b-addresses.mjs', args: ['--teardown'] },
   { name: 'company-users', script: 'b2b/seed-company-users.mjs', args: ['--teardown'] },
   { name: 'bopis', script: 'bopis/seed-bopis.mjs', args: ['--teardown'] },
+  // Variation family + its per-FFC stock records — before the fulfillment centers they sit on.
+  { name: 'variation-stock', script: 'inventory/seed-variation-stock.mjs', args: ['--teardown'] },
   { name: 'inventory', script: 'inventory/seed-inventory.mjs', args: ['--teardown'] },
   { name: 'pricing', script: 'pricing/seed-pricing.mjs', args: ['--teardown'] },
+  { name: 'compare', script: 'compare/seed-compare.mjs', args: ['--teardown'] },
   { name: 'configurable', script: 'products/seed-configurable.mjs', args: ['--teardown'] },
   { name: 'products', script: 'products/seed-standard-products.mjs', args: ['--teardown'] },
   { name: 'properties', script: 'catalog/seed-catalog-properties.mjs', args: ['--teardown'] },
@@ -95,6 +103,9 @@ const STEPS = [
   { name: 'store', script: 'store/seed-store.mjs', required: true, priority: 80 },
   { name: 'properties', script: 'catalog/seed-catalog-properties.mjs', required: true, priority: 30 },
   { name: 'products', script: 'products/seed-standard-products.mjs', required: true, priority: 40 },
+  // Compare fixtures own their two ad-hoc category roots and need the catalog structure + a
+  // fulfillment center, so they follow the standard products phase and precede configurables.
+  { name: 'compare', script: 'compare/seed-compare.mjs', required: false, priority: 45 },
   { name: 'configurable', script: 'products/seed-configurable.mjs', required: false, priority: 50 },
   // NOTE: no generic 'pricing' phase — standard-products + configurable price their OWN products
   // (distinct per-product prices). The generic seed-pricing.mjs set a FLAT 99.99 pricelist at high
@@ -118,6 +129,12 @@ const STEPS = [
   // seed-loyalty-balance.mjs, which is manual-only and NOT wired here because it places real orders).
   { name: 'loyalty-fixtures', script: 'loyalty/seed-loyalty-fixtures.mjs', required: false, priority: 118 },
   { name: 'loyalty', script: 'loyalty/seed-loyalty.mjs', required: false, priority: 120 },
+  // VCST-5319 Loyalty Missions. OPTIONAL and after the programs: the missions endpoints only exist on
+  // a build that ships the feature, and the PerSku goals resolve their two target products by live
+  // catalog discovery, so the products phase (40) must already have run. It turns ONLY
+  // `Loyalty.Missions.Enable` on and never touches the base `Loyalty.Enable` that suites 075/075b/075c
+  // read through LOYALTY_SETTINGS.
+  { name: 'loyalty-missions', script: 'loyalty/seed-loyalty-missions.mjs', required: false, priority: 122 },
   { name: 'white-labeling', script: 'white-labeling/seed-white-labeling.mjs', required: false, priority: 130 },
   // Restricted back-office (Manager) RBAC account for CMS-123/124 — read-only Page Builder, no
   // builder:update. Independent of the catalog/user graph (own role + account); optional.
@@ -130,6 +147,14 @@ const STEPS = [
   // products. Optional: quotes need the Quote module deployed + Stores.EnableQuotes on the store.
   { name: 'orders', script: 'orders/seed-order-states.mjs', required: false, priority: 140 },
   { name: 'quotes', script: 'orders/seed-quotes.mjs', required: false, priority: 145 },
+  // VCST-5546 / INV-047 — a variation family stocked on the store's MAIN fulfillment center, so it
+  // runs after `inventory` (70) has ensured the fulfillment centers exist.
+  { name: 'variation-stock', script: 'inventory/seed-variation-stock.mjs', required: false, priority: 72 },
+  // VCST-5705 / CAT-079 + CAT-080 + WISH-30 — two wishlists in two REAL stores. Runs last: it needs
+  // the catalog structure and a fulfillment center, and it creates its own products + customer.
+  // `required: false` because it hard-aborts on an env with no genuine second store
+  // (STORE_ID_SECONDARY), which is a legitimate deployment shape — see seed-wishlists.mjs.
+  { name: 'wishlists', script: 'wishlists/seed-wishlists.mjs', required: false, priority: 150 },
 ].sort((a, b) => a.priority - b.priority);
 
 function runStep(step) {

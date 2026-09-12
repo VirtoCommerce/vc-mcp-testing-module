@@ -139,7 +139,7 @@ Ensures the test case has all information an agent needs to execute independentl
 
 ---
 
-## Dimension 4: Testability
+## Dimension 4: Testability & Assertion Strength
 
 Ensures assertions can be objectively evaluated as PASS or FAIL with no human judgment.
 
@@ -164,6 +164,97 @@ Ensures assertions can be objectively evaluated as PASS or FAIL with no human ju
 - **Detection:** Assertion references a state that cannot be verified through available tools (DOM, API, console, network).
 - **Bad:** `[STATE] email received by user` (no email checking tool)
 - **Acceptable:** `[EMAIL] order confirmation email received within 60s` (if email verification is available)
+
+### T-005: Unscoreable prose in an EVALUATED assertion `[Critical]`
+- **Scope:** runner-native GraphQL cases (`[GQL-OP]` in Steps) and only the **verdict-affecting** tags the runner evaluates — `[ERRORS] [DATA] [NULL] [COUNT] [VAR] [PERF]`. `[EVIDENCE]/[MATH]/[ROUNDTRIP]/[ADMIN]/[STOREFRONT]/[EVENT]`, and the `Cross_Layer_Checks` / `Failure_Signals` / `Preconditions` / `References` columns, are **meant** to hold English and are never flagged. A non-runner case's assertions are read by an agent, which handles prose — also never flagged.
+- **Detection:** the predicate is not scoreable against the grammar in [`knowledge/api/graphql-test-cases-runner.md` §4](../../knowledge/api/graphql-test-cases-runner.md). Two shapes, both guaranteed to fail on every build regardless of the product: *unparseable* (no branch matches → the runner emits `unrecognized <KIND> predicate`) and *prose-operand* (a comparison branch matches but an operand is English, so the runner reports `lhs=undefined rhs=undefined`). The verdict is delegated to `classifyPredicateScoreability()` in `scripts/lib/graphql-assertions.ts` — the evaluator's own module — so the gate can never be stricter than the runner.
+- **Why Critical:** the case reds for a reason unrelated to the product **and** the false red masks the real assertions in the same case that passed. In `REG-2026-08-25-1128`, 5 of 14 non-passing new cases failed this way (e.g. `SR-GQL-119` — 8 of 9 assertions passed).
+- **Not a `{HYPOTHESIS}` rule.** A tagged hypothesis is legitimate while authoring (that is GRD-001's business); the defect is prose in an evaluated predicate, tagged or not.
+- **Bad:** `[DATA label=q] verify whether data.pushMessages.totalCount increased after the share {HYPOTHESIS}`
+- **Bad:** `[DATA label=q] data.product.loyaltyPoints is present (…); WHEN a factor is configured: data.product.loyaltyPoints.amount >= 0 and …`
+- **Bad:** `[DATA label=q] data.org.myStatus = "Approved" (BL-B2B-009: …)` — the trailing parenthetical trips the arithmetic branch, which compares numbers and can never match a string.
+- **Good:** `[DATA label=q] data.pushMessages.totalCount > 0 {HYPOTHESIS}` (+ the prose rationale moved to `Cross_Layer_Checks`)
+- **Fine:** `[ERRORS label=q] errors[] empty — every Product field must resolve` (the evaluator is prefix-anchored; a trailing rationale is not read)
+
+---
+
+### FLOW-001: Nothing in this suite crosses the value chain end to end `[Informational, file-level, Frontend suites]`
+
+**The rule.** A Frontend suite carries at least one case marked `[JOURNEY]` (in `Title` or `Section`)
+or stamped `Technique:FLOW` in `References` — a case that traverses the feature's whole value chain in
+one run, on the surface a customer actually uses. Chain and technique: `/qa-test-design`
+`test-design-techniques.md` §1a; the model field it comes from is `/qa-test` Step 1e Part 0.
+
+**Detection:** the suite path is under `Frontend/`, it has ≥1 case, and no case carries either marker.
+
+**Why it is a separate dimension from T-006, and why neither replaces the other.** T-006 asks whether
+an assertion **can fail**; FLOW-001 asks whether anyone **cares if it does**. The two are independent,
+and a suite can be excellent on the first and empty on the second — which is not hypothetical:
+`083c-loyalty-missions-storefront` scores 41 `INV` assertions and 58 `KEEP` under `npm run tc:rank`,
+and it placed **zero orders**, with 54 of its 71 cases never leaving one page. The mission feature's
+actual mechanism — an order advances progress, completion grants points, the points are spendable —
+was covered by 11% of 127 cases, and its last link by one case written on the final day. A strongly
+asserted check on something nobody's money depends on is precisely a garbage case, and T-006 rates it
+green.
+
+**A link is crossed only by an observation on the far side of it.** Proving the API moves a number and
+proving the page renders a number it was handed are two observations of ONE link; the join between them
+— where integration defects live — is covered only by a case that causes the effect and then observes
+it on the other surface.
+
+**Scoped to Frontend on purpose.** "The customer's own surface" is the whole point of the rule, and a
+Backend contract suite legitimately has no journey — firing on all 74 of them would be noise, and noise
+is how a rule gets `--warn-only`'d into silence.
+
+**Informational and file-level on purpose**, same shape and same reason as T-006 and TRI-000: the
+measured baseline on 2026-08-28 was **8 of 58** Frontend suites carrying a journey case (**0 of 74**
+Backend), with 37 Frontend suites of ≥20 cases and no journey — including `011-checkout-flow` (71) and
+`014-orders-frontend` (98). A High would turn the corpus red on day one. It is a burn-down signal, not
+a gate.
+
+**The marker is authored, never inferred.** Guessing "is this case end-to-end?" from step text would
+manufacture a verdict the author never made — the same discipline that keeps `UNKNOWN` separate from
+`PRES` in T-006.
+
+**Action under `--fix`:** do **not** synthesise a journey case from existing rows, and never satisfy the
+rule by inverting an assertion so a case matches current behaviour. Report the gap and route it to
+`/qa-test-design` §1a → `/qa-test-cases-generator` Step 3 §1, where the chain is modelled first and the
+journey authored from it.
+
+### T-006: Assertion is presence-only — cannot fail on a wrong value `[Informational file-level / Blocker at the appender]`
+
+**The rule.** Every case must carry ≥1 assertion of class `INV`, `REL`, `DER` or `SHAPE`. `PRES`
+(visible / shown / present / renders / exists) is legal only as a *guard*, never as the case's only
+check. Classes are defined in `qa-test-cases-generator/test-case-template.md` §Assertion STRENGTH;
+the classifier is `classifyAssertionStrength()` in `scripts/test-cases/lint-test-cases.ts`.
+
+**Detection:** every non-empty assertion line classifies as `PRES` (or `UNKNOWN`).
+
+- **Bad:** `[DOM] Thumbnail strip visible with multiple images` + `[STATE] Clicking thumbnail updates the main image` — real case `CAT-011`. Passes with two broken images and with the *wrong* image loaded.
+- **Good:** `[REL] main image src == the clicked thumbnail's full-size src` + `[COUNT] thumbnails == @td(PROD_CFG_BIKE.imageCount)`.
+
+**Why this dimension exists, and why T-002 does not cover it.** T-002's bar is *name an element* —
+`[DOM] cart badge is visible` names one and passes. T-001 rejects adverbs. Neither asks the only
+question that matters: **would this assertion still pass if the feature were broken?** Measured when
+the rule was added: 1 044 of 1 961 Frontend cases (53%) were presence-only, verb ratio 5:1 in favour
+of presence. The bug corpus confirms the consequence — `non-usd-price-zero-display` renders a literal
+`£0.00`, so "price is visible" passes.
+
+**This dimension is also the escape hatch from Dim 5 and Dim 10.** GRD-002 forbids an invented
+literal and DV-016 forbids a hardcoded value; together they left `PRES` as the only legal form.
+`INV`, `REL` and `SHAPE` are all literal-free, so they satisfy both rules *and* discriminate. When an
+author cannot legally state the expected value, the answer is a `REL` assertion (compare the system
+to itself), not a retreat to `PRES`.
+
+**Two severities on purpose:**
+- **Corpus-wide** it is one **Informational** file-level tally, same shape and same reason as GRD-001's
+  legacy tally and TRI-000: ~1 900 per-case Highs on day one would turn every suite red and push
+  everyone to `--warn-only`, killing the signal permanently.
+- **At the appender** (`append-test-cases-to-suite.ts`) it is a hard error, because that path sees
+  only NEW rows — so the legacy corpus is untouched and a new weak case simply never lands.
+
+**Auto-fixable:** No. Strengthening an assertion requires knowing what the correct value is.
+Hand off to `/qa-test-cases-generator` with the case as input.
 
 ---
 

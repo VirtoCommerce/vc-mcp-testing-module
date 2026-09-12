@@ -11,7 +11,7 @@ in **lock-step with the collector's inline consts** (Tier 1 uses them); the pros
 the diagnostician's judgment guide (Tier 2).
 
 > **Reference, don't restate.** Gate IDs (`G0`–`G7`) are defined once in
-> [`../../.claude/rules/quality-gates.md`](../../.claude/rules/quality-gates.md); report
+> [`../../.claude/knowledge/execution/quality-gates.md`](../../.claude/knowledge/execution/quality-gates.md); report
 > size caps live once in [`../../.claude/rules/reports.md`](../../.claude/rules/reports.md).
 > This file cites them by ID/name and never re-defines them.
 
@@ -314,7 +314,7 @@ Each entry lists the **expected phases/gates**, the **required outputs**, and
 Step-1 collector's signals can actually surface.
 
 ### `/project-init` — onboard the plugin onto a deployment
-- **Expected phases** (`commands/project-init.md` → the `/project-init` skill): install deps → ask *only* env name + tracker (Jira/Azure Boards) + code host (GitHub/Azure Repos) + auth-per-axis → **derive** projectType/client-org/contribution-mode/fork-account from token + live module/repo scan → write `project-profile.json` + `.env.<env>` + `.env.local` + `.mcp.json` → **verify access** (readiness table).
+- **Expected phases** (`plugins/vc-fix/commands/project-init.md` → the `/project-init` skill): install deps → ask *only* env name + tracker (Jira/Azure Boards) + code host (GitHub/Azure Repos) + auth-per-axis → **derive** projectType/client-org/contribution-mode/fork-account from token + live module/repo scan → write `project-profile.json` + `.env.<env>` + `.env.local` + `.mcp.json` → **verify access** (readiness table).
 - **Required outputs:** `project-profile.json` (valid JSON, at the project root — never under the plugin dir), `.env.<env>` + `.env.local`, `.mcp.json`, and a printed readiness table.
 - **Anti-patterns:**
   - **S1** — the run ends with no `project-profile.json` written (or it landed under the plugin install dir instead of `outputRoot`), or the verify-access step never ran. *Signal:* required-output missing; `permission_denied`/`tool_error` on the token probe with no recovery.
@@ -322,7 +322,7 @@ Step-1 collector's signals can actually surface.
   - **S3** — one `permission_denied` on an optional MCP the skill recovered from (noted, non-blocking).
 
 ### `/qa-bug` — reproduce, evidence, report, (optional) file
-- **Expected phases** (`commands/qa-bug.md`): Step 0 pre-flight (build/version + Context7 + dup check) → Step 1 gather/reproduce → **Step 2 4-Layer Validation** → Step 3 research + resolve exact repo → Step 4 write report → Step 5 (optional, consent-gated) create ticket.
+- **Expected phases** (`plugins/vc-fix/commands/qa-bug.md`): Step 0 pre-flight (build/version + Context7 + dup check) → Step 1 gather/reproduce → **Step 2 4-Layer Validation** → Step 3 research + resolve exact repo → Step 4 write report → Step 5 (optional, consent-gated) create ticket.
 - **Required outputs:** a `reports/bugs/open/BUG-*.md` with the **Fix Routing block** filled; a tracker ticket **only if** the user said yes.
 - **Anti-patterns:**
   - **S1** — no bug report written despite a reproduced defect; or a ticket was filed **without** the explicit user "yes" (consent violation). *Signal:* required-output missing; a tracker-create tool call with no preceding consent in the transcript.
@@ -339,7 +339,7 @@ Step-1 collector's signals can actually surface.
   - **S3** — one `permission_denied` on a clone/gh call that a retry resolved.
 
 ### `/qa-verify-fix` — verify a deployed fix, transition the ticket
-- **Expected phases** (`commands/qa-verify-fix.md`): Step 0 pre-flight → Step 1 fetch ticket → **Step 2 confirm-deployment hard gate** → Step 3 transition to `testing` (ONLY after Step 2) → Step 4 checklist → Step 5 execute (STR ×3) → Step 6 decide + transition by role → Step 7 summary.
+- **Expected phases** (`plugins/vc-fix/commands/qa-verify-fix.md`): Step 0 pre-flight → Step 1 fetch ticket → **Step 2 confirm-deployment hard gate** → Step 3 transition to `testing` (ONLY after Step 2) → Step 4 checklist → Step 5 execute (STR ×3) → Step 6 decide + transition by role → Step 7 summary.
 - **Required outputs:** `reports/tickets/{SPRINT}/VCST-XXXX/verification-summary.json` with a verdict; a role transition consistent with the verdict (or a BLOCKED with no transition).
 - **Anti-patterns:**
   - **S1** — transitioned the ticket to `testing` (or `tested`/`reopen`) **before/without** the Step-2 deploy confirmation — tested old code and moved the ticket on a false "deployed". *Signal:* a transition tool call before any deploy-check evidence; missing Step-2 phase.
@@ -348,7 +348,7 @@ Step-1 collector's signals can actually surface.
   - **S3** — one env probe `tool_error` recovered by a single retry.
 
 ### `/qa-monitoring` — App Insights online monitoring (detect-and-report only)
-- **Expected phases** (`commands/qa-monitoring.md`): Phase 0 pre-flight → 1 query both layers → 2 dedup (fingerprint gate) → 3 triage → 4 live repro (HIGH-confidence REAL_BUG only) → 5 report + notify + **STOP**.
+- **Expected phases** (`plugins/vc-fix/commands/qa-monitoring.md`): Phase 0 pre-flight → 1 query both layers → 2 dedup (fingerprint gate) → 3 triage → 4 live repro (HIGH-confidence REAL_BUG only) → 5 report + notify + **STOP**.
 - **Required outputs:** a `reports/monitoring/MONITOR-*/` summary (within the monitoring cap, `reports.md` §2) ending in the "no ticket filed, no fix attempted" footer. **Never** a filed ticket and **never** a `/qa-fix` invocation.
 - **Anti-patterns:**
   - **S1** — a tracker ticket was filed or a fix was attempted (crosses the detect-and-report-only boundary); or Phase 1 query returned nothing because the App Insights probe was **denied/errored** and the run reported "all clear" anyway (false negative). *Signal:* a tracker-create / `/qa-fix` `skill_start` in the span; `permission_denied`/`tool_error` on the App Insights query with an OK finalize.
@@ -356,7 +356,7 @@ Step-1 collector's signals can actually surface.
   - **S3** — one telemetry-query `tool_error` that a retry recovered.
 
 ### `/qa-env-check` — read-only environment validation
-- **Expected checks** (`commands/qa-env-check.md`): (1) active-config summary → (2) env vars → (3) both-surface endpoint health → (4) MCP availability → (5) plugin local state → (6) profile-driven tracker/host connectivity → **verdict READY / NOT READY**.
+- **Expected checks** (`plugins/vc-fix/commands/qa-env-check.md`): (1) active-config summary → (2) env vars → (3) both-surface endpoint health → (4) MCP availability → (5) plugin local state → (6) profile-driven tracker/host connectivity → **verdict READY / NOT READY**.
 - **Required outputs:** a printed check report ending in an explicit READY / NOT READY verdict. **Read-only** — no browser automation, no writes, no admin actions, target < 30s.
 - **Anti-patterns:**
   - **S1** — the run performed a **write / browser automation / admin action** (violates read-only), or never emitted a verdict. *Signal:* a browser or write tool `tool_use` in a `/qa-env-check` span; missing-output.
@@ -398,7 +398,7 @@ the diagnostician still confirms the root cause and names the fix:
 
 ## 6. References
 
-- Gate ladder G0–G7 + no-auto-merge + client-code containment: [`../../.claude/rules/quality-gates.md`](../../.claude/rules/quality-gates.md)
+- Gate ladder G0–G7 + no-auto-merge + client-code containment: [`../../.claude/knowledge/execution/quality-gates.md`](../../.claude/knowledge/execution/quality-gates.md)
 - Report categories + size caps + bloat patterns: [`../../.claude/rules/reports.md`](../../.claude/rules/reports.md)
 - Signal source + record schema: [`../../hooks/session-telemetry.mjs`](../../hooks/session-telemetry.mjs)
 - **Upstream contribution schema (default-deny, closed vocabulary):** [`upstream-schema.md`](./upstream-schema.md) + ADR [`adr-upstream-default-deny.md`](./adr-upstream-default-deny.md). The `deliver` step builds its outbound artifact ONLY from the structured jsonl reduced to this closed schema — the LLM DIAG free text (`signal`/`rootcause`/`fix`) never leaves the machine.

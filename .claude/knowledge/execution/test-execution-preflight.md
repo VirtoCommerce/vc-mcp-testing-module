@@ -39,7 +39,7 @@ Before acting on any `[PRE:*]` tag, the agent must detect the current browser st
 ### How to check current auth state
 
 1. **DOM probe** — take a `browser_snapshot` of the header. Look for:
-   - Account-menu button (signed-in): selector area matching `data-testid="main-layout.top-header.account-menu.*"`.
+   - Account-menu control (signed-in): `[data-test-id="account-menu"]` in the top header.
    - Sign in link (signed-out): visible `/sign-in` anchor or "Sign in" text in the header.
 2. **Whoami** — if signed in, navigate to `/account/dashboard` or click the account menu and read the displayed user name/email from the popup.
 3. **Org context** — for B2B users, read the org name displayed in the header or in the account menu. Compare against the target org alias.
@@ -47,30 +47,68 @@ Before acting on any `[PRE:*]` tag, the agent must detect the current browser st
 
 **Do not** rely on cookies or localStorage alone for identity checks — the DOM is the source of truth for what the user sees. Cookies/localStorage are used by `[PRE:CLEAR_SESSION]` to purge state, not to verify it.
 
-### Selectors (verified live 2026-04-24 on vcst-qa-storefront.govirto.com)
+### Selectors — read them from the generated module, not from a table here
 
-| Purpose | Selector |
-|---------|---------|
-| Account-menu trigger (header) | `data-test-id="main-layout.top-header.account-menu-button"` |
-| Sign-out button (in account menu popup) | `data-test-id="main-layout.top-header.account-menu.sign-out-button"` |
-| Sign-in page | URL `/sign-in` |
-| Sign-in email field | `data-test-id="sign-in-page.email-input"` |
-| Sign-in password field | `data-test-id="sign-in-page.password-input"` |
-| Sign-in submit | `data-test-id="sign-in-page.login-button"` |
-| Sign-up page | URL `/sign-up` |
-| Sign-up first-name field | `data-test-id="sign-up-first-name-input"` |
-| Sign-up last-name field | `data-test-id="sign-up-last-name-input"` |
-| Sign-up email field | `data-test-id="sign-up-email-input"` |
-| Sign-up password field | `data-test-id="sign-up-password-input"` |
-| Sign-up confirm-password field | `data-test-id="sign-up-confirm-password-input"` |
-| Sign-up submit | `data-test-id="sign-up-submit-button"` |
-| Sign-up success redirect | URL `/successful-registration` |
-| Whoami (display name) | Visible text inside `button[data-test-id="main-layout.top-header.account-menu-button"]`. Personal account: single display name (e.g., "John Doe"). B2B single-org: "Org name / Member display name" (e.g., "ACME Store 2 / ACME Store Maintainer"). B2B multi-org: same format — the current active org's name before the `/`. |
-| Org switcher (B2B multi-org) | **Inside the account menu popup**, below the "Organizations" label. Current org is a checked radio (e.g., `radio "ACME Store" [checked]`). Other orgs are clickable `button` elements with `accessible name` equal to the org name. Click the target org button → full-context swap fires (cart reloads, many `/graphql` POSTs, but NO new `/connect/token` — same user token works across orgs). Header whoami reflects the new org immediately. |
-| Cart page | URL `/cart` |
-| Cart line-item remove | Per-row remove/trash icon on `/cart` — probe live |
+**Source of truth: `scripts/lib/storefront-selectors.generated.ts`**, derived from the vc-frontend
+source by `npm run selectors:sync` and drift-guarded by `npm run selectors:check`. Use
+`isKnownSelector(name)` before writing a locator; use `testIdSelector(name)` to build one.
 
-**Note on attribute name:** the storefront uses `data-test-id` (kebab with dash) in most places. A few legacy spots may use `data-testid` (no dash). The sign-out selector has both forms in the wild; either should work with Playwright locators. Flag any new selector mismatch during live execution — do not guess.
+The table that used to live here was captured live on 2026-04-24 and was correct then. Audited
+against `vc-frontend@dev` on 2026-08-26, **22 of the 78 selectors these knowledge files assert no
+longer exist** — and the drift landed squarely on this document, because the sign-in and sign-out
+controls it specifies are reached by `[PRE:SIGNIN_AS]` / `[PRE:SIGNOUT]` from ~1,572 cases. An
+agent looking for an element that is no longer rendered either fails the precondition or falls
+back to guessing by text, which is a live contributor to the measured ~29% artefactual-BLOCKED
+rate. Hence a generated module and a gate rather than another hand-verified table.
+
+| Purpose | Today's addressable form | Was documented as (gone) |
+|---------|--------------------------|--------------------------|
+| Account-menu trigger (header) | `data-test-id="account-menu"` | `main-layout.top-header.account-menu-button` |
+| Sign-out button (in the account popup) | `data-test-id="sign-out-button"` | `main-layout.top-header.account-menu.sign-out-button` |
+| Header root | `data-test-id="top-header"` | (unchanged — still correct) |
+| Sign-in page | URL `/sign-in` | (a URL, not a selector) |
+| Sign-in email field | `data-test-id="email-input"` (via the UI-kit `test-id-input` prop; `name="email"` also works and is locale-independent) | `sign-in-page.email-input` |
+| Sign-in password field | `data-test-id="password-input"` (via the `test-id-input` prop) | `sign-in-page.password-input` |
+| Sign-in submit | `data-test-id="login-button"` | `sign-in-page.login-button` |
+| Sign-in error | `data-test-id="sign-in-error-alert"` | — |
+| Registration link (on sign-in) | `data-test-id="sign-in-page.registration-button"` | — |
+| Sign-up page | URL `/sign-up` | (a URL, not a selector) |
+| Sign-up name / email / password fields | all eight DO carry one, via the `test-id-input` prop: `sign-up-first-name-input`, `sign-up-last-name-input`, `sign-up-email-input`, `sign-up-organization-name-input`, `sign-up-password-input`, `sign-up-confirm-password-input`, plus the two account-kind radios `sign-up-personal-registration-radio-button` / `sign-up-organization-registration-radio-button` | (these ids are REAL — an earlier revision of this table wrongly listed them as gone) |
+| Sign-up submit | `data-test-id="sign-up-submit-button"` | (unchanged — still correct) |
+| Sign-up error | pattern `` `sign-up-error-${error}-alert` `` — a PREFIX, never a whole literal | — |
+| Search submit | `data-test-id="global-search-apply-button"` | (unchanged) |
+| Search query input | `data-test-id="global-search-query-input"` (via the `test-id-input` prop); the checkout address filter uses `search-keyword-input` | (both are REAL — wrongly listed as gone in an earlier revision) |
+| Cart page | URL `/cart` | (a URL, not a selector) |
+| Clear cart | `data-test-id="clear-cart-button"`, confirm `yes-button` / `no-button` | — |
+| Whoami (display name) | visible text inside the `account-menu` control. Personal: one display name. B2B single-org: `Org name / Member display name`. B2B multi-org: the ACTIVE org's name before the `/` | — |
+| Org switcher (B2B multi-org) | inside the account-menu popup, below the `Organizations` label: the current org is a checked radio, the others are buttons whose accessible name is the org name. Clicking one swaps context (cart reloads, many `/graphql` POSTs, **no** new `/connect/token` — one token spans orgs) | — |
+
+> **Correction, 2026-08-26 — four rows above used to say "no test id", and they were wrong.**
+> A test id reaches the DOM two ways, and the generator originally read only the first:
+> the `data-test-id="literal"` **attribute**, and a UI-kit **prop** (`test-id-input`,
+> `test-id-dropdown`, …). `vc-input.vue` declares `testIdInput?: string` and renders
+> `:data-test-id="testIdInput"` on the inner `<input>`, so `test-id-input="sign-up-password-input"`
+> puts `data-test-id="sign-up-password-input"` in the DOM — the prop value IS the rendered id.
+> Scanning only the attribute form hid **39 real selectors** across the sign-in form, the entire
+> sign-up form, the search bar, the address form, the bank-card form and the checkout method
+> selectors — precisely the form controls a smoke suite drives — and this table then recorded the
+> absence as a finding. `selectors:sync` now reads both forms (161 → 194 static ids) and a unit
+> test pins the prop coverage. Prefer the test id over a label: a label is an i18n key
+> (`common.labels.email`), so a label-based locator breaks the moment the locale changes, and the
+> language selector is itself under test.
+
+**The attribute is `data-test-id`. There is no `data-testid`.** This document previously said "a few
+legacy spots may use `data-testid` (no dash) … either should work with Playwright locators".
+Measured over the whole of `client-app/`: `data-testid` has **zero** occurrences, static or bound. A
+locator written against it can never match, so the hedge was not a safe fallback — it was a way to
+write a locator that always fails.
+
+**A missing test id is not a naming problem.** Ten UI-kit components accept an OPTIONAL test-id prop
+(`vc-input.vue` renders `:data-test-id="testIdInput"`), and the sign-in, sign-up and search inputs
+simply do not pass it. No naming discipline conjures an attribute that was never rendered — locate
+those by label, `name`, or role. This is also why `isKnownSelector` returning false means
+**unverified**, not invalid: 19 bindings in the source are bare expressions whose runtime value
+cannot be read statically, so the real surface is wider than the static list.
 
 ### Sign-up flow (when account needs provisioning)
 
@@ -97,7 +135,7 @@ Each primitive is a UI-only sequence. No JS shortcuts unless explicitly noted.
 **Steps:**
 1. Detect: is a user currently signed in? If no → skip (idempotent).
 2. Click the user name / avatar in the top header — this opens the account-menu popup.
-3. Inside the popup, click the **Logout** / **Sign out** button (`data-testid="main-layout.top-header.account-menu.sign-out-button"`).
+3. Inside the popup, click the **Logout** / **Sign out** button (`[data-test-id="sign-out-button"]`).
 4. Wait for redirect to `/` or `/sign-in`.
 5. Verify: sign-in link is visible in the header (post-condition).
 
@@ -129,7 +167,7 @@ Each primitive is a UI-only sequence. No JS shortcuts unless explicitly noted.
 **Steps (verified live 2026-04-24):**
 1. Detect: is a user signed in? If not → `BLOCKED` (can't switch org when signed out).
 2. Detect: is the current org already `@td(<alias>.name)`? Parse whoami text — the part before ` / ` is the current org name. If match → skip.
-3. Click the account-menu button (`data-test-id="main-layout.top-header.account-menu-button"`) to open the popup.
+3. Click the account-menu control (`[data-test-id="account-menu"]`) to open the popup.
 4. Inside the popup, under the "Organizations" label, locate a `button` element whose accessible name equals `@td(<alias>.name)`. The currently active org is a `radio [checked]` and is NOT a button — never click the checked radio.
 5. Click the target org's button. The account menu closes automatically.
 6. Wait for context swap: expect a burst of `/graphql` POSTs (cart, catalog, permissions, user context). No `/connect/token` — the user token is org-agnostic.
@@ -139,19 +177,45 @@ Each primitive is a UI-only sequence. No JS shortcuts unless explicitly noted.
 
 ### RESET_CART
 
-**Purpose:** start the case with an empty cart.
+**Purpose:** start the case with an empty cart — and with exactly ONE cart, which is not the same thing.
 
 **Steps:**
 1. Navigate to `/cart`.
-2. Detect: is the cart already empty? If yes → skip (idempotent).
+2. Detect: is the cart already empty? If yes → skip the emptying steps (idempotent).
 3. For each line item: click the remove/trash icon, wait for the row to disappear.
 4. Verify: empty-cart state is visible.
+5. **Competing-cart guard (API, not browser):** `npm run carts:check -- --email <the case's login>`.
+   Exit 0 = clean, exit 1 = the account holds >1 shopping cart for this store+currency. On exit 1 the
+   case is **BLOCKED, not FAIL** — clear it with `npm run carts:sweep -- --email <login>` (add `--force`
+   only if a surplus cart holds line items) and re-run the guard before proceeding.
 
-**Failure handling:** if a line item refuses to remove after one retry → log warning, proceed to the test. Cart reset is best-effort; do NOT block on it. The test itself will fail on its own assertions if the cart state is wrong for it.
+**Why step 5 is not optional.** Steps 1–4 act on the cart the storefront *renders*. When an account holds a
+second shopping cart (`type: null`, named anything but `default`), xAPI resolves **reads and writes to
+different carts**: `Query.cart` is name-unfiltered while every mutation pins `cartName: "default"`. So a
+competing cart is **invisible to a UI reset**, and the reset may even empty the cart the mutations are *not*
+writing to. Downstream the shipping address silently never binds and Place order stays disabled — HTTP 200,
+`errors: null`, no console error — which reads as a product defect in whatever case runs next. That is
+exactly how `COMP-E2E-007` failed in `REG-2026-08-26-0943`: a cart leaked from earlier agent activity on a
+shared account, not a storefront bug.
+See `reports/bugs/open/BUG-multi-cart-users-cannot-set-checkout-shipping-address-VCST-5811.md`; rules live in
+`scripts/seed-data/carts/cart-hygiene-specs.mjs`. **42 suites declare `[PRE:RESET_CART]`**, so any of them
+can inherit this.
+
+**Failure handling:** steps 1–4 are best-effort — if a line item refuses to remove after one retry → log a
+warning and proceed; the test's own assertions will catch a wrong cart state. **Step 5 is not best-effort:**
+an exposed account cannot produce a trustworthy checkout verdict, so report `BLOCKED` and stop rather than
+running the case and filing whatever it produces.
 
 ### CLEAR_SESSION
 
-**Purpose:** fully purge the user's session state — cookies, localStorage, sessionStorage. Use at user-context block boundaries (switching between B2B admin and personal user, for instance).
+**Purpose:** fully purge the user's session state — cookies, localStorage, sessionStorage. Use at
+user-context block boundaries (switching between B2B admin and personal user, for instance).
+
+**A user-context block is an ACTOR SEGMENT: a run of steps executed as one identity.** Usually a run of
+consecutive CASES sharing an actor — but it may also be a segment *inside* one case, which is how a
+two-role journey is written (`test-runner-tags.md` §Precondition Tags). The phrase was used in three
+files and defined in none, and the inter-case reading is what made "two actors in one case" look
+outside the model.
 
 **Steps:**
 1. If signed in → `SIGNOUT` first (leaves a clean auth state on the server).
@@ -298,6 +362,56 @@ On any `BLOCKED`:
 3. `VERIFY_AUTH:USER_MULTI_ORG` — whoami must still be USER_MULTI_ORG after the org switch (should be — org switch doesn't change user identity).
 4. Proceed to Steps.
 
+### Example 4 — two actors in ONE case (a permission boundary)
+
+The shape a Part 0r role scenario needs: one role acts, the other's view is then checked. The `[PRE:*]`
+cluster moves **into `Steps`**, once per actor segment. Shipped example: `011b` `COMP-E2E-010`
+(`Automated`).
+
+**Preconditions cell:** may be empty — the first segment establishes its own actor.
+
+**Steps cell:**
+```
+--- SCREEN: employee acts (storefront:organization:view + storefront:user:view ONLY) ---
+[PRE:CLEAR_SESSION]
+[PRE:SIGNIN_AS:ACME_VIEWER]
+[NAV] {{FRONT_URL}}/company/members
+[ASSERT] no 'Invite members' button and no Actions column (BL-B2B-005)
+
+--- SCREEN: maintainer verifies (adds storefront:user:invite + xapi:my_organization:edit) ---
+[PRE:CLEAR_SESSION]
+[PRE:SIGNIN_AS:ACME_ADMIN]
+[PRE:VERIFY_AUTH:ACME_ADMIN]
+[NAV] {{FRONT_URL}}/company/members
+[ASSERT] 'Invite members' button IS present — same surface, different permission set
+```
+
+**Name the PERMISSION each segment holds, not just the role.** A role is a label; the permission is the
+mechanism, and `test-data/b2b/roles.csv` is its source of truth (`permissions` column). Writing the
+permission into the segment divider is what makes the assertion falsifiable: it says *which grant* the
+absent control depends on, so a reviewer can check the claim against the role definition instead of
+trusting the role name.
+
+**And check the permissions actually differ before building a case on them.** `org-employee` and
+`purchasing-agent` carry the **same two** storefront permissions in `roles.csv` — purchasing is governed by
+cart/checkout, not by a storefront RBAC grant. A case asserting a storefront difference between those two
+roles is vacuous by construction: equal values on both sides of the distinction under test are a data
+defect (`.claude/rules/test-data.md` §SECOND RULE).
+
+**Three rules this shape carries:**
+1. **`CLEAR_SESSION` before each switch**, not just `SIGNIN_AS`. `SIGNIN_AS` signs the previous user out,
+   but a stale `Contact.CurrentOrganizationId` or a cached permission set can survive; the purge is what
+   makes the second segment's observation attributable to the permission rather than to leftovers.
+2. **Close each segment with `VERIFY_AUTH`** before asserting anything permission-dependent. Without it a
+   failed switch reads as a permission finding — the expensive misdiagnosis this idiom invites.
+3. **A mid-`Steps` `[PRE:*]` failure is a FAIL, not a BLOCKED** — the case has already run. See
+   `test-runner-tags.md` §Precondition Tags.
+
+**Prefer `SWITCH_ORG` where one account holds different roles per org.** `MULTI_ORG_TF_BR_ALT` is
+org-maintainer in TechFlow and org-employee in BuildRight, so Example 3's switch changes the permission set
+without re-authenticating — no second token (one token spans orgs), which is faster and lets the case
+assert the permission-claim change directly. Use two identities only when the scenario needs two people.
+
 ---
 
 ## Future Work
@@ -317,7 +431,6 @@ Do not use these tags in CSVs yet — they have no runner support. Until then, e
 - `knowledge/execution/test-runner-tags.md` — `[PRE:*]` quick reference and failure-policy summary
 - `skills/qa-test-cases-generator/test-case-template.md` — Preconditions column spec and when to use `[PRE:*]`
 - `agents/test-runner-agent.md` — Phase 2 step 2 triggers this protocol
-- `agents/autonomous-test-runner.md` — Phase 2 step 2 triggers this protocol
 - Project memory:
   - `feedback_agents_read_env_creds` — credentials are read from `.env` at runtime
   - `feedback_real_user_interaction` — UI actions only, no JS shortcuts

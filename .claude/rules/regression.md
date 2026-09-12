@@ -1,34 +1,20 @@
 # Regression & CI Reference
 
-## Architecture: Four Testing Modes
+## Architecture: Testing Modes
 
 ### 1. Interactive MCP-Driven Testing (Primary)
 Load a prompt template from `vc/shared/docs/prompts/`, execute via MCP browser tools with DevTools monitoring. After each flow: export HAR, capture console logs, take screenshots. Generate bug reports in `reports/bugs/`.
 
 ### 2. CI Regression via Claude Agent SDK
-`ci/run-regression.ts` orchestrates headless regression using `@anthropic-ai/claude-agent-sdk`. It reads suite CSVs from `regression/suites/`, injects them into prompts with the 3 regression agent definitions in `ci/agents/` (`qa-frontend-expert.md`, `qa-backend-expert.md`, `qa-testing-expert.md`), and runs suites in parallel batches (up to 3 concurrent, configurable via `MAX_PARALLEL`). Results are tracked in `reports/regression/history.json` (90-day rolling window). Teams notifications via `ci/notify-teams.ts`.
 
-**Note:** CI mode uses only `playwright-chrome` (single headless Chromium) for all suites. The 3-browser pool (chrome/firefox/edge) applies only to interactive mode. CI environment mapping: `qa` → `FRONT_URL`/`BACK_URL`, `staging` → `VIRTO_START_FRONT`/`VIRTO_START_BACK`.
+`ci/run-regression.ts` runs suites headless via `@anthropic-ai/claude-agent-sdk` (chrome only, up to 3 in parallel, 90-day `history.json`). The live-progress watcher, run close-out ownership and the `regression:reap` orphan backstop are specified in [`knowledge/execution/regression-pipelines.md`](../knowledge/execution/regression-pipelines.md) — read it before touching `test-run-status.json` or the watcher.
 
-**Regression Orchestration Pipeline (interactive mode):**
-1. `regression-orchestrator` agent reads `config/test-suites.json` manifest
-2. Resolves suite selection (`smoke`, `critical`, `sprint`, `full`, or comma-separated IDs)
-3. Assigns suites to browser pool slots (3 slots: chrome, firefox, edge)
-4. Spawns sub-agents using `agents/test-runner-agent.md` template with substituted parameters (`{{SUITE_ID}}`, `{{BROWSER_SERVER}}`, `{{ENVIRONMENT_URL}}`, `{{OUTPUT_FILE}}`, etc.)
-5. Each sub-agent gets an isolated browser context, executes all test cases from its CSV, writes JSON results
-6. Orchestrator collects results, handles retries with browser fallback chain, produces consolidated report
+### 3. Autonomous Interactive Regression — REMOVED 2026-08-26
 
-**Live progress + auto-report (interactive mode):** at run start the **persistent top-level session** (the one running `/qa-regression`) launches a background watcher (`npm run report:regression:watch -- --run-id {RUN_ID}`) that opens a self-refreshing `reports/regression/{RUN_ID}/regression-report.html`. **Watcher ownership is load-bearing:** it MUST run in the persistent session's own background — **never inside a Task-dispatched sub-agent** (`regression-orchestrator`/`test-runner`), whose child processes are killed when its turn ends while the run keeps going, freezing the HTML mid-run. The owner **self-heals**: while the run is `in_progress`, if `regression-report.html` mtime is >~60s stale it relaunches the watcher (or runs one-shot `report:regression`). See `commands/qa-regression.md` Step 3. It reads `test-run-status.json` (suites flip `pending → running → done` as the orchestrator updates it) plus the per-suite `suite-*-results.json` as they land, and `<meta refresh>`-reloads until the run is `completed`, then renders the final static report and exits. **Live per-case status:** because the runner (`agents/test-runner-agent.md` / `autonomous-test-runner.md`) pre-seeds every case as `PENDING` at suite start and **rewrites its `suite-*-results.json` after each case**, a suite flagged `running` renders **pre-expanded with its cases flipping PASS/FAIL/BLOCKED/PENDING live** — you no longer wait for the whole suite to finish. The dashboard shows a run-level live banner (suites + cases evaluated, live pass/fail/blocked tally, animated in-progress bars). The HTML report is generated **automatically** — no manual `npm run report:regression` step. `scripts/regression/generate-regression-html-report.ts` also supports one-shot (`report:regression`), portable/embedded (`report:regression:portable`), and `--open`. **Consolidated cross-run dashboard:** `npm run report:regression:overview` (`--overview [--since-days N]`, default 14) scans every `REG-*/SMOKE-*` run in the window and writes `reports/regression/overview.html` — aggregate cards, a pass-rate trend bar per run, and a table linking each run's own report, with an **in-page date-range + text filter** that recomputes the aggregate tiles live. The in-progress run is flagged `● LIVE`. **Auto-updates:** the per-case watcher (`report:regression:watch`) also rewrites `overview.html` on every tick and auto-opens it when the run finishes, and `report:regression:overview:watch` keeps a standalone overview self-refreshing (injects `<meta refresh>`) while any run is in progress — so an open overview tab updates itself, no re-run needed.
-
-### 3. Autonomous Interactive Regression (Agent Teams)
-`autonomous-regression-orchestrator` creates a team of child agents using Agent Teams API (TeamCreate, SendMessage). Each child gets an isolated browser context, fresh authentication, and exponential backoff (30s→60s→120s). The orchestrator manages a 3+1 token bucket (3 browser + 1 reporting agent), tracks failures in `results/{RUN_ID}/failures.json`, retries failed suites with browser fallback chain (max 3 attempts), and produces a consolidated report with quality gate evaluation and optional JIRA ticket creation via Atlassian MCP.
-
-**Invoke:** `/qa-regression critical --autonomous` or use `autonomous-regression-orchestrator` agent directly.
-**Results:** `results/{RUN_ID}/` (regression-report.md, summary.json, failures.json, per-suite results)
-**Reporting module:** `scripts/regression/reporting.ts` (generate reports, JIRA payloads, status updates)
+Do not re-create it. Why it was removed: [`docs/decisions/regression-history.md`](../../docs/decisions/regression-history.md).
 
 ### 4. Full Test Cycle CI Pipeline (Sync → Lifecycle → Regression)
-`ci/run-full-cycle.ts` orchestrates a 3-phase pipeline triggered by code changes. Phase 1 (SYNC + REVIEW) uses `/qa-test-lifecycle --ci` to detect stale test cases from PRs/diffs/module updates, update Steps/Assertions, analyze coverage gaps, and run the `/qa-review-tests` **static** dimensions (1–7, 9, 10 — dim 8 needs a browser, dim 11 is the separate `ci/run-suite-audit.ts` twin). Phase 2 (REGRESSION) delegates to `ci/run-regression.ts` to execute the affected suites. Each phase has independent skip flags and budget allocation (50%/50% of total budget). Results go to `reports/full-cycle/{RUN_ID}/`.
+`ci/run-full-cycle.ts` orchestrates a 3-phase pipeline triggered by code changes. Phase 1 (SYNC + REVIEW) uses `/qa-test-lifecycle --ci` to detect stale test cases from PRs/diffs/module updates, update Steps/Assertions, analyze coverage gaps, and run the `/qa-review-tests` **static** dimensions (1–7, 9, 10 — dim 8 needs a browser, dim 11 is the separate `ci/run-suite-audit.ts` twin). Phase 3 (REGRESSION) delegates to `ci/run-regression.ts` to execute the affected suites — the workflow's phase numbering (1 Sync · 2 Lifecycle · 3 Regression) is the one to quote. Each phase has independent skip flags and budget allocation (50%/50% of total budget). Results go to `reports/full-cycle/{RUN_ID}/`.
 
 **Invoke:** `CHANGE_SOURCE="PR #123" npm run ci:cycle` or via `.github/workflows/full-cycle.yml`
 **Triggers:** PR merge to main (auto), daily schedule (Mon-Fri 8AM UTC), manual dispatch
@@ -38,156 +24,79 @@ Load a prompt template from `vc/shared/docs/prompts/`, execute via MCP browser t
 
 Central configuration for regression orchestration. Defines:
 - **Browser pool**: 3 slots (playwright-chrome, playwright-firefox, playwright-edge) with fallback chain
-- **Suite definitions**: 119 suites in module-aligned subdirectories under `Frontend/` and `Backend/`, with id, name, CSV file path, priority, test count, assigned agent type, and tags
-- **Selection groups**: 37 groups — `smoke`, `critical`, `sprint`, `full`, `frontend`, `backend`, plus module-specific groups (`catalog`, `search`, `orders`, `auth`, `b2b`, `marketing`, `platform`, `bopis`, `payment`, `configurable-products`, `whitelabeling`, `purchase-flow`, `loyalty`, …)
+- **Suite definitions**: one per suite in module-aligned subdirectories under `Frontend/` and `Backend/`, with id, name, CSV file path, priority, test count, assigned agent type, and tags
+- **Selection groups**: `smoke`, `critical`, `sprint`, `full`, `frontend`, `backend`, plus module-specific groups (`catalog`, `search`, `orders`, `auth`, `b2b`, `marketing`, `platform`, `bopis`, `payment`, `configurable-products`, `whitelabeling`, `purchase-flow`, `loyalty`, …)
 - **Defaults**: max 3 parallel agents, 2 retries, 30s retry delay, HAR capture enabled
 
 ## Regression Test Suites
 
-119 suites in `regression/suites/` organized by module (48 directories) under `Frontend/` and `Backend/`. Enriched agent-native CSV format. Full definitions in `config/test-suites.json`. **Total: ~3,860 test cases** (per manifest `testCount`; the source of truth is `config/test-suites.json`).
+Suites live in `regression/suites/`, organized by module under `Frontend/` and `Backend/`, in the enriched agent-native CSV format. **`config/test-suites.json` is the source of truth for how many there are and how many cases they hold — `npm run suites:lint` prints both.** Do not restate either number here — the two that used to sit in this paragraph were both stale when checked on 2026-09-09, which is why `DOC-006` now fails a build that reintroduces one.
 
-### Frontend Suites (54 suites, ~1,810 tests — user-facing features & flows)
+### Suite inventory
 
-| Directory | Suites | Tests | Description |
-|-----------|--------|-------|-------------|
-| `Frontend/auth/` | 031-033, 082 | 118 | Login, registration, session, RBAC, company menu |
-| `Frontend/catalog/` | 001-003 | 87 | Navigation, product detail, filters |
-| `Frontend/search/` | 004-005 | 82 | Core search, filters & advanced |
-| `Frontend/cart/` | 028-030 | 104 | Core, validation/persistence, merge |
-| `Frontend/checkout/` | 011-013, 081 | 116 | Flow, guest, B2B |
-| `Frontend/orders/` | 014-015 | 130 | Orders frontend, quotes |
-| `Frontend/payment/` | 039, 040a-040c, 041 | 86 | CyberSource, Skyflow, Authorize.Net, Datatrans, cross-cutting |
-| `Frontend/bopis/` | 036-038 | 109 | Store selector, cart, checkout |
-| `Frontend/b2b/` | 006-010, 011b | 217 | Organization, lists, members, variations/configs, bulk/ship/dashboard |
-| `Frontend/configurable-products/` | 072, 072b-072d | 245 | UI, E2E scenarios, cross-cutting |
-| `Frontend/whitelabeling/` | 070-071 | 68 | Storefront, branding |
-| `Frontend/marketing/` | 077, 077b | 73 | Coupons & promotions storefront |
-| `Frontend/loyalty/` | 083, 083b | 33 | Loyalty storefront (earn/redeem, balance) |
-| `Frontend/cross-cutting/` | 043-048, 048c | 196 | GA4, security, a11y, i18n, performance, browser compat |
-| `Frontend/customer-reviews/` | 088 | 11 | Customer reviews storefront |
-| `Frontend/sales-rep/` | 089-091 | 103 | Sales-rep storefront (impersonation, orders, dashboard) |
-| `Frontend/smoke/` | 042 | 34 | Storefront smoke (P0) |
+Derived, not documented here — `config/test-suites.json` is the source of truth (`npm run suites:lint` prints totals). The suite-authoring RULES — globally unique case IDs, the `…A` / renumber naming convention, **XREF-001** (a dependency may not leave its suite CSV), the `078` split rationale — live in [`knowledge/execution/regression-suites.md`](../knowledge/execution/regression-suites.md). Read it before adding or splitting a suite.
 
-### Backend Suites (65 suites, ~2,050 tests — admin UI, modules & APIs)
+**First: a suite CSV has exactly one author for the duration of a change.** Not one author per file
+forever — one author per *change*: whoever is restructuring, culling or re-pointing a suite owns every
+row in it until they hand it back. A second writer is forbidden even when the two are editing
+"different rows", and even when both are careful. **A suite conflict is never resolved with git** —
+hand it to a human or to the other author.
 
-| Directory | Suites | Tests | Description |
-|-----------|--------|-------|-------------|
-| `Backend/platform/` | 020-021, 063 | 107 | Users/roles, dynamic properties, core settings |
-| `Backend/store/` | 034-035 | 69 | Management, rounding/email |
-| `Backend/catalog/` | 051, 053 | 71 | Products admin, categories admin |
-| `Backend/customer/` | 026, 027, 027b | 122 | Contacts, orgs & invites |
-| `Backend/pricing/` | 054-055 | 62 | Logic, management |
-| `Backend/inventory/` | 056 | 43 | Fulfillment centers, stock |
-| `Backend/marketing/` | 023-025 | 89 | Promotions, content, coupons/API |
-| `Backend/notifications/` | 057-058 | 81 | Templates, triggers |
-| `Backend/page-builder/` | 059-060 | 151 | Page Builder — page management, design/content |
-| `Backend/orders/` | 017-019 | 103 | Management, payments, shipments admin |
-| `Backend/api/` | 049 | 46 | Platform REST API |
-| `Backend/graphql/` | 050a, 050b1-050b5, 050c-050n | 479 | GraphQL xAPI (18 suites) |
-| `Backend/search/` | 061 | 47 | Search indexing admin |
-| `Backend/configurable-products/` | 052 | 31 | Configurable products admin |
-| `Backend/whitelabeling/` | 067 | 40 | White labeling admin |
-| `Backend/customer-reviews/` | 086-087 | 31 | Customer reviews admin & API |
-| `Backend/sales-rep/` | 092 | 40 | Sales-rep admin + embedded app (⚠ two CSVs both declare id `092`) |
-| `Backend/smoke/` | 078 | 115 | Backend/API smoke (P0) |
-| Other modules | 15 suites | ~320 | assets (062), channels (076), contracts (074), image-tools (069), import-export (064), loyalty (075/075b/075c), news (084), push-messages (068), returns (073), seo (066), shipping (065), task-management (085), xmarketing (079) |
-
-- **Release suite**: none. The master release suite `080` (`_release/080-full-regression-release.csv`) was **retired on 2026-07-31** — its CSV was deleted in commit `9dd9f3e3` and the manifest entry plus the `release` selection were removed once it was found that `release` had been resolving to a missing file (running zero cases while reporting a valid selection). For a major release, use `full` (all 119 suites) or a plan-driven `sprint` selection. `npm run suites:lint` now hard-fails on any declared-but-absent suite CSV, so this cannot recur silently.
-- **P0 suites**: 042 (Smoke), 078 (Backend/API Smoke), 039 (CyberSource Payment), 044 (Security), 049 (Platform API)
-- **FOLLOW-UP — two open `sales-rep` manifest defects** (surfaced as `npm run suites:lint` WARNs; not yet fixed because both need a renumbering decision, not a mechanical edit):
-  1. **Duplicate id `092`** — `Backend/sales-rep/092-sales-rep-admin.csv` and `092-sales-rep-admin-embedded-app.csv` both declare id `092`. Consumers build their lookup as `Object.fromEntries(suites.map(s => [s.id, s]))` (`ci/run-regression.ts` SUITE_MAP), so the **last entry silently wins and the other CSV never runs**. Fix by giving one a free id (e.g. `092b`).
-  2. **Orphan CSV `093`** — `Frontend/sales-rep/093-sales-rep-hub-dashboard-storefront.csv` exists on disk with **no manifest entry**, so no selection can reach it and it never runs. Fix by declaring it (or deleting it if superseded).
-- **Case IDs are globally unique across the whole corpus** — not merely unique within a suite. The runner keys per-case results and failure evidence by **bare case ID** (`suite-*-results.json` rows, `traces/{TC-ID}-FAIL-trace.json`, and `scripts/lib/regression-triage.ts` fingerprints), so two suites both declaring `CAT-001` let one run's evidence silently overwrite the other's — a real failure can read as someone else's pass. Enforced by **`npm run suites:lint`** (`findDuplicateCaseIds` in `scripts/test-cases/sync-test-suites.ts`, unit tests `scripts/unit/suite-global-case-ids.test.ts`); it scans **every CSV on disk**, orphans included, and **hard-fails** — unlike `CSV_LINT_BASELINE` there is no burn-down set, because the corpus was cleaned to zero collisions on 2026-08-03 (223 of them). IDs are harvested by the line-start scan (`extractExistingIds`), not a field parse, so the suites that aren't strictly CSV-parsable are still covered.
-  **Naming convention when two suites want the same prefix** — two cases, and they are different:
-  - **Re-prefix** when the suites are different *layers or domains* that merely collided on a shared prefix. The **storefront keeps the bare prefix** and the admin/back-office side takes an `…A` suffix: `CAT-*` (Frontend/catalog) vs **`CATA-*`** (051/053 admin), `ORD-*` (014 storefront) vs **`ORDA-*`** (017/018/019 admin), `SRCH-*` (004/005) vs **`SRCHA-*`** (061 admin). Where a prefix meant two unrelated things, the **documented owner keeps it**: suite 067 keeps `WL-*` (white labeling, per `knowledge/domain/white-labeling.md`) and the wishlist suite 050h became **`WISH-*`**; suite 050i keeps `CFG-GQL-*` (the gold-standard GraphQL suite) and the 9 interlopers in 072/072c became **`CFG-XAPI-*`**. Otherwise the more specific suite is qualified: 077b → **`CPN-SMK-*`**, the embedded-app half of `092` → **`SR-EMB-*`**. Re-prefixing is applied to the **whole prefix in that file**, not just the colliding rows, so each file keeps one coherent namespace and cannot collide again.
-  - **Renumber into a free range** when both suites legitimately share one domain namespace and only the numbers clashed — no new prefix: `035` STORE-052…055 → 066…069, `032` AUTH-066/067 → 074/075, `003` CAT-030…040 → 068…078, plus `CFG-TEXT`/`CFG-VAR` singles.
-- **Critical UI scope**: `knowledge/oracles/critical-ui-scope.md` defines the checklist of 36 components and 16 pages with applicable BL-UI invariants per cell. **Currently UNCOVERED** — its sole covering suite `048b-layout-stability.csv` (selection `layout-stability`) was removed on 2026-07-25, so all 197 applicable cells are marked `GAP`. The file is retained as the scope definition + audit-protocol reference for `/qa-design`. `npm run scope:validate` still hard-fails if a cell points at a *missing* test ID and warns on the GAP count; `--strict` makes GAPs fatal again once a replacement suite lands.
+Why a CSV is not mergeable in practice, the disposition-is-the-artifact argument, how to fan out
+analysis while serialising the write, the re-parse-after-every-write discipline (a mid-write
+unparsable suite takes the manifest gate down for *everyone*), and the cross-session relay rule (a
+fact sent to another session's SUBAGENT is dropped silently — the receiving session must re-issue it
+in its own dispatch brief): [`knowledge/execution/regression-suites.md`](../knowledge/execution/regression-suites.md)
+§Working concurrently on suites. The measured losses behind all of it:
+[`docs/decisions/regression-history.md`](../../docs/decisions/regression-history.md) §Shared-tree losses.
 
 ### Selection Groups
 
-| Selection | Suites | Use Case |
-|-----------|--------|----------|
-| `smoke` | 042, 078 | Daily validation before deployment |
-| `critical` | 042, 078, 039, 044, 049 | P0 suites only |
-| `purchase-flow` | cart + checkout + orders-frontend + payment | Purchase flow regression |
-| `catalog` | 001-003, 051, 053 | Catalog module (frontend + admin) |
-| `search` | 004-005, 061 | Search module (frontend + admin) |
-| `orders` | 014-019 | Orders & quotes (frontend + admin) |
-| `auth` | 031-033 | Authentication module |
-| `b2b` | 006-010 | B2B features |
-| `marketing` | 023-025, 077 | Marketing module (admin + storefront) |
-| `platform` | 020-021, 049, 063 | Platform module |
-| `frontend` | All Frontend/ suites (50) | Frontend-only regression |
-| `backend` | All Backend/ suites (59) | Backend-only regression |
-| `sprint` | **Plan-driven** — `/qa-regression sprint` reads `vc/shared/docs/Sprint plans/sprint-*-summary.json` → `suitesActivated[]` (auto-picks the most recent plan). Falls back to all P0+P1 suites when no plan exists or `--no-plan` is set. | Before sprint release |
-| `sprint:XX-YY` | Pinned to a specific sprint plan in `vc/shared/docs/Sprint plans/` | Re-run a past sprint's regression scope |
-| `full` | All 119 suites | Before production release |
+**Membership is defined in `config/test-suites.json` `selections`, never here** — `npm run suites:lint`
+prints the group count, and `npm run regression:plan -- <name>` resolves one to its actual
+suite list. The table below is *when to reach for which*, which the manifest cannot tell you.
+
+| Selection | Use Case |
+|-----------|----------|
+| `smoke` | Daily validation before deployment |
+| `critical` | P0 suites only |
+| `purchase-flow` | Cart → checkout → orders → payment, end to end |
+| `catalog` · `search` · `orders` · `auth` · `b2b` · `marketing` · `platform` | One module, frontend + admin |
+| `frontend` · `backend` | One layer, minus the suites the manifest excludes |
+| `sprint` | **Plan-driven** — `/qa-regression sprint` reads `vc/shared/docs/Sprint plans/sprint-*-summary.json` → `suitesActivated[]` (auto-picks the most recent plan). Falls back to all P0+P1 suites when no plan exists or `--no-plan` is set |
+| `sprint:XX-YY` | Re-run a past sprint's regression scope, pinned to that plan |
+| `full` | Everything the manifest does not exclude — before a production release |
 
 ## CI Regression Testing
 
-The `ci/` directory provides Docker-based CI regression using the Claude Agent SDK:
-
-```bash
-docker build -t vc-regression -f ci/Dockerfile .
-docker run --rm --shm-size=2gb --env-file .env \
-  -e ANTHROPIC_API_KEY=your-key \
-  -e SUITE_SELECTION=smoke \
-  -e TEST_ENVIRONMENT=qa \
-  -e MAX_BUDGET_USD=5.0 \
-  vc-regression
-```
+The `ci/` directory provides Docker-based CI regression using the Claude Agent SDK — build from
+`ci/Dockerfile` and pass the run's knobs as `-e` env vars (`ci/run-regression.ts` reads them; `--shm-size`
+must be raised for headed browsers).
 
 Suite selection accepts group names (`smoke`, `critical`, `catalog`, `orders`, etc.) or comma-separated IDs (`042,039,049`). CI runs up to 3 suites in parallel (configurable via `MAX_PARALLEL`). Reports go to `reports/regression/ci-YYYY-MM-DD/` (markdown + JSON summary).
 
 **Note:** The CI `run-regression.ts` dynamically loads suite definitions from `config/test-suites.json` at startup. Selection groups are also defined in the manifest's `selections` block.
 
-**Scheduled Pipeline (GitHub Actions - `.github/workflows/regression.yml`):**
-- **Daily smoke**: Mon-Fri at 6:00 AM UTC — runs suite 042 ($5 budget)
-- **Weekly full regression**: Sunday at 2:00 AM UTC — runs all 119 suites ($80 budget)
-- **Manual trigger**: Any selection, any environment, any budget via `workflow_dispatch`
+**There is no regression GitHub Actions workflow.** `regression.yml` was **removed 2026-09-08** — it ran exactly once, on 2026-02-11, from a schedule that was later commented out, and that run **failed** after 72 s. It never ran manually and never succeeded, so it documented a capability the team does not have. **The RUNNER is unaffected:** `ci/run-regression.ts` is invoked by `npm run ci:regression`, by the Docker image above, and by `full-cycle.yml` Phase 3 (Regression).
+
+The remaining pipelines (`suite-audit.yml`, `monitor.yml`, `auto-fix.yml`, `full-cycle.yml`) still have every `cron:` **commented out**, so nothing in `ci/` runs unattended (audit 2026-09-07 §4b, D9). Re-enabling one means uncommenting its `cron:` line; until then do not describe those runs as happening.
 
 **Teams Notifications:** After each pipeline run, `ci/notify-teams.ts` sends an Adaptive Card to the configured Teams webhook. Requires `TEAMS_WEBHOOK_URL` secret.
 
-## Online Monitoring (App Insights) — the fifth pipeline twin
+## On-demand references (moved out of the always-loaded tier, 2026-09-08)
 
-Beyond the four testing modes above, there is an **online monitoring** pipeline that watches Azure Application Insights for live errors instead of executing test cases. Like the others it has an interactive + headless **twin** pair:
+Each of these is read by the step that needs it and by nothing else. Anchors (`§…`) are unchanged.
 
-- **Interactive:** `/qa-monitoring [frontend|backend|both] [--since=MIN] [--dry-run]` (`commands/qa-monitoring.md`)
-- **Headless:** `ci/run-monitor.ts` (`npm run ci:monitor` / `ci:monitor:dry`) + `.github/workflows/monitor.yml`
-
-It queries both layers' App Insights resources (env-resolved `APPINSIGHTS_*`, never hardcoded), **deduplicates** errors via a fingerprint store (`reports/monitoring/.seen-fingerprints.json`, carried across CI runs by `actions/cache`), **triages** new/spiking signatures (`ci/agents/monitor-triage-agent.md`), **reproduces** HIGH-confidence bugs live via the QA experts, drafts bug reports with a `## Fix Routing` block, and reports to `reports/monitoring/MONITOR-*/` + Teams (`NOTIFY_MODE=monitor`). **Detect-and-report only** — it never files a tracker ticket and never auto-fixes; a human picks up the confirmed drafts via `/qa-bug` → `/qa-fix`. KQL probes live in `ci/monitoring/queries/`. Full methodology: the `/qa-monitoring` skill.
-
-## Scheduled Test-Case Staleness Audit — the sixth pipeline twin
-
-Suites rot silently. `lint-test-cases.ts` GRD-001 verifies an assertion **carries** a grounded provenance tag; it never verifies the tag is **true**. A `{DOC}` whose doc changed, an `{OBSERVED}` captured against a six-month-old build, a `{BL}` citing a retired invariant — all lint green. **Dimension 11** closes that hole by porting the `/qa-review-bl` triangulation mechanism to test cases, and a scheduled job works through the ~3,960-case corpus one suite at a time.
-
-- **Interactive:** `/qa-review-tests suite <ID> --triangulate [--fix]` (skill `.claude/skills/qa-review-tests/`, judgment rules in `triangulation-criteria.md`)
-- **Headless:** `ci/run-suite-audit.ts` (`npm run ci:audit` / `ci:audit:dry`) + `.github/workflows/suite-audit.yml`
-
-Each run audits **one** suite and opens **one draft PR** — the unit of work is the unit of review, and that PR is the human gate replacing `--fix`'s interactive confirmation. Each assertion is triangulated against **docs** (VirtoOZ) + **live** (playwright) + **source** (GitHub MCP); only **CONFIRMED** (refresh the `Audited:` stamp) and **DRIFT** (rewrite the drifted assertion) are written. MISSING / CONTRADICTORY / UNGROUNDED / RETIRE are PR-body proposals that never touch a CSV — deprecation and authoring stay human. Never auto-merges.
-
-**Rotation** (`npm run tc:audit:queue`, `scripts/test-cases/audit-queue.ts`): risk tier (P0/revenue-critical first) → unresolvable-source last → oldest `Audited:` stamp → testCount. **The stamp is the state** — it lives in the `References` cell of the row it describes, so there is no ledger to desync and a skipped day leaves that suite at the head of the queue. The queue is keyed by **file**, not id, because manifest id `092` is carried by two suites. Weekdays only ⇒ the ~14 P0/revenue-critical suites are covered in ~3 weeks; the full 120-suite cycle is ≈24 weeks, then rolls.
-
-**Source axis** (`npm run tc:audit:source`, `scripts/test-cases/suite-source-map.ts`): suite → module → repo, derived from `config/test-suites.json` `requiresModules` → `.claude/knowledge/execution/module-suite-map.md` → `ci/config/fix-repos.json` `routing[]`. It resolves 113/120 suites and **never invents a repo name** — an unresolvable suite scores UNGROUNDED, because a wrong repo yields a confident `file:line` for unrelated code and manufactures a false CONFIRMED.
-
-The audit's own run artifacts (`reports/suite-audit/TCA-*/`) are gitignored pipeline working data — `.claude/rules/reports.md` has no report category for a test-case review, so the narrative ships in the PR body and the only durable artifact is the CSV diff.
-
-## Post-Run Results Triage — `/qa-triage-results`
-
-A regression run tells you *which* tests failed; **`/qa-triage-results [RUN_ID|latest] [--fix] [--verify]`** works out *why* each one failed and what to do. **Owned by `qa-lead-orchestrator`** (orchestrate-only Triage Orchestrator — delegates classification to `regression-triage-agent`, live verification to `qa-frontend/backend-expert`, test fixes to `/qa-review-tests`, bug drafts to `/qa-bug`; never edits a CSV, files a ticket, or calls `/qa-fix`). It reads a completed run under `reports/regression/{RUN_ID}/`, and — cloning the `/qa-monitoring` skeleton (collect → dedup → triage → live-verify → report → STOP) — classifies every FAIL into **real product bug** vs a **test defect** (`TEST_STEPS_DEFECT` / `ASSERTION_DEFECT` / `TEST_DATA_DEFECT` / `STALE_TEST`) vs `FLAKY` / `ENV` / `KNOWN_ISSUE`.
-
-- **Collect (deterministic):** `npm run triage:collect -- <RUN_ID|latest> --record` (`scripts/lib/regression-triage.ts`) assembles each non-passing case — **FAIL, BLOCKED, and SKIPPED** (each with a `status`; only PASS and PENDING excluded) — with its `traces/*-FAIL-trace.json` (network + console w/ stack frames, FAIL only), `screenshots[]`, lane HAR path, the CSV row, a stable fingerprint, and the cross-run flaky flag. A BLOCKED is triaged for *why* (env / precondition / data / real bug); a SKIPPED for a removed feature (stale test) vs an intentional gate.
-- **Classify (judgment):** `ci/agents/regression-triage-agent.md` reads the evidence (incl. **opening the screenshot** for visual/element failures) against the oracles and emits `CLASS` + severity/route/confidence + suggested fix. Ambiguous → `REAL_BUG`/`LOW` (→ live repro / human review), never relabelled as a test-defect.
-- **Verify + act:** HIGH-confidence real bugs are reproduced live by `qa-frontend/backend-expert`; under `--fix`, test-defects route to `/qa-review-tests <suite> --fix` (diff + confirm) and confirmed bugs are drafted to `reports/bugs/`. **STOP** — never files a tracker ticket, never triggers `/qa-fix`.
-- **Report:** `reports/regression/{RUN_ID}/triage-report.md` (three tables: confirmed bugs / test-case fixes / dismissed).
-- **Flakiness feed:** `npm run triage:history` writes per-suite rows into `reports/regression/history.json` in the shape `scripts/regression/compute-metrics.ts` expects (previously the flaky/trend detector was starved — the CI runner wrote a run-level shape it couldn't read; that run-level cost log now lives in `history-ci-runs.json`).
-
-Full methodology: the `/qa-triage-results` skill (`triage-taxonomy.md` + `routing-and-fix.md`). Interactive-first; a headless `ci/run-triage-results.ts` twin is a documented follow-up.
+| Need | Read |
+|---|---|
+| Per-case lane routing (`suites:lanes` / `suites:machine` / `suites:merge`), the case filter (`suites:filter`), executability + the `EX-*` codes | [`knowledge/execution/regression-lanes.md`](../knowledge/execution/regression-lanes.md) |
+| Post-run promotion `Draft → Automated` (`tc:promote`, the `PR-*` hold codes) — called by `/qa-regression` **6.5** and `/qa-test-lifecycle` **6P**, never automatic | [`knowledge/execution/regression-promotion.md`](../knowledge/execution/regression-promotion.md) |
+| Pre-authoring scaffold (`tc:alloc`, `tc:scaffold --check`, the KEEP gate) | [`knowledge/execution/regression-scaffold.md`](../knowledge/execution/regression-scaffold.md) |
+| Change-scoped selection (`regression:select`), existing-coverage triage (`tc:scope`), post-run triage (`/qa-triage-results`) | [`knowledge/execution/regression-selection.md`](../knowledge/execution/regression-selection.md) |
+| Storefront selectors — generated surface, `selectors:sync` / `selectors:check` | [`knowledge/execution/regression-selectors.md`](../knowledge/execution/regression-selectors.md) |
+| Headless CI runner internals, the App Insights monitoring twin, the suite staleness-audit twin | [`knowledge/execution/regression-pipelines.md`](../knowledge/execution/regression-pipelines.md) |
+| Suite inventory rules (unique IDs, naming, XREF-001) | [`knowledge/execution/regression-suites.md`](../knowledge/execution/regression-suites.md) |
 
 ## Prompt Templates
 
-Key prompt templates in `vc/shared/docs/prompts/`:
-- `How to test Builder.io.md` - Builder.io, Virto Pages & vc-frontend testing
-- `story-testing.md` - Story-level testing prompt
-
-> **Note:** `test-runner-agent.md` is now an agent definition at `agents/test-runner-agent.md`, not a prompt template.
+Interactive prompt templates live in `vc/shared/docs/prompts/` — `ls` it for the roster.

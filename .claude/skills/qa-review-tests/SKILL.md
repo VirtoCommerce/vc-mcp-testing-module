@@ -64,6 +64,25 @@ Dimensions 1-7 and 9 are **static analysis** (no browser needed). Dimension 8 re
 > remain the reference for those judgment rules and as a fallback if the linter can't parse the file (it
 > reports S-007 in that case).
 
+> **Dimension 6 has a second deterministic core: `npm run ecl:lint`** (`scripts/knowledge/lint-ecl.ts`),
+> the ECL twin of `bl:lint`. It parses the section headings of
+> `knowledge/oracles/e-commerce-edge-cases-library.md` and cross-references every `Edge_Case_Refs` cell in
+> `regression/suites/**.csv`: **ECLC-001** a case cites an ECL section that does not exist (dangling —
+> false traceability) · **ECLC-002** a section no case cites · **ECLC-003** an unparsable suite (whose
+> citations are therefore ABSENT from the report, invalidating the other two in both directions) ·
+> **ECLL-001** duplicate section number · **ECLL-002/003** Appendix D ↔ body coherence · **ECLL-004**
+> zero-padded spelling (`ECL-05.1`). Run it before judging Dim-6 coverage; a dangling ref is a mechanical
+> fact, not a judgment call.
+>
+> **What it deliberately cannot catch — and why Dim 6 still needs you.** A citation that resolves to a
+> REAL BUT SEMANTICALLY WRONG section passes every check above. Nine loyalty cases cited `ECL-13.2`
+> ("Subscription & Recurring Billing") when they meant `ECL-13.3` ("Loyalty & Points"); the ref existed,
+> so no gate could object. Only reading the section text against the case's subject decides it. This is
+> the same split as **GRD-001 vs Dimension 11** on the assertion-provenance side: the linter proves a
+> reference is *present*, the reviewer proves it is *true*. Introduced 2026-08-06 after the gate's first
+> run found 20 dangling ECL ids across ~65 cases in 7 suites that had accumulated unnoticed, because the
+> ECL library had no declared write owner and no gate of any kind.
+
 ## Execution
 
 ### Step 0: Load References
@@ -364,6 +383,8 @@ Output: Per-case verification result:
 
 > **Ordering is fixed:** static review (Steps 2–5) → live verification (Step 6) → triangulation (Step 8) → **then** one apply pass. When `--triangulate` is set, run Step 8 **before** applying, because a DRIFT rewrite needs the gathered evidence to rewrite *to*. Never apply fixes before the axes are gathered.
 
+> **`file <suite> --fix` is the executor `/qa-test` Step 2a routes a `REPAIR` disposition to** — an existing row whose *mechanics* went stale against the change under test (renamed selector, moved route, removed argument, dead `@td()` alias), repaired **before** that run executes anything, because such a row cannot execute at all. A **`RE-BASE`** deliberately does **not** come here before the run: that row's *expected value* conflicts with the change, and the change is normally an **unmerged PR** — rewriting the assertion to match it first would make the change its own oracle, after which the case can only pass. It is executed instead, and 5a's test-defect path rewrites it with the run's own evidence. Disposition rules: [`.claude/skills/qa-test/coverage-triage.md`](../qa-test/coverage-triage.md).
+
 When `--fix` is specified:
 1. Present the review report first (Step 5)
 2. For each Blocker and Critical finding, propose a specific fix
@@ -471,6 +492,6 @@ The `qa-testing-expert` uses `playwright-firefox` for browser verification. This
 | `/qa-metrics` | Review findings feed into quality metrics |
 | `/qa-env-check` | Run env check before `--verify` to ensure environment is healthy |
 | `test-case-template.md` | The format contract that review validates against |
-| `/qa-test-lifecycle` | The **pipeline that embeds this skill** — complementary, not overlapping. It owns *when* review runs (Phase 4a = dims 1–7, 9, 10 static; Phase 5 = dim 8 + the live half of dim 10) and its own G1–G12 gates; **this skill remains the single owner of the dimension set, check codes, severities, and evidence bars**, and that command must reference them rather than restate them. Its Phase 2 change signal is a *single-axis candidate*: a rewrite of what a case **asserts** must clear this skill's Dim-11 bar (`--triangulate`, its Phase 4a-bis), while a mechanical selector/URL update may be applied directly. **Review never promotes `Automation_Status` — but that pipeline's Phase 6P does**, and it is the only thing that may: 6P *derives* eligibility from this skill's output (0 GRD-001 Blocker/High, 0 ENV-008, every assertion grounded) and then needs explicit human/`qa-lead` approval before flipping `Draft → Reviewed` while appending a `/qa-test` run's run-scoped cases into `regression/suites/`. The `Draft → Reviewed` rule below is that shared gate |
+| `/qa-test-lifecycle` | The **pipeline that embeds this skill** — complementary, not overlapping. It owns *when* review runs (Phase 4a = dims 1–7, 9, 10 static; Phase 5 = dim 8 + the live half of dim 10) and its own G1–G12 gates; **this skill remains the single owner of the dimension set, check codes, severities, and evidence bars**, and that command must reference them rather than restate them. Its Phase 2 change signal is a *single-axis candidate*: a rewrite of what a case **asserts** must clear this skill's Dim-11 bar (`--triangulate`, its Phase 4a-bis), while a mechanical selector/URL update may be applied directly. **Review never promotes `Automation_Status` itself** — the promotion flip is owned by an orchestrator, never this skill: that pipeline's Phase 6P, which since 2026-09-10 is the **full** promoter — `/qa-test`'s own `5g` gate was removed, so its ticket cases are promoted by a later `/qa-test-lifecycle` pass like any other source (a **direct** `/qa-regression` run also flips already-grounded cases at its Step 6.5, via the same `tc:promote`, without any of this skill's assertion work). It *derives* eligibility from this skill's output (0 GRD-001 Blocker/High, 0 ENV-008, every assertion grounded) and needs explicit human/`qa-lead` approval before flipping `Draft → Reviewed` (or `Draft → Automated` when the case ran green under the automated regression runner). The promotion rule below is that shared gate |
 | `/qa-review-bl` | The **sibling triangulation mechanism** — same three axes, same evidence bar, applied to `BL-*` invariants instead of assertions. Its Step 4 reconciles coverage back into this skill; a `{BL}`-tagged assertion whose invariant it amended shows up here as a Dim 11 DRIFT |
 | `ci/run-suite-audit.ts` | The **headless twin** — runs `--triangulate --fix --ci` on one suite per weekday and lands each audit as its own draft PR (`.github/workflows/suite-audit.yml`) |

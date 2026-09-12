@@ -6,8 +6,8 @@
 |---------------|------|----------|
 | **Test documentation** (plans, cases, testrail CSVs — NOT execution reports, see below) | `reports/tickets/SprintXX-XX/VCST-XXXX/` | `test-plan.md` (`/qa-plan`), `test-cases.csv` (`/qa-test-cases-generator`), `testrail-import.csv` |
 | **Test screenshots** (evidence captured during test execution) | `reports/tickets/SprintXX-XX/VCST-XXXX/screenshots/` | `desktop/feature-overview.png`, `mobile/checkout-step3.png` |
-| **`/qa-test` run summary** (AC analysis, checklist, execution results, exploratory findings) | **Terminal only** — folded into one chat report, never written as separate files (`.claude/rules/reports.md` §1) | n/a — only `summary.json` (duplicate-run marker) + `screenshots/` persist to `reports/tickets/SprintXX-XX/VCST-XXXX/` |
-| **Bug reports — open** (active bugs) | `reports/bugs/open/` | `BUG-Checkout-Payment-Overlap-iOS.md` |
+| **`/qa-test` run summary** (AC analysis, checklist, execution + the C1 ticket-regression result) | **Terminal only** — folded into one chat report, never written as separate files (`.claude/rules/reports.md` §1) | n/a — only `summary.json` (duplicate-run marker) + `screenshots/` persist to `reports/tickets/SprintXX-XX/VCST-XXXX/`; new cases persist to `regression/suites/` |
+| **Bug reports — open** (active bugs) | `reports/bugs/open/{critical-high\|medium\|low}/` — foldered by the severity the report DECLARES (`.claude/rules/reports.md` §1a); a `QUESTION-*.md` stays at `open/` root | `open/critical-high/BUG-Checkout-Payment-Overlap-iOS.md` |
 | **Bug reports — fixed** (verified fixes, kept for regression reference) | `reports/bugs/fixed/` | `BUG-Cart-Total-Reset-VCST-4700.md` |
 | **Bug reports — closed** (won't fix, false positive, cannot reproduce) | `reports/bugs/closed/` | `BUG-GA4-add-payment-info.md` |
 | **Bug evidence** (screenshots & API traces for bugs) | `reports/bugs/screenshots/` and `reports/bugs/api-traces/` | `payment-form-broken-ios.png`, `graphql-error-response.json` |
@@ -16,7 +16,7 @@
 | **Full regression runs** (multi-suite reports) | `reports/regression/REG-YYYY-MM-DD-HHMM/` | suite reports, `REGRESSION-REPORT.md` |
 | **Smoke test runs** (`/qa-smoke` Track A + Track B) | `reports/regression/SMOKE-YYYY-MM-DD-HHMM/` | `smoke-report.md`, `suite-01-trackA-results.json`, `suite-01-trackB-results.json`, `trackA-evidence/`, `trackB-evidence/` |
 | **Performance reports** (standalone investigations worth keeping) | `reports/performance/` | `lists-page-performance-report-2026-02-11.md` |
-| **Exploratory session reports** (standalone `/qa-sbtm` / `/qa-exploratory` domain charters — read back for the 24h duplicate-charter check; NOT `/qa-test`'s own ticket-scoped mini-charter, which is terminal-only) | `reports/exploratory/` | `SBTM-checkout-edge-cases-2026-03-01.md` |
+| **Exploratory session reports** (standalone `/qa-sbtm` / `/qa-exploratory` domain charters — read back for the 24h duplicate-charter check; `/qa-test` no longer runs an exploratory charter) | `reports/exploratory/` | `SBTM-checkout-edge-cases-2026-03-01.md` |
 | **Checklists** (`/qa-checklist` output) | **Terminal only** — no active writer today; `reports/checklists/` is reserved for a future durable checklist artifact | n/a |
 | **BA analysis reports** (system analysis, stories, API audit) | `reports/ba/` | `ba-report-2026-03-04.md`, `checkout-stories.md` |
 | **BA business logic proposals** (draft `PROPOSED-BL-*` invariants from `/ba-analyze`; human-promoted into `business-logic.md`) | `reports/ba/` | `bl-proposals-2026-04-22.md` |
@@ -27,9 +27,10 @@
 
 ## Naming Conventions
 
-- **Bug reports:** `reports/bugs/open/BUG-{Short-Description}.md` (e.g., `BUG-Guest-Checkout-Email-Validation.md`)
-- **Bug reports with JIRA ref:** `reports/bugs/open/BUG-{Description}-VCST-XXXX.md`
-- **Bug lifecycle:** `open/` → (verified fix) → `fixed/` | (false positive/won't fix) → `closed/`
+- **Bug reports:** `reports/bugs/open/<severity>/BUG-{Short-Description}.md` (e.g., `open/medium/BUG-Guest-Checkout-Email-Validation.md`) — `<severity>` is `critical-high` (Critical/P0 · High/P1), `medium` (Medium/P2) or `low` (Low/P3), mirroring the severity the report states in its own title tag / `**Severity:**` line. The report is the source of truth; the folder is a view (`.claude/rules/reports.md` §1a)
+- **Bug reports with JIRA ref:** `reports/bugs/open/<severity>/BUG-{Description}-VCST-XXXX.md`
+- **Bug lifecycle:** `open/<severity>/` → (verified fix) → `fixed/` | (false positive/won't fix) → `closed/` — the destination trees are FLAT; a re-grade edits the report first, then moves the file
+- **Reading the tree:** always recurse (`open/**/*.md`). A one-level `open/*.md` glob now matches nothing but the open `QUESTION-*.md`
 - **Ticket evidence:** `reports/tickets/VCST-XXXX/test-report.md`
 - **Screenshots:** `{component-name}-{state}-{viewport}.png` or `{test-case-id}-{description}.png`
 - **`/qa-test` execution results:** terminal-only, no file — folded into its Step 6 chat report; only `summary.json` persists

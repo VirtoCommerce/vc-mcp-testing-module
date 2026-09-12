@@ -27,9 +27,27 @@ Your prompt is structured as four synergistic layers — business logic (invaria
 
 ## Business Logic Reference
 
-> **Reference:** `knowledge/oracles/business-logic.md` — testable business invariants across 17 domains, 108 rules.
+> **Reference:** `knowledge/oracles/business-logic.md` — testable business invariants, grouped into `## Domain N: … (BL-X)` sections (`npm run bl:extract:list` prints the domains and their sizes; counts are derived, never transcribed).
 
-When a test result is ambiguous, check business-logic.md before classifying. If observed behavior violates a business invariant, it is a FAIL regardless of whether a JIRA spec explicitly covers it.
+When a test result is ambiguous, check the invariants before classifying. If observed behavior violates a business invariant, it is a FAIL regardless of whether a JIRA spec explicitly covers it.
+
+**IF YOUR BRIEF ALREADY CONTAINS THE RULES, DO NOT RE-READ THE ORACLE.** A dispatching orchestrator can
+paste the relevant scope in as text — `npm run bl:extract -- --domain <d>` for invariants,
+`npm run ecl:extract -- --domain <d>` (or `--chapter <n>`) for edge-case patterns. An extract is the
+oracle's own markdown, sliced verbatim, and carries a header saying so. Re-opening the source file to
+re-read what you were handed costs most of your context and adds nothing — the extract IS the source,
+character for character. The same applies to every other item a brief supplies as text rather than as a
+path (matrix rows, the journey case, schema fragments): that is the **dispatch pack**, and what may and
+may not travel in one is [`skills/qa-test/dispatch-pack.md`](../../skills/qa-test/dispatch-pack.md).
+Three conditions, all real:
+
+- **An extract is a SUBSET.** It states which ids it contains. If the work turns out to touch a domain
+  or chapter it does not cover, ask for that scope (or read the oracle) rather than concluding no rule
+  applies — "not in my extract" is never evidence that no invariant or edge case exists.
+- **No extract in the brief ⇒ read the file**, scoped to the domains your task touches.
+- **A packed fragment that carries a rev is only as current as that rev.** A schema or selector fragment
+  stamped `UNKNOWN` grounds nothing; treat what you take from it as a hypothesis, exactly as you would
+  from an unrefreshed snapshot.
 
 ## Judge — Pass/Fail Classification
 
@@ -70,7 +88,7 @@ Ambiguous examples: label text changed (intentional?), new console warning (harm
 
 **This does NOT lower the bar for what counts as a bug.** The Live-Verification Policy below still governs filing: a disabled control is validation working (not a bug), an API-only repro is not a UI-layer defect, and by-design / config-gated behavior is verified at the source before filing. Notice everything; **verify before you file.** Continuous observation widens what you *look at* — it does not widen what you *call a defect*.
 
-**Discovery pass — ticket / feature / PR testing only (NOT bulk regression).** When testing a ticket, feature, or PR (i.e. not executing a pre-built regression suite), spend a short focused block — ~5–10 min — on active discovery beyond the scripted cases: surprise-seeking plus one adversarial tour or persona lens. Aim to surface at least one scenario the existing cases don't cover. Bulk-regression runs (`test-runner-agent` / `autonomous-test-runner` executing a CSV suite) skip this timed pass and rely on the continuous-observation reflex above. Full methodology: `/qa-exploratory` (discovery-first command) and `/qa-sbtm` (charters, CRISP/SFDPOT, Whittaker tours, personas). Read the VC bug catalog (`knowledge/oracles/vc-bug-catalog.md`) to avoid re-discovering known patterns.
+**Discovery pass — ticket / feature / PR testing only (NOT bulk regression).** When testing a ticket, feature, or PR (i.e. not executing a pre-built regression suite), spend a short focused block — ~5–10 min — on active discovery beyond the scripted cases: surprise-seeking plus one adversarial tour or persona lens. Aim to surface at least one scenario the existing cases don't cover. Bulk-regression runs (`test-runner-agent` executing a CSV suite) skip this timed pass and rely on the continuous-observation reflex above. Full methodology: `/qa-exploratory` (discovery-first command) and `/qa-sbtm` (charters, CRISP/SFDPOT, Whittaker tours, personas). Read the VC bug catalog (`knowledge/oracles/vc-bug-catalog.md`) to avoid re-discovering known patterns.
 
 ## Self-Check & Verify Work (MANDATORY, every agent, every run)
 
@@ -120,7 +138,8 @@ Reference files — read on-demand before each testing area, not all upfront:
 
 | Area | File |
 |------|------|
-| Business Logic Invariants | `knowledge/oracles/business-logic.md` |
+| Business Logic Invariants | `knowledge/oracles/business-logic.md` — **or the extract already in your brief** (`bl:extract`, see §Business Logic Reference) |
+| Edge-case patterns | `knowledge/oracles/e-commerce-edge-cases-library.md` — **or the extract already in your brief** (`ecl:extract`, same rule) |
 | Platform Patterns | `knowledge/api/platform-patterns.md` |
 | Performance Thresholds | `knowledge/execution/performance-thresholds.md` |
 | Browser Quirks | `knowledge/automation/browser-quirks.md` |
@@ -159,9 +178,11 @@ Full decision tree, JS recipes, and CSV-runner recipes: `knowledge/execution/liv
 ### 2. Validate GraphQL against the live schema
 
 Before authoring or reviewing any query/mutation:
-- Consult `knowledge/api/graphql-schema.md` (live introspection snapshot — 86 queries / 134 mutations / 36 types as of last refresh).
+- Consult `knowledge/api/graphql-schema.md` — the live introspection snapshot. **Read its own header for the rev and the counts; do not trust a count written here.** This line used to transcribe "86 queries / 134 mutations / 36 types"; the live schema reads **108 / 140 / 54** (probed 2026-09-02), so the transcription was wrong by 22 queries, 6 mutations and 18 types — the `.claude/rules/test-data.md` §GOLDEN RULE failure in its purest form, and a working demonstration of exactly the drift this section is about.
 - For ad-hoc inline checks: `npx tsx scripts/graphql/graphql-runner.ts --query "<inline>"`.
-- Schema is refreshed via `npm run schema:refresh`; fixtures are bumped/renamed via `npm run graphql:fixtures:update`; CI gate is `npm run graphql:fixtures:validate`.
+- **Two artifacts go stale independently, and one command does not refresh both.** `npm run schema:refresh` rewrites `knowledge/api/graphql-schema.md` (what YOU read) and nothing else. `npm run graphql:fixtures:validate:refresh` re-introspects, rewrites `scripts/.graphql-schema.cache.json` (what the RUNNER reads) and validates the 74 fixtures, exiting non-zero on drift. Fixtures are bumped/renamed via `npm run graphql:fixtures:update`.
+- **`npm run graphql:fixtures:validate` without `--refresh` is not a freshness check.** `loadSchemaCache` has no age check, so it passes clean against an arbitrarily old cache — and the cache is a single shared file, not one per env, so it may hold a different environment's contract (`test-data/graphql/index.json` records the `backUrl` + `lastValidated` it was built from — read them). `npm run schema:check` is a liveness check, never a drift gate.
+- **Never judge the snapshot's staleness from the snapshot.** A caller that refreshed it hands you the rev; with no rev, treat it as UNKNOWN age. Spec: `.claude/skills/qa-test/contract-refresh.md`.
 - The canonical runner is `scripts/graphql/graphql-runner.ts` — **never write custom JS to execute CSV-defined GraphQL cases.**
 
 ### 3. Verify selectors & state against the live UI
@@ -320,6 +341,8 @@ See [`.claude/rules/reports.md`](../../../rules/reports.md) — the single sourc
 ## Browser Interaction — Mandatory Real-User Behavior
 
 **Hook-enforced.** A `PreToolUse` hook (`hooks/enforce-real-user.mjs`) blocks `browser_evaluate`, `browser_run_code_unsafe`, and `evaluate_script` MCP calls unless the JS payload matches the narrow auto-allow regex list (GraphiQL JWT `execCommand('insertText')`, `dataLayer`/`gtag()`, cross-origin iframe inspection). Do not try to bypass — if your case fits an exception but was blocked, extend the regex.
+
+**Typing a password — the token is the BARE KEY NAME.** On a Playwright lane, `browser_type(text="ORG_USER_PASSWORD")`; the MCP substitutes the value from `--secrets` and redacts it everywhere. **Never `{{ORG_USER_PASSWORD}}`** — the repo's `{{VAR}}` test-data convention does not apply to this flag, the lookup misses, and the miss is SILENT (the literal string is typed; the form just says "Login attempt failed"). Confirm the hit from the response's *Ran Playwright code* line: `fill(process.env['NAME'])` = hit, `fill('NAME')` = miss. A second `PreToolUse` hook (`hooks/enforce-secret-token.mjs`) blocks a placeholder, an unknown credential-shaped key, and a plaintext secret before the keystroke. Chrome DevTools MCP has **no** `--secrets` — that brief must name its own auth path. Contract: [`../../execution/browser-lanes.md`](../../execution/browser-lanes.md) §Browser login secrets.
 
 You MUST drive the browser like a real customer:
 

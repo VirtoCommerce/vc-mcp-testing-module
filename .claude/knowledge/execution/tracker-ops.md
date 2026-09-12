@@ -127,6 +127,25 @@ guessing custom-field ids.
   before the `PATCH`.
 - The on-disk `reports/bugs/*.md` file stays plain Markdown regardless — this rule is only about
   what you push into a **tracker field**.
+- **One carve-out, and only one:** a comment that must **display screenshots** cannot be Markdown —
+  see §5c. Prose stays Markdown everywhere else.
+
+## 5b. Bug-filing relationship — Sub-task vs Link vs Standalone
+
+`/qa-test` Step 5d files a confirmed bug with one of three relationships to the ticket under test, set by
+that finding's **provenance** (5a). This is the contract `/qa-bug` follows when invoked with a relationship
+context (`sub-task-of:<ticket-key>` / `link-only:<existing-bug-key>`); a standalone `/qa-bug` call
+(no relationship context) is unaffected and keeps creating an ordinary Bug as today.
+
+| Relationship | Jira | Azure Boards |
+|---|---|---|
+| **IN-SCOPE → Sub-task of `<ticket-key>`** | `createJiraIssue` with `fields.issuetype.name = "Sub-task"` + `fields.parent = {key: <ticket-key>}`. **Probe first** via `getJiraIssueTypeMetaWithFields` on the project — some projects rename or disable the Sub-task type, and a parent whose own type is an Epic may not support one. On a miss, **fall back** to a standalone Bug + a "Relates" link and say so in the filing output — never silently drop the relationship. | Create the Bug work item normally, then `PATCH` its `relations` to add a link of type `System.LinkTypes.Hierarchy-Reverse` pointing at the parent. Azure Boards has no distinct "sub-task" issue type — the hierarchy link *is* the parent-child relationship. |
+| **PRE-EXISTING → link only, no new ticket** | `createIssueLink` between the existing bug's key and `<ticket-key>` — resolve the link type id via `getIssueLinkTypes` first (use "Relates"/whatever that project calls it), never hardcode a link-type id. Nothing is filed. | `PATCH` the existing work item's `relations` to add a link of type `System.LinkTypes.Related` to `<ticket-key>`. Nothing is filed. |
+| **OUT-OF-SCOPE incidental → standalone + related link** *(unchanged from today)* | `createJiraIssue` (Bug) + `createIssueLink` "Relates" back to `<ticket-key>`. | Create the Bug work item + a `System.LinkTypes.Related` relation to `<ticket-key>`. |
+
+An incidental bug is never a sub-task — it wasn't caused by this ticket's change, so a parent-child
+relationship would misrepresent it; it gets its own standalone ticket with a plain "related" link, same as
+the in-scope case's fallback path.
 
 ### Comment & body style — clear, brief, understandable
 
@@ -140,9 +159,99 @@ note) MUST be:
   matters. No investigation logs, no step-by-step narration, no restating the whole ticket.
 - **Understandable to a human skimming on a deadline.** Reference evidence (PR link, screenshot,
   `@td` alias, BL-* id), don't inline it. Obey the size discipline in `.claude/rules/reports.md`.
-- **Rendered Markdown, not raw markup.** Verify the comment renders (bold/lists/code actually
-  format) — a literal `**` / `| … |` wall means you sent the wrong dialect (Jira wiki instead of
-  Markdown, or Markdown into an Azure HTML field). Fix and re-post.
+- **Rendered, not raw markup.** Verify the comment renders (bold/lists/code actually format) — a
+  literal `**` / `| … |` wall means you sent the wrong dialect (Jira wiki instead of Markdown, or
+  Markdown into an Azure HTML field). Fix and re-post. The inverse holds for the §5c
+  screenshot carve-out: there the body is wiki markup on purpose, and a literal `h2.` / `||` wall
+  means you sent *Markdown* into the v2 endpoint. Whichever dialect you chose, read the posted
+  comment back before calling it done.
+
+## 5c. Screenshots in a Jira comment — attach first, then wiki markup (2026-08-07)
+
+> **This section is the MECHANISM. That screenshots MUST be embedded inline is policy — `.claude/rules/reports.md` §5.0 — and it binds documentation, bug reports and fix verification alike. Posting a UI claim with no inline image, or with a Markdown/prose file reference, is a non-delivery, not a cosmetic miss. The `?expand=renderedBody` check below is part of the posting step, not an optional follow-up.**
+
+A Markdown image reference in a Jira comment **silently renders as nothing**. `![alt](path)` pointing
+at a repo path, or at a bare filename, is dropped by the Markdown→ADF conversion with no error and no
+warning — the comment posts `200 OK` and simply has no image. Naming the file in prose ("Screenshot:
+`foo.png`") is not a substitute: the reader still cannot see it. This cost a full round trip on
+VCST-5281, where two complete guides were posted with twelve invisible screenshots.
+
+Images live in a Jira comment only if **both** steps happen:
+
+1. **Attach the file to the issue.** The Atlassian MCP has **no attachment tool** — use the REST
+   endpoint directly with `JIRA_EMAIL` + `JIRA_API_TOKEN` from `.env.local`:
+   ```bash
+   curl -sk -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H "X-Atlassian-Token: no-check" \
+     -F "file=@path/to/shot.png" [-F "file=@path/to/second.png" ...] \
+     "https://<site>.atlassian.net/rest/api/3/issue/<KEY>/attachments"
+   ```
+   Multiple `-F file=@…` in one request is fine. **Check what already landed before retrying** — a
+   failed output pipe does not mean the upload failed, and a blind retry duplicates every attachment
+   (`GET /rest/api/3/issue/<KEY>?fields=attachment`).
+2. **Reference it as wiki markup, via the v2 comment API.** `POST`/`PUT`
+   `/rest/api/2/issue/<KEY>/comment[/<id>]` with a plain-string `body` containing
+   `!filename.png|width=700!`. Jira resolves the filename against the issue's attachments and
+   converts it to a real ADF media node. The whole comment body must then be wiki markup —
+   `h2.` headings, `*bold*`, `_italic_`, `{{mono}}`, `||header||` / `|cell|` tables, `#` numbered and
+   `*` bulleted lists, `[text|url]` links, `{panel:title=…}…{panel}` for admonitions.
+
+**Do not** hand-build an ADF `media` node with the numeric attachment id — Jira rejects it with
+`400 ATTACHMENT_VALIDATION_ERROR`. The `media.attrs.id` must be a media-service **UUID**, which the
+attachment REST API does not expose; the wiki-markup path is what resolves it for you.
+
+**The three ADF dead ends, measured 2026-09-02 on VCST-5319 — do not re-probe them:**
+
+| Attempt | Result |
+|---|---|
+| `media.attrs` `{type:"file", id:"<attachmentId>", collection:""}` | `400 ATTACHMENT_VALIDATION_ERROR` |
+| same, `collection` omitted | `400 INVALID_INPUT` — the field is required |
+| same, `collection:"jira-attachments"` | `400 ATTACHMENT_VALIDATION_ERROR` |
+| `media.attrs` `{type:"external", url:"…/attachment/content/<id>"}` | **`201 Created`, then renders `Can only create thumbnails for attached images`** |
+
+The last one is the trap: it is the only variant that *posts successfully*, so a run that stops at the
+status code concludes it worked. `GET /rest/api/3/issue/<KEY>/comment/<id>?expand=renderedBody` is what
+distinguishes them — a rendered `<span class="error">` means the images are invisible whatever the POST
+returned.
+
+**Read the POSITIVE signal off the `<img>`, not off `file-preview-id`.** That attribute was the marker on
+the 2026-09-02 VCST-5319 measurement and it does **not** appear on a working wiki render: verified
+2026-09-03 on VCST-5868, where a correct `!file.png|width=700!` renders as
+`<span class="image-wrap"><img src=".../rest/api/3/attachment/content/<attachmentId>" width=…>` with
+**zero** `file-preview-id` occurrences. A check gated on that attribute would have called three correctly
+rendered images a failure. The three signals that did hold: one `<img src=…/attachment/content/…>` per
+image in `renderedBody`; via the v3 read below, one ADF `media` node per image whose `attrs.id` is a
+36-char UUID with `type: "file"`; and **zero** surviving literal `!…png!` in `renderedBody`, which proves
+the wiki markup was converted rather than printed.
+
+**Probe on a throwaway comment, never on the deliverable.** Post a one-line test comment, iterate the
+variants against it, then write the real comment once with the form that rendered — and delete the probe
+(`DELETE /rest/api/2/issue/<KEY>/comment/<id>` → `204`). Iterating on the deliverable itself means
+repeatedly overwriting a comment other people may already be reading.
+
+**Verify, don't assume.** Re-read the comment through the **v3** API and confirm each `media` node's
+`attrs.id` is a 36-char UUID:
+```bash
+curl -sk -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
+  "https://<site>.atlassian.net/rest/api/3/issue/<KEY>/comment/<id>"
+```
+Zero media nodes means the images are invisible, whatever the POST returned.
+
+Azure Boards is unaffected — its fields are HTML, so `<img src="…">` against an uploaded attachment
+URL works normally.
+
+## 5d. Publishing a deliverable to a ticket means the deliverable
+
+When asked to push a report, guide, analysis, or test model **to a ticket**, post the **artifact
+itself**, in full, in the comment body. A summary plus a repo path is not a delivery:
+
+- **Repo paths are not readable by ticket readers.** A path is only resolvable by someone with that
+  checkout, at that commit — and if the file is uncommitted, by literally no one but the author.
+  Never cite a working-tree path as if it were a link.
+- **Summarize only when explicitly asked to.** "Push it to the ticket" means the content. If the
+  artifact is genuinely too large for one comment, split it across comments (one per logical
+  document) rather than shrinking it to an abstract.
+- **A pointer is legitimate only when the target is reachable** — a merged-and-pushed GitHub URL, a
+  PR link, an attachment on that same ticket.
 
 ## 5. Build-version verification is platform-only
 

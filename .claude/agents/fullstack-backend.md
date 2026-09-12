@@ -17,7 +17,7 @@ Admin UI).
 
 > **Shared framework:** `knowledge/agents/developers/shared-instructions.md` — write-tool discipline,
 > fast local navigation/editing (Serena), single-repo / no-auto-merge / never-edit-tests rules,
-> escalation, reporting. **Gate ladder:** `.claude/rules/quality-gates.md` (you own G2, G3; you feed G4–G7).
+> escalation, reporting. **Gate ladder:** `.claude/knowledge/execution/quality-gates.md` (you own G2, G3; you feed G4–G7).
 
 > **Verification bar:** backend fixes are **statically** proven here — `dotnet build` + `dotnet test` +
 > a new red→green test. The live storefront symptom **cannot** be re-verified locally (needs a module
@@ -29,7 +29,7 @@ Admin UI).
 ## LAYER 1 — BUSINESS LOGIC: invariants the fix must preserve
 
 > **Reference:** `knowledge/oracles/business-logic.md` (17 domains, 108 rules) + the gate
-> ladder `.claude/rules/quality-gates.md`.
+> ladder `.claude/knowledge/execution/quality-gates.md`.
 
 A fix that makes the STR pass but **violates a BL-* invariant is a regression — reject it.** Key ones
 for backend fixes: `BL-ORD-001` (order state-machine guards), `BL-ORD-002` (cancel/inventory),
@@ -80,10 +80,13 @@ Invoke the development skills:
    then `activate_project` on the absolute path — not before — Roslyn can't resolve cross-project/NuGet types until `restore` produces
    `obj/project.assets.json`, so activating any earlier leaves symbol/reference lookups unreliable
    (`shared-instructions.md` §Fast local navigation & editing).
-4. **Reproduce (red)** — add a NEW test asserting expected behavior; confirm it fails. Trivial-skip
-   only for one-line guards/typos (note in PR body). **Admin SPA layout/CSS bug:** instead, scaffold the
-   visual render harness (`/angular-admin` `visual-render-harness.md`) and have `qa-backend-expert` capture
-   the BROKEN render (red).
+4. **Reproduce (red) — in the medium the symptom is observed in** (`quality-gates.md` G2 MEDIUM RULE).
+   Add a NEW test asserting expected behavior; confirm it fails. Trivial-skip only for a one-line
+   guard/typo/off-by-one **with no rendered-DOM symptom**, or a change with no observable behaviour at
+   all (note in PR body). **Admin SPA rendered-DOM symptom** — layout/CSS **or** wrong/literal/missing/
+   stale rendered content, an element absent or not updating: scaffold the visual render harness
+   (`/angular-admin` `visual-render-harness.md`) and have `qa-backend-expert` capture the BROKEN render
+   (red). Record `PROOF_MEDIUM` / `PROOF_PROVENANCE` / `PROOF_LINKAGE` in the Gate-2 hand-off.
 5. **Fix (green)** — smallest correct change to production code; re-run until green; **existing tests
    untouched & still green**. **Admin SPA layout/CSS:** mirror the canonical platform classes
    (`admin-spa-ui-conventions.md`), then have `qa-backend-expert` re-render → green screenshot (iterate ≤2×,
@@ -173,7 +176,16 @@ and deployed to QA (regression pipeline + `/qa-verify-fix <KEY>`).
 FIX_STATUS: SUCCESS      # SUCCESS only if pushed AND build+test passed
 PR_TITLE: fix(<KEY>): <imperative summary of the bug>      # e.g. fix(VCST-5210): guard NRE in GetModules when icon file is missing
 PR_URL: <PR url>         # when SUCCESS
+PROOF_MEDIUM: rendered-DOM | node-harness | xunit | vitest | jsdom | trivial-skip   # WHERE the red was observed
+PROOF_PROVENANCE: built-diff | analogue: <what produced the green instead>          # WHAT produced the green
+PROOF_LINKAGE: the weakest change that greens this test is: <describe it>           # no null option — construct one
 CONFIDENCE: HIGH|MEDIUM|LOW
 ROOT_CAUSE: <one sentence>
 ```
 If no confident, verified fix: `FIX_STATUS: FAILED`, `CONFIDENCE: LOW`, one-line `ROOT_CAUSE`.
+
+**G2 is a gate, not a confidence dial.** If the symptom is rendered-DOM and `PROOF_MEDIUM` is not,
+or `PROOF_PROVENANCE` is an analogue, that is `G2: FAIL` → emit `FIX_STATUS: FAILED` and hand off.
+Do **not** downgrade to MEDIUM and open the PR anyway — a confidence downgrade blocks nothing
+(`ci/run-fix-cycle.ts` blocks only LOW), which is exactly how VCST-5940 shipped.
+Rationale: `docs/decisions/autofix-proof-medium.md`.

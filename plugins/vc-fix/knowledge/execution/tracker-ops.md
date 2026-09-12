@@ -45,6 +45,14 @@ Use whichever surface is available; prefer the MCP when connected, else the CLI/
 > tool's exit status, records nothing (VCST-5582 C3). If you must shorten the output, redirect to a
 > file and read the file (`node … ado.mjs … > out.json 2>&1; echo "exit=$?"`), or use the tool's own
 > `--json` and read the fields — never a pipe that swallows the status.
+>
+> **Windows / Git-Bash: a `--path` starting with `/` gets MSYS-mangled.** On Git-Bash, MSYS rewrites
+> a leading-slash argument into a Windows path (`/Web/config.js` → `C:/Program Files/Git/Web/config.js`)
+> **before** `ado.mjs` sees it, so `get-file --path /some/repo/path` resolves to the wrong file. `ado.mjs
+> get-file` detects the mangling and prints a hint, but you hit it first — so either prefix the command
+> with `MSYS_NO_PATHCONV=1` (`MSYS_NO_PATHCONV=1 node … ado.mjs get-file --path /src/App.cs`) **or** pass
+> `--path` **without** the leading slash (`--path src/App.cs`). This is a Git-Bash quirk, not an `ado.mjs`
+> bug — it affects any native tool taking a POSIX-looking path argument.
 
 | Op | Jira (`tracker.kind = jira`) | Azure Boards (`tracker.kind = azure`) — via `ado.mjs` |
 |---|---|---|
@@ -75,12 +83,23 @@ resolve/comment/transition ops and for commit/PR cross-links (Azure: `AB#12345`)
 > markup** (`h2.`, `*bold*`, `{code}…{code}`, `{{mono}}`) — it renders as literal text. Summaries/titles
 > are plain text, no markup.
 >
+> **ONE carve-out, and only one — a comment that must DISPLAY screenshots cannot be Markdown.**
+> A Markdown image reference (`![alt](path)`) and a prose file path both post `200 OK` and render
+> NOTHING. Such a comment is attached first, then written as **wiki markup** with
+> `!filename.png|width=700!` through the **v2** comment API, and VERIFIED from
+> `?expand=renderedBody` (one `<img …/attachment/content/N>` per image, zero surviving `!….png!`,
+> zero `<span class="error">`). On Azure Boards the equivalent is `ado.mjs upload-attachment`
+> then an inline `<img src="{url}">`. Embedding is MANDATORY for any UI claim, not a style choice —
+> policy and the verification gate: `.claude/rules/reports.md` §5.0.
+>
 > **Comment & body style — clear, brief, understandable (both trackers).** Format alone isn't enough;
 > the content must read fast. Every comment/field body you push (bug filing, `/qa-fix` status,
 > `/qa-verify-fix` verdict, `/qa-defect` note) is: **structured** (Markdown headings / short bullets /
 > a small table, never a wall of text); **brief — lead with the outcome** (`✅ Verified fixed @ build X`,
 > `Routed to vc-module-cart, PR #NN`), then only the evidence that matters — no investigation logs or
-> step-by-step narration; **evidence referenced, not inlined** (PR link, screenshot, BL-* id), obeying
+> step-by-step narration; **evidence referenced, not inlined** (PR link, BL-* id) — **except a
+> SCREENSHOT, which is always embedded inline per the carve-out above; a referenced image is an
+> invisible one** — obeying
 > the size caps in `.claude/rules/reports.md`; and **verified to render** (bold/lists/code actually
 > format) — a literal `**` / `| … |` wall means the wrong dialect was sent, so fix and re-post.
 Auth (never passwords): Jira via the Atlassian MCP OAuth (or `JIRA_API_TOKEN`+`JIRA_EMAIL`);

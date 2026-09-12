@@ -18,10 +18,24 @@ harness, nothing here is ever committed — only the screenshots/verdict go in t
 
 ## When to use
 
-- The bug is **layout / CSS / visual** in a module blade (`*.tpl.html`): overlap, misalignment, wrong width,
-  clipping, spacing, a control rendering in the wrong place, a missing/!wrong platform class.
-- For pure **logic** bugs use the Node scratch harness instead. A bug with both (a CSS class toggled by a
-  wrong condition) uses **both**: Node harness for the condition, render harness for the appearance.
+- The bug's symptom is **observable only in a rendered DOM**. Two families:
+  - **layout / CSS**: overlap, misalignment, wrong width, clipping, spacing, a control in the wrong
+    place, a missing/wrong platform class;
+  - **rendering / binding / update**: the blade shows the wrong, literal, empty or stale content; an
+    element never appears or never refreshes; an interpolation or `srcdoc`/`ng-bind`-style binding does
+    not take effect.
+- **When the diff is JS that feeds a rendered binding, load the REAL controller file** into the harness
+  (`<script src>` the checkout's `.js` beside the `ng-include`'d real `.tpl.html`) and reproduce the real
+  arrival ORDER of the data (a deferred stub callback if the value arrives async). A harness that
+  pre-sets the bound value renders correctly and yields a **false green** — the red must appear first.
+- **The green must be produced by the diff as written** (`PROOF_PROVENANCE: built-diff`). An
+  intervention that is **not what ships** — a re-assignment, a different delay, a stub standing in for
+  **the file under fix** — proves a hypothesis about the mechanism, not the fix: label it
+  `analogue: <what>`. **A live DOM edit that mirrors the committed markup change exactly is NOT an
+  analogue** — that is the stronger live verification G3 prefers; stubbing `$scope`, data states and
+  collaborators is likewise expected, and is what the recipe below does.
+- For a **non-rendered** symptom (payload, computed value, endpoint) use the Node scratch harness
+  instead. A bug with both uses **both**.
 
 ---
 
@@ -169,7 +183,7 @@ when the fix changes flow.
 - Iterate **dev ↔ qa-backend-expert ≤ 2 times** locally (fix → re-render → re-screenshot) **before** opening
   the PR, and squash — so the public PR shows one clean structural commit, not the 5-commit thrash of PR #101.
 - This satisfies the layout/CSS branch of **G2 (red)** and **G3/G4 (green, pre-PR)** in
-  `.claude/rules/quality-gates.md`. Post-deploy **G6** remains the final real-user confirmation, but is no
+  `.claude/knowledge/execution/quality-gates.md`. Post-deploy **G6** remains the final real-user confirmation, but is no
   longer the first time anyone sees the layout.
 
 ---

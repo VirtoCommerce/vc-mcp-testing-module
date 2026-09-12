@@ -310,5 +310,109 @@ if (shapeHits.length === 0) {
   );
 }
 
-const idFatal = (idHits.length > 0 || aliasGuidHits.length > 0 || shapeHits.length > 0) && !WARN_ONLY;
+// --- DV-023: derived-boundary drift guard (golden rule: never transcribe a constant
+// that has a source of truth). A BVA alias whose value is a multiple of another
+// alias's field must declare `_multiplier`/`_offset` and still equal the product, so
+// changing the source (e.g. BOPIS.pageSize) fails loudly here instead of leaving the
+// boundary cases silently asserting the wrong count. Today's only family is
+// BOPIS_BVA_* off BOPIS.pageSize; the check is written generically so the next one
+// costs a table row, not a new script.
+type DerivedFamily = { prefix: string; sourceAlias: string; sourceField: string; targetField: string };
+const DERIVED_FAMILIES: DerivedFamily[] = [
+  { prefix: "BOPIS_BVA_", sourceAlias: "BOPIS", sourceField: "pageSize", targetField: "activeCount" },
+];
+const driftHits: string[] = [];
+{
+  const aliasesRaw = JSON.parse(readFileSync(join(TEST_DATA_DIR, "aliases.json"), "utf8")) as Record<
+    string,
+    Record<string, unknown>
+  >;
+  for (const fam of DERIVED_FAMILIES) {
+    const src = aliasesRaw[fam.sourceAlias];
+    const base = Number(src?.[fam.sourceField]);
+    if (!src || !Number.isFinite(base)) {
+      driftHits.push(`${fam.prefix}*: source ${fam.sourceAlias}.${fam.sourceField} missing or non-numeric — cannot verify derivation`);
+      continue;
+    }
+    for (const [name, def] of Object.entries(aliasesRaw)) {
+      if (!name.startsWith(fam.prefix) || !def || typeof def !== "object") continue;
+      const actual = Number(def[fam.targetField]);
+      const mult = Number(def["_multiplier"]);
+      const off = Number(def["_offset"]);
+      if (!Number.isFinite(mult) || !Number.isFinite(off)) {
+        driftHits.push(`${name}: missing numeric _multiplier/_offset — a derived boundary must declare how it is derived`);
+        continue;
+      }
+      const expected = base * mult + off;
+      if (actual !== expected)
+        driftHits.push(`${name}.${fam.targetField} = ${actual} but ${fam.sourceAlias}.${fam.sourceField}(${base}) * ${mult} + ${off} = ${expected}`);
+    }
+  }
+}
+console.log("\n--- Derived-Boundary Drift Guard (DV-023) ---\n");
+if (driftHits.length === 0) {
+  console.log("  All derived boundary aliases match their source-of-truth derivation. ✓");
+} else {
+  const tag = WARN_ONLY ? "WARN" : "FAIL";
+  console.log(`  ${driftHits.length} derived-boundary mismatch(es) [${tag}]:`);
+  for (const h of driftHits) console.log(`    ${h}`);
+  console.log(
+    "\n  A boundary transcribed from a source constant is correct exactly once. Re-derive it\n" +
+    "  (or fix _multiplier/_offset) rather than editing the literal to match." +
+    (WARN_ONLY ? "\n  (--warn-only: not failing the build. Drop the flag to enforce.)" : "")
+  );
+}
+
+// --- DV-024: evidence OUTPUT paths must never appear in a test case (THIRD RULE) ---
+// A case says WHAT to observe; WHERE the evidence lands is supplied by the RUN, through the
+// agent prompt contract and skills/qa-evidence/evidence-capture-policy.md. A literal
+// `reports/tickets/<Sprint>/<TICKET>/...` in a row hardcodes the sprint AND the ticket into a
+// case that outlives both: re-run a sprint later and it writes into a CLOSED ticket folder,
+// which `reports:prune` deletes — and the case still PASSES, so the evidence silently detaches
+// from the run that produced it. Measured 2026-09-10: 28 occurrences across 10 suites, spread
+// by authors copying neighbouring house style. Rule: .claude/rules/test-data.md THIRD RULE.
+// Escape hatch: put `DV-024-OK` anywhere in the row to record a reviewed exception.
+const EVIDENCE_PATH_RE = /reports\/tickets\/[^\s,"|)]+/;
+const evidenceHits: { file: string; id: string; hit: string }[] = [];
+{
+  const walk = (dir: string): string[] =>
+    readdirSync(dir).flatMap((e) => {
+      const p = join(dir, e);
+      return statSync(p).isDirectory() ? walk(p) : p.endsWith(".csv") ? [p] : [];
+    });
+  for (const file of walk(SUITES_DIR)) {
+    const content = readFileSync(file, "utf8");
+    if (!EVIDENCE_PATH_RE.test(content)) continue;
+    let rows: string[][];
+    try {
+      rows = parseCsv(content, { columns: false, relax_column_count: true }) as string[][];
+    } catch { continue; } // structure errors are S-007's job, not ours
+    const header = rows[0] ?? [];
+    for (const row of rows.slice(1)) {
+      const blob = row.join("  ");
+      if (/DV-024-OK/.test(blob)) continue;
+      const m = blob.match(EVIDENCE_PATH_RE);
+      if (m) evidenceHits.push({ file: relative(ROOT, file), id: row[header.indexOf("ID")] ?? row[0], hit: m[0] });
+    }
+  }
+}
+console.log("\n--- Evidence-Output-Path Guard (DV-024) ---\n");
+if (evidenceHits.length === 0) {
+  console.log("  No test case names an evidence output path. ✓");
+} else {
+  const tag = WARN_ONLY ? "WARN" : "FAIL";
+  console.log(`  ${evidenceHits.length} case(s) hardcode a reports/tickets path [${tag}]:`);
+  for (const h of evidenceHits) console.log(`    ${h.id}  (${h.file})  -> ${h.hit}`);
+  console.log(
+    "\n  A case says WHAT to observe, never WHERE the evidence lands. The run supplies the\n" +
+    "  output directory via the agent prompt contract; a path here bakes in the sprint and the\n" +
+    "  ticket, so a later re-run writes into a closed (and pruned) folder while still passing.\n" +
+    "  Remove the path. Reviewed exception: add DV-024-OK to the row." +
+    (WARN_ONLY ? "\n  (--warn-only: not failing the build. Drop the flag to enforce.)" : "")
+  );
+}
+
+const idFatal =
+  (idHits.length > 0 || aliasGuidHits.length > 0 || shapeHits.length > 0 || driftHits.length > 0 ||
+    evidenceHits.length > 0) && !WARN_ONLY;
 process.exit(totalFailed > 0 || idFatal ? 1 : 0);

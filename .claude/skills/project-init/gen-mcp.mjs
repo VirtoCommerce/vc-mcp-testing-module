@@ -8,7 +8,7 @@
  *   - the chosen tracker/VCS (enable only the relevant servers via
  *     .claude/settings.local.json `enabledMcpjsonServers`),
  *   - available tokens (inject placeholders that are present in the env; for the
- *     github MCP, fall back to `gh auth token` when no PAT env is set).
+ *     github MCP — NO `gh auth token` fallback: see VCST-5774 D3).
  *
  * .mcp.json keeps ALL server definitions (so they're available), but only the
  * enabled subset is listed in settings.local.json. Both files are gitignored.
@@ -21,7 +21,6 @@
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
-import { execSync } from "child_process";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
@@ -44,6 +43,26 @@ function detectOs(flag) {
   return "linux";
 }
 
+// #220 — stdio MCP servers launch via npx (an npm registry lookup inside the ~30s startup budget).
+// On a host that falls back slowly from a broken IPv6 route to IPv4 that lookup can hang ~150s and
+// every stdio server misses the budget. Set NODE_OPTIONS to prefer IPv4 in DNS (the actual cure) +
+// npm prefer-offline so a package ALREADY in the npx cache resolves without a registry round-trip
+// (a cold first fetch still runs, now fast over IPv4 — this surface has no cache-warm step). ONLY
+// `--dns-result-order=ipv4first`
+// (NODE_OPTIONS-allowed since Node 16.4); NOT `--no-network-family-autoselection` (newer flag, fatal
+// in NODE_OPTIONS on the Node-18 floor). Mirrors the plugin copy (plugins/vc-fix). Pure + idempotent.
+const IPV4_NODE_OPTIONS = "--dns-result-order=ipv4first";
+export function ensureNodeOptions(server) {
+  if (server?.type && server.type !== "stdio") return server; // http/sse: no Node process to hint
+  const args = Array.isArray(server?.args) ? server.args : [];
+  const isNodeLaunch = server?.command === "npx" || (server?.command === "cmd" && args.includes("npx"));
+  if (!isNodeLaunch) return server;
+  const prevEnv = server.env || {};
+  const prev = prevEnv.NODE_OPTIONS || "";
+  const NODE_OPTIONS = prev.includes(IPV4_NODE_OPTIONS) ? prev : prev ? `${prev} ${IPV4_NODE_OPTIONS}` : IPV4_NODE_OPTIONS;
+  return { ...server, env: { ...prevEnv, NODE_OPTIONS, npm_config_prefer_offline: "true" } };
+}
+
 /** Windows template uses command:"cmd", args:["/c","npx",...]. On *nix call npx directly. */
 function normalizeForOs(server, os) {
   if (os === "windows") return server;
@@ -61,7 +80,11 @@ function injectTokens(server) {
       process.env.GITHUB_FIX_BUGS_TOKEN ||
       process.env.GIT_TOKEN ||
       process.env.GITHUB_TOKEN ||
-      ghAuthToken(),
+      // NO `gh auth token` fallback (VCST-5774 D3). Copying the operator's gh CLI OAuth SESSION
+      // into a file persists a credential they never agreed to persist — observed on disk as
+      // `gho_…` in two generated projects. With nothing resolved the placeholder simply stays
+      // unresolved, which the caller already handles.
+      "",
     "<POSTMAN_API_KEY>": process.env.POSTMAN_API_KEY || "",
     "<FIGMA_API_KEY>": process.env.FIGMA_API_KEY || "",
     "<CONTEXT7_API_KEY>": process.env.CONTEXT7_API_KEY || "",
@@ -80,15 +103,11 @@ function injectTokens(server) {
   return walk(server);
 }
 
-let _ghToken;
-function ghAuthToken() {
-  if (_ghToken !== undefined) return _ghToken;
-  try {
-    _ghToken = execSync("gh auth token", { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-  } catch {
-    _ghToken = "";
-  }
-  return _ghToken;
+/** The `<PLACEHOLDER>` names injectTokens() could NOT resolve in a built server def (deduped).
+ * Drives the enable decision: an optional extra still carrying one stays dormant. */
+export function unresolvedPlaceholders(server) {
+  if (!server) return [];
+  return [...new Set(JSON.stringify(server).match(/<[A-Z0-9_]+>/g) || [])];
 }
 
 function main() {
@@ -108,7 +127,7 @@ function main() {
   // Build the tailored mcpServers (OS-normalized + tokens injected), keeping all defs.
   const mcpServers = {};
   for (const [name, def] of Object.entries(srcServers)) {
-    mcpServers[name] = injectTokens(normalizeForOs(def, os));
+    mcpServers[name] = injectTokens(ensureNodeOptions(normalizeForOs(def, os)));
   }
 
   // Which servers to ENABLE (the rest stay defined but dormant).
@@ -126,7 +145,17 @@ function main() {
     context7: "context7",
     devtools: "Chrome DevTools",
   };
-  for (const e of extras) if (extraMap[e]) enabled.add(extraMap[e]);
+  // An OPTIONAL extra whose key never resolved stays DEFINED but dormant — a blank optional key
+  // means "leave that server disabled", not "ship a server that cannot start". Same fix as the
+  // plugins/vc-fix twin; coupling-free, so it ports as-is.
+  const dormantExtras = [];
+  for (const e of extras) {
+    const name = extraMap[e];
+    if (!name) continue;
+    const missing = unresolvedPlaceholders(mcpServers[name]);
+    if (missing.length) dormantExtras.push({ name, missing });
+    else enabled.add(name);
+  }
   // Only enable servers that actually exist in the template.
   const enabledList = [...enabled].filter((n) => mcpServers[n]);
 
@@ -145,16 +174,23 @@ function main() {
   settings.enabledMcpjsonServers = enabledList;
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
   console.log(`[gen-mcp] enabled servers: ${enabledList.join(", ")}`);
+  for (const { name, missing } of dormantExtras) {
+    console.log(`[gen-mcp] ${name}: defined but NOT enabled — ${missing.join(", ")} unset (optional; set it in .env.local and re-run to enable).`);
+  }
 
-  // Warn about any enabled server whose token is still a placeholder.
+  // Warn about any enabled server whose token is still a placeholder. Reuse the single
+  // `unresolvedPlaceholders` helper (same source the enable-vs-skip decision uses above) so the
+  // placeholder scan can never drift between the two call sites.
   for (const name of enabledList) {
-    const blob = JSON.stringify(mcpServers[name]);
-    const ph = blob.match(/<[A-Z0-9_]+>/g);
-    if (ph) console.warn(`[gen-mcp] ⚠ ${name}: unresolved ${[...new Set(ph)].join(", ")} — set the token in .env.local or via login, then re-run.`);
+    const ph = unresolvedPlaceholders(mcpServers[name]);
+    if (ph.length) console.warn(`[gen-mcp] ⚠ ${name}: unresolved ${ph.join(", ")} — set the token in .env.local or via login, then re-run.`);
   }
 
   console.log("[gen-mcp] ⚠ Restart the MCP servers (reload the IDE / Claude Code) for changes to take effect.");
   if (args.print) console.log(JSON.stringify({ mcpServers }, null, 2));
 }
 
-main();
+// CLI only — importing this module (e.g. a unit test importing `ensureNodeOptions`) must NOT run
+// main(), which would regenerate .mcp.json / settings.local.json as an import side effect. Mirrors
+// the plugin copy's main-guard; the old bare `main();` here lacked it.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

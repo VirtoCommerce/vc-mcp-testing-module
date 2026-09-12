@@ -175,6 +175,14 @@ under per-domain subfolders of `scripts/seed-data/`.
 
 A lightweight in-agent analogue of the developers team's Gate-4 reviewer. All must hold:
 
+- [ ] **Decidable per link**: for every link of the feature's value chain this data serves, would the case
+      FAIL if that link were implemented wrong? Equal values on both sides of a distinction under test are
+      a data defect (`.claude/rules/test-data.md` §SECOND RULE). A fixture set can be immaculate by every
+      other box here and still test nothing — that is exactly what happened to the missions fixtures.
+- [ ] **Divergence is guarded, not just seeded** — the `td:validate:<domain>` guard FAILS when the
+      discriminating gap collapses (quantities equalise, rankings agree, a delta goes to zero).
+- [ ] `live-discover` is constrained on every dimension the feature reads (currency, price shape, stock,
+      catalog scope) — unconstrained discovery manufactures findings that get filed and rejected.
 - [ ] No hardcoded IDs/SKUs/prices/GUIDs — all via `{{VAR}}` / `@td()` / `live-discover` (DV-013 clean).
 - [ ] No runtime GUID in a committed CSV/JSON — it writes to `aliases.<env>.json` only.
 - [ ] Idempotent find-or-create; `TEST_ENV`-aware; `ENV_RISK`/prod guard honored; `AGENT-TEST-` prefix.
