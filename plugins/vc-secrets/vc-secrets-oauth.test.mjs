@@ -1758,11 +1758,11 @@ test("handleCallback: a request to another path is ignored, not treated as a fai
     // A browser fetching /favicon.ico for the "you can close this tab" page must not abort a
     // sign-in that is about to succeed.
     assert.equal(m.handleCallback(GET("/favicon.ico"), "RIGHT", "/callback").ignore, true);
-    // The only input the path check actually decides, and the reason the line above does not pin it:
-    // a NON-callback path carrying a complete, valid callback query. /favicon.ico is turned away by
-    // the stray-request branch below whatever the path check does, so deleting the check left the
-    // whole suite green. With all three parameters present that branch cannot fire, and the code is
-    // accepted from a path Entra never redirected to.
+    // What the path check actually decides, and the reason the line above does not pin it: a
+    // NON-callback path carrying ANY of code, error or state. /favicon.ico is turned away by the
+    // stray-request branch below whatever the path check does, so deleting the check left the whole
+    // suite green. One of the three parameters is enough to disarm that branch; with a matching
+    // state and a code, as here, the code is accepted from a path Entra never redirected to.
     assert.equal(m.handleCallback(GET("/evil?code=abc&state=RIGHT"), "RIGHT", "/callback").ignore, true);
 });
 
@@ -1818,8 +1818,9 @@ test("the tab title names which sign-in the tab belongs to", () => {
     // The name is escaped although it is validated `[a-z0-9-]+` at load, because the page must not
     // depend on a check made somewhere else -- and nothing asserted that until now: removing
     // escapeHtml from BOTH titles left the whole suite green, since every name above is one that
-    // escaping does not change. Asserted on the raw HTML rather than through `title()`, whose own
-    // `[^<]*` would stop at an unescaped bracket and quietly report a shorter title instead.
+    // escaping does not change. Asserted on the raw HTML rather than through `title()`: its `[^<]*`
+    // cannot span an unescaped bracket, so on a regression the match fails outright and the helper
+    // throws a TypeError on `exec(...)[1]` -- a failure that names nothing about escaping.
     const hostile = "a<script>&\"x";
     assert.match(m.closeTabPage(hostile), /<title>Signed in - a&lt;script&gt;&amp;&quot;x<\/title>/);
     assert.match(m.failedPage({ error: "x", description: "", extras: [] }, hostile),

@@ -3480,15 +3480,23 @@ test("README: the trust probe names both causes, since it cannot distinguish the
 
 // Reads the module sources and returns every non-ASCII character sitting inside a string literal.
 // Quote-state, not a pattern: a `//` comment may keep its typography, and a trailing comment on a code
-// line must not be mistaken for the code. The narrower guard over mapResolveError and forTerminal
-// covers what `cmdDoctor` prints; this covers what `fail()` prints, which is EVERY VcSecretsError
-// message, and those go out through the same raw write (`vc-secrets.mjs` fail()).
+// line must not be mistaken for the code. The narrower guard beside it pins three mapResolveError
+// messages and forTerminal's truncation marker by value; this one is the rule those three are
+// instances of, and it reaches every message in the listed modules -- `fail()` writes each of them
+// with the same raw `fs.writeSync(2, ...)` that cmdDoctor's report uses.
 //
 // Ported from the source's own guard. It exists here because a hand-rolled sweep of the same class,
 // written the same day, missed a live message: a scanner carrying quote state ACROSS lines
 // desynchronised on a quote inside a regex literal and reported the region as code, so the sweep and
 // its verification -- the same function -- agreed on a wrong answer. Per-line state cannot drift that
 // way; it costs false positives on an apostrophe in a comment, which is the safe direction.
+//
+// Two blind spots, both measured to have no instance today. The comment skip fires on any two
+// adjacent slashes at closed quote state, so a regex literal spelling one -- `/^https?:\/\//` --
+// ends the scan of that line early; the package's escaped-slash regexes never form the pair. And
+// per-line state cannot see a continuation line of a multi-line template, inherited from the source
+// and harmless here because the three such templates hold PowerShell, whose every message sits in
+// an inner quote pair this does open. A help text spanning lines would be unguarded.
 function nonAsciiInEmittedLiterals(source) {
     const found = [];
     for (const [lineNo, line] of source.split("\n").entries()) {
@@ -3530,16 +3538,51 @@ function nonAsciiInEmittedLiterals(source) {
 }
 
 test("every string literal these modules can print is ASCII", () => {
-    // `fail()` writes every VcSecretsError message with the same raw call `cmdDoctor` uses, so a new em
-    // dash in any thrown message reaches a console that may not be UTF-8. The source measured one
-    // arriving as mojibake; the narrow guard that replaced it only looked at one function's output.
+    // `fail()` writes every VcSecretsError message with the same raw call cmdDoctor's report uses, so
+    // a new em dash in any thrown message reaches a console that may not be UTF-8. The source measured
+    // one arriving as mojibake; the narrow guard that replaced it only looked at one function's output.
     //
-    // The list is the five modules the launcher itself runs. vc-secrets-shim.mjs and the install and
-    // hook scripts also print, and are deliberately NOT here: the source draws the same line, and
-    // widening it is a decision rather than an oversight.
+    // The list is every local module the launcher loads -- resolved by following its imports, not by
+    // memory, which is how clients.mjs (four thrown messages) was left out of the first version --
+    // plus the probe, which runs in its own process and prints there. vc-secrets-shim.mjs and the
+    // install and hook scripts print too and are NOT here; that boundary is a decision, recorded
+    // rather than inherited, because the source's list has no counterpart to any of them.
     for (const name of ["vc-secrets.mjs", "vc-secrets-oauth.mjs", "vc-secrets-cache.mjs",
-        "vc-secrets-error.mjs", "vc-secrets-probe.mjs"]) {
+        "vc-secrets-error.mjs", "vc-secrets-probe.mjs", "clients.mjs"]) {
         const source = fs.readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), "utf8");
         assert.deepEqual(nonAsciiInEmittedLiterals(source), [], `non-ASCII in a printable literal of ${name}`);
     }
+});
+
+// The four tests below pin nonAsciiInEmittedLiterals itself. They exist because the first version of
+// this guard was landed with its controls run by hand and thrown away: both of its decision points --
+// the escape branch and the quote-state clause on the comment skip -- could then be deleted with the
+// whole suite green, which is the defect class the guard was written to stop, one level up.
+
+test("nonAsciiInEmittedLiterals: a non-ASCII character in a string literal is reported", () => {
+    const found = nonAsciiInEmittedLiterals('fail("the gpg agent is locked \u2014 run unlock");');
+    assert.equal(found.length, 1, `expected one finding, got ${JSON.stringify(found)}`);
+    assert.match(found[0], /line 1/);
+});
+
+test("nonAsciiInEmittedLiterals: an escape is decoded, because it is ASCII here and not at runtime", () => {
+    // Six ASCII characters in the source, an em dash in the message. A scanner that reads the bytes
+    // of the file cannot see this at all, which is the hole this branch exists to close.
+    const found = nonAsciiInEmittedLiterals('fail("the gpg agent is locked \\u2014 run unlock");');
+    assert.equal(found.length, 1, `expected one finding, got ${JSON.stringify(found)}`);
+    assert.match(found[0], /escape \\u2014/);
+});
+
+test("nonAsciiInEmittedLiterals: typography in a comment is left alone", () => {
+    // The whole reason for the comment skip: prose may use an em dash, because a comment is never
+    // written to anyone's terminal.
+    assert.deepEqual(nonAsciiInEmittedLiterals('// locked \u2014 run unlock\nfail("ok");'), []);
+});
+
+test("nonAsciiInEmittedLiterals: a // inside a string does not end the scan", () => {
+    // The comment skip fires only at closed quote state. A URL inside a message is text, and a
+    // defect after it is still a defect -- without that clause the scan stops at the "//" of the
+    // scheme and the rest of the line, this em dash included, is never examined.
+    const found = nonAsciiInEmittedLiterals('fail("see https://example.invalid \u2014 then retry");');
+    assert.equal(found.length, 1, `expected one finding, got ${JSON.stringify(found)}`);
 });

@@ -1687,7 +1687,8 @@ function listenForCallback(expectedState, { entryName = null,
         // `reject` rejects the BIND, and is inert once listen has resolved -- after that a server
         // error would vanish while next() waited forever. Settling as well makes a listener that dies
         // mid-sign-in end the wait with a reason instead of hanging. The source fixes the same shape
-        // at createChannel's listener; that verb is not ported yet, so nothing here pairs with it.
+        // at the listener inside createChannel -- a helper of its run verb, not a verb itself, and one
+        // this package has no counterpart to until Task 20 wires the token channel.
         server.once("error", (e) => {
             reject(e);
             settle({ error: "listener_failed", description: e.code ?? e.message });
