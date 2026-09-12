@@ -2099,6 +2099,13 @@ function cmdLoginSeams() {
     return seamsOf(m.cmdLogin.toString());
 }
 
+// One per verb, because `seamsOf` takes a function's text and nothing generalises across the two.
+// cmdLogout's own comment used to claim cmdLoginSeams covered it; it does not, and the whole suite
+// stayed green with a bogus seam in cmdLogout's parameter list.
+function cmdLogoutSeams() {
+    return seamsOf(m.cmdLogout.toString());
+}
+
 // Presence of the KEY is not injection: `Object.keys({a: undefined})` is `["a"]`, and a
 // destructuring default fires on undefined, so `loginDeps({ removeEntry: undefined })` would hand
 // back the real deleter with the guard green. The source's own instance of that idiom rides a test
@@ -2138,6 +2145,21 @@ test("loginDeps: every cmdLogin seam that reaches outside this process is inject
     const injected = definedSeams(loginDeps().deps);
     assert.deepEqual(seams.filter((s) => !mayDefault.includes(s) && !injected.includes(s)), [],
         "each of these would fall through to a real implementation in every login test");
+});
+
+test("cmdLogout: every seam this verb declares is pinned, so a new one forces a decision", () => {
+    // The LIST only, where cmdLogin's guard above also checks a fixture injects each seam: this
+    // verb's tests build their deps inline, as the source's do, so there is no single fixture to
+    // check them against. The list is the half that carries the weight anyway -- it is what makes
+    // a NEW outside-process seam fail here instead of falling through to a real implementation in
+    // every test that omits it.
+    //
+    // `backend` is declared but unreachable in practice while `deleteEntry` is injected, since it
+    // only feeds `deleteEntryIo(backend)`. It is pinned all the same: whether that stays true is
+    // exactly the decision this test exists to force.
+    assert.deepEqual(cmdLogoutSeams(),
+        ["deleteEntry", "backend", "acquireLock", "now", "sleep", "log"],
+        "the seam list changed, or the parse broke — both need a human");
 });
 
 test("loginDeps: a seam handed in as undefined counts as NOT injected", () => {
@@ -2695,6 +2717,35 @@ test("cmdLogout: an unserialised removal is announced, and a serialised one is q
     assert.match(lines.join(""), /EACCES/, "and it names the errno rather than a guess at the cause");
     assert.equal(lines.filter((l) => l.includes("NOT serialised")).length, 1,
         "the serialised path must not warn");
+});
+
+test("cmdLogout: an error from the lock reaches the caller, and nothing is deleted on the way past", async () => {
+    // The half of the source's mcpw.test.js:3029 that lost its referent. That test drives the
+    // error THROUGH cmdLogout and asserts twice -- it propagates, AND nothing was attempted. This
+    // package pinned acquireTokenLock directly instead (vc-secrets-oauth.test.mjs, the
+    // "not laundered into one" test), which was right while cmdLogout did not exist, but only the
+    // first assertion survived the re-point. The second one is the half about logout.
+    //
+    // The shape it forecloses is not hypothetical: it is written out, correctly, in cmdLogin,
+    // whose `.catch((e) => ({ lock: null, reason: "unbindable", error: e }))` belongs THERE
+    // because a failed lock must not cost a single-use authorization code. Copied down onto this
+    // verb it reads a TypeError from broken wiring as "the sandbox refused the bind", and logout
+    // then deletes both credentials unserialised and reports success -- with an errno of
+    // `undefined` as the only trace. Harmonising the two verbs' lock handling is the obvious
+    // future edit; this test is what notices it.
+    //
+    // The two assertions are not equally isolable, and it is worth knowing which is which. The
+    // rejection is pinned alone: adding that `.catch` here reddens this test and nothing else.
+    // The `attempted` assertion is live -- a deletion escaping ahead of the lock does redden it,
+    // measured -- but no mutation isolates it, because six sibling tests pin the same ordering
+    // incidentally. It is a consequence assertion, not an independent pin, and reads as one.
+    const attempted = [];
+    const boom = new TypeError("acquireLock is not a function");
+    await assert.rejects(() => m.cmdLogout("azure-mcp", LOGOUT_CFG, {
+        deleteEntry: async (name) => { attempted.push(name); },
+        acquireLock: async () => { throw boom; },
+    }), (e) => e === boom, "the wiring error must reach the caller unchanged");
+    assert.deepEqual(attempted, [], "and nothing may be deleted on the way past");
 });
 
 lockTest("the renewal, a login and a logout all lock on ONE name -- pre-occupied, not read off the source", async () => {

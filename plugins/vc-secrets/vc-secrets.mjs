@@ -2016,8 +2016,10 @@ async function cmdLogout(serverName, cfg, { deleteEntry = null,
     // at the call site (mcpw.js:1236-1241) — that does not port here, because it would force this
     // package's `main` to resolve `decl` itself, duplicating the guard above AND running it before
     // it, inverting the ordering this guard guarantees. The parameter list still carries a bare
-    // `acquireLock = null` in the source's position so cmdLoginSeams' parse of this function's
-    // text keeps finding it as a seam.
+    // `acquireLock = null` -- NOT in the source's position, since `backend` precedes it here -- so
+    // that cmdLogoutSeams' parse of this function's text keeps finding it as a seam. That parse is
+    // cmdLogout's own: cmdLoginSeams reads cmdLogin and nothing else, and an earlier draft of this
+    // comment named it, which made a bogus seam added here invisible to the whole suite.
     const acquire = acquireLock ?? tokenLockFor(serverName, decl, cfg);
     const remove = deleteEntry ?? deleteEntryIo(backend);
     const names = Object.values(oauthEntryKeys(serverName, decl, cfg));
