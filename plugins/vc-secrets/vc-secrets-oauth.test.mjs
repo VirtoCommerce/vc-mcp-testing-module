@@ -119,8 +119,17 @@ test("buildAuthorizeUrl: the verifier is never in the URL, only its digest", () 
 // token". A name that no longer matches one below means this note went stale, not that you
 // miscounted. The source's suite leaves these fields unpinned
 // because there mcpw.js imports this module and a real `login` exercised most of them end to end.
-// Nothing imports this module yet, so until it is wired up they are all that stands between a
-// tidy-up of the two builders and a protocol request that is still well-formed and no longer safe.
+//
+// "Nothing imports this module yet" is no longer why these five stay unported: cmdLogin now calls
+// buildAuthorizeUrl and createPkcePair to build the code grant's authorize request, and
+// buildTokenBody with kind: "code" for the exchange -- which drives "the challenge itself
+// travels", "client_id, redirect_uri and state", and "the code grant carries no refresh token"
+// end to end through a real caller. What keeps these five here rather than deleted is that they
+// pin the FIELD-LEVEL contract a caller's happy path does not exercise on its own: cmdLogin's own
+// tests assert that a login succeeds, not that a dropped `code_challenge` or a leaked
+// refresh_token on the code grant would be caught before it reached Entra. The other two -- the
+// refresh grant's token and the client_id/scope shared by both grants -- are exercised by
+// oauthLaunchDeps's renewal path instead.
 
 test("buildAuthorizeUrl: the challenge itself travels, not only the method that advertises it", () => {
     // Measured: dropping `code_challenge` leaves the URL still advertising
@@ -133,10 +142,11 @@ test("buildAuthorizeUrl: the challenge itself travels, not only the method that 
 });
 
 test("buildAuthorizeUrl: client_id, redirect_uri and state reach the request unaltered", () => {
-    // No callback layer is ported yet, and that is precisely why these are asserted here: the
-    // consumer that would notice a missing `state` — a listener comparing it against the one it
-    // generated — does not exist in this package, so nothing downstream fails if the builder
-    // stops emitting it.
+    // The callback layer IS ported: listenForCallback (vc-secrets.mjs:1665) and handleCallback
+    // (vc-secrets.mjs:1769) exist, and handleCallback compares the returned `state` against
+    // `expectedState` at vc-secrets.mjs:1800 -- the consumer that would notice a missing `state`
+    // is real now. This test still earns its place regardless: it pins the builder's OWN contract
+    // independently of that consumer, the same way the other field-level tests in this block do.
     const u = new URL(oauth.buildAuthorizeUrl({ tenantId: "t", clientId: "the-client", scopes: ["a"],
         redirectUri: "http://localhost:1/", state: "the-state", challenge: "ch" }));
     assert.equal(u.searchParams.get("client_id"), "the-client");
@@ -1311,7 +1321,9 @@ test("acquireTokenLock: a clean acquisition returns the lock, without waiting or
 test("acquireTokenLock: a holder that never clears is reported busy, bounded by the poll cap", async () => {
     // Mirrors the source's frozen-clock regression (mcpw.test.js:2356): with now() frozen the
     // deadline never advances, and only MAX_LOCK_POLLS stops the loop from spinning forever.
-    // Verified here directly rather than through cmdLogin, which does not exist in this package.
+    // Verified here directly rather than through cmdLogin: acquireTokenLock is exported and
+    // callable on its own, so no vehicle was ever needed -- driving it through cmdLogin would pin
+    // the verb's wiring rather than this loop.
     let polls = 0;
     const result = await m.acquireTokenLock({
         acquireLock: async () => cache.HELD_BY_OTHER,
@@ -1964,4 +1976,342 @@ socketTest("listenForCallback: a stray request is answered and waited past, the 
     } finally {
         await server.close();
     }
+});
+
+// ---------------------------------------------------------------------------------------------
+// cmdLogin — Task 14b's port of the interactive sign-in verb. Ported from the upstream launcher's
+// suite (mcpw.test.js): `m.McpwError` becomes `m.VcSecretsError`, and every "mcpw"/"mcpw login" in
+// a user-facing string becomes "vc-secrets"/"vc-secrets login". `cache.entryNames(serverName)`
+// becomes `oauthEntryKeys(serverName, decl, cfg)` — both return { refresh, access }, but the
+// values here are the full three-segment keystore keys keyFor produces, not the source's bare
+// entry names, so an assertion on a written/removed name reads it off LOGIN_KEYS below instead of
+// a literal "oauth-azure-mcp-*" string.
+//
+// The authorization gate that will sit at cmdLogin's head is a follow-up commit, once the operator
+// decides its shape — deliberately absent here. These tests cover the verb as it exists today.
+// ---------------------------------------------------------------------------------------------
+
+const LOGIN_DECL = { ...DECL_IDENTITY, scope: "project" };
+const LOGIN_CFG = { oauth: { "azure-mcp": LOGIN_DECL }, projectId: "login-p1" };
+const LOGIN_KEYS = m.oauthEntryKeys("azure-mcp", LOGIN_DECL, LOGIN_CFG);
+
+// cmdLogin's network, browser and listener are injected, which leaves its actual decisions —
+// the order of the two writes above all — as ordinary assertions. This verb is ultimately proved
+// by a live sign-in, and that run was blocked on an app registration for a while; the
+// irreversible step inside it should not have to wait for an administrator to be covered.
+function loginDeps(overrides = {}) {
+    const written = [];
+    const opened = [];
+    const logged = [];
+    const lock = [];
+    const removed = [];
+    const deps = {
+        listen: async () => ({ port: 51234, next: async () => ({ code: "the-code" }), close: async () => {} }),
+        open: (cmd) => { opened.push(cmd); },
+        exchange: async () => ({ refreshToken: "new-rt", accessToken: "at", expiresAt: 3600_000,
+            obtainedAt: 0, lifetimeMs: 3600_000, uptimeAtIssue: 1000 }),
+        writeEntry: async (name, value) => { written.push([name, value]); },
+        randomState: () => "STATE",
+        log: (line) => { logged.push(line); },
+        backend: "gpg",
+        // Injected like every other seam here, and not left to the default: that one binds a REAL
+        // machine-global socket, so every login test would serialise against every other and
+        // against any other invocation of this tool running on this machine.
+        acquireLock: async () => { lock.push("acquire"); return { release: async () => { lock.push("release"); } }; },
+        // Same reason as acquireLock, and it was missed here once at a real cost: the default is
+        // the REAL deleteEntryIo, so the refresh-write-failure test below cleared a developer's
+        // live sign-in out of the actual keystore. From a GREEN run -- a delete that succeeds
+        // looks like nothing at all. Measured 2026-08-20: both oauth entries for the affected
+        // server were present before the run and gone after, with every other test still passing.
+        removeEntry: async (name) => { removed.push(name); },
+        ...overrides,
+    };
+
+    return { deps, written, opened, logged, lock, removed };
+}
+
+// Depth-aware rather than line-anchored: the first version of this matched only a seam standing
+// alone at an indent of exactly four, so a new seam sharing a line with another was dropped
+// silently, and the guard passed covering nothing for the very case it exists for.
+function cmdLoginSeams() {
+    const source = m.cmdLogin.toString();
+    const block = source.slice(source.indexOf("{", source.indexOf("cfg,")) + 1, source.indexOf("} = {}) {"));
+    const parts = [];
+    let depth = 0;
+    let current = "";
+    for (const ch of block) {
+        if ("([{".includes(ch)) { depth += 1; }
+        if (")]}".includes(ch)) { depth -= 1; }
+        if (ch === "," && depth === 0) { parts.push(current); current = ""; continue; }
+        current += ch;
+    }
+    parts.push(current);
+
+    return parts.map((part) => (/^\s*(\w+)\s*=/.exec(part) ?? [])[1]).filter(Boolean);
+}
+
+// Presence of the KEY is not injection: `Object.keys({a: undefined})` is `["a"]`, and a
+// destructuring default fires on undefined, so `loginDeps({ removeEntry: undefined })` would hand
+// back the real deleter with the guard green. That idiom is live in this file — see the
+// acquireLock case below.
+function definedSeams(deps) {
+    return Object.entries(deps).filter(([, value]) => value !== undefined).map(([key]) => key);
+}
+
+test("cmdLogin: a hostile parameter reaches the terminal message declawed", async () => {
+    const { deps } = loginDeps({
+        listen: async () => ({ port: 1, next: async () => ({
+            error: "access_denied", description: "", extras: [["subcode", `x\u001b[2Jy`]],
+        }), close: async () => {} }),
+    });
+    await assert.rejects(() => m.cmdLogin("azure-mcp", LOGIN_CFG, deps), (e) => {
+        assert.ok(!/[\u0000-\u001f]/.test(e.message), `raw control byte in: ${JSON.stringify(e.message)}`);
+        assert.match(e.message, /subcode=x\?\[2Jy/);
+
+        return true;
+    });
+});
+
+test("loginDeps: every cmdLogin seam that reaches outside this process is injected", () => {
+    const seams = cmdLoginSeams();
+    // A parser that quietly finds nothing would make this test pass forever. Pin the whole list,
+    // so adding a seam fails here and forces a decision about whether it needs injecting.
+    assert.deepEqual(seams, ["listen", "open", "browser", "exchange", "writeEntry", "removeEntry",
+        "randomState", "log", "backend", "acquireLock", "now", "sleep"],
+        "the seam list changed, or the parse broke — both need a human");
+    // These three stay inside the process: a pure command builder, the clock, and a timer.
+    const mayDefault = ["browser", "now", "sleep"];
+    const injected = definedSeams(loginDeps().deps);
+    assert.deepEqual(seams.filter((s) => !mayDefault.includes(s) && !injected.includes(s)), [],
+        "each of these would fall through to a real implementation in every login test");
+});
+
+test("loginDeps: a seam handed in as undefined counts as NOT injected", () => {
+    // The hole the key-presence check had. cmdLogin's destructuring default fires on undefined, so
+    // this must read as absent — otherwise the guard blesses exactly the shape that deleted a live
+    // sign-in.
+    assert.ok(!definedSeams(loginDeps({ removeEntry: undefined }).deps).includes("removeEntry"));
+    assert.ok(definedSeams(loginDeps().deps).includes("removeEntry"));
+});
+
+test("cmdLogin: the refresh entry is written before the access entry", async () => {
+    // Entra invalidates the old refresh token the moment it issues a new one, so persisting the
+    // new one is the only irreversible step in the design. Writing the access entry first would
+    // widen the window in which a crash leaves no way back in except an interactive login.
+    const { deps, written } = loginDeps();
+    await m.cmdLogin("azure-mcp", LOGIN_CFG, deps);
+    assert.deepEqual(written.map(([name]) => name), [LOGIN_KEYS.refresh, LOGIN_KEYS.access]);
+});
+
+test("cmdLogin: a failed refresh write is fatal, and the access entry is not written after it", async () => {
+    // The access entry would then describe a session whose refresh token was never stored — a
+    // login that works for an hour and cannot be renewed.
+    const { deps, written } = loginDeps({
+        writeEntry: async (name) => {
+            if (name.endsWith("-refresh")) { throw new m.VcSecretsError("keystore full"); }
+            written.push([name]);
+        },
+    });
+    await assert.rejects(() => m.cmdLogin("azure-mcp", LOGIN_CFG, deps), /keystore full/);
+    assert.deepEqual(written, [], "nothing may be written once the refresh write failed");
+});
+
+test("cmdLogin: a failed ACCESS write is not fatal — losing it costs one exchange", async () => {
+    const { deps, logged } = loginDeps({
+        writeEntry: async (name) => { if (name.endsWith("-access")) { throw new m.VcSecretsError("nope"); } },
+    });
+    await m.cmdLogin("azure-mcp", LOGIN_CFG, deps);
+    assert.ok(logged.some((l) => /access/i.test(l)), `the degraded write must be reported: ${logged.join("")}`);
+});
+
+test("cmdLogin: the redirect_uri is the registered localhost URI, with the bound port and no path", async () => {
+    // Three independent failure modes in one string, and none of them fails locally.
+    //
+    // The port must come from the listener, or Entra redirects the browser to a port nothing is
+    // listening on and the sign-in hangs with no error. The host must be `localhost` and the path
+    // must be absent, because Entra matches this string against the app registration — bare
+    // `http://localhost` under Mobile and desktop applications — and ignores the port only for
+    // that host. Either mismatch is AADSTS50011.
+    //
+    // So if a change to vc-secrets.mjs makes this fail, fix vc-secrets.mjs — do not update the
+    // expectation. This string is not a mirror of the code; it is what an administrator configured
+    // in Entra.
+    let seenUri = null;
+    const { deps } = loginDeps({
+        listen: async () => ({ port: 45678, next: async () => ({ code: "c" }), close: async () => {} }),
+        exchange: async (tenantId, body) => {
+            seenUri = new URLSearchParams(body).get("redirect_uri");
+
+            return { refreshToken: "rt", accessToken: "at", expiresAt: 1, obtainedAt: 0,
+                lifetimeMs: 3600_000, uptimeAtIssue: 1 };
+        },
+    });
+    await m.cmdLogin("azure-mcp", LOGIN_CFG, deps);
+    assert.equal(seenUri, "http://localhost:45678/");
+});
+
+test("cmdLogin: a callback error aborts before any exchange and names the Entra code", async () => {
+    let exchanged = false;
+    const { deps } = loginDeps({
+        listen: async () => ({ port: 1, close: async () => {},
+            next: async () => ({ error: "access_denied", description: "AADSTS50105: not assigned" }) }),
+        exchange: async () => { exchanged = true; return {}; },
+    });
+    await assert.rejects(() => m.cmdLogin("azure-mcp", LOGIN_CFG, deps), /AADSTS50105/);
+    assert.equal(exchanged, false, "a refused sign-in must not reach the token endpoint");
+});
+
+test("cmdLogin: the listener is closed even when the sign-in fails", async () => {
+    // An abandoned listener holds the port for the life of the process, so the next attempt
+    // binds a different one — and on a failure path nobody is watching to notice.
+    let closed = false;
+    const { deps } = loginDeps({
+        listen: async () => ({ port: 1, close: async () => { closed = true; },
+            next: async () => ({ error: "state_mismatch" }) }),
+    });
+    await assert.rejects(() => m.cmdLogin("azure-mcp", LOGIN_CFG, deps));
+    assert.equal(closed, true);
+});
+
+test("cmdLogin: with no browser opener the URL is printed and the sign-in still proceeds", async () => {
+    const { deps, opened, logged, written } = loginDeps({ browser: () => null });
+    await m.cmdLogin("azure-mcp", LOGIN_CFG, deps);
+    assert.deepEqual(opened, [], "nothing to open");
+    assert.ok(logged.some((l) => l.includes("https://login.microsoftonline.com/")),
+        `the URL must reach the operator: ${logged.join("")}`);
+    assert.equal(written.length, 2, "and the sign-in completes normally");
+});
+
+test("cmdLogin: the verifier never leaves the process, only its digest does", async () => {
+    // PKCE is worthless if the verifier travels with the authorize request. The code grant is
+    // the only place it may appear.
+    let authorizeUrl = null;
+    const { deps } = loginDeps({
+        browser: (platform, env, url) => { authorizeUrl = url; return null; },
+        exchange: async (tenantId, body) => {
+            const verifier = new URLSearchParams(body).get("code_verifier");
+            assert.ok(verifier, "the code grant must carry the verifier");
+            assert.ok(!authorizeUrl.includes(verifier), "but the authorize URL must not");
+
+            return { refreshToken: "rt", accessToken: "at", expiresAt: 1, obtainedAt: 0,
+                lifetimeMs: 3600_000, uptimeAtIssue: 1 };
+        },
+    });
+    await m.cmdLogin("azure-mcp", LOGIN_CFG, deps);
+});
+
+test("cmdLogin: macOS is a supported platform, not a refusal", async () => {
+    // Every other verb already works there — detectLocalBackend returns keychain on darwin, the
+    // read path is non-interactive, and the lock has its own darwin branch. login was briefly the
+    // one feature that dropped the platform, which is a contradiction rather than a limitation.
+    const { deps, written } = loginDeps({ backend: "keychain" });
+    await m.cmdLogin("azure-mcp", LOGIN_CFG, deps);
+    assert.deepEqual(written.map(([name]) => name), [LOGIN_KEYS.refresh, LOGIN_KEYS.access]);
+});
+
+test("cmdLogin: a backend with no keystore is refused before a code is spent", async () => {
+    // The check that survives: whatever the reason, discovering it after the exchange leaves the
+    // developer signed in with nothing stored and a single-use code already burned.
+    let bound = false;
+    const { deps } = loginDeps({
+        backend: "nonesuch",
+        listen: async () => { bound = true; return { port: 1, next: async () => ({ code: "c" }), close: async () => {} }; },
+    });
+    await assert.rejects(() => m.cmdLogin("azure-mcp", LOGIN_CFG, deps), /nonesuch/);
+    assert.equal(bound, false, "nothing may be opened or bound when the token cannot be stored");
+});
+
+test("cmdLogin: a failed refresh write also clears the stale entries a previous login left", async () => {
+    // Within one login the order already prevents access-without-refresh. The gap is ACROSS
+    // invocations: Entra invalidated the old refresh token the moment it issued this one, so the
+    // previous login's entries are now lies — the old access token keeps working until it
+    // expires and then the session dies with nothing to renew from. Clearing both makes the
+    // state unambiguously signed-out instead of quietly doomed.
+    const removed = [];
+    const { deps } = loginDeps({
+        writeEntry: async (name) => { if (name.endsWith("-refresh")) { throw new m.VcSecretsError("keystore full"); } },
+        removeEntry: async (n) => { removed.push(n); },
+    });
+    await assert.rejects(() => m.cmdLogin("azure-mcp", LOGIN_CFG, deps), /keystore full/);
+    assert.deepEqual(removed.sort(), [LOGIN_KEYS.access, LOGIN_KEYS.refresh].sort());
+});
+
+test("cmdLogin: a cleanup failure does not replace the write error the developer needs", async () => {
+    const { deps } = loginDeps({
+        writeEntry: async (name) => { if (name.endsWith("-refresh")) { throw new m.VcSecretsError("keystore full"); } },
+        removeEntry: async () => { throw new m.VcSecretsError("delete failed too"); },
+    });
+    await assert.rejects(() => m.cmdLogin("azure-mcp", LOGIN_CFG, deps), /keystore full/);
+});
+
+test("cmdLogin: an undeclared server is refused before a port is bound", async () => {
+    let bound = false;
+    const { deps } = loginDeps({ listen: async () => { bound = true; return { port: 1, next: async () => ({}), close: async () => {} }; } });
+    await assert.rejects(() => m.cmdLogin("ghost", LOGIN_CFG, deps), /ghost/);
+    assert.equal(bound, false);
+});
+
+test("cmdLogin: both writes happen under the lock, and it is taken AFTER the sign-in, not across it", async () => {
+    // Two claims in one order, because they trade against each other. Under the lock: a renewal
+    // finishing between the exchange and these writes would otherwise overwrite the token just
+    // issued with the rotated one from the chain Entra killed by issuing it. After the sign-in:
+    // the same mutex serialises every renewal on this machine, and a browser waits on a human.
+    const order = [];
+    const { deps } = loginDeps({
+        listen: async () => ({ port: 1, next: async () => { order.push("browser"); return { code: "c" }; },
+            close: async () => {} }),
+        exchange: async () => { order.push("exchange"); return { refreshToken: "rt", accessToken: "at" }; },
+        writeEntry: async (name) => { order.push(name.endsWith("refresh") ? "write-refresh" : "write-access"); },
+        acquireLock: async () => { order.push("lock"); return { release: async () => order.push("release") }; },
+    });
+    await m.cmdLogin("azure-mcp", LOGIN_CFG, deps);
+    assert.deepEqual(order, ["browser", "exchange", "lock", "write-refresh", "write-access", "release"]);
+});
+
+test("cmdLogin: a renewal that will not release still stores the token, and names what may undo it", async () => {
+    // The asymmetry the shared helper deliberately does not decide. By this point the
+    // authorization code is spent and single-use: refusing would leave the developer signed in at
+    // Entra with nothing on disk, and a second attempt cannot reuse the code.
+    let ms = 0;
+    const { deps, written, logged } = loginDeps({
+        acquireLock: async () => cache.HELD_BY_OTHER,
+        now: () => (ms += 10_000),
+        sleep: async () => {},
+    });
+    await m.cmdLogin("azure-mcp", LOGIN_CFG, deps);
+    assert.equal(written.length, 2, "a spent code must still end up stored");
+    // A wedged holder that later wakes will overwrite this write, and the developer would otherwise
+    // meet that only as an unexplained request to sign in again.
+    assert.match(logged.join(""), /still holding the lock/, "the hazard has to be named where it is taken");
+    assert.match(logged.join(""), /run this again/, "together with what to do about it");
+});
+
+test("cmdLogin: no lock failure costs the developer a spent authorization code", async () => {
+    // Every way of not getting the lock, including the ones acquireTokenLock rethrows rather than
+    // classifies. Past the exchange the code is single-use and gone: an exception here would store
+    // nothing, clear nothing, and leave the previous login's entries lying — and adding the lock is
+    // what made that step able to fail at all, so refusing would be a regression, not a discovery.
+    for (const boom of [Object.assign(new Error("refused"), { code: "EPERM" }),
+        Object.assign(new Error("too many open files"), { code: "EMFILE" }),
+        new TypeError("acquireLock is not a function")]) {
+        const { deps, written, logged } = loginDeps({ acquireLock: async () => { throw boom; } });
+        await m.cmdLogin("azure-mcp", LOGIN_CFG, deps);
+        assert.equal(written.length, 2, `${boom.code ?? boom.name} lost the sign-in`);
+        assert.match(logged.join(""), /NOT serialised/, "and the developer is told what was not promised");
+        // Without this, a wiring TypeError and an ordinary sandbox EPERM print the same line, and
+        // the first is a bug while the second is the environment working as measured.
+        assert.match(logged.join(""), new RegExp(boom.code ?? boom.name),
+            `the warning must name ${boom.code ?? boom.name}`);
+    }
+});
+
+test("cmdLogin: the lock is released even when the refresh write fails and the entries are cleared", async () => {
+    // The clearing branch deletes the very entries a waiting renewal is about to read, so it has
+    // to run inside the lock too — and a leaked holder blocks every launch on this machine.
+    const { deps, lock } = loginDeps({
+        writeEntry: async () => { throw new m.VcSecretsError("keystore full"); },
+        removeEntry: async () => {},
+    });
+    await assert.rejects(() => m.cmdLogin("azure-mcp", LOGIN_CFG, deps), /keystore full/);
+    assert.deepEqual(lock, ["acquire", "release"]);
 });

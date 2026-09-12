@@ -3,6 +3,7 @@
 // injects them into that one child only. README.md carries the declaration schema, the three
 // declaration homes and their precedence.
 import { spawn, spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -1345,9 +1346,10 @@ function tokenLockFor(entryName, decl, cfg, { platform = process.platform, env =
 }
 
 // Waits out whoever holds the token mutex — the one all three writers to the entry pair take —
-// and DECIDES NOTHING about failing to get it. Its two callers are the login and logout verbs,
-// neither of them ported yet; they want opposite things from a failure and each words its own
-// message at its own call site, so a message written here would be right for at most one of them.
+// and DECIDES NOTHING about failing to get it. Its two callers are the login and logout verbs;
+// login is ported, logout is not yet. They want opposite things from a failure and each words its
+// own message at its own call site, so a message written here would be right for at most one of
+// them.
 //
 // The window being waited out is not the one ensureFreshToken already closed between its two cache
 // reads. It is the width of the exchange, where the holder sits on the network with a token it
@@ -1400,10 +1402,10 @@ async function acquireTokenLock({ acquireLock, now, sleep, log }) {
     const deadline = now() + cache.LOCK_WAIT_MS;
     let backoff = LOCK_POLL_MS;
     // Bounded by polls as WELL as by the clock, because the deadline is enforced by an INJECTED
-    // `now`: a frozen stub would spin here forever, and the login verb -- not ported yet -- reaches
-    // this line with a single-use authorization code already spent, so a hang there costs the code
-    // itself. The cap is the backstop and the clock is the mechanism — under any advancing clock
-    // the deadline is crossed first.
+    // `now`: a frozen stub would spin here forever, and the login verb reaches this line with a
+    // single-use authorization code already spent, so a hang there costs the code itself. The cap
+    // is the backstop and the clock is the mechanism — under any advancing clock the deadline is
+    // crossed first.
     // ensureFreshToken's identical loop has no cap on purpose: it has spent nothing and a launch
     // that hangs is a launch that failed, which is visible.
     for (let poll = 0; poll < MAX_LOCK_POLLS && now() < deadline; poll += 1) {
@@ -1819,6 +1821,156 @@ function handleCallback(req, expectedState, redirectPath) {
     const code = parsed.searchParams.get("code");
 
     return code ? { code } : { error: "no_code" };
+}
+
+// The interactive sign-in verb. The authorization gate that belongs at its head -- who may bring
+// this oauth entry into a server or task's env -- is deliberately not here yet: it lands in a
+// follow-up commit once its shape is settled, and adding it early would guess at a decision that
+// is not this change's to make.
+async function cmdLogin(serverName, cfg, {
+    listen = listenForCallback,
+    open = openBrowser,
+    browser = buildBrowserCommand,
+    exchange = oauth.exchange,
+    writeEntry = (name, value) => writeSecretValue(name, value),
+    removeEntry = null,
+    randomState = () => crypto.randomBytes(32).toString("base64url"),
+    log = (line) => process.stderr.write(line),
+    backend = detectLocalBackend(),
+    acquireLock = null,
+    now = Date.now,
+    sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+} = {}) {
+    const decl = (cfg.oauth ?? {})[serverName];
+    if (!decl) {
+        throw new VcSecretsError(`unknown oauth entry "${serverName}" -- not declared in ${CONFIG_NAME}`);
+    }
+    if (!LOCAL_BACKENDS.includes(backend)) {
+        // Checked before anything is bound or opened. The alternative is to discover it at the
+        // very end: the developer signs in, the exchange spends the authorization code, and only
+        // then does the store fail — and a code is single-use, so that ordering turns a missing
+        // capability into a sign-in that cannot even be retried cleanly.
+        throw new VcSecretsError(`"vc-secrets login" has no keystore on backend "${backend}" -- nothing could store the token`);
+    }
+    // Resolved here rather than defaulted in the parameter list: tokenLockFor needs `decl` and
+    // `cfg` (this package's keystore keys are scoped per project — see tokenLockFor's own
+    // comment), neither of which exists until the guard above has run. The parameter list still
+    // carries a bare `acquireLock = null` in the source's position so that cmdLoginSeams' parse of
+    // this function's own text keeps finding it as a seam.
+    const acquire = acquireLock ?? tokenLockFor(serverName, decl, cfg);
+    const removeStale = removeEntry ?? deleteEntryIo(backend);
+    const { verifier, challenge } = oauth.createPkcePair();
+    const state = randomState();
+    const server = await listen(state, { entryName: serverName });
+    try {
+        // `localhost` although the listener binds 127.0.0.1, and the two must NOT be harmonised:
+        // this string is matched against the app registration, which carries `http://localhost`,
+        // and Entra ignores the port only for that host. 127.0.0.1 is a different registered URI —
+        // one the portal cannot even add over http, so it is not the one an administrator created.
+        //
+        // The port comes from the listener rather than a guess for the mirror reason: Entra would
+        // redirect the browser to a port nothing is listening on, and the sign-in hangs silently.
+        const redirectUri = `http://localhost:${server.port}${REDIRECT_PATH}`;
+        const url = oauth.buildAuthorizeUrl({ tenantId: decl.tenantId, clientId: decl.clientId,
+            scopes: decl.scopes, redirectUri, state, challenge });
+        const spec = browser(process.platform, process.env, url);
+        if (spec) {
+            open(spec);
+            log(`vc-secrets: opening a browser to sign in to "${serverName}"\n`);
+        } else {
+            log(`vc-secrets: open this URL to sign in to "${serverName}":\n${url}\n`);
+        }
+        const verdict = await server.next();
+        if (verdict.error) {
+            // The extras carry whatever Entra chose to send instead of a description; without them
+            // an `access_denied` reaches the developer as one word they can do nothing with.
+            const extras = (verdict.extras ?? [])
+                .map(([k, v]) => `${forTerminal(k, 40)}=${forTerminal(v)}`).join(", ");
+            throw new VcSecretsError(`sign-in for "${serverName}" failed: ${forTerminal(verdict.error, 60)}`
+                + (verdict.description ? ` -- ${forTerminal(verdict.description, 400)}` : "")
+                + (extras ? ` (${extras})` : "")
+                + (verdict.description ? "" : " -- no description was sent; the usual causes are a"
+                    + " declined consent prompt or an account not assigned to the application"));
+        }
+        const parsed = await exchange(decl.tenantId, oauth.buildTokenBody({ kind: "code",
+            clientId: decl.clientId, redirectUri, code: verdict.code, verifier, scopes: decl.scopes }));
+        const names = oauthEntryKeys(serverName, decl, cfg);
+        // Taken HERE and not before the browser: one mutex serialises every renewal on this
+        // machine, and a sign-in waits on a human, so holding it across that would stall every
+        // launch for minutes. What it does cover is the window between the exchange and the writes,
+        // where a renewal finishing first would have its own write land second and replace the
+        // token this sign-in just obtained. This matters MORE here than in the source: entries are
+        // keyed per project (oauthEntryKeys, not a bare server name), so one machine routinely
+        // holds several of them signed in at once, each a login of its own.
+        //
+        // What the late placement LEAVES OPEN, and no mutex can close: a logout that runs while
+        // this sign-in is still at the browser takes the lock uncontended, deletes both entries,
+        // and reports a removal — then these writes land and the credential is back. The two never
+        // overlap, so it is an ordering, not a race; closing it needs an epoch a logout bumps and
+        // a login re-checks here. Deliberately not built: the shape of it is "a human left a tab
+        // open across a logout", and the cost is a third entry plus a write on every logout.
+        // Every failure to get the lock is caught, including the ones acquireTokenLock rethrows.
+        // Past this line the authorization code is SPENT: an exception here stores nothing, clears
+        // nothing, and leaves the previous login's entries in exactly the lying state the fatal
+        // write branch below exists to prevent — and the developer cannot retry with the same code.
+        // Before this change the step could not fail at all, so refusing here would be a
+        // regression introduced by the lock rather than a hazard the lock found.
+        const { lock, reason, error } = await acquireTokenLock({ acquireLock: acquire, now, sleep, log })
+            .catch((e) => ({ lock: null, reason: "unbindable", error: e }));
+        if (reason === "busy") {
+            // Waited the full ceiling and gave up. Worded as "was still holding" rather than "is":
+            // the latch that got us here remembers a holder was SEEN, not that one is there now.
+            // Stored anyway for the reason above — but a holder that later wakes and completes will
+            // overwrite this, and the developer would otherwise meet that only as an unexplained
+            // request to sign in again.
+            log(`vc-secrets: a token renewal for "${serverName}" was still holding the lock -- storing the new`
+                + " token anyway; if the next launch asks you to sign in, run this again\n");
+        }
+        if (reason === "unbindable") {
+            log(`vc-secrets: the token lock could not be taken (${error?.code ?? error?.name}) -- this sign-in`
+                + " is NOT serialised against an in-flight renewal\n");
+        }
+        try {
+            // Refresh first, and its failure is fatal. Entra kills the old refresh token the moment
+            // it issues this one, so this write is the single step in the design that cannot be
+            // retried — an access entry stored beside a refresh token that never landed describes a
+            // session that works for an hour and then cannot be renewed by anything.
+            try {
+                await writeEntry(names.refresh, cache.serializeRefresh({ refreshToken: parsed.refreshToken,
+                    tenantId: decl.tenantId, clientId: decl.clientId, scopes: decl.scopes }));
+            } catch (e) {
+                // Entra has already invalidated whatever refresh token was there, so a PREVIOUS
+                // login's entries are now lies: the old refresh token is dead and the old access
+                // token keeps working until it expires, at which point the session dies mid-use with
+                // nothing to renew from. Clearing both makes the state unambiguously signed-out.
+                for (const stale of [names.access, names.refresh]) {
+                    try {
+                        await removeStale(stale);
+                    } catch { /* best effort — the write failure is what the developer must see */ }
+                }
+                throw e;
+            }
+            try {
+                await writeEntry(names.access, cache.serializeAccess(parsed));
+            } catch (e) {
+                // Best-effort by design: losing the access entry costs one exchange on next launch,
+                // where failing the whole login would cost an interactive sign-in.
+                log(`vc-secrets: signed in, but the access entry could not be stored (${e.message}); `
+                    + "the next launch will exchange one\n");
+            }
+        } finally {
+            // Covers the stale-clearing path too: that branch deletes the very entries a waiting
+            // renewal is about to read, and releasing before it would let the renewal see one of
+            // the two halves mid-clear.
+            await lock?.release();
+        }
+
+        return { serverName };
+    } finally {
+        // An abandoned listener holds its port for the life of the process, and on a failure
+        // path there is nobody watching to notice.
+        await server.close();
+    }
 }
 
 function makeSecretResolver(cfg, env = process.env) {
@@ -2737,7 +2889,7 @@ async function cmdEmitConfig(cfg, argv) {
     fs.writeSync(1, body);
 }
 
-const VERBS = ["run", "task", "set", "unlock", "doctor", "migrate", "emit-config"];
+const VERBS = ["run", "task", "set", "unlock", "login", "doctor", "migrate", "emit-config"];
 const USAGE = `usage: vc-secrets <${VERBS.join("|")}> [name]`;
 
 async function main(argv) {
@@ -2772,6 +2924,10 @@ async function main(argv) {
     }
     if (command === "unlock") {
         await cmdUnlock(cfg);
+        return;
+    }
+    if (command === "login" && arg) {
+        await cmdLogin(arg, cfg);
         return;
     }
     if (command === "doctor") {
@@ -2813,7 +2969,7 @@ export {
     COMMAND_ON_STDIN, quoteForSecurityInteractive, writeSecretValue,
     tokenLockFor, acquireTokenLock, ensureFreshToken, oauthLaunchDeps,
     REDIRECT_PATH, MAX_ERROR_PARAMS, closeTabPage, forTerminal, escapeHtml, failedPage, listenForCallback,
-    openBrowser, buildBrowserCommand, handleCallback,
+    openBrowser, buildBrowserCommand, handleCallback, cmdLogin,
     runTool, resolveSpawnCommand, buildSpawnInvocation, makeSecretResolver, cmdRun, cmdTask, cmdLaunch, killProcessTree,
     validateLaunchables, LEGACY_ENV_VARS, LEGACY_SECRET_ENV_VARS,
     mapResolveError, applyKeystrokes, promptHidden, cmdSet, cmdUnlock, unlockTargets, cmdDoctor, cmdMigrate, newKeyPresent,
