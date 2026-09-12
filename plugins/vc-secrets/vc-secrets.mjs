@@ -1686,8 +1686,8 @@ function listenForCallback(expectedState, { entryName = null,
         });
         // `reject` rejects the BIND, and is inert once listen has resolved -- after that a server
         // error would vanish while next() waited forever. Settling as well makes a listener that dies
-        // mid-sign-in end the wait with a reason instead of hanging. createChannel fixes the same
-        // shape at its own listener.
+        // mid-sign-in end the wait with a reason instead of hanging. The source fixes the same shape
+        // at createChannel's listener; that verb is not ported yet, so nothing here pairs with it.
         server.once("error", (e) => {
             reject(e);
             settle({ error: "listener_failed", description: e.code ?? e.message });
@@ -1702,8 +1702,7 @@ function listenForCallback(expectedState, { entryName = null,
     });
 }
 
-// The spawned child's own default was silently dropped once before: spec.opts carries per-platform
-// options (windowsVerbatimArguments, say) that the builder decided this launch needs, and the
+// Spread spec.opts rather than ignoring it: the win32 spec needs windowsVerbatimArguments, and the
 // previous inline default silently dropped whatever the builder asked for. A spec field nothing reads
 // is worse than no field -- the builder looks correct and the launch is not.
 function openBrowser(spec, { spawnProcess = spawn, log = (line) => process.stderr.write(line) } = {}) {
@@ -2296,7 +2295,7 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
         lines.push(`FAIL ${e.message}`);   // report, never crash the diagnostic tool
     }
     if (configDirOverride) {
-        lines.push("WARN VC_SECRETS_CONFIG_DIR is set — vc-secrets is reading a non-default config");
+        lines.push("WARN VC_SECRETS_CONFIG_DIR is set -- vc-secrets is reading a non-default config");
     }
     for (const problem of wiringProblems) {
         lines.push(`WARN ${problem}`);

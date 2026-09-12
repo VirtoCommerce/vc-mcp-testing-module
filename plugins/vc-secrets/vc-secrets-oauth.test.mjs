@@ -1758,6 +1758,12 @@ test("handleCallback: a request to another path is ignored, not treated as a fai
     // A browser fetching /favicon.ico for the "you can close this tab" page must not abort a
     // sign-in that is about to succeed.
     assert.equal(m.handleCallback(GET("/favicon.ico"), "RIGHT", "/callback").ignore, true);
+    // The only input the path check actually decides, and the reason the line above does not pin it:
+    // a NON-callback path carrying a complete, valid callback query. /favicon.ico is turned away by
+    // the stray-request branch below whatever the path check does, so deleting the check left the
+    // whole suite green. With all three parameters present that branch cannot fire, and the code is
+    // accepted from a path Entra never redirected to.
+    assert.equal(m.handleCallback(GET("/evil?code=abc&state=RIGHT"), "RIGHT", "/callback").ignore, true);
 });
 
 test("handleCallback: a stray request on the callback path is ignored, not read as an attack", () => {
@@ -1768,6 +1774,12 @@ test("handleCallback: a stray request on the callback path is ignored, not read 
     // makes the port reachable from Windows, so this is not hypothetical.
     assert.equal(m.handleCallback(GET("/"), "RIGHT", "/").ignore, true);
     assert.equal(m.handleCallback(GET("/?probe=1"), "RIGHT", "/").ignore, true);
+    // The "not read as an attack" half of the title, which nothing asserted: the verdict is the same
+    // with the branch removed, because the state check also ignores. What changes is the DIAGNOSIS --
+    // every browser request for "/" then prints the notice below, which names a state that is not
+    // this sign-in's. Deleting the branch left the suite green; this is the line that reddens.
+    assert.equal(m.handleCallback(GET("/"), "RIGHT", "/").notice, undefined,
+        "a browser asking for the root is not something to warn the developer about");
     // A request that claims to be a callback but carries someone else's state is ignored WITH a
     // notice -- it neither ends the sign-in nor disappears.
     const wrongState = m.handleCallback(GET("/?code=abc&state=WRONG"), "RIGHT", "/");
@@ -1803,6 +1815,15 @@ test("the tab title names which sign-in the tab belongs to", () => {
     assert.equal(title(m.failedPage({ error: "x", description: "", extras: [] })), "Sign-in failed");
     // And the failure title must not read as a success at a glance, which is where a tab title is read.
     assert.doesNotMatch(title(m.failedPage({ error: "x", description: "", extras: [] }, "org")), /signed in/i);
+    // The name is escaped although it is validated `[a-z0-9-]+` at load, because the page must not
+    // depend on a check made somewhere else -- and nothing asserted that until now: removing
+    // escapeHtml from BOTH titles left the whole suite green, since every name above is one that
+    // escaping does not change. Asserted on the raw HTML rather than through `title()`, whose own
+    // `[^<]*` would stop at an unescaped bracket and quietly report a shorter title instead.
+    const hostile = "a<script>&\"x";
+    assert.match(m.closeTabPage(hostile), /<title>Signed in - a&lt;script&gt;&amp;&quot;x<\/title>/);
+    assert.match(m.failedPage({ error: "x", description: "", extras: [] }, hostile),
+        /<title>Sign-in failed - a&lt;script&gt;&amp;&quot;x<\/title>/);
 });
 
 test("failedPage: renders the reason, and escapes it because the sender chose it", () => {

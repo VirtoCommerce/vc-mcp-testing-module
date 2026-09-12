@@ -3477,3 +3477,69 @@ test("README: the trust probe names both causes, since it cannot distinguish the
     assert.match(readme, /two causes/i, "the probe is documented as ambiguous");
     assert.match(readme, /matcher/i, "and the second cause is named");
 });
+
+// Reads the module sources and returns every non-ASCII character sitting inside a string literal.
+// Quote-state, not a pattern: a `//` comment may keep its typography, and a trailing comment on a code
+// line must not be mistaken for the code. The narrower guard over mapResolveError and forTerminal
+// covers what `cmdDoctor` prints; this covers what `fail()` prints, which is EVERY VcSecretsError
+// message, and those go out through the same raw write (`vc-secrets.mjs` fail()).
+//
+// Ported from the source's own guard. It exists here because a hand-rolled sweep of the same class,
+// written the same day, missed a live message: a scanner carrying quote state ACROSS lines
+// desynchronised on a quote inside a regex literal and reported the region as code, so the sweep and
+// its verification -- the same function -- agreed on a wrong answer. Per-line state cannot drift that
+// way; it costs false positives on an apostrophe in a comment, which is the safe direction.
+function nonAsciiInEmittedLiterals(source) {
+    const found = [];
+    for (const [lineNo, line] of source.split("\n").entries()) {
+        let quote = null;
+        for (let i = 0; i < line.length; i += 1) {
+            const ch = line[i];
+            // Stop at a line comment, which the source's version does not do although its own header
+            // says a comment "may keep its typography". Its corpus never exposes the gap; this one
+            // does, at twelve sites -- eleven of them comments whose own apostrophe or quotation mark
+            // opens quote state, and the twelfth the real defect. Only when quote state is CLOSED: a
+            // `//` inside a string (a URL in a message) is text, not the start of a comment.
+            if (quote === null && ch === "/" && line[i + 1] === "/") { break; }
+            if (quote === null && "\"'`".includes(ch)) { quote = ch; continue; }
+            if (quote !== null && ch === "\\") {
+                // An ESCAPE can smuggle a non-ASCII character past a scanner that only looks at the
+                // bytes of the source: `\\u2014` is six ASCII characters here and an em dash at runtime.
+                // Found by a mutation that used exactly that form and survived.
+                const escaped = /^\\(?:u\{([0-9a-fA-F]+)\}|u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2}))/
+                    .exec(line.slice(i));
+                if (escaped) {
+                    const point = parseInt(escaped[1] ?? escaped[2] ?? escaped[3], 16);
+                    if (point > 127) {
+                        found.push(`line ${lineNo + 1}: escape ${escaped[0]} in ${line.trim().slice(0, 60)}`);
+                    }
+                    i += escaped[0].length - 1;
+                    continue;
+                }
+                i += 1;
+                continue;
+            }
+            if (quote !== null && ch === quote) { quote = null; continue; }
+            if (quote !== null && ch.charCodeAt(0) > 127) {
+                found.push(`line ${lineNo + 1}: ${JSON.stringify(ch)} in ${line.trim().slice(0, 70)}`);
+            }
+        }
+    }
+
+    return found;
+}
+
+test("every string literal these modules can print is ASCII", () => {
+    // `fail()` writes every VcSecretsError message with the same raw call `cmdDoctor` uses, so a new em
+    // dash in any thrown message reaches a console that may not be UTF-8. The source measured one
+    // arriving as mojibake; the narrow guard that replaced it only looked at one function's output.
+    //
+    // The list is the five modules the launcher itself runs. vc-secrets-shim.mjs and the install and
+    // hook scripts also print, and are deliberately NOT here: the source draws the same line, and
+    // widening it is a decision rather than an oversight.
+    for (const name of ["vc-secrets.mjs", "vc-secrets-oauth.mjs", "vc-secrets-cache.mjs",
+        "vc-secrets-error.mjs", "vc-secrets-probe.mjs"]) {
+        const source = fs.readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), "utf8");
+        assert.deepEqual(nonAsciiInEmittedLiterals(source), [], `non-ASCII in a printable literal of ${name}`);
+    }
+});
