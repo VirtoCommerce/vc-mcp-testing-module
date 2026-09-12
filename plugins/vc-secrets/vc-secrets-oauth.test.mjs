@@ -2542,11 +2542,14 @@ const LOGOUT_CFG = { oauth: { "azure-mcp": LOGOUT_DECL }, projectId: "logout-p1"
 const LOGOUT_KEYS = m.oauthEntryKeys("azure-mcp", LOGOUT_DECL, LOGOUT_CFG);
 const FREE_LOCK = async () => ({ release: async () => {} });
 
-test("cmdLogout: removes both entries", async () => {
+test("cmdLogout: removes both entries, refresh before access", async () => {
+    // The ORDER is asserted rather than sorted away, and the partial-failure test below is why.
+    // The source sorts both sides here (mcpw.test.js:2732), which makes the order invisible:
+    // measured, reversing `names` in the production loop left the whole suite green.
     const deleted = [];
     await m.cmdLogout("azure-mcp", LOGOUT_CFG, { deleteEntry: async (n) => { deleted.push(n); },
         acquireLock: FREE_LOCK });
-    assert.deepEqual(deleted.sort(), [LOGOUT_KEYS.access, LOGOUT_KEYS.refresh].sort());
+    assert.deepEqual(deleted, [LOGOUT_KEYS.refresh, LOGOUT_KEYS.access]);
 });
 
 test("cmdLogout: an already-absent entry is success, and both are still attempted", async () => {
@@ -2560,9 +2563,11 @@ test("cmdLogout: an already-absent entry is success, and both are still attempte
         },
         acquireLock: FREE_LOCK,
     });
-    assert.equal(attempted.length, 2, "one absent entry must not stop the other from being removed");
+    assert.deepEqual(attempted, [LOGOUT_KEYS.refresh, LOGOUT_KEYS.access],
+        "one absent entry must not stop the other from being removed, and in the order the "
+        + "partial-failure test depends on");
     assert.deepEqual(report.removed, []);
-    assert.deepEqual(report.alreadyAbsent.sort(), [LOGOUT_KEYS.access, LOGOUT_KEYS.refresh].sort());
+    assert.deepEqual(report.alreadyAbsent, [LOGOUT_KEYS.refresh, LOGOUT_KEYS.access]);
 });
 
 test("cmdLogout: a real failure is not swallowed as already-absent", async () => {
@@ -2572,6 +2577,30 @@ test("cmdLogout: a real failure is not swallowed as already-absent", async () =>
         deleteEntry: async () => { throw Object.assign(new m.VcSecretsError("keystore locked"), { toolExitCode: 1 }); },
         acquireLock: FREE_LOCK,
     }), /keystore locked/);
+});
+
+test("cmdLogout: a store that fails part-way has already removed the refresh token, not the access one", async () => {
+    // The reason the two tests above assert an order instead of sorting it. There is no
+    // transaction here: the loop rethrows anything that is not exit 3, so a store that dies
+    // half-way leaves whatever has gone, gone, and whatever has not, on disk. Refresh-first bounds
+    // that to a short-lived access token. The other order leaves the REFRESH token -- the
+    // credential this verb exists to remove -- behind a failure a developer may reasonably read as
+    // "nothing happened".
+    //
+    // Inherited from the source, which builds `names` the same way and sorts it away in its own
+    // assertions, so this is a strengthening of the port rather than a correction to it.
+    const deleted = [];
+    await assert.rejects(() => m.cmdLogout("azure-mcp", LOGOUT_CFG, {
+        deleteEntry: async (n) => {
+            if (deleted.length === 1) {
+                throw Object.assign(new m.VcSecretsError("keystore locked"), { toolExitCode: 1 });
+            }
+            deleted.push(n);
+        },
+        acquireLock: FREE_LOCK,
+    }), /keystore locked/);
+    assert.deepEqual(deleted, [LOGOUT_KEYS.refresh],
+        "the long-lived credential must be the one already gone when a store fails part-way");
 });
 
 test("cmdLogout: an undeclared server is refused before anything is deleted", async () => {
@@ -2734,11 +2763,15 @@ test("cmdLogout: an error from the lock reaches the caller, and nothing is delet
     // `undefined` as the only trace. Harmonising the two verbs' lock handling is the obvious
     // future edit; this test is what notices it.
     //
-    // The two assertions are not equally isolable, and it is worth knowing which is which. The
-    // rejection is pinned alone: adding that `.catch` here reddens this test and nothing else.
-    // The `attempted` assertion is live -- a deletion escaping ahead of the lock does redden it,
-    // measured -- but no mutation isolates it, because six sibling tests pin the same ordering
-    // incidentally. It is a consequence assertion, not an independent pin, and reads as one.
+    // Both assertions are independent pins, each with its own defect, and both were measured.
+    // The rejection: appending that `.catch` reddens this test alone. The `attempted` assertion:
+    // wrapping the lock call in a try/catch that deletes best-effort before rethrowing -- the same
+    // "be permissive when the lock machinery fails" family, and the likelier edit of the two --
+    // also reddens this test alone. What does NOT isolate `attempted` is a deletion escaping
+    // ahead of the lock on every path: that reddens six siblings too, because they pin the
+    // ordering incidentally. Recorded because an earlier draft of this comment generalised from
+    // that one mutation to "nothing isolates it", which would have invited the next reader to
+    // delete the assertion as decorative.
     const attempted = [];
     const boom = new TypeError("acquireLock is not a function");
     await assert.rejects(() => m.cmdLogout("azure-mcp", LOGOUT_CFG, {
