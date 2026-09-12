@@ -1131,6 +1131,27 @@ test("a gpg removal that fails for any other reason is not reported as absent", 
         (e) => e.toolExitCode !== 3);
 });
 
+test("deleteEntryIo: a malformed gpg key is refused, not read as already-absent", async () => {
+    // Without this guard a malformed key still splits into a scope and a name (":" is present),
+    // so keyToPath builds a real -- just wrong -- path, fs.rmSync misses on it, and the failure
+    // comes back as ENOENT -> toolExitCode 3, the exact shape cmdLogout reads as "already absent".
+    // A logout would then report a credential removed that was never even looked for. Path
+    // traversal is not the live hazard here: oauth entry names and projectId are both validated
+    // against SECRET_NAME_RE at config load (vc-secrets.mjs:448, :539), so a key built from a
+    // loaded config cannot carry a traversal segment. The hazard is this exit-code collision, so
+    // the assertion is on the MESSAGE and on the absence of the already-absent shape, not on path
+    // traversal -- mirroring the source's analog (mcpw.test.js:2701), which asserts
+    // /invalid secret name/ and specifically NOT /no stored entry/ for the same reason.
+    const del = m.deleteEntryIo("gpg", { HOME: "/nonexistent-for-this-test" });
+    await assert.rejects(() => del("vc-secrets:user:Not_Valid"), (e) => {
+        assert.match(e.message, /invalid secret key/);
+        assert.doesNotMatch(e.message, /no stored entry/);
+        assert.notEqual(e.toolExitCode, 3, "a malformed key must not be read as an already-absent entry");
+
+        return true;
+    });
+});
+
 test("cmdUnlock: must keep showing pinentry interactively — no --pinentry-mode reaches the gpg it runs", { skip: process.platform === "win32" && "gpg backend is not selected on win32" }, async () => {
     const secretsHome = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-unlock-"));
     tmpDirs.push(secretsHome);
