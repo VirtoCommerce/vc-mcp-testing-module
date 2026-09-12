@@ -128,9 +128,9 @@ environment does not help there; that case wants a git credential helper, not th
   family: `secrets:<name>` with the plural no longer means anything, so it cannot be silently accepted
   as a constant.
 - `secret:<name>` resolves the whole value; `secret:<name>.<field>` needs `"format": "json"`.
-- `oauth:<name>` takes no `.<field>` — a token is not a JSON document. **This build accepts and
-  validates `oauth` declarations but does not yet acquire tokens**, so launching a server that
-  references one fails with a message saying exactly that.
+- `oauth:<name>` takes no `.<field>` — a token is not a JSON document. **`vc-secrets login <name>` acquires and
+  stores a token, but this build does not yet hand one to a server**, so launching a server that
+  references an `oauth:` value still fails with a message saying exactly that.
 - `literal:` is stripped once: `literal:literal:x` sets the value `literal:x`.
 - The rule covers `env`, which is where a credential belongs if it must be given to a process at all.
   `args` stay free text — a token there would be visible in the machine's process list anyway, so it is

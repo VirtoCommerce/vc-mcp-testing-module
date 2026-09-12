@@ -121,10 +121,9 @@ function parseEntry(json) {
         parsed = JSON.parse(json);
     } catch {
         // Absent rather than an error, and never a rethrow: node embeds the first ten characters
-        // of its input in a JSON SyntaxError and this input is a keystore blob. Absent is the
-        // actionable answer for whatever eventually calls this — vc-secrets.mjs's VERBS has no
-        // `login` yet; that verb, and the wiring that would route an absent cache to it, arrive
-        // with a later task.
+        // of its input in a JSON SyntaxError and this input is a keystore blob. Absent is also the
+        // actionable answer for the callers there now: ensureFreshToken treats it as "sign in", and
+        // the `login` verb overwrites it.
         return null;
     }
     if (parsed?.schema !== CACHE_SCHEMA) {

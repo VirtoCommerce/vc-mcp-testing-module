@@ -605,7 +605,7 @@ test("cacheStatus: after a reboot the anchor is ignored rather than believed", (
 test("cacheStatus: a caller that omits the monotonic reading is stopped, not quietly downgraded", () => {
     // Omitting it makes byUptime NaN, NaN >= 0 is false, and the function falls back to exactly
     // the wall-clock-only rule the anchor replaced — no throw, no needs-refresh, nothing red.
-    // There is no production caller yet, so the wiring commit is precisely when that would bite.
+    // ensureFreshToken (vc-secrets.mjs:1556) is the production caller, so this is live, not latent.
     assert.throws(() => cache.cacheStatus(cacheAt(0), DECL, 60_000), /uptime/i);
     assert.throws(() => cache.cacheStatus(cacheAt(0), DECL, 60_000, NaN), /uptime/i);
     assert.throws(() => cache.cacheStatus(cacheAt(0), DECL, undefined, 1060), /now/i);
@@ -693,7 +693,7 @@ test("parseEntry: rejects a schema version it does not know", () => {
 test("parseEntry: unreadable input is absent, and nothing about it is echoed", () => {
     // Never a rethrow: node embeds the first ten characters of the input in a JSON SyntaxError,
     // and this input is a keystore blob. Absent is also the actionable answer for whatever calls
-    // this — there is no `login` verb yet (VERBS, vc-secrets.mjs); it arrives with a later task.
+    // this: ensureFreshToken treats an absent entry as "sign in", and the `login` verb overwrites it.
     assert.equal(cache.parseEntry("eyJhbGciOiJSUzI1NiJ9.truncated"), null);
     assert.equal(cache.parseEntry(""), null);
 });
@@ -1994,18 +1994,21 @@ socketTest("listenForCallback: a stray request is answered and waited past, the 
 // with contents would imply this fixture pins a relation it does not.
 // ---------------------------------------------------------------------------------------------
 
-// `kind: "oauth"` is what the merge stamps on every entry in the oauth section (it is the
-// discriminator authorizationFor branches on) and `declaredName` names the key it was found under,
-// so a hand-built declaration omitting either is not a
-// declaration this package can ever see -- it falls out of authorizationFor as "needs no
-// authorization", which is the one answer the gate must never get.
+// `kind: "oauth"` is what the merge stamps on every entry in the oauth section -- it is the
+// discriminator authorizationFor branches on -- and `declaredName` names the key it was found
+// under. A hand-built declaration omitting either is not one this package can ever see, and the
+// two consumers of authorizationFor disagree about what its `null` means: cmdLogin reads `.block`
+// off it and dies with a TypeError, while resolveEnvEntries (vc-secrets.mjs:726) tests
+// `source !== null` and takes it as "needs no authorization". Fail-closed at one site and
+// permissive at the other is the reason to match the merge rather than to guard the null.
 const LOGIN_DECL = { ...DECL_IDENTITY, kind: "oauth", scope: "project", home: "project", declaredName: "azure-mcp" };
 const LOGIN_CFG = { oauth: { "azure-mcp": LOGIN_DECL }, projectId: "login-p1",
     registrations: { [DECL_IDENTITY.tenantId]: { [DECL_IDENTITY.clientId]: {} } } };
 const LOGIN_KEYS = m.oauthEntryKeys("azure-mcp", LOGIN_DECL, LOGIN_CFG);
 
-// These three differ from LOGIN_CFG in exactly ONE property each, so a test driven by one of them
-// fails for the reason its name gives and not for a second difference nobody stated.
+// UNACKNOWLEDGED_CFG differs from LOGIN_CFG in exactly one property, so a test driven by it fails
+// for the reason its name gives. USER_CFG differs in two -- the declaration's home AND the absent
+// registrations block -- and has to: the whole claim is that the first makes the second irrelevant.
 const UNACKNOWLEDGED_CFG = { ...LOGIN_CFG, registrations: {} };
 const USER_DECL = { ...DECL_IDENTITY, kind: "oauth", scope: "user", home: "user", declaredName: "azure-mcp" };
 const USER_CFG = { oauth: { "azure-mcp": USER_DECL }, projectId: "login-p1" };
@@ -2049,8 +2052,7 @@ function loginDeps(overrides = {}) {
 // Depth-aware rather than line-anchored: the first version of this matched only a seam standing
 // alone at an indent of exactly four, so a new seam sharing a line with another was dropped
 // silently, and the guard passed covering nothing for the very case it exists for.
-function cmdLoginSeams() {
-    const source = m.cmdLogin.toString();
+function seamsOf(source) {
     const block = source.slice(source.indexOf("{", source.indexOf("cfg,")) + 1, source.indexOf("} = {}) {"));
     const parts = [];
     let depth = 0;
@@ -2063,15 +2065,29 @@ function cmdLoginSeams() {
     }
     parts.push(current);
 
-    return parts.map((part) => (/^\s*(\w+)\s*=/.exec(part) ?? [])[1]).filter(Boolean);
+    // The name, whether or not a default follows it. Requiring the `=` was the same hole in a
+    // second costume: a seam added WITHOUT a default vanished from the list, so the deepEqual below
+    // passed and the one production call site -- main, which calls cmdLogin(arg, cfg) with no deps
+    // object at all -- would hand it `undefined`. Line comments are stripped first because they
+    // would otherwise shadow the name on the part that follows them.
+    return parts.map((part) => (/^\s*(\w+)/.exec(part.replace(/\/\/.*$/gm, "")) ?? [])[1]).filter(Boolean);
+}
+
+function cmdLoginSeams() {
+    return seamsOf(m.cmdLogin.toString());
 }
 
 // Presence of the KEY is not injection: `Object.keys({a: undefined})` is `["a"]`, and a
 // destructuring default fires on undefined, so `loginDeps({ removeEntry: undefined })` would hand
-// back the real deleter with the guard green. That idiom is live in this file — see the
-// acquireLock case below.
+// back the real deleter with the guard green. The source's own instance of that idiom rides a test
+// this package has not ported, so nothing below demonstrates it -- which is exactly why the guard
+// has to state the rule rather than lean on an example.
 function definedSeams(deps) {
-    return Object.entries(deps).filter(([, value]) => value !== undefined).map(([key]) => key);
+    // `null` counts as absent alongside `undefined`: both acquireLock and removeEntry default to
+    // null in the parameter list and resolve their real implementation with `??` in the body, so a
+    // seam handed in as null falls through to the machine-global socket or the real deleter exactly
+    // as an omitted one does. Filtering on undefined alone would bless that shape.
+    return Object.entries(deps).filter(([, value]) => value !== undefined && value !== null).map(([key]) => key);
 }
 
 test("cmdLogin: a hostile parameter reaches the terminal message declawed", async () => {
@@ -2110,6 +2126,38 @@ test("loginDeps: a seam handed in as undefined counts as NOT injected", () => {
     assert.ok(definedSeams(loginDeps().deps).includes("removeEntry"));
 });
 
+test("loginDeps: a seam handed in as null counts as NOT injected, as the body's ?? reads it", () => {
+    // acquireLock and removeEntry both default to null and resolve the real thing with `??`, so a
+    // null is the one shape that looks handed-in to a key check and behaves like an omission: it
+    // binds the machine-global socket, or calls the real deleter.
+    assert.ok(!definedSeams(loginDeps({ acquireLock: null }).deps).includes("acquireLock"));
+    assert.ok(definedSeams(loginDeps().deps).includes("acquireLock"));
+});
+
+test("seamsOf: a seam declared without a default is still a seam", () => {
+    // The parser is guilty until shown otherwise, because it feeds the deepEqual above and a parser
+    // that quietly finds fewer names makes that assertion pass while covering less. Requiring an
+    // `=` dropped a defaultless seam entirely -- and defaultless is the dangerous kind, since main
+    // calls cmdLogin with no deps object at all.
+    assert.deepEqual(seamsOf("async function f(a, cfg, {\n    withDefault = 1,\n    bare,\n} = {}) {"),
+        ["withDefault", "bare"]);
+});
+
+test("seamsOf: a seam sharing a line with another is not dropped, and a line comment shadows nothing", () => {
+    // The depth-aware split exists for the first of these; the comment strip for the second. Both
+    // are ways for a name to go missing without the list looking wrong.
+    assert.deepEqual(seamsOf("async function f(a, cfg, {\n    one = 1, two = 2,\n} = {}) {"), ["one", "two"]);
+    assert.deepEqual(seamsOf("async function f(a, cfg, {\n    // why three is defaulted\n    three = 3,\n} = {}) {"),
+        ["three"]);
+});
+
+test("seamsOf: a default containing a comma does not split into two seams", () => {
+    // The whole reason the split is depth-aware: writeEntry's default is an arrow taking two
+    // parameters, and a naive split on "," would report `name` and `value` as seams of their own.
+    assert.deepEqual(seamsOf("async function f(a, cfg, {\n    w = (name, value) => g(name, value),\n    x = [1, 2],\n} = {}) {"),
+        ["w", "x"]);
+});
+
 test("cmdLogin: the refresh entry is written before the access entry", async () => {
     // Entra invalidates the old refresh token the moment it issues a new one, so persisting the
     // new one is the only irreversible step in the design. Writing the access entry first would
@@ -2117,6 +2165,29 @@ test("cmdLogin: the refresh entry is written before the access entry", async () 
     const { deps, written } = loginDeps();
     await m.cmdLogin("azure-mcp", LOGIN_CFG, deps);
     assert.deepEqual(written.map(([name]) => name), [LOGIN_KEYS.refresh, LOGIN_KEYS.access]);
+});
+
+test("cmdLogin: the refresh entry carries the new refresh token under the declaration's identity", async () => {
+    // The two names and their order were pinned; the CONTENTS were not. Every field here is one a
+    // later read compares, so a refresh entry holding the access token, or the tenant and client
+    // transposed, stores a session ensureFreshToken rejects on identity at the next launch --
+    // sending the developer back to `login` with nothing naming why.
+    const { deps, written } = loginDeps();
+    await m.cmdLogin("azure-mcp", LOGIN_CFG, deps);
+    assert.deepEqual(cache.parseEntry(written.find(([name]) => name === LOGIN_KEYS.refresh)[1]),
+        { schema: 1, refreshToken: "new-rt", tenantId: LOGIN_DECL.tenantId,
+            clientId: LOGIN_DECL.clientId, scopes: LOGIN_DECL.scopes });
+});
+
+test("cmdLogin: the access entry carries the token and the timing the exchange returned", async () => {
+    // The same gap on the other write, and it fails differently: the three timing fields decide
+    // when a renewal fires, so a transposition here is a session that renews at the wrong moment
+    // rather than one that is refused outright.
+    const { deps, written } = loginDeps();
+    await m.cmdLogin("azure-mcp", LOGIN_CFG, deps);
+    assert.deepEqual(cache.parseEntry(written.find(([name]) => name === LOGIN_KEYS.access)[1]),
+        { schema: 1, accessToken: "at", expiresAt: 3600_000, obtainedAt: 0, lifetimeMs: 3600_000,
+            uptimeAtIssue: 1000 });
 });
 
 test("cmdLogin: a failed refresh write is fatal, and the access entry is not written after it", async () => {
@@ -2351,6 +2422,17 @@ test("cmdLogin: the refusal names the registration that must be acknowledged, no
     const { deps } = loginDeps();
     await assert.rejects(() => m.cmdLogin("azure-mcp", UNACKNOWLEDGED_CFG, deps),
         new RegExp(`registrations\\."${DECL_IDENTITY.tenantId}"\\."${DECL_IDENTITY.clientId}"`));
+});
+
+test("cmdLogin: the refusal names no command, because doctor does not report registrations yet", async () => {
+    // The decision authorizationRefusal's own comment records, and the one resolveEnvEntries
+    // already makes on this kind: doctor's crossing loop reports secret references only, so naming
+    // it here would send the developer to a command that prints nothing about this block. It was
+    // pinned at that site alone, and this verb did the opposite for a commit with nothing red. The
+    // /not authorized/ half is the control: without it an empty message would satisfy the absence.
+    const { deps } = loginDeps();
+    await assert.rejects(() => m.cmdLogin("azure-mcp", UNACKNOWLEDGED_CFG, deps),
+        (e) => /not authorized/.test(e.message) && !/vc-secrets doctor/.test(e.message));
 });
 
 test("cmdLogin: the policy refusal wins over the capability refusal", async () => {

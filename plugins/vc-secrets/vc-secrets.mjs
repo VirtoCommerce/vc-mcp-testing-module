@@ -1823,7 +1823,6 @@ function handleCallback(req, expectedState, redirectPath) {
     return code ? { code } : { error: "no_code" };
 }
 
-// The interactive sign-in verb.
 async function cmdLogin(serverName, cfg, {
     listen = listenForCallback,
     open = openBrowser,
@@ -1858,9 +1857,14 @@ async function cmdLogin(serverName, cfg, {
     if (decl.home !== USER_SCOPE) {
         const source = authorizationFor(cfg, decl);
         if (source.block === undefined) {
+            // No DOCTOR_REMEDY, for the reason authorizationRefusal's own comment gives and the
+            // reason resolveEnvEntries omits it on this same kind: doctor's crossing loop reports
+            // secret references only, so naming it here would send the developer to a command that
+            // prints nothing about registrations. Task 21 gives doctor that report; the remedy goes
+            // back on BOTH refusals then, not on one of them now.
             throw new VcSecretsError(`"vc-secrets login ${serverName}" is not authorized -- the app`
                 + ` registration it names must be acknowledged at ${source.where} in`
-                + ` ${path.join("~", ".claude", CONFIG_NAME)}${DOCTOR_REMEDY}`);
+                + ` ${path.join("~", ".claude", CONFIG_NAME)}`);
         }
     }
     if (!LOCAL_BACKENDS.includes(backend)) {
