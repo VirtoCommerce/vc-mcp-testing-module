@@ -1820,9 +1820,9 @@ test("forTerminal: a control byte from the redirect cannot reach the terminal as
     // The HTML sink escapes; this is the same sender with a different alphabet. CSI would move the
     // cursor and overwrite what is already on screen, OSC can reach the window title or the
     // clipboard — and unlike a bad tag, none of it is visible in the text that carried it.
-    const nasty = `a[2Jbcd`;
+    const nasty = `a\u001b[2Jb\u0007c\u009bd`;
     const safe = m.forTerminal(nasty);
-    assert.ok(!/[ --]/.test(safe), `control bytes survived: ${JSON.stringify(safe)}`);
+    assert.ok(!/[\u0000-\u001f\u007f-\u009f]/.test(safe), `control bytes survived: ${JSON.stringify(safe)}`);
     assert.match(safe, /^a\?\[2Jb\?c\?d$/, "and the replacement itself must be ASCII");
 });
 

@@ -1380,7 +1380,7 @@ test("mapResolveError: wcm exit 3 → Credential Manager advice", () => {
     const e = Object.assign(new Error("CredRead failed"), { toolExitCode: 3 });
     const mapped = m.mapResolveError("wcm", "ado-pat", e);
     assert.ok(mapped instanceof m.VcSecretsError);
-    assert.match(mapped.message, /not found in Credential Manager — run "vc-secrets set ado-pat"/);
+    assert.match(mapped.message, /not found in Credential Manager -- run "vc-secrets set ado-pat"/);
 });
 
 test("an oversize value is named as a size problem, with the entry that overflowed", () => {
@@ -1402,14 +1402,14 @@ test("mapResolveError: keychain exit 44 → Keychain advice", () => {
     const e = Object.assign(new Error("security: item not found"), { toolExitCode: 44 });
     const mapped = m.mapResolveError("keychain", "ado-pat", e);
     assert.ok(mapped instanceof m.VcSecretsError);
-    assert.match(mapped.message, /not found in Keychain — run "vc-secrets set ado-pat"/);
+    assert.match(mapped.message, /not found in Keychain -- run "vc-secrets set ado-pat"/);
 });
 
 test("mapResolveError: gpg failure → unlock hint", () => {
     const e = new Error("gpg exited 2: decryption failed: No secret key");
     const mapped = m.mapResolveError("gpg", "ado-pat", e);
     assert.ok(mapped instanceof m.VcSecretsError);
-    assert.match(mapped.message, /decryption failed: No secret key — if the gpg agent is locked, run "vc-secrets unlock" in a terminal/);
+    assert.match(mapped.message, /decryption failed: No secret key -- if the gpg agent is locked, run "vc-secrets unlock" in a terminal/);
 });
 
 test("mapResolveError: other backend/exit-code combinations pass through unchanged", () => {
@@ -1426,7 +1426,7 @@ test("makeSecretResolver: gpg backend, file absent → not-set advice (pre-check
     const resolver = m.makeSecretResolver({}, env);
     await assert.rejects(
         resolver("ado-pat", { backend: "local", scope: "user" }),
-        (e) => e instanceof m.VcSecretsError && /not set — run "vc-secrets set ado-pat"/.test(e.message));
+        (e) => e instanceof m.VcSecretsError && /not set -- run "vc-secrets set ado-pat"/.test(e.message));
 });
 
 test("applyKeystrokes: typing, backspace, control chars, paste with terminator", () => {

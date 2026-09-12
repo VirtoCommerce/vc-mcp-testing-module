@@ -208,7 +208,7 @@ function validateRegistrations(registrations) {
         const lower = tenantId.toLowerCase();
         const prior = seenTenantIds.get(lower);
         if (prior !== undefined) {
-            throw new VcSecretsError(`registrations has both "${prior}" and "${tenantId}" — tenant ids are matched without regard to case, so pick one spelling`);
+            throw new VcSecretsError(`registrations has both "${prior}" and "${tenantId}" -- tenant ids are matched without regard to case, so pick one spelling`);
         }
         seenTenantIds.set(lower, tenantId);
         if (typeof clients !== "object" || clients === null || Array.isArray(clients)) {
@@ -372,7 +372,7 @@ function validateLaunchables(label, map) {
                 throw new VcSecretsError(`${label} "${name}": env key "${envKey}" is not allowed (code-injection vector)`);
             }
             if (!REF_PREFIXES.some((prefix) => value.startsWith(prefix)) && parseLiteral(value) === null) {
-                throw new VcSecretsError(`${label} "${name}": env ${envKey} must be "secret:<name>", "oauth:<name>" or "literal:<value>" — an unprefixed value cannot be told apart from a pasted credential`);
+                throw new VcSecretsError(`${label} "${name}": env ${envKey} must be "secret:<name>", "oauth:<name>" or "literal:<value>" -- an unprefixed value cannot be told apart from a pasted credential`);
             }
         }
     }
@@ -386,7 +386,7 @@ function parseConfigFile(file, warnings) {
         throw new VcSecretsError(`config is not valid JSON: ${file} (${e.message})`);
     }
     if (typeof cfg.schemaVersion === "number" && cfg.schemaVersion > SCHEMA_VERSION) {
-        throw new VcSecretsError(`${file}: schemaVersion ${cfg.schemaVersion} needs a newer vc-secrets (this one speaks ${SCHEMA_VERSION}) — update the plugin`);
+        throw new VcSecretsError(`${file}: schemaVersion ${cfg.schemaVersion} needs a newer vc-secrets (this one speaks ${SCHEMA_VERSION}) -- update the plugin`);
     }
     cfg.secrets ??= {};
     cfg.servers ??= {};
@@ -541,12 +541,12 @@ function loadConfig(paths = configPaths()) {
             // "user" is the user scope's own namespace segment. A project claiming it would read and
             // overwrite personal secrets under keys indistinguishable from theirs.
             if (cfg.projectId === USER_SCOPE) {
-                throw new VcSecretsError(`${file}: projectId "${USER_SCOPE}" is reserved for the user scope — pick another`);
+                throw new VcSecretsError(`${file}: projectId "${USER_SCOPE}" is reserved for the user scope -- pick another`);
             }
             if (scope === USER_SCOPE) {
-                warnings.push(`${file}: projectId is meaningless at user scope — ignored`);
+                warnings.push(`${file}: projectId is meaningless at user scope -- ignored`);
             } else if (projectId !== null && projectId !== cfg.projectId) {
-                throw new VcSecretsError(`projectId disagrees: "${projectId}" in ${projectIdFrom}, "${cfg.projectId}" in ${file} — they key the same secrets, so one of them is wrong`);
+                throw new VcSecretsError(`projectId disagrees: "${projectId}" in ${projectIdFrom}, "${cfg.projectId}" in ${file} -- they key the same secrets, so one of them is wrong`);
             } else {
                 projectId = cfg.projectId;
                 projectIdFrom = file;
@@ -558,7 +558,7 @@ function loadConfig(paths = configPaths()) {
             } else {
                 // A repository authorizing the vault reads it asks for would be the grant written by the
                 // party requesting it — the same reason `authorized` is user-scope only.
-                warnings.push(`${file}: "vaults" only authorizes at user scope — ignored`);
+                warnings.push(`${file}: "vaults" only authorizes at user scope -- ignored`);
             }
         }
         if (cfg.registrations !== undefined) {
@@ -576,7 +576,7 @@ function loadConfig(paths = configPaths()) {
             } else {
                 // A repository authorizing the app registration it names would be the grant written by the
                 // party requesting it — the same reason `authorized` and `vaults` are user-scope only.
-                warnings.push(`${file}: "registrations" only authorizes at user scope — ignored`);
+                warnings.push(`${file}: "registrations" only authorizes at user scope -- ignored`);
             }
         }
         for (const [name, decl] of Object.entries(cfg.secrets)) {
@@ -589,7 +589,7 @@ function loadConfig(paths = configPaths()) {
             if (decl.authorized !== undefined && scope !== USER_SCOPE) {
                 // The point of the block is that its author owns the secret. A project authorizing its own
                 // access would be the grant it is meant to require, written by the party asking for it.
-                warnings.push(`${file}: secret "${name}": "authorized" only authorizes at user scope — ignored`);
+                warnings.push(`${file}: secret "${name}": "authorized" only authorizes at user scope -- ignored`);
             }
             secrets[name] = { ...decl, scope: scope === "local" ? "project" : scope, home: scope };
         }
@@ -613,7 +613,7 @@ function loadConfig(paths = configPaths()) {
                 // Same rule the secret merge states: authorizationFor honours the block only at user
                 // scope, so accepting one here in silence leaves a grant that reads as effective and
                 // is not.
-                warnings.push(`${file}: oauth "${name}": "authorized" only authorizes at user scope — ignored`);
+                warnings.push(`${file}: oauth "${name}": "authorized" only authorizes at user scope -- ignored`);
             }
             // `declaredName` is stamped here (unlike the secret merge above) because a later task's
             // authorizationFor needs the name to build its `where` pointer, and unlike secrets there is no
@@ -623,7 +623,7 @@ function loadConfig(paths = configPaths()) {
     }
 
     if (Object.keys(files).length === 0) {
-        throw new VcSecretsError(`no declaration file found — looked for ${[paths.user, paths.project, paths.local].filter(Boolean).join(", ")}`);
+        throw new VcSecretsError(`no declaration file found -- looked for ${[paths.user, paths.project, paths.local].filter(Boolean).join(", ")}`);
     }
     // Demanded whenever a project-scope secret or oauth declaration exists at all, including Key Vault
     // secrets that do not touch the keystore: a rule that only bites once someone adds a local-backend
@@ -634,7 +634,7 @@ function loadConfig(paths = configPaths()) {
     // line noticing.
     if (projectId === null
         && (Object.values(secrets).some((d) => d.scope === "project") || Object.values(oauth).some((d) => d.scope === "project"))) {
-        throw new VcSecretsError(`a project-scope secret or oauth declaration is declared but projectId is not — add "projectId" to ${files.project ?? files.local} (it namespaces the keystore entries, so it cannot be derived)`);
+        throw new VcSecretsError(`a project-scope secret or oauth declaration is declared but projectId is not -- add "projectId" to ${files.project ?? files.local} (it namespaces the keystore entries, so it cannot be derived)`);
     }
 
     // A project-declared server MAY reference a user-scope secret: one personal PAT used from several
@@ -678,7 +678,7 @@ function oauthKeyClashes(cfg) {
             const secretName = secretKeys.get(key);
             if (secretName !== undefined) {
                 clashes.push(`oauth "${name}" ${role} entry and secret "${secretName}" resolve to the `
-                    + `same keystore key ${key} — one overwrites the other`);
+                    + `same keystore key ${key} -- one overwrites the other`);
             }
         }
     }
@@ -690,7 +690,7 @@ function oauthKeyClashes(cfg) {
 // so pointing an oauth refusal at it would name a command that prints nothing.
 function authorizationRefusal(envVar, kind, refName, { reason, where, remedy = "" }) {
     return new VcSecretsError(`env ${envVar}: this ${kind === "tasks" ? "task" : "server"} is `
-        + `${reason} to receive "${refName}" — the authorization for it lives at `
+        + `${reason} to receive "${refName}" -- the authorization for it lives at `
         + `${where} in ${path.join("~", ".claude", CONFIG_NAME)}${remedy}`);
 }
 
@@ -700,7 +700,7 @@ const DOCTOR_REMEDY = '; run "vc-secrets doctor" for the block to add';
 // difference is who starts them — the MCP client, or a person running `task`.
 async function resolveEnvEntries(name, cfg, resolveSecret, kind = "servers") {
     if (!Object.hasOwn(cfg[kind], name)) {
-        throw new VcSecretsError(`unknown ${kind === "tasks" ? "task" : "server"} "${name}" — not declared in ${CONFIG_NAME}`);
+        throw new VcSecretsError(`unknown ${kind === "tasks" ? "task" : "server"} "${name}" -- not declared in ${CONFIG_NAME}`);
     }
     const server = cfg[kind][name];
     // validate every reference BEFORE contacting any backend
@@ -718,7 +718,7 @@ async function resolveEnvEntries(name, cfg, resolveSecret, kind = "servers") {
             // refuses a name held by both, so falling through would resolve the same-named secret and
             // hand its value to a variable that asked for a token.
             if (!Object.hasOwn(cfg.oauth ?? {}, ref.name)) {
-                throw new VcSecretsError(`env ${envVar}: undeclared oauth entry "${ref.name}" — declare it in the "oauth" section of ${CONFIG_NAME}`);
+                throw new VcSecretsError(`env ${envVar}: undeclared oauth entry "${ref.name}" -- declare it in the "oauth" section of ${CONFIG_NAME}`);
             }
             const oauthDecl = cfg.oauth[ref.name];
             // Same exemption crossingProblem makes for secrets: a launchable declared in the user's
@@ -813,7 +813,7 @@ function detectLocalBackend(platform = process.platform, env = process.env) {
     const override = env.VC_SECRETS_LOCAL_BACKEND;
     if (override !== undefined) {
         if (!LOCAL_BACKENDS.includes(override)) {
-            throw new VcSecretsError(`VC_SECRETS_LOCAL_BACKEND="${override}" — expected ${LOCAL_BACKENDS.join("|")}`);
+            throw new VcSecretsError(`VC_SECRETS_LOCAL_BACKEND="${override}" -- expected ${LOCAL_BACKENDS.join("|")}`);
         }
         return override;
     }
@@ -972,7 +972,7 @@ const KEY_RE = new RegExp(`^${KEY_PREFIX}:[a-z0-9-]+:[a-z0-9-]+$`);
 
 function buildLocalRead(backend, key, env = process.env) {
     if (!KEY_RE.test(key)) {
-        throw new VcSecretsError(`invalid secret key "${key}" — expected vc-secrets:<scope>:<name>`);
+        throw new VcSecretsError(`invalid secret key "${key}" -- expected vc-secrets:<scope>:<name>`);
     }
     if (backend === "wcm") {
         return { cmd: psCommand(env), args: psArgs(PS_CRED_READ),
@@ -992,7 +992,7 @@ function buildLocalRead(backend, key, env = process.env) {
 
 function buildLocalWrite(backend, key, env = process.env, { tmp = false, value = undefined } = {}) {
     if (!KEY_RE.test(key)) {
-        throw new VcSecretsError(`invalid secret key "${key}" — expected vc-secrets:<scope>:<name>`);
+        throw new VcSecretsError(`invalid secret key "${key}" -- expected vc-secrets:<scope>:<name>`);
     }
     if (backend === "wcm") {
         return { cmd: psCommand(env), args: psArgs(PS_CRED_WRITE),
@@ -1044,7 +1044,7 @@ function buildLocalWrite(backend, key, env = process.env, { tmp = false, value =
 
 function buildLocalDelete(backend, key, env = process.env) {
     if (!KEY_RE.test(key)) {
-        throw new VcSecretsError(`invalid secret key "${key}" — expected vc-secrets:<scope>:<name>`);
+        throw new VcSecretsError(`invalid secret key "${key}" -- expected vc-secrets:<scope>:<name>`);
     }
     if (backend === "wcm") {
         return { cmd: psCommand(env), args: psArgs(PS_CRED_DELETE),
@@ -1067,7 +1067,7 @@ function deleteEntryIo(backend = detectLocalBackend(), env = process.env, { run 
     return async (key) => {
         if (backend === "gpg") {
             if (!KEY_RE.test(key)) {
-                throw new VcSecretsError(`invalid secret key "${key}" — expected vc-secrets:<scope>:<name>`);
+                throw new VcSecretsError(`invalid secret key "${key}" -- expected vc-secrets:<scope>:<name>`);
             }
             try {
                 rm(keyToPath(key, env));
@@ -1291,7 +1291,7 @@ function buildSpawnInvocation(resolved, args) {
 // "not found" rewrites above are advice for a read.
 function mapResolveError(backend, name, e) {
     if (backend === "wcm" && e.toolExitCode === 3) {
-        return new VcSecretsError(`secret "${name}" not found in Credential Manager — run "vc-secrets set ${name}"`);
+        return new VcSecretsError(`secret "${name}" not found in Credential Manager -- run "vc-secrets set ${name}"`);
     }
     if (backend === "wcm" && e.toolExitCode === 4) {
         // Keep the measured size, drop win32err=1783: the number a developer can act on is
@@ -1299,13 +1299,13 @@ function mapResolveError(backend, name, e) {
         const size = /(\d+) bytes/.exec(e.message)?.[1];
         const measured = size ? ` (${size} bytes)` : "";
 
-        return new VcSecretsError(`secret "${name}" is too large for Credential Manager${measured} — the blob limit is 2560 bytes`);
+        return new VcSecretsError(`secret "${name}" is too large for Credential Manager${measured} -- the blob limit is 2560 bytes`);
     }
     if (backend === "keychain" && e.toolExitCode === 44) {
-        return new VcSecretsError(`secret "${name}" not found in Keychain — run "vc-secrets set ${name}"`);
+        return new VcSecretsError(`secret "${name}" not found in Keychain -- run "vc-secrets set ${name}"`);
     }
     if (backend === "gpg") {
-        return new VcSecretsError(`${e.message} — if the gpg agent is locked, run "vc-secrets unlock" in a terminal`);
+        return new VcSecretsError(`${e.message} -- if the gpg agent is locked, run "vc-secrets unlock" in a terminal`);
     }
 
     return e;
@@ -1624,7 +1624,7 @@ function forTerminal(value, limit = 200) {
     // replacement character is itself non-ASCII, so on the code page that turned an em dash into
     // mojibake it would arrive as mojibake too -- a sanitiser producing the thing it exists to remove.
     // Caught by the guard over printable literals, on its own author.
-    const flattened = String(value).replace(/[ --]/g, "?");
+    const flattened = String(value).replace(/[\u0000-\u001f\u007f-\u009f]/g, "?");
 
     return flattened.length > limit ? `${flattened.slice(0, limit)}...` : flattened;
 }
@@ -1705,7 +1705,7 @@ function listenForCallback(expectedState, { entryName = null,
 // The spawned child's own default was silently dropped once before: spec.opts carries per-platform
 // options (windowsVerbatimArguments, say) that the builder decided this launch needs, and the
 // previous inline default silently dropped whatever the builder asked for. A spec field nothing reads
-// is worse than no field — the builder looks correct and the launch is not.
+// is worse than no field -- the builder looks correct and the launch is not.
 function openBrowser(spec, { spawnProcess = spawn, log = (line) => process.stderr.write(line) } = {}) {
     const child = spawnProcess(spec.cmd, spec.args,
         { stdio: "ignore", detached: true, windowsHide: true, ...spec.opts });
@@ -1727,15 +1727,15 @@ function buildBrowserCommand(platform, env, url, onPath = commandOnPath) {
         // window title and open nothing.
         //
         // Verbatim, with the URL quoted, because cmd.exe does not use the argv it was handed. It
-        // re-parses everything after /c as one string, where a bare & separates commands — and node
+        // re-parses everything after /c as one string, where a bare & separates commands -- and node
         // does not quote an argument that has no spaces, so an authorize URL arrives with every &
         // exposed. Measured on Windows: the browser received the URL truncated at `client_id`, and
         // Entra answered `AADSTS900144` naming the `scope` it was never sent. The argv-element form
         // this replaced was green in a test that asserted the element, which is not the property
         // cmd.exe reads. Same technique buildSpawnInvocation already uses for a .cmd shim.
         if (url.includes('"')) {
-            // Cannot arrive from the outside today — the URL is built here from guids, base64url and
-            // configured scopes — so this is an invariant made checkable rather than a guess about
+            // Cannot arrive from the outside today -- the URL is built here from guids, base64url and
+            // configured scopes -- so this is an invariant made checkable rather than a guess about
             // input. Thrown before the browser opens, so no authorization code is at stake.
             throw new VcSecretsError("refusing to open a URL containing a double quote");
         }
@@ -1827,7 +1827,7 @@ function makeSecretResolver(cfg, env = process.env) {
         const key = keyFor(name, decl, cfg);
         const backend = decl.backend === "keyvault" ? "keyvault" : detectLocalBackend(process.platform, env);
         if (backend === "gpg" && !fs.existsSync(keyToPath(key, env))) {
-            throw new VcSecretsError(`secret "${name}" not set — run "vc-secrets set ${name}"`);
+            throw new VcSecretsError(`secret "${name}" not set -- run "vc-secrets set ${name}"`);
         }
         const spec = backend === "keyvault" ? buildKeyvaultRead(decl) : buildLocalRead(backend, key, env);
         let value;
@@ -1843,7 +1843,7 @@ function makeSecretResolver(cfg, env = process.env) {
             value = decodeCredBlobHex(value).value;
         }
         if (value === "") {
-            throw new VcSecretsError(`secret "${name}": backend returned empty value — run "vc-secrets set ${name}" (or check az login)`);
+            throw new VcSecretsError(`secret "${name}": backend returned empty value -- run "vc-secrets set ${name}" (or check az login)`);
         }
         resolvedValues.push(value);
         return value;
@@ -1907,10 +1907,10 @@ function promptHidden(question) {
 async function cmdSet(name, cfg) {
     const decl = cfg.secrets[name];
     if (!decl) {
-        throw new VcSecretsError(`unknown secret "${name}" — declare it in ${CONFIG_NAME} first`);
+        throw new VcSecretsError(`unknown secret "${name}" -- declare it in ${CONFIG_NAME} first`);
     }
     if (decl.backend !== "local") {
-        throw new VcSecretsError(`secret "${name}" is backend "${decl.backend}" — set it in its own store, not via vc-secrets`);
+        throw new VcSecretsError(`secret "${name}" is backend "${decl.backend}" -- set it in its own store, not via vc-secrets`);
     }
     const key = keyFor(name, decl, cfg);
     const backend = detectLocalBackend();
@@ -1920,7 +1920,7 @@ async function cmdSet(name, cfg) {
     } else {
         const value = await promptHidden(`value for "${name}" (hidden): `);
         if (!value) {
-            throw new VcSecretsError("empty value — nothing stored");
+            throw new VcSecretsError("empty value -- nothing stored");
         }
         await writeLocalValue(backend, key, spec, value, process.env);
     }
@@ -1970,7 +1970,7 @@ async function cmdUnlock(cfg, opts = {}) {
     if (!process.env.GPG_TTY) {
         // Guarded form on purpose: in a non-interactive shell `tty` prints "not a tty", and exporting
         // that hands gpg a bogus terminal path instead of leaving the variable unset.
-        write("vc-secrets: GPG_TTY is not set — pinentry may fail; add `if [ -t 0 ]; then export GPG_TTY=$(tty); fi` to your shell rc\n");
+        write("vc-secrets: GPG_TTY is not set -- pinentry may fail; add `if [ -t 0 ]; then export GPG_TTY=$(tty); fi` to your shell rc\n");
     }
     const files = unlockTargets(cfg, exists);
     if (files.length === 0) {
@@ -2054,7 +2054,7 @@ async function cmdMigrate(cfg) {
             present = await newKeyPresent(backend, key, process.env);
         } catch (e) {
             failed += 1;
-            lines.push(`${name}: cannot tell whether it is already migrated, refusing to touch it — ${e.message}`);
+            lines.push(`${name}: cannot tell whether it is already migrated, refusing to touch it -- ${e.message}`);
             continue;
         }
         if (present) {
@@ -2067,11 +2067,11 @@ async function cmdMigrate(cfg) {
             legacyValue = await readLegacyLocalValue(backend, name, process.env);
         } catch (e) {
             failed += 1;
-            lines.push(`${name}: migration failed — ${e.message}`);
+            lines.push(`${name}: migration failed -- ${e.message}`);
             continue;
         }
         if (legacyValue === null) {
-            lines.push(`${name}: no legacy entry — run "vc-secrets set ${name}"`);
+            lines.push(`${name}: no legacy entry -- run "vc-secrets set ${name}"`);
             continue;
         }
 
@@ -2079,7 +2079,7 @@ async function cmdMigrate(cfg) {
             const spec = buildLocalWrite(backend, key, process.env, { tmp: backend === "gpg", value: legacyValue });
             if (spec.argvExposesValue) {
                 lines.push(`${name}: the value contains a line ending, so it passed through the command line of a `
-                    + `short-lived process — visible to anything reading this machine's process list during the write`);
+                    + `short-lived process -- visible to anything reading this machine's process list during the write`);
             }
             await writeLocalValue(backend, key, spec, legacyValue, process.env);
             if (backend === "keychain") {
@@ -2089,21 +2089,21 @@ async function cmdMigrate(cfg) {
                 // its read needs a warm agent, so a cold one would fail a write that in fact succeeded.
                 const stored = await runTool(buildLocalRead(backend, key, process.env), { redactValues: [legacyValue] });
                 if (stored !== legacyValue) {
-                    throw new VcSecretsError("the store returned a different value than was written — the legacy entry is untouched, migrate it by hand");
+                    throw new VcSecretsError("the store returned a different value than was written -- the legacy entry is untouched, migrate it by hand");
                 }
             }
             migrated += 1;
             lines.push(`${name}: migrated`);
         } catch (e) {
             failed += 1;
-            lines.push(`${name}: migration failed — ${e.message}`);
+            lines.push(`${name}: migration failed -- ${e.message}`);
         }
     }
     // Deliberately no per-collision advice. project↔local collisions share one namespace, so there is no
     // second key to mention; a user↔project collision DOES leave the user-scope key unwritten, but the
     // legacyOnly probe in `doctor` reports exactly that, by name, and the legacy entry stays in place —
     // so the guidance belongs where it can be re-checked rather than in a one-shot line printed here.
-    lines.push(`vc-secrets: migrate — ${migrated} migrated, ${failed} failed`);
+    lines.push(`vc-secrets: migrate -- ${migrated} migrated, ${failed} failed`);
     // sync write: stderr is an async pipe on Windows, and process.exit abandons pending writes
     fs.writeSync(2, lines.join("\n") + "\n");
     if (failed > 0) {
@@ -2156,7 +2156,7 @@ function readWiredServers(mcpJsonPath, userJsonPath = null, projectRoot = null, 
             return JSON.parse(fs.readFileSync(file, "utf8"));
         } catch (e) {
             if (fs.existsSync(file)) {
-                problems.push(`${file}: cannot be read (${e.message}) — treating it as no wiring, so advice about leftover tokens may be wrong`);
+                problems.push(`${file}: cannot be read (${e.message}) -- treating it as no wiring, so advice about leftover tokens may be wrong`);
             }
 
             return null;
@@ -2235,10 +2235,10 @@ function wiredNamesInToml(text) {
 // Returns SERVER NAMES, not file paths, because the set it feeds is read two ways: `.size` decides a
 // message, and `.has(serverName)` decides which secrets a run actually consumes. Contributing paths
 // type-checks and satisfies every size-based assertion while making a server wired only through this
-// route look unconsumed — so its Key Vault secret is reported SKIP and never checked.
+// route look unconsumed -- so its Key Vault secret is reported SKIP and never checked.
 //
 // The name has to come from the file's own server KEY. A substring test over the file text marked
-// every declared name that merely occurred anywhere — and the baked shim path alone contains "data",
+// every declared name that merely occurred anywhere -- and the baked shim path alone contains "data",
 // "plugins", "tools", "claude", "run" and "node", so a server named any of those was wired by the
 // path string itself. Worse, one config file holds ALL of a user's servers and only some route
 // through the launcher, so a single wired neighbour vouched for every plaintext one beside it. That
@@ -2253,10 +2253,10 @@ function readWiredElsewhere(paths, seen = [], problems = []) {
         try {
             text = fs.readFileSync(p, "utf8");
         } catch (e) {
-            // Reported, not swallowed — the sibling reader does the same for the same condition. A
+            // Reported, not swallowed -- the sibling reader does the same for the same condition. A
             // file counted as inspected while nobody could read it makes the advice that rests on it
             // confident and wrong.
-            problems.push(`${p}: cannot be read (${e.message}) — treating it as no wiring, so advice about leftover tokens may be wrong`);
+            problems.push(`${p}: cannot be read (${e.message}) -- treating it as no wiring, so advice about leftover tokens may be wrong`);
             continue;
         }
         seen.push(p);
@@ -2284,7 +2284,7 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
         lines.push(`WARN ${warning}`);
     }
     for (const collision of cfg.collisions ?? []) {
-        lines.push(`WARN ${collision.kind} "${collision.name}" declared in both ${collision.from} and ${collision.to} — ${collision.to} wins`);
+        lines.push(`WARN ${collision.kind} "${collision.name}" declared in both ${collision.from} and ${collision.to} -- ${collision.to} wins`);
     }
     for (const clash of oauthKeyClashes(cfg)) {
         lines.push(`WARN ${clash}`);
@@ -2302,7 +2302,7 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
         lines.push(`WARN ${problem}`);
     }
     // settings.local.json is where a stale token actually lives; the session env only carries it
-    // when something exported it. Reporting the file is what makes the message actionable —
+    // when something exported it. Reporting the file is what makes the message actionable --
     // `doctor` run from a plain terminal never sees the file's env block in its own process.
     const fileEnvKeys = enableLists.envKeys ?? [];
     for (const varName of LEGACY_ENV_VARS) {
@@ -2316,14 +2316,14 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
             continue;
         }
         if (wired.size > 0) {
-            lines.push(`WARN ${varName} present in ${where} — remove it (servers now read via vc-secrets)`);
+            lines.push(`WARN ${varName} present in ${where} -- remove it (servers now read via vc-secrets)`);
         } else if (clientConfigsSeen.length > 0) {
-            lines.push(`INFO ${varName} present in ${where} — still required until the vc-secrets switch lands`);
+            lines.push(`INFO ${varName} present in ${where} -- still required until the vc-secrets switch lands`);
         } else {
             // Naming what was inspected, not which clients exist. A message that says it looked for three
             // clients while reading two files is a false statement inside the diagnostic whose falsehood this
             // change exists to remove.
-            lines.push(`INFO ${varName} present in ${where} — no MCP config was inspected, so whether the switch has landed is unknown`);
+            lines.push(`INFO ${varName} present in ${where} -- no MCP config was inspected, so whether the switch has landed is unknown`);
         }
     }
     for (const tool of toolsMissing) {
@@ -2334,8 +2334,8 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
         if (status === true) {
             lines.push(`OK secret "${name}" resolvable`);
         } else if (legacyOnlySet.has(name)) {
-            // Not a FAIL: the secret exists, just not yet under the new key — migrate resolves it.
-            lines.push(`WARN secret "${name}" is only under the legacy key — run "vc-secrets migrate"`);
+            // Not a FAIL: the secret exists, just not yet under the new key -- migrate resolves it.
+            lines.push(`WARN secret "${name}" is only under the legacy key -- run "vc-secrets migrate"`);
         } else if (typeof status === "string") {
             // A missing "az"/"gpg"/etc. already produced its own "required tool ... not found on PATH"
             // FAIL above; repeating it once per secret that needs the same tool is noise, not signal.
@@ -2345,13 +2345,13 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
             if (missingTool && toolsMissing.includes(missingTool)) {
                 continue;
             }
-            lines.push(`FAIL secret "${name}" not resolvable — ${status}`);
+            lines.push(`FAIL secret "${name}" not resolvable -- ${status}`);
         } else {
-            lines.push(`FAIL secret "${name}" not resolvable — run "vc-secrets set ${name}" (local) or check az login (keyvault)`);
+            lines.push(`FAIL secret "${name}" not resolvable -- run "vc-secrets set ${name}" (local) or check az login (keyvault)`);
         }
     }
     for (const name of skipped) {
-        lines.push(`SKIP secret "${name}" (keyvault) — no enabled server consumes it; use --all to force`);
+        lines.push(`SKIP secret "${name}" (keyvault) -- no enabled server consumes it; use --all to force`);
     }
     // Tasks carry the same env references as servers, so an unchecked task would be the one place a
     // typo'd or undeclared reference survives until someone actually runs it.
@@ -2413,10 +2413,10 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
         }
     }
     if (typeof shimContract === "number" && shimContract < REQUIRED_SHIM_CONTRACT) {
-        lines.push(`WARN the installed shim speaks contract ${shimContract}, this launcher expects ${REQUIRED_SHIM_CONTRACT} — re-run the vc-secrets install skill`);
+        lines.push(`WARN the installed shim speaks contract ${shimContract}, this launcher expects ${REQUIRED_SHIM_CONTRACT} -- re-run the vc-secrets install skill`);
     }
     if (backend !== null && lines.length === 0) {
-        lines.push(`OK platform=${platform} backend=${backend} — nothing to report`);
+        lines.push(`OK platform=${platform} backend=${backend} -- nothing to report`);
     }
 
     return lines;
@@ -2430,10 +2430,10 @@ function commandOnPath(tool) {
 
 const DOCTOR_FLAGS = ["--all"];
 
-// Which secrets does an ENABLED (or wired) launchable actually consume? A task has no enable list —
-// it is run on purpose — so anything it references counts as consumed, otherwise a Key Vault secret
+// Which secrets does an ENABLED (or wired) launchable actually consume? A task has no enable list --
+// it is run on purpose -- so anything it references counts as consumed, otherwise a Key Vault secret
 // used only by a task would be reported SKIP and never checked. Servers and tasks are iterated
-// separately so a task cannot mark a same-named SERVER enabled merely by existing — that would drop
+// separately so a task cannot mark a same-named SERVER enabled merely by existing -- that would drop
 // the SKIP that keeps a teammate's `doctor` from FAILing on a Key Vault secret they cannot reach.
 // The kind filter carries the same weight in the other direction: an oauth reference shares the
 // reference grammar but declares no secret, and counting one as consumed un-skips a same-named
@@ -2462,7 +2462,7 @@ function consumedSecrets(cfg, enableLists, wired) {
 
 async function cmdDoctor(cfg, flags = []) {
     // An unrecognized flag used to be ignored, so `doctor --al` printed the same SKIP as a run
-    // with no flag at all — output indistinguishable from "checked it and skipped". A diagnostic
+    // with no flag at all -- output indistinguishable from "checked it and skipped". A diagnostic
     // that silently drops what it doesn't understand reports a state that was never checked.
     const unknown = flags.filter((f) => !DOCTOR_FLAGS.includes(f));
     if (unknown.length > 0) {
@@ -2470,8 +2470,8 @@ async function cmdDoctor(cfg, flags = []) {
     }
     const checkAll = flags.includes("--all");
     // .claude/vc-secrets.json's directory anchors both files: settings.local.json is its sibling,
-    // .mcp.json is one directory above. No project declaration → nothing to anchor on, so both
-    // checks are skipped rather than guessed at — a missing project is not itself a fault.
+    // .mcp.json is one directory above. No project declaration -> nothing to anchor on, so both
+    // checks are skipped rather than guessed at -- a missing project is not itself a fault.
     const projectFile = cfg.files.project ?? cfg.files.local;
     const claudeDir = projectFile ? path.dirname(projectFile) : null;
     const enableLists = claudeDir ? readEnableLists(path.join(claudeDir, "settings.local.json")) : { enabled: [], disabled: [], envKeys: [] };
@@ -2547,14 +2547,14 @@ async function cmdDoctor(cfg, flags = []) {
 }
 
 // A signal reaches the direct child only. On Windows that leaves a grandchild running: `dnx` spawns
-// dotnet.exe, which survives, orphans, and keeps a lock on the package file it was reading — so the
+// dotnet.exe, which survives, orphans, and keeps a lock on the package file it was reading -- so the
 // NEXT run fails with "the process cannot access the file" instead of the clean timeout it deserved.
 // Measured on Windows while building the previous launcher, where it cost a manual taskkill
 // between attempts; this package inherits the finding, not the experiment.
 //
 // SYNCHRONOUS on the win32 branch on purpose: a caller that kills and exits on the next line races its
 // own teardown, and an async spawn loses. Not cmdLaunch, which exits from the child's `close` handler
-// once the kill has landed. The POSIX path needs no such care — kill(2) has been delivered on return.
+// once the kill has landed. The POSIX path needs no such care -- kill(2) has been delivered on return.
 //
 // The child must have been spawned DETACHED, or `-child.pid` names a group it is not in: usually
 // absent, but a recycled pid makes it someone else's, and that group takes the SIGKILL five seconds
@@ -2597,12 +2597,12 @@ async function cmdLaunch(kind, name, cfg) {
     // Interim, until Task 20 wires the token channel; delete this block with it. It runs BEFORE
     // resolveEnvEntries because that function resolves as well as validates: refusing afterwards
     // unlocks the keystore for a launch that cannot proceed, and a missing secret beside the oauth
-    // ref then reports "run vc-secrets set" — the wrong problem entirely. Only a DECLARED entry is
+    // ref then reports "run vc-secrets set" -- the wrong problem entirely. Only a DECLARED entry is
     // refused here, so an undeclared one still reaches the message that names the typo.
     for (const [envVar, value] of Object.entries(cfg[kind][name]?.env ?? {})) {
         const ref = parseReference(value);
         if (ref?.kind === "oauth" && Object.hasOwn(cfg.oauth ?? {}, ref.name)) {
-            throw new VcSecretsError(`env ${envVar}: oauth entry "${ref.name}" cannot be resolved — `
+            throw new VcSecretsError(`env ${envVar}: oauth entry "${ref.name}" cannot be resolved -- `
                 + "this build declares oauth entries but does not yet acquire tokens for them");
         }
     }
@@ -2624,7 +2624,7 @@ async function cmdLaunch(kind, name, cfg) {
     const child = spawn(invocation.cmd, invocation.args, {
         stdio: "inherit",
         env: childEnv,
-        detached: process.platform !== "win32",   // own process group → we can kill the whole tree
+        detached: process.platform !== "win32",   // own process group -> we can kill the whole tree
         ...invocation.opts,
     });
     resolver.resolvedValues.length = 0;   // shrink the in-heap window
@@ -2661,7 +2661,7 @@ function fail(e) {
 }
 
 // Raised only when the shim's own contract changes. `doctor` compares it against what the shim
-// reported so a stale shim says so itself — the failure it would otherwise cause (an old pointer to a
+// reported so a stale shim says so itself -- the failure it would otherwise cause (an old pointer to a
 // launcher whose entry contract moved) surfaces as a missing export, which reads like a broken install.
 const REQUIRED_SHIM_CONTRACT = 1;
 let activeShimContract = null;
@@ -2683,16 +2683,16 @@ function emitConfig(cfg, clientName) {
     // caveat rides along any more: the shim resolves the current install from whichever client's
     // registry or plugin cache is present, so the emitted entry does not depend on any one client
     // being installed. The alternative that stays disqualified is a path into the versioned plugin
-    // cache — it keeps resolving after an update and silently runs an OLD launcher.
+    // cache -- it keeps resolving after an update and silently runs an OLD launcher.
     let launcher = client.launcherRef;
     if (!launcher) {
         launcher = defaultShimPath();
-        notes.push(`${client.displayName} expands no variables in its config, so this entry names the shim by path — `
+        notes.push(`${client.displayName} expands no variables in its config, so this entry names the shim by path -- `
             + "the shim resolves the current plugin install per launch, so an ordinary update needs no re-emit");
     }
 
     if (client.minVersion === MIN_VERSION_UNKNOWN) {
-        notes.push(`${client.displayName}: version floor not established — this entry is untested on any specific version`);
+        notes.push(`${client.displayName}: version floor not established -- this entry is untested on any specific version`);
     } else if (client.minVersion) {
         notes.push(`${client.displayName}: requires ${client.minVersion} or newer`);
     }
@@ -2700,10 +2700,10 @@ function emitConfig(cfg, clientName) {
     // the literal instruction "paste into one of: … not by pasting", because a template carries its own
     // guidance for the scope that is NOT pasted.
     for (const [scope, where] of Object.entries(client.configFiles)) {
-        notes.push(`${scope} scope → ${where}`);
+        notes.push(`${scope} scope -> ${where}`);
     }
     // A resolved path, never client.launcherRef: that token is expanded by the CLIENT inside its own
-    // config file and is not a path in a shell. Measured — `bash -c 'echo node "${env:VC_SECRETS}"'`
+    // config file and is not a path in a shell. Measured -- `bash -c 'echo node "${env:VC_SECRETS}"'`
     // prints an empty word, so the instruction would silently become `node "" doctor`.
     notes.push(`then verify with: node ${JSON.stringify(defaultShimPath())} doctor`);
 
@@ -2789,7 +2789,7 @@ async function main(argv) {
     throw new VcSecretsError(USAGE);   // a known verb reached here missing its required argument
 }
 
-// The single entry point, used both by direct invocation below and by the shim — which cannot rely on
+// The single entry point, used both by direct invocation below and by the shim -- which cannot rely on
 // the gate at the bottom, because when the shim runs it is argv[1], not this file. Two entry paths
 // diverging is how the wrapped and unwrapped invocations start behaving differently.
 async function runCli(argv, { shimContract } = {}) {
