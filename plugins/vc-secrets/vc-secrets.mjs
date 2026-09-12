@@ -1823,10 +1823,7 @@ function handleCallback(req, expectedState, redirectPath) {
     return code ? { code } : { error: "no_code" };
 }
 
-// The interactive sign-in verb. The authorization gate that belongs at its head -- who may bring
-// this oauth entry into a server or task's env -- is deliberately not here yet: it lands in a
-// follow-up commit once its shape is settled, and adding it early would guess at a decision that
-// is not this change's to make.
+// The interactive sign-in verb.
 async function cmdLogin(serverName, cfg, {
     listen = listenForCallback,
     open = openBrowser,
@@ -1844,6 +1841,27 @@ async function cmdLogin(serverName, cfg, {
     const decl = (cfg.oauth ?? {})[serverName];
     if (!decl) {
         throw new VcSecretsError(`unknown oauth entry "${serverName}" -- not declared in ${CONFIG_NAME}`);
+    }
+    // Refused on policy here: before the capability check below, and before anything is bound or
+    // opened. Minting is the privileged act — consent happens in a browser and the refresh token it
+    // yields outlives the session, so a repository that names an app registration would otherwise
+    // cause a delegated token to be minted against it. resolveEnvEntries polices which launchable
+    // may CONSUME a token, which is a different question from whether the token may exist at all.
+    // The order also matters: telling someone who is not allowed to sign in that their machine has
+    // no keystore sends them to fix the wrong thing.
+    //
+    // Keyed on `home`, not on the returned block: a user-scope declaration carrying no `authorized`
+    // yields an absent block too, and refusing on that would demand a second opt-in in the file
+    // that IS the opt-in. And `=== undefined` rather than a truthy test, because validateAuthorized
+    // rejects every non-object at this leaf when the config loads — absent is the only other state
+    // a real config reaches, so a truthy test would be a proxy for what the loader guarantees.
+    if (decl.home !== USER_SCOPE) {
+        const source = authorizationFor(cfg, decl);
+        if (source.block === undefined) {
+            throw new VcSecretsError(`"vc-secrets login ${serverName}" is not authorized -- the app`
+                + ` registration it names must be acknowledged at ${source.where} in`
+                + ` ${path.join("~", ".claude", CONFIG_NAME)}${DOCTOR_REMEDY}`);
+        }
     }
     if (!LOCAL_BACKENDS.includes(backend)) {
         // Checked before anything is bound or opened. The alternative is to discover it at the

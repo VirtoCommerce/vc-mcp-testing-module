@@ -1987,13 +1987,29 @@ socketTest("listenForCallback: a stray request is answered and waited past, the 
 // entry names, so an assertion on a written/removed name reads it off LOGIN_KEYS below instead of
 // a literal "oauth-azure-mcp-*" string.
 //
-// The authorization gate that will sit at cmdLogin's head is a follow-up commit, once the operator
-// decides its shape — deliberately absent here. These tests cover the verb as it exists today.
+// cmdLogin refuses a project-scope entry whose app registration the user file has not acknowledged,
+// so every test below runs on an acknowledged one and LOGIN_CFG carries the block. It grants
+// nothing: the verb's gate reads whether the registration is acknowledged at all, and WHICH
+// launchable may then consume the token is resolveEnvEntries' decision, not this verb's — a block
+// with contents would imply this fixture pins a relation it does not.
 // ---------------------------------------------------------------------------------------------
 
-const LOGIN_DECL = { ...DECL_IDENTITY, scope: "project" };
-const LOGIN_CFG = { oauth: { "azure-mcp": LOGIN_DECL }, projectId: "login-p1" };
+// `kind: "oauth"` is what the merge stamps on every entry in the oauth section (it is the
+// discriminator authorizationFor branches on) and `declaredName` names the key it was found under,
+// so a hand-built declaration omitting either is not a
+// declaration this package can ever see -- it falls out of authorizationFor as "needs no
+// authorization", which is the one answer the gate must never get.
+const LOGIN_DECL = { ...DECL_IDENTITY, kind: "oauth", scope: "project", home: "project", declaredName: "azure-mcp" };
+const LOGIN_CFG = { oauth: { "azure-mcp": LOGIN_DECL }, projectId: "login-p1",
+    registrations: { [DECL_IDENTITY.tenantId]: { [DECL_IDENTITY.clientId]: {} } } };
 const LOGIN_KEYS = m.oauthEntryKeys("azure-mcp", LOGIN_DECL, LOGIN_CFG);
+
+// These three differ from LOGIN_CFG in exactly ONE property each, so a test driven by one of them
+// fails for the reason its name gives and not for a second difference nobody stated.
+const UNACKNOWLEDGED_CFG = { ...LOGIN_CFG, registrations: {} };
+const USER_DECL = { ...DECL_IDENTITY, kind: "oauth", scope: "user", home: "user", declaredName: "azure-mcp" };
+const USER_CFG = { oauth: { "azure-mcp": USER_DECL }, projectId: "login-p1" };
+const USER_KEYS = m.oauthEntryKeys("azure-mcp", USER_DECL, USER_CFG);
 
 // cmdLogin's network, browser and listener are injected, which leaves its actual decisions —
 // the order of the two writes above all — as ordinary assertions. This verb is ultimately proved
@@ -2314,4 +2330,48 @@ test("cmdLogin: the lock is released even when the refresh write fails and the e
     });
     await assert.rejects(() => m.cmdLogin("azure-mcp", LOGIN_CFG, deps), /keystore full/);
     assert.deepEqual(lock, ["acquire", "release"]);
+});
+
+test("cmdLogin: a project-scope entry the user file has not acknowledged is refused before a port is bound", async () => {
+    // Before the bind, for the same reason the backend check is: past the exchange the
+    // authorization code is spent, and a refusal discovered there cannot be retried with it. The
+    // bind is the observable because it is the first thing cmdLogin does to the outside world.
+    let bound = false;
+    const { deps } = loginDeps({
+        listen: async () => { bound = true; return { port: 1, next: async () => ({}), close: async () => {} }; },
+    });
+    await assert.rejects(() => m.cmdLogin("azure-mcp", UNACKNOWLEDGED_CFG, deps), /not authorized/);
+    assert.equal(bound, false, "an unauthorized sign-in must not reach the listener");
+});
+
+test("cmdLogin: the refusal names the registration that must be acknowledged, not the declaration", async () => {
+    // The remedy is a block in the USER file keyed by the (tenantId, clientId) pair, and naming the
+    // declaration instead would send the developer to edit the repository file that is precisely
+    // what may not authorize itself.
+    const { deps } = loginDeps();
+    await assert.rejects(() => m.cmdLogin("azure-mcp", UNACKNOWLEDGED_CFG, deps),
+        new RegExp(`registrations\\."${DECL_IDENTITY.tenantId}"\\."${DECL_IDENTITY.clientId}"`));
+});
+
+test("cmdLogin: the policy refusal wins over the capability refusal", async () => {
+    // Both would refuse this call. If the backend check ran first the developer would be told their
+    // machine has no keystore -- true, and the wrong thing to go and fix, because installing one
+    // changes nothing about a sign-in they are not authorized to make.
+    const { deps } = loginDeps({ backend: "nonesuch" });
+    await assert.rejects(() => m.cmdLogin("azure-mcp", UNACKNOWLEDGED_CFG, deps), (e) => {
+        assert.match(e.message, /not authorized/);
+        assert.doesNotMatch(e.message, /keystore/);
+
+        return true;
+    });
+});
+
+test("cmdLogin: a user-scope entry needs no registrations block, because its own file is the authorization", async () => {
+    // Nothing is crossing a scope boundary: the declaration lives in the file the grant would live
+    // in. Demanding a block here would make the developer authorize themselves, and `authorized` on
+    // a user-scope declaration is absent in exactly the same way an unacknowledged registration is
+    // -- which is why the exemption is keyed on the declaration's home and not on that absence.
+    const { deps, written } = loginDeps();
+    await m.cmdLogin("azure-mcp", USER_CFG, deps);
+    assert.deepEqual(written.map(([name]) => name), [USER_KEYS.refresh, USER_KEYS.access]);
 });
