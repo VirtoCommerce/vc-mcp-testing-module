@@ -616,9 +616,9 @@ function loadConfig(paths = configPaths()) {
                 // is not.
                 warnings.push(`${file}: oauth "${name}": "authorized" only authorizes at user scope -- ignored`);
             }
-            // `declaredName` is stamped here (unlike the secret merge above) because a later task's
-            // authorizationFor needs the name to build its `where` pointer, and unlike secrets there is no
-            // ad-hoc call site that already adds it.
+            // `declaredName` is stamped here (unlike the secret merge above) because authorizationFor
+            // needs the name to build its `where` pointer, and unlike secrets there is no ad-hoc call
+            // site that already adds it.
             oauth[name] = { ...decl, kind: "oauth", scope: scope === "local" ? "project" : scope, home: scope, declaredName: name };
         }
     }
@@ -2776,8 +2776,12 @@ async function cmdLaunch(kind, name, cfg) {
     for (const [envVar, value] of Object.entries(cfg[kind][name]?.env ?? {})) {
         const ref = parseReference(value);
         if (ref?.kind === "oauth" && Object.hasOwn(cfg.oauth ?? {}, ref.name)) {
+            // Reworded, not removed, when the login verb landed: the old text said this build does
+            // not acquire tokens, which a developer who has just watched `vc-secrets login` write two
+            // keystore entries can see is false -- and it pointed away from the real cause, which is
+            // that nothing hands an acquired token to a child yet. Task 20 deletes the block.
             throw new VcSecretsError(`env ${envVar}: oauth entry "${ref.name}" cannot be resolved -- `
-                + "this build declares oauth entries but does not yet acquire tokens for them");
+                + '"vc-secrets login" stores a token for it, but this build does not yet hand one to a server');
         }
     }
     const { env: secretEnv } = await resolveEnvEntries(name, cfg, resolver, kind);

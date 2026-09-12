@@ -465,7 +465,7 @@ const OAUTH_DECL = {
 };
 
 test("an oauth declaration is stamped with the scope, the home and its kind", () => {
-    // kind is what a later task's authorizationFor discriminates on; without it that function falls
+    // kind is what authorizationFor discriminates on; without it that function falls
     // through to "needs no authorization".
     const cfg = m.loadConfig(projectPaths({ projectId: "proj-x", oauth: { ado: OAUTH_DECL } }));
     assert.equal(cfg.oauth.ado.home, "project");
@@ -1746,7 +1746,7 @@ test("cmdLaunch: an authorized oauth reference is refused, and the secret beside
             servers: { s: { command: "npx", args: ["-y", "some-oauth-package"],
                 env: { ADO_TOKEN: "oauth:ado", OTHER: "secret:plain" } } } },
     }));
-    await assert.rejects(() => m.cmdLaunch("servers", "s", cfg), /does not yet acquire tokens/);
+    await assert.rejects(() => m.cmdLaunch("servers", "s", cfg), /does not yet hand one to a server/);
 });
 
 test("resolveEnvEntries: an oauth reference with no registration grant is refused before any backend is contacted", async () => {
@@ -1785,11 +1785,11 @@ test("an oauth reference cannot smuggle a value into a dangerous env key either,
     })), /NODE_OPTIONS/);
 });
 
-test("cmdLaunch refuses an authorized oauth reference while this build cannot acquire tokens", async () => {
+test("cmdLaunch refuses an authorized oauth reference while nothing hands a token to a child", async () => {
     // The interim refusal moved out of resolveEnvEntries rather than being deleted, so the CLI
     // behaviour is unchanged while the resolver gains its reporting shape. Task 20 removes it.
     const cfg = m.loadConfig(authorizedOauthPaths());
-    await assert.rejects(() => m.cmdLaunch("servers", "s", cfg), /does not yet acquire tokens/);
+    await assert.rejects(() => m.cmdLaunch("servers", "s", cfg), /does not yet hand one to a server/);
 });
 
 test("doctorReport: an oauth reference sharing a user-scope secret's name reports no grant", () => {

@@ -605,7 +605,8 @@ test("cacheStatus: after a reboot the anchor is ignored rather than believed", (
 test("cacheStatus: a caller that omits the monotonic reading is stopped, not quietly downgraded", () => {
     // Omitting it makes byUptime NaN, NaN >= 0 is false, and the function falls back to exactly
     // the wall-clock-only rule the anchor replaced — no throw, no needs-refresh, nothing red.
-    // ensureFreshToken (vc-secrets.mjs:1556) is the production caller, so this is live, not latent.
+    // oauthLaunchDeps' readCache (vc-secrets.mjs:1556) is the production caller, so this is live
+    // rather than latent. Not ensureFreshToken, which reaches this only through the injected seam.
     assert.throws(() => cache.cacheStatus(cacheAt(0), DECL, 60_000), /uptime/i);
     assert.throws(() => cache.cacheStatus(cacheAt(0), DECL, 60_000, NaN), /uptime/i);
     assert.throws(() => cache.cacheStatus(cacheAt(0), DECL, undefined, 1060), /now/i);
@@ -1998,7 +1999,7 @@ socketTest("listenForCallback: a stray request is answered and waited past, the 
 // discriminator authorizationFor branches on -- and `declaredName` names the key it was found
 // under. A hand-built declaration omitting either is not one this package can ever see, and the
 // two consumers of authorizationFor disagree about what its `null` means: cmdLogin reads `.block`
-// off it and dies with a TypeError, while resolveEnvEntries (vc-secrets.mjs:726) tests
+// off it and dies with a TypeError, while resolveEnvEntries (vc-secrets.mjs:728) tests
 // `source !== null` and takes it as "needs no authorization". Fail-closed at one site and
 // permissive at the other is the reason to match the merge rather than to guard the null.
 const LOGIN_DECL = { ...DECL_IDENTITY, kind: "oauth", scope: "project", home: "project", declaredName: "azure-mcp" };
@@ -2027,8 +2028,12 @@ function loginDeps(overrides = {}) {
     const deps = {
         listen: async () => ({ port: 51234, next: async () => ({ code: "the-code" }), close: async () => {} }),
         open: (cmd) => { opened.push(cmd); },
-        exchange: async () => ({ refreshToken: "new-rt", accessToken: "at", expiresAt: 3600_000,
-            obtainedAt: 0, lifetimeMs: 3600_000, uptimeAtIssue: 1000 }),
+        // All four timing fields differ, and expiresAt is obtainedAt + lifetimeMs rather than a
+        // repeat of one of them. The source's stub leaves obtainedAt at 0, which makes expiresAt and
+        // lifetimeMs the same number -- and a whole-object assertion then cannot see those two
+        // transposed, which is the one transposition among the four a degenerate fixture hides.
+        exchange: async () => ({ refreshToken: "new-rt", accessToken: "at", expiresAt: 1_703_600_000,
+            obtainedAt: 1_700_000_000, lifetimeMs: 3600_000, uptimeAtIssue: 1000 }),
         writeEntry: async (name, value) => { written.push([name, value]); },
         randomState: () => "STATE",
         log: (line) => { logged.push(line); },
@@ -2053,7 +2058,11 @@ function loginDeps(overrides = {}) {
 // alone at an indent of exactly four, so a new seam sharing a line with another was dropped
 // silently, and the guard passed covering nothing for the very case it exists for.
 function seamsOf(source) {
-    const block = source.slice(source.indexOf("{", source.indexOf("cfg,")) + 1, source.indexOf("} = {}) {"));
+    const raw = source.slice(source.indexOf("{", source.indexOf("cfg,")) + 1, source.indexOf("} = {}) {"));
+    // Line comments go BEFORE the split, not after it. Prose contains commas, and the comma is what
+    // the split acts on: one part would end mid-sentence and the next would begin with an ordinary
+    // word that reads as a seam name -- losing the real seam and inventing a phantom in its place.
+    const block = raw.replace(/\/\/.*$/gm, "");
     const parts = [];
     let depth = 0;
     let current = "";
@@ -2067,10 +2076,9 @@ function seamsOf(source) {
 
     // The name, whether or not a default follows it. Requiring the `=` was the same hole in a
     // second costume: a seam added WITHOUT a default vanished from the list, so the deepEqual below
-    // passed and the one production call site -- main, which calls cmdLogin(arg, cfg) with no deps
-    // object at all -- would hand it `undefined`. Line comments are stripped first because they
-    // would otherwise shadow the name on the part that follows them.
-    return parts.map((part) => (/^\s*(\w+)/.exec(part.replace(/\/\/.*$/gm, "")) ?? [])[1]).filter(Boolean);
+    // passed and the one production call site -- main (vc-secrets.mjs:2952), which calls
+    // cmdLogin(arg, cfg) with no deps object at all -- would hand it `undefined`.
+    return parts.map((part) => (/^\s*(\w+)/.exec(part) ?? [])[1]).filter(Boolean);
 }
 
 function cmdLoginSeams() {
@@ -2151,6 +2159,15 @@ test("seamsOf: a seam sharing a line with another is not dropped, and a line com
         ["three"]);
 });
 
+test("seamsOf: a comma inside a line comment does not split a seam in two", () => {
+    // Why the strip runs before the split rather than after. Prose commas are ordinary; this one
+    // ends a part mid-sentence, so "not later" becomes the next part's leading word and reads as a
+    // seam name while the real `listen` disappears. The guard then reports a list change nobody
+    // made, and the reader hunts for a seam edit instead of the comment they just typed.
+    assert.deepEqual(seamsOf("async function f(a, cfg, {\n    // bound here, not later\n    listen = x,\n} = {}) {"),
+        ["listen"]);
+});
+
 test("seamsOf: a default containing a comma does not split into two seams", () => {
     // The whole reason the split is depth-aware: writeEntry's default is an arrow taking two
     // parameters, and a naive split on "," would report `name` and `value` as seams of their own.
@@ -2186,8 +2203,8 @@ test("cmdLogin: the access entry carries the token and the timing the exchange r
     const { deps, written } = loginDeps();
     await m.cmdLogin("azure-mcp", LOGIN_CFG, deps);
     assert.deepEqual(cache.parseEntry(written.find(([name]) => name === LOGIN_KEYS.access)[1]),
-        { schema: 1, accessToken: "at", expiresAt: 3600_000, obtainedAt: 0, lifetimeMs: 3600_000,
-            uptimeAtIssue: 1000 });
+        { schema: 1, accessToken: "at", expiresAt: 1_703_600_000, obtainedAt: 1_700_000_000,
+            lifetimeMs: 3600_000, uptimeAtIssue: 1000 });
 });
 
 test("cmdLogin: a failed refresh write is fatal, and the access entry is not written after it", async () => {
