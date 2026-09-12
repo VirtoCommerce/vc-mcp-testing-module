@@ -1346,10 +1346,9 @@ function tokenLockFor(entryName, decl, cfg, { platform = process.platform, env =
 }
 
 // Waits out whoever holds the token mutex — the one all three writers to the entry pair take —
-// and DECIDES NOTHING about failing to get it. Its two callers are the login and logout verbs;
-// login is ported, logout is not yet. They want opposite things from a failure and each words its
-// own message at its own call site, so a message written here would be right for at most one of
-// them.
+// and DECIDES NOTHING about failing to get it. Its two callers are the login and logout verbs,
+// both ported. They want opposite things from a failure and each words its own message at its
+// own call site, so a message written here would be right for at most one of them.
 //
 // The window being waited out is not the one ensureFreshToken already closed between its two cache
 // reads. It is the width of the exchange, where the holder sits on the network with a token it
@@ -1993,6 +1992,80 @@ async function cmdLogin(serverName, cfg, {
         // path there is nobody watching to notice.
         await server.close();
     }
+}
+
+// Ported from the source's cmdLogout (mcpw.js:1233-1293). Unlike cmdLogin, this verb carries NO
+// authorization/policy gate: minting a credential is the privileged act, removing one is not, and
+// refusing a removal would leave the refresh token on disk — the one outcome logout exists to
+// prevent.
+async function cmdLogout(serverName, cfg, { deleteEntry = null,
+    backend = detectLocalBackend(),
+    acquireLock = null, now = Date.now,
+    sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+    log = (line) => process.stderr.write(line) } = {}) {
+    const decl = (cfg.oauth ?? {})[serverName];
+    if (!decl) {
+        // Before any deletion: a typo must not remove a different server's tokens, and there is
+        // no way to tell afterwards which name was meant.
+        throw new VcSecretsError(`unknown oauth entry "${serverName}" -- not declared in ${CONFIG_NAME}`);
+    }
+    // Resolved here rather than defaulted in the parameter list, for the same reason cmdLogin
+    // resolves its own lock here: tokenLockFor needs `decl` and `cfg` (this package's keystore
+    // keys are scoped per project), neither of which exists until the guard above has run. The
+    // source's `main` wires this verb's lock itself (mcpw.js:2545-2546) and refuses a missing one
+    // at the call site (mcpw.js:1236-1241) — that does not port here, because it would force this
+    // package's `main` to resolve `decl` itself, duplicating the guard above AND running it before
+    // it, inverting the ordering this guard guarantees. The parameter list still carries a bare
+    // `acquireLock = null` in the source's position so cmdLoginSeams' parse of this function's
+    // text keeps finding it as a seam.
+    const acquire = acquireLock ?? tokenLockFor(serverName, decl, cfg);
+    const remove = deleteEntry ?? deleteEntryIo(backend);
+    const names = Object.values(oauthEntryKeys(serverName, decl, cfg));
+    const removed = [];
+    const alreadyAbsent = [];
+    const { lock, reason, error } = await acquireTokenLock({ acquireLock: acquire, now, sleep, log });
+    if (reason === "busy") {
+        // Refused rather than deleted anyway: a retryable logout is a far weaker failure than a
+        // credential the developer has been told is gone and which is in fact back on disk.
+        throw new VcSecretsError(`another vc-secrets is still refreshing the token for "${serverName}" -- logout did not get`
+            + " the lock in time; retry, or find the \"vc-secrets run\" that is still refreshing it");
+    }
+    if (reason === "unbindable") {
+        // Not a holder, and not a reason to refuse: this is EPERM in the sandbox agents run in, and
+        // failing here would leave a credential that cannot be revoked from the session that needs
+        // it revoked. The removal goes ahead saying out loud what it could not promise.
+        log(`vc-secrets: the token lock could not be taken (${error?.code}) -- this removal is NOT`
+            + " serialised against an in-flight renewal\n");
+    }
+    try {
+        for (const name of names) {
+            try {
+                await remove(name);
+                removed.push(name);
+            } catch (e) {
+                // Only exit 3 means "no such entry". Treating every failure as success would report
+                // a logout that left the refresh token on disk, which is the one thing logout is for.
+                if (e.toolExitCode !== 3) {
+                    throw e;
+                }
+                alreadyAbsent.push(name);
+            }
+        }
+    } finally {
+        await lock?.release();
+    }
+    // The one thing that can undo this removal, said where the developer can still act on it. A
+    // sign-in that was already waiting on a human takes the lock only when the browser comes back,
+    // so it lands after this and writes a live token — the reasoning is at cmdLogin's lock. No
+    // mutex closes that, and nothing else reports it, so deleting this line silently restores a
+    // logout that can be reversed without a trace.
+    //
+    // Unconditional on purpose: a removal that found nothing is exactly the case where a pending
+    // sign-in is the likely cause.
+    log(`vc-secrets: a sign-in for "${serverName}" already open in a browser will still complete and store`
+        + " a token -- close any such tab\n");
+
+    return { removed, alreadyAbsent };
 }
 
 function makeSecretResolver(cfg, env = process.env) {
@@ -2915,7 +2988,7 @@ async function cmdEmitConfig(cfg, argv) {
     fs.writeSync(1, body);
 }
 
-const VERBS = ["run", "task", "set", "unlock", "login", "doctor", "migrate", "emit-config"];
+const VERBS = ["run", "task", "set", "unlock", "login", "logout", "doctor", "migrate", "emit-config"];
 const USAGE = `usage: vc-secrets <${VERBS.join("|")}> [name]`;
 
 async function main(argv) {
@@ -2954,6 +3027,15 @@ async function main(argv) {
     }
     if (command === "login" && arg) {
         await cmdLogin(arg, cfg);
+        return;
+    }
+    if (command === "logout" && arg) {
+        const report = await cmdLogout(arg, cfg);
+        // Names and counts only -- never a value. Deliberately does NOT restate the serialisation
+        // warning: that line is printed the moment the lock is refused, immediately above this one
+        // in the same stream, and a second copy here would be a mirror no test can reach.
+        fs.writeSync(2, `vc-secrets: removed ${report.removed.length} (${report.removed.join(", ") || "none"}), `
+            + `already absent ${report.alreadyAbsent.length}\n`);
         return;
     }
     if (command === "doctor") {
@@ -2995,7 +3077,7 @@ export {
     COMMAND_ON_STDIN, quoteForSecurityInteractive, writeSecretValue,
     tokenLockFor, acquireTokenLock, ensureFreshToken, oauthLaunchDeps,
     REDIRECT_PATH, MAX_ERROR_PARAMS, closeTabPage, forTerminal, escapeHtml, failedPage, listenForCallback,
-    openBrowser, buildBrowserCommand, handleCallback, cmdLogin,
+    openBrowser, buildBrowserCommand, handleCallback, cmdLogin, cmdLogout,
     runTool, resolveSpawnCommand, buildSpawnInvocation, makeSecretResolver, cmdRun, cmdTask, cmdLaunch, killProcessTree,
     validateLaunchables, LEGACY_ENV_VARS, LEGACY_SECRET_ENV_VARS,
     mapResolveError, applyKeystrokes, promptHidden, cmdSet, cmdUnlock, unlockTargets, cmdDoctor, cmdMigrate, newKeyPresent,
