@@ -31,7 +31,7 @@ function flag(name) {
     const at = process.argv.indexOf(name);
     if (joined !== undefined) {
         if (at >= 0) {
-            fail(`${name} was given twice, as ${JSON.stringify(joined)} and as a separate value — pass it once`);
+            fail(`${name} was given twice, as ${JSON.stringify(joined)} and as a separate value -- pass it once`);
         }
 
         return joined.slice(name.length + 1);
@@ -39,7 +39,7 @@ function flag(name) {
     if (at < 0) {
         const misspelt = process.argv.find((a) => a.startsWith(name));
         if (misspelt !== undefined) {
-            fail(`unrecognised argument ${JSON.stringify(misspelt)} — write ${name} <value> or ${name}=<value>`);
+            fail(`unrecognised argument ${JSON.stringify(misspelt)} -- write ${name} <value> or ${name}=<value>`);
         }
 
         return null;
@@ -56,7 +56,7 @@ const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT
     ?? path.dirname(path.dirname(fileURLToPath(import.meta.url)));   // scripts/ -> plugin root
 const source = path.join(pluginRoot, SHIM);
 if (!fs.existsSync(source)) {
-    fail(`${source} not found — CLAUDE_PLUGIN_ROOT is ${process.env.CLAUDE_PLUGIN_ROOT ?? "unset"}, so this is not a complete plugin install`);
+    fail(`${source} not found -- CLAUDE_PLUGIN_ROOT is ${process.env.CLAUDE_PLUGIN_ROOT ?? "unset"}, so this is not a complete plugin install`);
 }
 
 // The data directory survives plugin updates; the cache path carries the version and does not, which is
@@ -81,7 +81,7 @@ if (!fs.existsSync(source)) {
 const dataHome = defaultDataHome();
 const declared = flag("--data-dir");
 if (declared !== null && declared !== "" && !path.isAbsolute(declared)) {
-    fail(`--data-dir must be an absolute path, got ${JSON.stringify(declared)} — a value still shaped like a placeholder means the command ran where Claude Code does not substitute it`);
+    fail(`--data-dir must be an absolute path, got ${JSON.stringify(declared)} -- a value still shaped like a placeholder means the command ran where Claude Code does not substitute it`);
 }
 let target = declared || null;
 let how = "--data-dir";
@@ -90,7 +90,7 @@ if (target && !path.basename(target).toLowerCase().startsWith("vc-secrets")) {
     const because = path.basename(target) === ""
         ? "it names a filesystem root rather than a plugin directory"
         : "it names another plugin's directory, so the placeholder was not substituted";
-    fs.writeSync(2, `install-shim: ignoring --data-dir=${target} — ${because}\n`);
+    fs.writeSync(2, `install-shim: ignoring --data-dir=${target} -- ${because}\n`);
     ignored = target;
     target = null;
 }
@@ -122,12 +122,12 @@ try {
 const lines = [
     `shim: ${destination} (${replaced}; directory chosen via ${how})`,
     "",
-    "Add this to ~/.claude/settings.json — a wrapped MCP server reads it, and picks it up only after a",
+    "Add this to ~/.claude/settings.json -- a wrapped MCP server reads it, and picks it up only after a",
     "restart. Merge it into the existing \"env\" object if there is one; this file is not written for you.",
     "",
     `  {"env": {"VC_SECRETS": ${JSON.stringify(destination)}}}`,
     "",
-    "Run these directly when working with vc-secrets by hand — no other setup needed:",
+    "Run these directly when working with vc-secrets by hand -- no other setup needed:",
     "",
     `  node ${JSON.stringify(destination)} set <name>`,
     `  node ${JSON.stringify(destination)} unlock`,

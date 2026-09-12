@@ -98,7 +98,7 @@ try {
 // warn and continue: the single field consumed below is `plugins[key][].installPath`, and if that has
 // moved, the checks after this fail with their own legible message.
 if (registry && registry.version !== REGISTRY_SCHEMA) {
-    fs.writeSync(2, `vc-secrets: ${registryPath} is schema version ${registry.version}, this shim was written for ${REGISTRY_SCHEMA} — continuing, but update the plugin\n`);
+    fs.writeSync(2, `vc-secrets: ${registryPath} is schema version ${registry.version}, this shim was written for ${REGISTRY_SCHEMA} -- continuing, but update the plugin\n`);
 }
 
 // Drop anything that is not an object before reading fields off it: the file is the client's, and a
@@ -187,9 +187,9 @@ if (fromRegistry.length > 0) {
     const cached = installsInCaches();
     if (cached.length === 0) {
         fail(records.length > 0
-            ? `no usable install of ${PLUGIN_KEY} — every record in ${registryPath} points at a directory holding no ${LAUNCHER}, and no plugin cache holds one either. `
+            ? `no usable install of ${PLUGIN_KEY} -- every record in ${registryPath} points at a directory holding no ${LAUNCHER}, and no plugin cache holds one either. `
                 + "Reinstall it from the marketplace, then run the vc-secrets install skill"
-            : `plugin ${PLUGIN_KEY} is not installed — looked in ${registryPath} and in ${CACHE_ROOTS.join(", ")}. `
+            : `plugin ${PLUGIN_KEY} is not installed -- looked in ${registryPath} and in ${CACHE_ROOTS.join(", ")}. `
                 + "Install it from the marketplace, then run the vc-secrets install skill");
     }
     record = pick(cached);
@@ -210,7 +210,7 @@ try {
     fail(`cannot load ${launcher}: ${e.message}`);
 }
 if (typeof mod.runCli !== "function") {
-    fail(`${launcher} does not export runCli — this shim is older than the plugin, re-run the vc-secrets install skill`);
+    fail(`${launcher} does not export runCli -- this shim is older than the plugin, re-run the vc-secrets install skill`);
 }
 
 await mod.runCli(process.argv.slice(2), { shimContract: SHIM_CONTRACT });

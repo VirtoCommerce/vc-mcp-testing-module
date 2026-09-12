@@ -3542,13 +3542,18 @@ test("every string literal these modules can print is ASCII", () => {
     // a new em dash in any thrown message reaches a console that may not be UTF-8. The source measured
     // one arriving as mojibake; the narrow guard that replaced it only looked at one function's output.
     //
-    // The list is every local module the launcher loads -- resolved by following its imports, not by
-    // memory, which is how clients.mjs (four thrown messages) was left out of the first version --
-    // plus the probe, which runs in its own process and prints there. vc-secrets-shim.mjs and the
-    // install and hook scripts print too and are NOT here; that boundary is a decision, recorded
-    // rather than inherited, because the source's list has no counterpart to any of them.
+    // The list is every module in this package that can reach a terminal -- each one that throws or
+    // prints, plus the error type they all throw. Resolved by measuring both, not by memory, which is
+    // how clients.mjs (four thrown messages) was missing from the first version.
+    //
+    // It is WIDER than the source's, deliberately. The source lists only what its launcher loads, and
+    // that costs it nothing because it has no counterpart to the shim or the install and hook scripts.
+    // Here those three print through the same raw fs.writeSync(2, ...) the rule is argued from, and
+    // the shim prints on an MCP server's stderr when a launch fails -- the moment a developer is least
+    // able to read mojibake.
     for (const name of ["vc-secrets.mjs", "vc-secrets-oauth.mjs", "vc-secrets-cache.mjs",
-        "vc-secrets-error.mjs", "vc-secrets-probe.mjs", "clients.mjs"]) {
+        "vc-secrets-error.mjs", "vc-secrets-probe.mjs", "clients.mjs", "vc-secrets-shim.mjs",
+        "scripts/install-shim.mjs", "hooks/guard-declarations.mjs"]) {
         const source = fs.readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), "utf8");
         assert.deepEqual(nonAsciiInEmittedLiterals(source), [], `non-ASCII in a printable literal of ${name}`);
     }

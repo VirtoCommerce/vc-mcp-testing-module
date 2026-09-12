@@ -39,7 +39,7 @@ try {
 } catch (e) {
     // Nothing in targetsFrom throws today. The catch stays because exiting 1 from an unexpected throw
     // would ALLOW the call: refusing an edit is recoverable, letting a declaration edit through is not.
-    fs.writeSync(2, `BLOCK: vc-secrets guard failed to read this payload — ${e.message}\n`);
+    fs.writeSync(2, `BLOCK: vc-secrets guard failed to read this payload -- ${e.message}\n`);
     process.exit(2);
 }
 
@@ -48,7 +48,7 @@ if (!targets.readable) {
     // that is not a write tool reports readable: true, so this fires only for a write whose payload
     // this guard could not parse — which is exactly the case worth saying out loud.
     const what = typeof input.tool_name === "string" && input.tool_name ? input.tool_name : "unnamed tool";
-    fs.writeSync(2, `vc-secrets guard: unrecognised ${what} payload — not inspected\n`);
+    fs.writeSync(2, `vc-secrets guard: unrecognised ${what} payload -- not inspected\n`);
     process.exit(0);
 }
 
@@ -58,7 +58,7 @@ for (const raw of targets.paths) {
     // ~/.claude/vc-secrets.json
     if (DECLARATION_RE.test(filePath)) {
         fs.writeSync(2,
-            "BLOCK: a vc-secrets declaration decides which command receives which secret — change it via a human PR, not an in-session edit. "
+            "BLOCK: a vc-secrets declaration decides which command receives which secret -- change it via a human PR, not an in-session edit. "
             + "(This guard sees the client's write tools only; it is a speed bump, not a security boundary.)\n");
         process.exit(2);
     }
@@ -66,7 +66,7 @@ for (const raw of targets.paths) {
     // plugin update never overwrites it, so an edit here survives indefinitely.
     if (SHIM_RE.test(filePath)) {
         fs.writeSync(2,
-            "BLOCK: the vc-secrets shim is on the path of every server launch — reinstall it with the vc-secrets install skill instead of editing it.\n");
+            "BLOCK: the vc-secrets shim is on the path of every server launch -- reinstall it with the vc-secrets install skill instead of editing it.\n");
         process.exit(2);
     }
 }
