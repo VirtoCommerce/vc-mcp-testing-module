@@ -1302,8 +1302,10 @@ test("oauthLaunchDeps.writeCache: a failed ACCESS write is a warning, not a lost
 
 // ---------------------------------------------------------------------------------------------
 // New coverage this task adds (not a port): acquireTokenLock had no DIRECT test in the source —
-// every source case drove it through cmdLogin/cmdLogout, which are Tasks 14/15 and do not exist
-// here yet. Without these three, acquireTokenLock ships with zero coverage of its own.
+// every source case drove it through cmdLogin/cmdLogout instead. cmdLogin and cmdLogout are now
+// both ported (Tasks 14/15), and a handful of their own tests exercise this loop too — but
+// without these seven, acquireTokenLock would still have no coverage of its own that survives a
+// change to either verb's wiring.
 // ---------------------------------------------------------------------------------------------
 
 test("acquireTokenLock: a clean acquisition returns the lock, without waiting or logging", async () => {
@@ -1341,13 +1343,22 @@ test("acquireTokenLock: an error that is not a refused bind is not laundered int
     // an fd exhaustion into "the sandbox refused the bind" — acquireTokenLock decides nothing
     // about a failure to get the lock, so this must reach the caller unchanged, never come back as
     // {lock: null, reason: "unbindable"}.
-    const boom = Object.assign(new Error("too many open files"), { code: "EMFILE" });
-    await assert.rejects(() => m.acquireTokenLock({
-        acquireLock: async () => { throw boom; },
-        now: () => 0,
-        sleep: async () => {},
-        log: () => {},
-    }), (e) => e === boom);
+    //
+    // Two shapes, not one: an EMFILE (a `code` that is simply not EPERM/EACCES) and a bare
+    // TypeError from broken wiring (no `code` property at all). Narrowing the guard from
+    // `e.code !== "EPERM" && e.code !== "EACCES"` to `e.code && e.code !== "EPERM" && e.code !==
+    // "EACCES"` reads the TypeError's undefined `code` as "falsy, so don't rethrow" and launders
+    // it into {lock: null, reason: "unbindable"} — leaving the suite green on the first case alone
+    // (mirrors the source's mcpw.test.js:3029, which loops over the same two shapes).
+    for (const boom of [Object.assign(new Error("too many open files"), { code: "EMFILE" }),
+        new TypeError("acquireLock is not a function")]) {
+        await assert.rejects(() => m.acquireTokenLock({
+            acquireLock: async () => { throw boom; },
+            now: () => 0,
+            sleep: async () => {},
+            log: () => {},
+        }), (e) => e === boom, `${boom.code ?? boom.name} must reach the caller unchanged`);
+    }
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -1448,7 +1459,10 @@ test("ensureFreshToken: the contended wait's backoff and ceiling bound the deadl
     // constant deleted from the loop. This instead DRIVES the loop and pins the numbers it must
     // actually produce: the backoff seed, the doubling, the ceiling, and the window the deadline
     // falls in — the same shape as the source's own pinned-copy test (mcpw.test.js:2934), driven
-    // through ensureFreshToken instead of cmdLogout because cmdLogout does not exist here yet.
+    // through ensureFreshToken rather than cmdLogout: cmdLogout is ported now (Task 15) and pins
+    // the same numbers on its own call to acquireTokenLock (see the cmdLogout tests below), but
+    // this one is kept because it is the one that drives ensureFreshToken's OWN call to the loop —
+    // a change that broke only that call site would go unnoticed without it.
     const LOCK_POLL_SEED = 250;
     const LOCK_POLL_CEILING = 2_000;
     const slept = [];
@@ -2473,4 +2487,267 @@ test("cmdLogin: a user-scope entry needs no registrations block, because its own
     const { deps, written } = loginDeps();
     await m.cmdLogin("azure-mcp", USER_CFG, deps);
     assert.deepEqual(written.map(([name]) => name), [USER_KEYS.refresh, USER_KEYS.access]);
+});
+
+// ---------------------------------------------------------------------------------------------
+// cmdLogout -- Task 15's port of the sign-out verb. Ported from the upstream launcher's suite
+// (mcpw.test.js): `m.McpwError` becomes `m.VcSecretsError`, `cache.entryNames(serverName)`
+// becomes `oauthEntryKeys(serverName, decl, cfg)` (both return { refresh, access }, but the
+// values here are the full three-segment keystore keys keyFor produces -- an assertion on a
+// removed/attempted name reads it off LOGOUT_KEYS below instead of a literal
+// "oauth-azure-mcp-*" string), and every "mcpw"/"mcpw run" in a user-facing string becomes
+// "vc-secrets"/"vc-secrets run".
+//
+// Decision A: cmdLogout resolves its own lock internally, the same way cmdLogin does --
+// `acquireLock` defaults to null in the parameter list and falls through to
+// `tokenLockFor(serverName, decl, cfg)`. Two source tests are dropped for it, having lost their
+// referent: "a call site that forgets the lock is refused rather than left unserialised"
+// (mcpw.test.js:2784) checked a wiring seam that no longer exists once the lock is resolved
+// inside the verb; "main hands logout the shared lock builder rather than one of its own"
+// (mcpw.test.js:2916) source-inspected a `main` wiring this package's `main` never performs --
+// it calls `cmdLogout(arg, cfg)` with no deps object, exactly like the `login` branch. The
+// "three writers, one lock name" test near the end of this section replaces both: it proves the
+// default actually reaches the real tokenLockFor, driven directly, for all three writers.
+//
+// cmdLogout gets NO authorization/policy gate. Minting a credential is the privileged act;
+// removing one is not, and refusing a removal leaves the refresh token on disk, which is the one
+// outcome logout exists to prevent. So LOGOUT_CFG carries no `registrations` block at all, unlike
+// LOGIN_CFG -- an unacknowledged project-scope entry still logs out cleanly.
+// ---------------------------------------------------------------------------------------------
+
+const LOGOUT_DECL = { ...DECL_IDENTITY, kind: "oauth", scope: "project", home: "project", declaredName: "azure-mcp" };
+const LOGOUT_CFG = { oauth: { "azure-mcp": LOGOUT_DECL }, projectId: "logout-p1" };
+const LOGOUT_KEYS = m.oauthEntryKeys("azure-mcp", LOGOUT_DECL, LOGOUT_CFG);
+const FREE_LOCK = async () => ({ release: async () => {} });
+
+test("cmdLogout: removes both entries", async () => {
+    const deleted = [];
+    await m.cmdLogout("azure-mcp", LOGOUT_CFG, { deleteEntry: async (n) => { deleted.push(n); },
+        acquireLock: FREE_LOCK });
+    assert.deepEqual(deleted.sort(), [LOGOUT_KEYS.access, LOGOUT_KEYS.refresh].sort());
+});
+
+test("cmdLogout: an already-absent entry is success, and both are still attempted", async () => {
+    // The not-found signal is toolExitCode, the property runTool actually sets -- a stub carrying
+    // `code` would be read by nothing in production.
+    const attempted = [];
+    const report = await m.cmdLogout("azure-mcp", LOGOUT_CFG, {
+        deleteEntry: async (n) => {
+            attempted.push(n);
+            throw Object.assign(new m.VcSecretsError("not found"), { toolExitCode: 3 });
+        },
+        acquireLock: FREE_LOCK,
+    });
+    assert.equal(attempted.length, 2, "one absent entry must not stop the other from being removed");
+    assert.deepEqual(report.removed, []);
+    assert.deepEqual(report.alreadyAbsent.sort(), [LOGOUT_KEYS.access, LOGOUT_KEYS.refresh].sort());
+});
+
+test("cmdLogout: a real failure is not swallowed as already-absent", async () => {
+    // Only exit 3 means "no such entry". Treating every failure as success would report a
+    // logout that left the refresh token on disk -- the one outcome logout exists to prevent.
+    await assert.rejects(() => m.cmdLogout("azure-mcp", LOGOUT_CFG, {
+        deleteEntry: async () => { throw Object.assign(new m.VcSecretsError("keystore locked"), { toolExitCode: 1 }); },
+        acquireLock: FREE_LOCK,
+    }), /keystore locked/);
+});
+
+test("cmdLogout: an undeclared server is refused before anything is deleted", async () => {
+    const attempted = [];
+    await assert.rejects(() => m.cmdLogout("ghost", LOGOUT_CFG, {
+        deleteEntry: async (n) => { attempted.push(n); },
+        acquireLock: FREE_LOCK,
+    }), /ghost/);
+    assert.deepEqual(attempted, [], "a typo must not delete another server's entries");
+});
+
+test("cmdLogout: the lock is released even when a deletion throws", async () => {
+    // Same reason ensureFreshToken releases in a finally: a leaked holder outlives the process
+    // that took it and blocks every launch on this machine until someone notices.
+    let released = 0;
+    await assert.rejects(() => m.cmdLogout("azure-mcp", LOGOUT_CFG, {
+        deleteEntry: async () => { throw Object.assign(new m.VcSecretsError("keystore locked"), { toolExitCode: 1 }); },
+        acquireLock: async () => ({ release: async () => { released++; } }),
+    }), /keystore locked/);
+    assert.equal(released, 1, "a failed deletion must not leave the renewal lock held");
+});
+
+test("cmdLogout: the one thing that can undo the removal is named, even when nothing was removed", async () => {
+    // A sign-in already waiting on a human takes the lock only when the browser returns, so it
+    // lands after this logout and writes a live token. No mutex closes that ordering, and this
+    // line is the only place it is reported -- the alternative to it was an epoch entry, weighed
+    // and declined. Asserted on the empty removal too, because that is the case where a pending
+    // sign-in is the likely reason and the notice matters most.
+    for (const deleteEntry of [async () => {},
+        async () => { throw Object.assign(new m.VcSecretsError("not found"), { toolExitCode: 3 }); }]) {
+        const logged = [];
+        await m.cmdLogout("azure-mcp", LOGOUT_CFG,
+            { deleteEntry, acquireLock: FREE_LOCK, log: (line) => logged.push(line) });
+        assert.match(logged.join(""), /already open in a browser/, "the residual has to reach the developer");
+        assert.match(logged.join(""), /azure-mcp/, "and name the entry it applies to");
+    }
+});
+
+test("cmdLogout: a holder that never releases fails the logout instead of reporting a removal", async () => {
+    const attempted = [];
+    let ms = 0;
+    await assert.rejects(() => m.cmdLogout("azure-mcp", LOGOUT_CFG, {
+        deleteEntry: async (n) => { attempted.push(n); },
+        acquireLock: async () => cache.HELD_BY_OTHER,
+        now: () => (ms += 10_000),
+        sleep: async () => {},
+    }), /still refreshing/);
+    assert.deepEqual(attempted, [], "a removal that cannot be serialised must not be reported as one");
+});
+
+test("cmdLogout: where the lock cannot be bound at all, the removal proceeds and says so", async () => {
+    const deleted = [];
+    const logged = [];
+    let ms = 0;
+    await m.cmdLogout("azure-mcp", LOGOUT_CFG, {
+        log: (line) => logged.push(line),
+        deleteEntry: async (n) => { deleted.push(n); },
+        acquireLock: async () => { throw Object.assign(new Error("bind refused"), { code: "EPERM" }); },
+        // Never reached while a refusal is read as a refusal -- injected so that reading it as a
+        // HOLDER instead fails here in milliseconds rather than after the whole 45 s ceiling.
+        now: () => (ms += 10_000),
+        sleep: async () => {},
+    });
+    assert.equal(deleted.length, 2, "a credential that cannot be revoked is the worse failure");
+    assert.match(logged.join(""), /NOT serialised/, "and the promise it could not keep is named");
+    assert.match(logged.join(""), /EPERM/, "with the errno, not a guess at the cause");
+});
+
+// One in-process mutex standing in for the socket, so the reproduction runs sandboxed too: what
+// is under test is the order logout and a renewal agree on, not the socket that enforces it --
+// that is what the lockTest cases in this file cover.
+function sharedLock() {
+    let held = false;
+
+    return async () => {
+        if (held) {
+            return cache.HELD_BY_OTHER;
+        }
+        held = true;
+
+        return { release: async () => { held = false; } };
+    };
+}
+
+test("cmdLogout: a renewal in flight cannot put back the credential logout reported removed", async () => {
+    // The window ensureFreshToken already closed is the one between its two cache reads. This is
+    // the other one: the holder is inside the exchange, on the network, and will write both
+    // entries the moment Entra answers. An unlocked delete lands in front of that write, reports
+    // success, and the refresh token is back on disk with nothing to notice.
+    const store = new Map([[LOGOUT_KEYS.refresh, "r1"], [LOGOUT_KEYS.access, "a1"]]);
+    const acquireLock = sharedLock();
+    let reached, answer;
+    const inExchange = new Promise((r) => { reached = r; });
+    const entra = new Promise((r) => { answer = r; });
+    const renewal = m.ensureFreshToken({
+        serverName: "azure-mcp",
+        readCache: async () => (store.has(LOGOUT_KEYS.refresh)
+            ? { state: "needs-refresh", refreshToken: store.get(LOGOUT_KEYS.refresh) }
+            : { state: "absent" }),
+        writeCache: async (fresh) => {
+            store.set(LOGOUT_KEYS.refresh, fresh.refreshToken);
+            store.set(LOGOUT_KEYS.access, fresh.accessToken);
+        },
+        exchange: async () => { reached(); await entra; return { accessToken: "a2", refreshToken: "r2" }; },
+        acquireLock,
+        sleep: async () => {},
+    });
+    await inExchange;
+    const logout = m.cmdLogout("azure-mcp", LOGOUT_CFG, {
+        deleteEntry: async (n) => {
+            if (!store.delete(n)) {
+                throw Object.assign(new m.VcSecretsError("not found"), { toolExitCode: 3 });
+            }
+        },
+        acquireLock,
+        sleep: () => new Promise((r) => setImmediate(r)),
+    });
+    answer();
+    const [token] = await Promise.all([renewal, logout]);
+    assert.deepEqual([...store.keys()], [], "logout reported a removal a renewal was able to undo");
+    assert.equal(token, "a2", "and the launch it waited for still has to survive");
+});
+
+test("cmdLogout: an unserialised removal is announced, and a serialised one is quiet", async () => {
+    // Deleting the warning outright left the source's suite green, and it is the ONLY signal
+    // there is: the report carries no serialisation field, because nothing in production would
+    // read one.
+    const lines = [];
+    const write = process.stderr.write;
+    process.stderr.write = (line) => { lines.push(String(line)); return true; };
+    try {
+        await m.cmdLogout("azure-mcp", LOGOUT_CFG, {
+            deleteEntry: async () => {},
+            acquireLock: async () => { throw Object.assign(new Error("nope"), { code: "EACCES" }); },
+        });
+        await m.cmdLogout("azure-mcp", LOGOUT_CFG, {
+            deleteEntry: async () => {}, acquireLock: FREE_LOCK,
+        });
+    } finally {
+        process.stderr.write = write;
+    }
+    assert.match(lines.join(""), /NOT serialised/, "the one signal a developer sees cannot be silent");
+    assert.match(lines.join(""), /EACCES/, "and it names the errno rather than a guess at the cause");
+    assert.equal(lines.filter((l) => l.includes("NOT serialised")).length, 1,
+        "the serialised path must not warn");
+});
+
+lockTest("the renewal, a login and a logout all lock on ONE name -- pre-occupied, not read off the source", async () => {
+    // The source captures this by monkeypatching c.acquireLock (mcpw.test.js:2894) -- unavailable
+    // here for the same reason tokenLockFor's own test gives (this file, "tokenLockFor: project
+    // scope keys the lock exactly the way keyFor keys the keystore entry"): cache.acquireLock is
+    // a read-only ES module export. Proven instead by PRE-occupying the exact path keyFor's own
+    // rule predicts and observing all three writers collide with it -- if any of them computed
+    // its lock name some other way, it would bind its OWN, unoccupied lock instead of contending
+    // on this one.
+    //
+    // An improvement on the source: login and logout are now both real, ported verbs (Decision A
+    // makes logout resolve its own lock internally, the same way login always has), so both are
+    // driven directly with `acquireLock: undefined` -- reaching the destructuring default is the
+    // point, not omitting the key (the source's own comment on this test makes the same
+    // distinction). The source could drive only the renewal's builder and the login verb this
+    // way; its third writer was `m.tokenLockFor(arg)()` standing in for logout's wiring, because
+    // logout's own lock was wired from its `main`, not from inside the verb.
+    const entryName = "azure-mcp";
+    const decl = { ...DECL_IDENTITY, kind: "oauth", scope: "project", home: "project", declaredName: entryName };
+    const cfg = { oauth: { [entryName]: decl }, projectId: "lock-name-p1",
+        registrations: { [DECL_IDENTITY.tenantId]: { [DECL_IDENTITY.clientId]: {} } } };
+    const lockPath = cache.lockPathFor(entryName, cfg.projectId, { platform: process.platform, env: process.env });
+    const holder = await cache.acquireLock(lockPath);
+    // Captured before the assertion, and released defensively in the finally below: under a WRONG
+    // scope key this comes back as a real, live-listening lock instead of HELD_BY_OTHER, and an
+    // un-released listener keeps the process alive long after the assertion has already failed --
+    // measured directly, mutating oauthLaunchDeps' own scope key hung this exact test until the
+    // lock below was captured and released rather than only asserted on.
+    let renewalLock = null;
+    try {
+        // Writer 1: the renewal path, oauthLaunchDeps' own acquireLock.
+        renewalLock = await m.oauthLaunchDeps(entryName, decl, cfg, { backend: "gpg" }).acquireLock();
+        assert.equal(renewalLock, cache.HELD_BY_OTHER, "oauthLaunchDeps must contend on the pre-occupied path");
+
+        // Writer 2: cmdLogin, with its `acquireLock` left at the destructuring default. cmdLogin
+        // treats a busy lock as a warning, not a refusal, so it still returns -- the log line is
+        // the only signal that it actually contended on the SAME path rather than sailing through
+        // on one of its own.
+        const { deps: loginDepsObj, logged: loginLogged } = loginDeps({ acquireLock: undefined,
+            now: () => 0, sleep: async () => {} });
+        await m.cmdLogin(entryName, cfg, loginDepsObj);
+        assert.match(loginLogged.join(""), /was still holding the lock/,
+            "cmdLogin's default must contend on the same pre-occupied path");
+
+        // Writer 3: cmdLogout, same default, but this verb treats a busy lock as fatal.
+        let ms = 0;
+        await assert.rejects(() => m.cmdLogout(entryName, cfg, {
+            deleteEntry: async () => {}, acquireLock: undefined,
+            now: () => (ms += 10_000), sleep: async () => {},
+        }), /still refreshing/, "cmdLogout's default must contend on the same pre-occupied path");
+    } finally {
+        if (renewalLock && renewalLock !== cache.HELD_BY_OTHER) { await renewalLock.release(); }
+        await holder.release();
+    }
 });
