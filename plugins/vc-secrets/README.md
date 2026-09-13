@@ -48,20 +48,24 @@ update while the plugin's commands moved on. The shim resolves the plugin's curr
 launch, so an ordinary plugin update needs no reinstall.
 
 From a terminal, everything runs through the shim, by its literal path — `install` prints the exact
-command for each verb, so there is nothing to configure first. (If you'd rather type a short name than
-paste the path each time, export it as `VC_SECRETS` from your shell's own startup file — that's a
-convenience you set up yourself, not something this tool needs or writes.) The `settings.json` entry
-`install` also prints is separate and unrelated to your terminal: it reaches only the processes Claude
-Code itself starts, which is why a wrapped MCP server needs it but a command you type by hand does not:
+commands, and every other verb takes the same form, so there is nothing to configure first. (If you'd
+rather type a short name than paste the path each time, export it as `VC_SECRETS` from your shell's
+own startup file — that's a convenience you set up yourself, not something this tool needs or
+writes.) The `settings.json` entry `install` also prints is separate and unrelated to your terminal:
+it reaches only the processes Claude Code itself starts, which is why a wrapped MCP server needs it
+but a command you type by hand does not:
 
 | Verb | |
 |---|---|
 | `set <name>` | Store one secret. Hidden prompt; the value never appears in argv. Only works for a name already declared — it refuses an unknown one. |
+| `login <name>` | Sign in to the `oauth` entry `<name>` in a browser and store its token. Refuses an entry a repository declares until your user file acknowledges its app registration. |
+| `logout <name>` | Delete the stored token for that entry, and print which entries were removed and how many were already absent. A `login` still waiting on its browser tab can finish afterwards and store a token again — close that tab. |
 | `run <server>` | Resolve and run that server on stdio, staying as its parent. This is what an MCP entry calls. |
 | `task <name>` | Same, for a declared non-MCP command — a load-test harness, a migration step. |
 | `doctor` | Diagnose. Exits non-zero on any `FAIL`, so it works as a gate. |
 | `unlock` | Warm the gpg agent for the session (gpg backend only) — decrypts whichever of the current or the older stored file exists. No-op on Windows and macOS. |
 | `migrate` | Copy legacy-prefix entries to namespaced keys. Idempotent. |
+| `emit-config <client>` | Print the MCP entries for every declared server in that client's format — `claude-code`, `cursor` or `codex`. Stdout is exactly what you paste; the guidance goes to stderr. See [Clients](#clients). |
 
 ## Declarations
 
