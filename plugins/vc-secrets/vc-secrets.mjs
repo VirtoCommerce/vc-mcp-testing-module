@@ -15,6 +15,7 @@ import { clientNames, clientDescriptor, MIN_VERSION_UNKNOWN } from "./clients.mj
 import { defaultDataHome, defaultShimDir, defaultShimPath } from "./scripts/shim-path.mjs";
 import * as cache from "./vc-secrets-cache.mjs";     // entries, expiry, the cross-process refresh lock
 import * as oauth from "./vc-secrets-oauth.mjs";     // the Entra protocol
+import { PACKAGE_NAME_RE, BIN_NAME_RE } from "./vc-secrets-target.mjs"; // the one copy of the target grammar
 
 const CONFIG_NAME = "vc-secrets.json";
 const LOCAL_CONFIG_NAME = "vc-secrets.local.json";
@@ -65,10 +66,6 @@ const SECRET_NAME_RE = /^[a-z0-9-]+$/;
 const LAUNCHABLE_NAME_RE = /^[A-Za-z0-9._-]+$/;
 // Azure AD tenant ids are GUIDs, and arrive mixed-case.
 const TENANT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-// npm package-name grammar (scoped or unscoped), reused by a later runtime matcher for the same
-// targetPackage/binName grammar — keep this the one copy.
-const PACKAGE_NAME_RE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
-const BIN_NAME_RE = /^[a-z0-9][a-z0-9._-]*$/;
 
 function parseReference(value) {
     if (typeof value !== "string" || !REF_PREFIXES.some((prefix) => value.startsWith(prefix))) {

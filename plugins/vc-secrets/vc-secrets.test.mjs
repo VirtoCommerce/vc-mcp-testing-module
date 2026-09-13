@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as m from "./vc-secrets.mjs";
+import * as target from "./vc-secrets-target.mjs";
 import * as clients from "./clients.mjs";
 import * as t from "./hooks/targets.mjs";
 
@@ -550,6 +551,36 @@ test("a declaration with no targetPackage is refused", () => {
     // dies at the one-hour boundary with nothing red anywhere.
     const cfg = { projectId: "proj-x", oauth: { ado: { ...OAUTH_DECL, targetPackage: undefined } } };
     assert.throws(() => m.loadConfig(projectPaths(cfg)), /targetPackage/);
+});
+
+test("config validation accepts exactly the target names the runtime matcher can build a pattern from", () => {
+    // A name the loader accepts but the matcher cannot build from is a session that never renews;
+    // the reverse refuses a declaration that would have worked.
+    assert.equal(m.PACKAGE_NAME_RE, target.PACKAGE_NAME_RE, "one copy, not two that happen to agree today");
+    assert.equal(m.BIN_NAME_RE, target.BIN_NAME_RE, "one copy, not two that happen to agree today");
+
+    const load = (fields) => m.loadConfig(projectPaths({ projectId: "proj-x",
+        oauth: { ado: { ...OAUTH_DECL, ...fields } } }));
+
+    for (const targetPackage of ["some-oauth-package", "@vendor/server", "a.b_c-d"]) {
+        assert.doesNotThrow(() => load({ targetPackage }));
+        assert.doesNotThrow(() => target.targetEntryPattern(targetPackage));
+    }
+    for (const targetPackage of [".*", "@vendor/server|.*", "../../etc", "a b", "UPPER", "@vendor/"]) {
+        assert.throws(() => load({ targetPackage }), /targetPackage/);
+        assert.throws(() => target.targetEntryPattern(targetPackage), /package name/);
+    }
+
+    for (const binName of ["srv", "mcp-server-x"]) {
+        assert.doesNotThrow(() => load({ binName }));
+        assert.doesNotThrow(() => target.targetEntryPattern("@vendor/server", binName));
+    }
+    // Not "" or null: a declaration refuses those while the preload treats an empty value as
+    // absent -- deliberate, and covered by the runtime matcher's own suite.
+    for (const binName of [".*", "a/b", "a b", "SRV"]) {
+        assert.throws(() => load({ binName }), /binName/);
+        assert.throws(() => target.targetEntryPattern("@vendor/server", binName), /bin name/);
+    }
 });
 
 test("the same oauth name in two scopes is reported as a collision, not silently overwritten", () => {
@@ -3574,7 +3605,7 @@ test("every string literal these modules can print is ASCII", () => {
     // able to read mojibake.
     for (const name of ["vc-secrets.mjs", "vc-secrets-oauth.mjs", "vc-secrets-cache.mjs",
         "vc-secrets-error.mjs", "vc-secrets-probe.mjs", "clients.mjs", "vc-secrets-shim.mjs",
-        "scripts/install-shim.mjs", "hooks/guard-declarations.mjs"]) {
+        "vc-secrets-target.mjs", "scripts/install-shim.mjs", "hooks/guard-declarations.mjs"]) {
         const source = fs.readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), "utf8");
         assert.deepEqual(nonAsciiInEmittedLiterals(source), [], `non-ASCII in a printable literal of ${name}`);
     }

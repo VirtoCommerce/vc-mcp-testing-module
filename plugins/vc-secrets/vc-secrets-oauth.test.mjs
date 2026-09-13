@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import * as m from "./vc-secrets.mjs";              // the launcher
 import * as oauth from "./vc-secrets-oauth.mjs";     // the protocol
 import * as cache from "./vc-secrets-cache.mjs";     // entries, expiry, the lock
+import * as target from "./vc-secrets-target.mjs";   // the preload's target matcher
 import crypto from "node:crypto";
 import os from "node:os";
 import http from "node:http";
@@ -2833,5 +2834,71 @@ lockTest("the renewal, a login and a logout all lock on ONE name -- pre-occupied
     } finally {
         if (renewalLock && renewalLock !== cache.HELD_BY_OTHER) { await renewalLock.release(); }
         await holder.release();
+    }
+});
+
+// -----
+// The preload's target matcher (vc-secrets-target.mjs)
+
+test("a target pattern anchors on the package AND its entry file", () => {
+    const re = target.targetEntryPattern("@vendor/server");
+    assert.equal(re.test("/x/node_modules/@vendor/server/dist/index.js"), true);
+    assert.equal(re.test("/x/node_modules/@other/thing/dist/index.js"), false,
+        "dist/index.js alone must not make every node process a candidate");
+    assert.equal(re.test("/x/node_modules/some-other-pkg/dist/index.js"), false);
+    assert.equal(re.test("/x/node_modules/@vendor/server/lib/util.js"), false,
+        "the package path alone must not match every file under its tree");
+});
+
+test("a scoped package matches with either path separator, including between scope and name", () => {
+    // This is the Windows form npx resolves there, and the scope separator is the one a literal
+    // "/" in the pattern would miss.
+    assert.equal(target.isTargetEntry("C:\\x\\node_modules\\@vendor\\server\\dist\\index.js", "@vendor/server"), true);
+});
+
+test("a sibling package whose name merely starts the same is not a target", () => {
+    // The boundary a substring match gets wrong, and the one that hands a credential to a process
+    // nobody chose.
+    const re = target.targetEntryPattern("@vendor/server");
+    assert.equal(re.test("/x/node_modules/@vendor/server-extras/dist/index.js"), false);
+});
+
+test("a declared bin name matches the .bin shim, which is the ordinary npx entry", () => {
+    // A bin name is not derivable from a package name, which is why it travels as its own field.
+    assert.equal(target.isTargetEntry("/x/node_modules/.bin/srv", "@vendor/server", "srv"), true);
+    assert.equal(target.isTargetEntry("C:\\x\\node_modules\\.bin\\srv.cmd", "@vendor/server", "srv"), true);
+});
+
+test("with no declared bin, the .bin entry is NOT a target", () => {
+    // The cost of leaving binName out, made visible here rather than at the one-hour mark.
+    assert.equal(target.isTargetEntry("/x/node_modules/.bin/srv", "@vendor/server", null), false);
+    assert.equal(target.isTargetEntry("/x/node_modules/.bin/srv", "@vendor/server", ""), false);
+});
+
+test("a target name is constrained to the npm grammar, and undefined or null is not a name", () => {
+    // undefined and null stringify to "undefined"/"null", which the grammar accepts.
+    for (const bad of [".*", "@vendor/server|.*", "../../etc", "a b", undefined, null, 42]) {
+        assert.throws(() => target.targetEntryPattern(bad), /package name/);
+    }
+    for (const bad of [".*", 42]) {
+        assert.throws(() => target.targetEntryPattern("@vendor/server", bad), /bin name/);
+    }
+});
+
+test("npm's own helper processes, and a process with no entrypoint, are not targets", () => {
+    // NODE_OPTIONS reaches the whole subtree (measured at 3 processes on Windows, including an
+    // npm helper), so being loaded is not evidence of being wanted.
+    for (const entry of ["/usr/lib/node_modules/npm/bin/npx-cli.js",
+        "/usr/lib/node_modules/npm/bin/npm-prefix.js", "", undefined]) {
+        assert.equal(target.isTargetEntry(entry, "@vendor/server", "srv"), false);
+    }
+});
+
+test("isTargetEntry never throws: a malformed target is simply not matched", () => {
+    const entry = "/x/node_modules/@vendor/server/dist/index.js";
+    for (const args of [[entry, ".*"], [entry, undefined], [entry, "@vendor/server", ".*"]]) {
+        let result;
+        assert.doesNotThrow(() => { result = target.isTargetEntry(...args); });
+        assert.equal(result, false);
     }
 });
