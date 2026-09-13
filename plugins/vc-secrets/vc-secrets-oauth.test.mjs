@@ -2863,16 +2863,34 @@ test("a sibling package whose name merely starts the same is not a target", () =
     assert.equal(re.test("/x/node_modules/@vendor/server-extras/dist/index.js"), false);
 });
 
+test("a package name is matched from its first character, not as the tail of a longer name", () => {
+    // Unscoped, because a scope's "@" always follows a separator and so hides this edge.
+    assert.equal(target.isTargetEntry("/x/node_modules/server/dist/index.js", "server"), true);
+    assert.equal(target.isTargetEntry("/x/node_modules/my-server/dist/index.js", "server"), false);
+});
+
+test("a bin name is matched from its first character, not as the tail of a longer name", () => {
+    assert.equal(target.isTargetEntry("/x/node_modules/.bin/mcp-srv", "@vendor/server", "srv"), false);
+});
+
+test("a dot in a declared name matches only a dot", () => {
+    assert.equal(target.isTargetEntry("/x/node_modules/socket.io/dist/index.js", "socket.io"), true);
+    assert.equal(target.isTargetEntry("/x/node_modules/socketXio/dist/index.js", "socket.io"), false);
+});
+
 test("a declared bin name matches the .bin shim, which is the ordinary npx entry", () => {
     // A bin name is not derivable from a package name, which is why it travels as its own field.
     assert.equal(target.isTargetEntry("/x/node_modules/.bin/srv", "@vendor/server", "srv"), true);
     assert.equal(target.isTargetEntry("C:\\x\\node_modules\\.bin\\srv.cmd", "@vendor/server", "srv"), true);
 });
 
-test("with no declared bin, the .bin entry is NOT a target", () => {
+test("with no declared bin, only the package entry is a target", () => {
     // The cost of leaving binName out, made visible here rather than at the one-hour mark.
     assert.equal(target.isTargetEntry("/x/node_modules/.bin/srv", "@vendor/server", null), false);
     assert.equal(target.isTargetEntry("/x/node_modules/.bin/srv", "@vendor/server", ""), false);
+    // The builder treats "" as absent, as the preload's `|| null` does. A refused "" would also read
+    // false above -- isTargetEntry swallows the refusal -- and only this line tells the two apart.
+    assert.equal(target.isTargetEntry("/x/node_modules/@vendor/server/dist/index.js", "@vendor/server", ""), true);
 });
 
 test("a target name is constrained to the npm grammar, and undefined or null is not a name", () => {
@@ -2918,8 +2936,8 @@ function stubChannelPath() {
     if (process.platform === "win32") {
         return `\\\\.\\pipe\\vcs-t16-${process.pid}-${pipeSeq++}`;
     }
-    // /tmp rather than os.tmpdir(): sun_path is ~104 bytes and a redirected TMPDIR overflows it
-    // (EINVAL at bind).
+    // /tmp rather than os.tmpdir(): a socket path is limited to sun_path's ~104-108 bytes, which a
+    // redirected TMPDIR can exceed -- measured on Linux, the bind then lands silently at a truncated path.
     const dir = fs.mkdtempSync("/tmp/vcs-t16-");
     tmpDirs.push(dir);
 
@@ -3140,7 +3158,7 @@ channelTest("a frame split across two writes is reassembled, not dropped", async
     }
 });
 
-channelTest("frames coalesced into one write are all applied, in order", async () => {
+channelTest("of frames coalesced into one write, the last one wins", async () => {
     const stub = await startStubChannel((sock) => {
         sock.write('{"token":"first"}\n{"token":"second"}\n');
     });
@@ -3171,6 +3189,30 @@ channelTest("an unreadable frame is reported on fd 2 without echoing any of it, 
     }
 });
 
+channelTest("a null frame is ignored, and reading continues", async () => {
+    const stub = await startStubChannel((sock) => {
+        sock.write('null\n{"token":"after"}\n');
+    });
+    try {
+        const entry = writeEntry(TARGET_ENTRY, pollingBody("SERVER_TOKEN", 5000));
+        const { err, code } = await runEntry(entry, preloadEnv(stub));
+        assert.match(err, /VAR=after/);
+        assert.equal(code, 0);
+    } finally {
+        await stub.close();
+    }
+});
+
+channelTest("an unreachable channel is reported on fd 2 and costs the renewal, never the process", async () => {
+    // Nothing listens at this path.
+    const entry = writeEntry(TARGET_ENTRY, 'setTimeout(() => process.stderr.write("MAIN RAN\\n"), 300);');
+    const { out, err, code } = await runEntry(entry, preloadEnv({ path: stubChannelPath() }));
+    assert.equal(code, 0, "an unhandled socket 'error' event ends the server process");
+    assert.match(err, /MAIN RAN/);
+    assert.match(err, /vc-secrets preload: channel error: \S/);
+    assert.equal(out, "", "fd 1 is the client's JSON-RPC stream");
+});
+
 channelTest("the token receiver does not keep the server process alive", async () => {
     const stub = await startStubChannel(() => {});
     try {
@@ -3186,8 +3228,8 @@ channelTest("the token receiver does not keep the server process alive", async (
 });
 
 channelTest("a missing or malformed target package costs the renewal, never the process", async () => {
-    // Cite the measured exit-1 behaviour of a throw in an --import module: a throw here would end
-    // the process before "MAIN RAN" is ever written.
+    // A throw in a module loaded through --import exits 1 before the entry script runs (measured on
+    // node 22), so a throwing matcher would end this process before "MAIN RAN" is ever written.
     const stub = await startStubChannel((sock) => {
         sock.write(JSON.stringify({ token: "delivered-token" }) + "\n");
     });

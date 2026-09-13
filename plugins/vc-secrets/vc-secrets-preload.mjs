@@ -49,7 +49,7 @@ if (isTargetEntry(entry, targetPackage, targetBin) && channel && nonce && tokenE
                 process.stderr.write("vc-secrets preload: unreadable channel frame, ignored\n");
                 continue;
             }
-            if (typeof msg.token === "string" && msg.token !== "") {
+            if (typeof msg?.token === "string" && msg.token !== "") {
                 process.env[tokenEnv] = msg.token;
             }
         }

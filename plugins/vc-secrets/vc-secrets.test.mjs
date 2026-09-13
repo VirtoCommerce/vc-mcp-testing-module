@@ -556,8 +556,10 @@ test("a declaration with no targetPackage is refused", () => {
 test("config validation accepts exactly the target names the runtime matcher can build a pattern from", () => {
     // A name the loader accepts but the matcher cannot build from is a session that never renews;
     // the reverse refuses a declaration that would have worked.
-    assert.equal(m.PACKAGE_NAME_RE, target.PACKAGE_NAME_RE, "one copy, not two that happen to agree today");
-    assert.equal(m.BIN_NAME_RE, target.BIN_NAME_RE, "one copy, not two that happen to agree today");
+    // Identity covers what the launcher exports. What loadConfig itself tests is pinned only on the
+    // samples below: a second expression that agrees with the matcher on all of them would pass.
+    assert.equal(m.PACKAGE_NAME_RE, target.PACKAGE_NAME_RE, "the launcher exports the matcher's regex, not a copy");
+    assert.equal(m.BIN_NAME_RE, target.BIN_NAME_RE, "the launcher exports the matcher's regex, not a copy");
 
     const load = (fields) => m.loadConfig(projectPaths({ projectId: "proj-x",
         oauth: { ado: { ...OAUTH_DECL, ...fields } } }));

@@ -2,8 +2,9 @@
 //
 // Imported by the preload (inside the server process), by config validation and by the launcher, so it
 // has NO top-level action of any kind. The preload's guarded receiver lives in its own module for that
-// reason: were it here, importing this would wake a credential receiver inside the launcher, whose own
-// environment carries the channel variables whenever it is itself a child of a wrapped server.
+// reason: were it here, importing this would run the receiver's guard inside the launcher, leaving only
+// the entry-path check between it and a channel whose variables the launcher's own environment carries
+// whenever it is itself a child of a wrapped server.
 import { VcSecretsError } from "./vc-secrets-error.mjs";
 
 // The declaration names a package, never a pattern: this gate decides which process receives a

@@ -162,15 +162,17 @@ and the server process that is meant to hold the token:
 
 - `tenantId` and `clientId` come from the declaration — nothing about a tenant or a registration is built
   into this tool.
-- `scopes` must include `offline_access`. Without it no refresh token is issued, and every launch needs a
-  fresh sign-in.
+- `scopes` must include `offline_access`. Without it the sign-in returns no refresh token, and
+  `vc-secrets login` refuses it.
 - `targetPackage` is **required**: the npm package of the server the token is meant for. Once a launch
   hands tokens over (not yet in this build — see above), a renewed token is delivered only into a node
-  process whose entry file is that package's `dist/index.js`, because the
-  launch environment reaches every node process below it — `npx` and its helpers included — and being
-  started there is not evidence of being the server. It is a package **name**, held to the npm naming
-  rules, never a pattern: this decides which process receives a credential, so it is not something a
-  declaration can widen.
+  process whose entry file is that package's `dist/index.js` (or, with `binName`, a file of that name),
+  because the launch environment reaches every node process below it — `npx` and its helpers included —
+  and being started there is not evidence of being the server. It is a package **name**, held to the npm
+  naming rules, never a pattern: a declaration names the server it means, and cannot write an expression
+  that matches more. The match is by path segment, so an unscoped name also matches a scoped package of
+  the same name (`@other/<name>`), and a `binName` matches any file so named — within the launched
+  server's own process tree, which already holds the token it was started with.
 - `binName` is optional: the package's executable, as `npx` normally starts it (`node_modules/.bin/<bin>`).
   It is its own key because a bin name is not derivable from the package name — the example's package
   ships the bin `mcp-server-azuredevops`, not `mcp`. **Leave it out and a server started through its
@@ -179,7 +181,8 @@ and the server process that is meant to hold the token:
 - `authorized` works as it does for a secret: in your user file it names the project servers allowed to
   use the token, and anywhere else it is ignored with a warning.
 
-All of it is validated when the declaration loads, including the two keys only a launch reads.
+Every key's shape is checked when the declaration loads, including the two keys only a launch reads.
+Whether `scopes` includes `offline_access` is not, and surfaces at `login`.
 
 A project or local file may declare an `oauth` block, but the tenant and the client then come from the
 repository — so a committed declaration could otherwise have a delegated token minted against any app
