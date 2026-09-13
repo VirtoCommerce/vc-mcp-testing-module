@@ -2902,3 +2902,327 @@ test("isTargetEntry never throws: a malformed target is simply not matched", () 
         assert.equal(result, false);
     }
 });
+
+// -----
+// The preload, run as a real process against a stub channel
+
+// The module URLs the fixtures below load, computed once from this test file's own URL so they
+// resolve regardless of the spawned process's working directory.
+const PRELOAD_URL = new URL("./vc-secrets-preload.mjs", import.meta.url).href;
+const TARGET_URL = new URL("./vc-secrets-target.mjs", import.meta.url).href;
+
+// The path/pipe a stub channel binds to. Named pipes on Windows have no filesystem lifetime to
+// clean up, so only the POSIX branch registers a tmpDir for the `after()` sweep.
+let pipeSeq = 0;
+function stubChannelPath() {
+    if (process.platform === "win32") {
+        return `\\\\.\\pipe\\vcs-t16-${process.pid}-${pipeSeq++}`;
+    }
+    // /tmp rather than os.tmpdir(): sun_path is ~104 bytes and a redirected TMPDIR overflows it
+    // (EINVAL at bind).
+    const dir = fs.mkdtempSync("/tmp/vcs-t16-");
+    tmpDirs.push(dir);
+
+    return path.join(dir, "c.sock");
+}
+
+// The preload's net.connect uses a filesystem socket / named pipe -- neither socketTest's TCP bind
+// nor lockTest's abstract-namespace bind -- and a probe of the wrong privilege answers confidently
+// either way (the file's own comment above lockTest records that defect once already).
+let channelBindProbe = null;
+function canBindChannel() {
+    channelBindProbe ??= new Promise((resolve) => {
+        let probePath;
+        try {
+            probePath = stubChannelPath();
+        } catch {
+            resolve(false);
+
+            return;
+        }
+        const probe = net.createServer();
+        probe.once("error", () => resolve(false));
+        probe.once("listening", () => probe.close(() => resolve(true)));
+        probe.listen(probePath);
+    });
+
+    return channelBindProbe;
+}
+
+const channelTest = (name, fn) => test(name, async (t) => {
+    if (!(await canBindChannel())) {
+        t.skip("needs an environment that permits a filesystem-socket bind");
+
+        return;
+    }
+    await fn(t);
+});
+
+// A minimal stand-in for the real vc-secrets channel: it speaks the wire protocol and nothing
+// more -- one greeting in, newline-delimited frames out -- and implements none of the channel's
+// own checks (no nonce comparison, no single-client enforcement), which is why no test here
+// asserts a refusal. Task 17 replaces this with the real createChannel.
+function startStubChannel(onGreeting) {
+    const channelPath = stubChannelPath();
+    const greetings = [];
+    const sockets = new Set();
+    const server = net.createServer((sock) => {
+        sockets.add(sock);
+        sock.on("error", () => {});
+        let buf = "";
+        const onData = (chunk) => {
+            buf += chunk.toString("utf8");
+            const nl = buf.indexOf("\n");
+            if (nl < 0) {
+                return;
+            }
+            sock.off("data", onData);
+            let greeting;
+            try {
+                greeting = JSON.parse(buf.slice(0, nl));
+            } catch {
+                greeting = { unparsable: true };
+            }
+            greetings.push(greeting);
+            onGreeting(sock);
+        };
+        sock.on("data", onData);
+    });
+
+    return new Promise((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(channelPath, () => {
+            resolve({
+                path: channelPath,
+                greetings,
+                get connections() {
+                    return sockets.size;
+                },
+                close: async () => {
+                    for (const sock of sockets) {
+                        sock.destroy();
+                    }
+                    await new Promise((res) => server.close(res));
+                },
+            });
+        });
+    });
+}
+
+// A throwaway entry-script file under its own tmp dir, at the relative path a fixture wants the
+// preload to see as process.argv[1].
+function writeEntry(relPath, body) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vcs-t16-entry-"));
+    tmpDirs.push(dir);
+    const full = path.join(dir, relPath);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, body);
+
+    return full;
+}
+
+// The child polls rather than sleeping a fixed time: a fixed wait either flakes under load or pays
+// its full cost on every run, and the negative cases need a SHORT deadline they must survive.
+function pollingBody(varName, waitMs) {
+    return `
+        // Report on fd 2 only: fd 1 in the real server is the client's JSON-RPC stream.
+        let waited = 0;
+        const tick = setInterval(() => {
+            const v = process.env.${varName};
+            waited += 25;
+            if (v || waited >= ${waitMs}) {
+                clearInterval(tick);
+                process.stderr.write("VAR=" + (v ?? "<unset>") + "\\n");
+                process.exit(0);
+            }
+        }, 25);
+    `;
+}
+
+// Runs one entry script as a real child process. NODE_OPTIONS is composed here by hand until Task
+// 18's buildChildEnv exists; Task 18 routes this through it, because the quoted URL node parses
+// back out of an environment variable is the delivery path's last mile.
+function runEntry(entry, env, { preload = true, timeoutMs = 10000 } = {}) {
+    const childEnv = { ...process.env };
+    delete childEnv.NODE_OPTIONS;
+    for (const key of Object.keys(childEnv)) {
+        if (key.startsWith("VC_SECRETS_")) {
+            delete childEnv[key];
+        }
+    }
+    if (preload) {
+        childEnv.NODE_OPTIONS = `--import "${PRELOAD_URL}"`;
+    }
+    for (const [key, value] of Object.entries(env)) {
+        if (value === undefined) {
+            delete childEnv[key];
+        } else {
+            childEnv[key] = value;
+        }
+    }
+
+    return new Promise((resolve) => {
+        const child = spawn(process.execPath, [entry], { env: childEnv, stdio: ["ignore", "pipe", "pipe"] });
+        let out = "";
+        let err = "";
+        let timedOut = false;
+        const timer = setTimeout(() => {
+            timedOut = true;
+            child.kill();
+        }, timeoutMs);
+        child.stdout.on("data", (d) => { out += d; });
+        child.stderr.on("data", (d) => { err += d; });
+        child.once("exit", (code) => {
+            clearTimeout(timer);
+            resolve({ out, err, code, timedOut });
+        });
+    });
+}
+
+function preloadEnv(stub, overrides = {}) {
+    return {
+        VC_SECRETS_TOKEN_CHANNEL: stub.path,
+        VC_SECRETS_CHANNEL_NONCE: "right-nonce",
+        VC_SECRETS_TOKEN_ENV: "SERVER_TOKEN",
+        VC_SECRETS_TARGET_PACKAGE: "@vendor/server",
+        VC_SECRETS_TARGET_BIN: "",
+        ...overrides,
+    };
+}
+
+const TARGET_ENTRY = "node_modules/@vendor/server/dist/index.js";
+
+channelTest("a target process receives the token into the variable its own environment names, and writes nothing on fd 1", async () => {
+    const stub = await startStubChannel((sock) => {
+        sock.write(JSON.stringify({ token: "delivered-token" }) + "\n");
+    });
+    try {
+        const entry = writeEntry(TARGET_ENTRY, pollingBody("SERVER_TOKEN", 5000));
+        const { out, err } = await runEntry(entry, preloadEnv(stub));
+        assert.match(err, /VAR=delivered-token/);
+        assert.equal(out, "", "the preload must never write on fd 1");
+        assert.deepEqual(stub.greetings, [{ nonce: "right-nonce" }], "the preload's half of the handshake");
+    } finally {
+        await stub.close();
+    }
+});
+
+channelTest("a process that is not the target takes no action on either fd", async () => {
+    const stub = await startStubChannel((sock) => {
+        sock.write(JSON.stringify({ token: "delivered-token" }) + "\n");
+    });
+    try {
+        const entry = writeEntry("node_modules/some-other-pkg/dist/index.js", pollingBody("SERVER_TOKEN", 800));
+        const { out, err } = await runEntry(entry, preloadEnv(stub));
+        assert.match(err, /VAR=<unset>/);
+        assert.equal(out, "");
+        assert.ok(!/vc-secrets preload/.test(err));
+        assert.equal(stub.connections, 0, "no connection at all, not merely no assignment");
+    } finally {
+        await stub.close();
+    }
+});
+
+channelTest("a frame split across two writes is reassembled, not dropped", async () => {
+    // A stream socket may split writes; "one chunk is one frame" works on every machine it is
+    // tried on and fails as a silently ignored renewal.
+    const stub = await startStubChannel((sock) => {
+        sock.write('{"tok');
+        setTimeout(() => sock.write('en":"split-token"}\n'), 100);
+    });
+    try {
+        const entry = writeEntry(TARGET_ENTRY, pollingBody("SERVER_TOKEN", 5000));
+        const { err } = await runEntry(entry, preloadEnv(stub));
+        assert.match(err, /VAR=split-token/);
+        assert.ok(!/unreadable/.test(err));
+    } finally {
+        await stub.close();
+    }
+});
+
+channelTest("frames coalesced into one write are all applied, in order", async () => {
+    const stub = await startStubChannel((sock) => {
+        sock.write('{"token":"first"}\n{"token":"second"}\n');
+    });
+    try {
+        const entry = writeEntry(TARGET_ENTRY, pollingBody("SERVER_TOKEN", 5000));
+        const { err } = await runEntry(entry, preloadEnv(stub));
+        assert.match(err, /VAR=second/);
+    } finally {
+        await stub.close();
+    }
+});
+
+channelTest("an unreadable frame is reported on fd 2 without echoing any of it, and reading continues", async () => {
+    const stub = await startStubChannel((sock) => {
+        sock.write('NOT-JSON-secret-prefix\n{"token":"after"}\n');
+    });
+    try {
+        const entry = writeEntry(TARGET_ENTRY, pollingBody("SERVER_TOKEN", 5000));
+        const { out, err } = await runEntry(entry, preloadEnv(stub));
+        assert.ok(err.includes("vc-secrets preload: unreadable channel frame, ignored"));
+        // Node embeds the first ten characters of the input in a JSON SyntaxError, and on this
+        // channel the input is a token.
+        assert.ok(!err.includes("NOT-JSON"));
+        assert.match(err, /VAR=after/);
+        assert.equal(out, "");
+    } finally {
+        await stub.close();
+    }
+});
+
+channelTest("the token receiver does not keep the server process alive", async () => {
+    const stub = await startStubChannel(() => {});
+    try {
+        const entry = writeEntry(TARGET_ENTRY, 'setTimeout(() => process.stderr.write("MAIN DONE\\n"), 300);');
+        const { err, code, timedOut } = await runEntry(entry, preloadEnv(stub), { timeoutMs: 4000 });
+        assert.equal(timedOut, false, "an un-unref'd socket keeps the server alive until the launcher goes away");
+        assert.equal(code, 0);
+        assert.match(err, /MAIN DONE/);
+        assert.equal(stub.greetings.length, 1, "positive control: the receiver WAS connected when the process exited");
+    } finally {
+        await stub.close();
+    }
+});
+
+channelTest("a missing or malformed target package costs the renewal, never the process", async () => {
+    // Cite the measured exit-1 behaviour of a throw in an --import module: a throw here would end
+    // the process before "MAIN RAN" is ever written.
+    const stub = await startStubChannel((sock) => {
+        sock.write(JSON.stringify({ token: "delivered-token" }) + "\n");
+    });
+    try {
+        const entry = writeEntry(TARGET_ENTRY, 'process.stderr.write("MAIN RAN\\n");');
+        for (const targetPackage of [undefined, ".*"]) {
+            const { err, code } = await runEntry(entry, preloadEnv(stub, { VC_SECRETS_TARGET_PACKAGE: targetPackage }));
+            assert.equal(code, 0);
+            assert.match(err, /MAIN RAN/);
+        }
+        assert.equal(stub.connections, 0);
+    } finally {
+        await stub.close();
+    }
+});
+
+channelTest("importing the target module wakes no receiver; importing the preload does", async () => {
+    // Both halves, because "wakes nothing" alone passes for a fixture that cannot observe a
+    // receiver at all.
+    const stub = await startStubChannel((sock) => {
+        sock.write(JSON.stringify({ token: "delivered-token" }) + "\n");
+    });
+    try {
+        const entryA = writeEntry(TARGET_ENTRY,
+            `import(${JSON.stringify(TARGET_URL)}).then(() => { ${pollingBody("SERVER_TOKEN", 800)} });`);
+        const runA = await runEntry(entryA, preloadEnv(stub), { preload: false });
+        assert.match(runA.err, /VAR=<unset>/);
+        assert.equal(stub.connections, 0);
+
+        const entryB = writeEntry(TARGET_ENTRY,
+            `import(${JSON.stringify(PRELOAD_URL)}).then(() => { ${pollingBody("SERVER_TOKEN", 5000)} });`);
+        const runB = await runEntry(entryB, preloadEnv(stub), { preload: false });
+        assert.match(runB.err, /VAR=delivered-token/);
+        assert.equal(stub.connections, 1);
+    } finally {
+        await stub.close();
+    }
+});

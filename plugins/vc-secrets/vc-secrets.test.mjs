@@ -3605,7 +3605,8 @@ test("every string literal these modules can print is ASCII", () => {
     // able to read mojibake.
     for (const name of ["vc-secrets.mjs", "vc-secrets-oauth.mjs", "vc-secrets-cache.mjs",
         "vc-secrets-error.mjs", "vc-secrets-probe.mjs", "clients.mjs", "vc-secrets-shim.mjs",
-        "vc-secrets-target.mjs", "scripts/install-shim.mjs", "hooks/guard-declarations.mjs"]) {
+        "vc-secrets-target.mjs", "vc-secrets-preload.mjs", "scripts/install-shim.mjs",
+        "hooks/guard-declarations.mjs"]) {
         const source = fs.readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), "utf8");
         assert.deepEqual(nonAsciiInEmittedLiterals(source), [], `non-ASCII in a printable literal of ${name}`);
     }
