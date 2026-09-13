@@ -143,6 +143,71 @@ environment does not help there; that case wants a git credential helper, not th
   between projects is a convention this tool keeps for you, not a boundary it enforces against a
   declaration that wants to cross it. Don't copy a `projectId` between repos.
 
+### Signed-in tokens: the `oauth` block
+
+An `oauth:<name>` reference names an entry here. It describes the app registration to sign in against,
+and the server process that is meant to hold the token:
+
+```jsonc
+"oauth": {
+  "ado": {
+    "tenantId": "<tenant-guid>",
+    "clientId": "<client-id>",
+    "scopes": ["<resource>/.default", "offline_access"],
+    "targetPackage": "@azure-devops/mcp",
+    "binName": "mcp-server-azuredevops"
+  }
+}
+```
+
+- `tenantId` and `clientId` come from the declaration — nothing about a tenant or a registration is built
+  into this tool.
+- `scopes` must include `offline_access`. Without it no refresh token is issued, and every launch needs a
+  fresh sign-in.
+- `targetPackage` is **required**: the npm package of the server the token is meant for. Once a launch
+  hands tokens over (not yet in this build — see above), a renewed token is delivered only into a node
+  process whose entry file is that package's `dist/index.js`, because the
+  launch environment reaches every node process below it — `npx` and its helpers included — and being
+  started there is not evidence of being the server. It is a package **name**, held to the npm naming
+  rules, never a pattern: this decides which process receives a credential, so it is not something a
+  declaration can widen.
+- `binName` is optional: the package's executable, as `npx` normally starts it (`node_modules/.bin/<bin>`).
+  It is its own key because a bin name is not derivable from the package name — the example's package
+  ships the bin `mcp-server-azuredevops`, not `mcp`. **Leave it out and a server started through its
+  `.bin` shim never receives a renewed token**: it runs on the token it was launched with, and loses
+  access when that expires, with nothing reporting why.
+- `authorized` works as it does for a secret: in your user file it names the project servers allowed to
+  use the token, and anywhere else it is ignored with a warning.
+
+All of it is validated when the declaration loads, including the two keys only a launch reads.
+
+A project or local file may declare an `oauth` block, but the tenant and the client then come from the
+repository — so a committed declaration could otherwise have a delegated token minted against any app
+registration it names. Your consent is keyed by that pair, in your user file, and names the server
+that consumes the token with its shape exactly as declared — the same comparison a secret's
+authorization gets. For the `azure-devops` server above, with its env value changed to `oauth:ado`:
+
+```json
+{
+  "registrations": {
+    "<tenant-guid>": {
+      "<client-id>": {
+        "servers": {
+          "azure-devops": {
+            "command": "npx",
+            "args": ["-y", "@azure-devops/mcp@2.8.1", "my-org", "-a", "envvar"],
+            "envKeys": ["ADO_MCP_AUTH_TOKEN"]
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+`vc-secrets login <name>` refuses a repository-declared entry with no such block, and says which key to
+add. `registrations` takes effect only in the user file, and tenant ids match without regard to case.
+
 ## Where a secret is stored, and under what key
 
 Keys are namespaced by the declaration's home, so a project's secrets and your personal ones never
