@@ -130,6 +130,7 @@ const lines = [
     "Run these directly when working with vc-secrets by hand -- no other setup needed:",
     "",
     `  node ${JSON.stringify(destination)} set <name>`,
+    `  node ${JSON.stringify(destination)} login <name>`,
     `  node ${JSON.stringify(destination)} unlock`,
     `  node ${JSON.stringify(destination)} migrate`,
     "",

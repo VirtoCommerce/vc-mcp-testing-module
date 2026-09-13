@@ -2643,12 +2643,12 @@ test("install-shim: copies the shim, is idempotent, and prints the settings entr
     assert.ok(fs.existsSync(shim), `expected the shim at ${shim}\n${first.stdout}${first.stderr}`);
     assert.match(first.stdout, /installed/);
     assert.match(first.stdout, /"VC_SECRETS"/);
-    // No shell export: the shim's path is already stable and literal, so a human running set/unlock/
-    // migrate/doctor by hand needs no per-shell setup, and none is printed or suggested.
+    // No shell export: the shim's path is already stable and literal, so a human running set/login/
+    // unlock/migrate/doctor by hand needs no per-shell setup, and none is printed or suggested.
     assert.doesNotMatch(first.stdout, /export/i);
     assert.doesNotMatch(first.stdout, /shell rc/i);
     const quoted = JSON.stringify(shim);
-    for (const verb of ["set <name>", "unlock", "migrate", "doctor"]) {
+    for (const verb of ["set <name>", "login <name>", "unlock", "migrate", "doctor"]) {
         assert.ok(first.stdout.includes(`node ${quoted} ${verb}`), `expected the literal ${verb} command\n${first.stdout}`);
     }
 

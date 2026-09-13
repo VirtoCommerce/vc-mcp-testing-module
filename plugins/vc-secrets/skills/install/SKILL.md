@@ -49,8 +49,8 @@ entry and the commands that use it — so they come out the same on every machin
 It is idempotent: a second run reports `already up to date`.
 
 It deliberately **prints** rather than writes. `~/.claude/settings.json` belongs to the developer, and a
-tool that edits it unasked is a tool nobody trusts twice. There is no shell setup to do: `set`, `unlock`,
-`doctor`, and `migrate` are run with the shim's literal path, which the script already computed.
+tool that edits it unasked is a tool nobody trusts twice. There is no shell setup to do: `set`, `login`,
+`unlock`, `doctor`, and `migrate` are run with the shim's literal path, which the script already computed.
 
 ## Then verify
 
@@ -63,8 +63,8 @@ node ../../vc-secrets.mjs doctor
 ```
 
 1. **Relay its output verbatim.** The `settings.json` entry is what a wrapped MCP server reads, and it
-   picks the variable up only after a restart — say so. The four commands below it are what a human runs
-   by hand; they need nothing added to a shell.
+   picks the variable up only after a restart — say so. The commands below it are what a human runs by
+   hand; they need nothing added to a shell.
 2. **Run the `doctor` command the script prints** and report its output. On a machine with no declaration
    file yet the whole output is `FAIL no declaration file found` — expected at this point, not a bug
    report. The next step is writing a declaration, then `set`.
