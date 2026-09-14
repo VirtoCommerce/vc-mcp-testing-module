@@ -164,14 +164,29 @@ export async function resolveWinningEarning({ api, earnInfo, userGroups = [], no
  * Returns the created order number. The shipping address is a literal only because a brand-new
  * contact has none of its own and checkout will not reach a decisive state without one; nothing
  * asserts on it.
+ *
+ * `cartName` isolates concurrent or differently-scoped carts. It matters for a MULTI-ORGANIZATION
+ * account: a cart is resolved by (userId, storeId, cartName, currency) and carries whatever
+ * `organizationId` it was CREATED under, so a leftover "default" cart made under one organization
+ * is handed straight back to a caller holding a token for the other — and the resulting order,
+ * whose `OrganizationId` is the only thing the loyalty handler reads, silently funds the wrong pool.
+ *
+ * `onCartReady(cart)` is the PRE-COMMIT GATE for exactly that. It runs after the cart is resolved
+ * and BEFORE the shipment, the payment and `createOrderFromCart`; if it throws, no order exists. An
+ * order on this platform is real and non-reversible and a loyalty accrual cannot be undone, so a
+ * caller whose correctness depends on a property of the cart (its organization, its currency, its
+ * line count) asserts it HERE rather than discovering it afterwards. Both parameters are optional
+ * and every existing caller is unaffected.
  */
 export async function placeEarnOrder({
   gql, storeId, userId, productId, qty, currency = 'USD', culture = 'en-US',
+  cartName = 'default', onCartReady = null,
 } = {}) {
-  await gql(`mutation { addItem(command: { cartName: "default" storeId: "${storeId}" userId: "${userId}" productId: "${productId}" quantity: ${qty} }) { id } }`, 'addItem');
-  const cartData = await gql(`query { cart(cartName: "default" storeId: "${storeId}" userId: "${userId}" currencyCode: "${currency}" cultureName: "${culture}") { id availableShippingMethods { code optionName price { amount } } availablePaymentMethods { code } } }`, 'get_cart');
+  await gql(`mutation { addItem(command: { cartName: "${cartName}" storeId: "${storeId}" userId: "${userId}" productId: "${productId}" quantity: ${qty} }) { id } }`, 'addItem');
+  const cartData = await gql(`query { cart(cartName: "${cartName}" storeId: "${storeId}" userId: "${userId}" currencyCode: "${currency}" cultureName: "${culture}") { id organizationId organizationName itemsQuantity availableShippingMethods { code optionName price { amount } } availablePaymentMethods { code } } }`, 'get_cart');
   const cart = cartData?.cart;
   if (!cart?.id) throw new Error('cart not resolved after addItem');
+  if (onCartReady) await onCartReady(cart);
   const ship = (cart.availableShippingMethods || []).find((m) => m.code === 'FixedRate') || cart.availableShippingMethods?.[0];
   if (!ship) throw new Error('no available shipping method');
   await gql(`mutation { addOrUpdateCartShipment(command: { storeId: "${storeId}" userId: "${userId}" currencyCode: "${currency}" cultureName: "${culture}" shipment: { shipmentMethodCode: "${ship.code}" shipmentMethodOption: "${ship.optionName}" price: ${ship.price?.amount ?? 0} deliveryAddress: { firstName: "Seed" lastName: "Agent" line1: "100 Main St" city: "New York" countryCode: "US" countryName: "United States" postalCode: "10001" regionId: "US-NY" regionName: "New York" } } }) { id } }`, 'set_shipment');

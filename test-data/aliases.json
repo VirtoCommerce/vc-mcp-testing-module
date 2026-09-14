@@ -7026,7 +7026,7 @@
     },
     "notes": "VCST-5735 /compare v2 — a configurable whose TWO configuration sections share one display label (\"Finish\"). The compare table keys configuration rows config:<label>, so a shared label is the only shape that can show one row overwriting the other; all 22 pre-existing configurable specs carry distinct section names, so the collision was unreachable however many configurables a case put side by side. The two sections carry DIFFERENT option sets and prices on purpose — identical content would make the rows indistinguishable even when the implementation is correct. Seeded by scripts/seed-data/products/seed-configurable.mjs --only CFG-033; drift-guarded by td:validate:cfg. NAVIGATE VIA {{FRONT_URL}}@td(CFG_DUPLABEL.url).",
     "_status": "authored-20260903"
-  },
+  },
   "ORG_LOY_A": {
     "_inline": true,
     "email": "agent-test-orgloy-a@test-agent.com",
@@ -7226,5 +7226,40 @@
       "seeded_at": "seeded_at"
     },
     "_notes": "VCST-5024 — the PARTIAL-ACCUMULATION probe, closing the gap this fixture set previously named as uncovered (\"does A's order advance a 2-order mission for B?\"). It became answerable only once the pool was genuinely organization-scoped. THE QUESTION IT DECIDES: after ORG_LOY_A places ONE order, does ORG_LOY_B read this mission at 1/2 (progress is pooled) or 0/2 (progress is user-keyed)? Neither member is Completed at that point, so the reading is unambiguous — which is precisely what a count-1 mission cannot give you, because it is Completed the instant anything accrues and \"B sees it done\" is then consistent with both pooled progress and pooled completion alone. The count MUST stay >= 2 and MUST differ from ORG_LOY_MISSION_2's 1, or the pair asks one question twice; td:validate:org-loyalty fails both collapses. reward 631 is distinct from 617/619 so a delta names this mission and not a sibling. Completing it takes TWO orders across the outlet, so budget for that. Seeded per-run by npm run seed:org-loyalty (or `--missions-only --only ORG_LOY_MISSION_PARTIAL`); guard npm run td:validate:org-loyalty. id/name/run_id are RUN-variant and live only in aliases.<env>.json."
+  },
+  "MULTI_ORG_LOY_POOLS": {
+    "_inline": true,
+    "user_email": "",
+    "user_id": "",
+    "techflow_org_id": "",
+    "buildright_org_id": "",
+    "techflow_balance_at_seed": "",
+    "buildright_balance_at_seed": "",
+    "user_balance_at_seed": "",
+    "techflow_earn_qty": "",
+    "buildright_earn_qty": "",
+    "user_earn_qty": "",
+    "earn_points_per_unit": "",
+    "earn_sku": "",
+    "store_mode_at_seed": "",
+    "seeded_at": "",
+    "fields": {
+      "user_email": "user_email",
+      "user_id": "user_id",
+      "techflow_org_id": "techflow_org_id",
+      "buildright_org_id": "buildright_org_id",
+      "techflow_balance_at_seed": "techflow_balance_at_seed",
+      "buildright_balance_at_seed": "buildright_balance_at_seed",
+      "user_balance_at_seed": "user_balance_at_seed",
+      "techflow_earn_qty": "techflow_earn_qty",
+      "buildright_earn_qty": "buildright_earn_qty",
+      "user_earn_qty": "user_earn_qty",
+      "earn_points_per_unit": "earn_points_per_unit",
+      "earn_sku": "earn_sku",
+      "store_mode_at_seed": "store_mode_at_seed",
+      "seeded_at": "seeded_at"
+    },
+    "_comment": "LOYORG-E2E-003 / suite 083e — the three DIVERGENT loyalty balances that make \"a buyer in two companies sees the right company points after switching\" DECIDABLE. Seeder scripts/seed-data/loyalty/seed-multiorg-loyalty-balance.mjs (npm run seed:multiorg-loyalty-balance); spec + divergence rules scripts/seed-data/loyalty/multiorg-balance-specs.mjs; drift guard npm run td:validate:multiorg-balance. EVERY field here is RUNTIME and therefore EMPTY in this committed base — an unseeded env must resolve them to \"\" (a clear miss), never to another env s value. They are written to aliases.<env>.json by the seeder. The account is MULTI_ORG_TF_BR_ALT (the FRONTEND-lane multi-org twin) and the two organization ids are re-recorded here from that alias so a case needs only ONE @td() namespace; the pinned org GUIDs remain owned by MULTI_ORG_TF_BR_ALT and are never edited here.",
+    "_notes": "THE GAP IT CLOSES: measured on vcst 2026-09-14, TechFlow, BuildRight and the account own user scope ALL read 0, so the two readings either side of an organization switch agreed trivially and the case own Preconditions instructed it to record inconclusive. It BLOCKED on exactly that in two consecutive runs. WHY ALL THREE MUST DIVERGE (.claude/rules/test-data.md SECOND RULE): three implementations have to produce three DIFFERENT observations — CORRECT (T then B), LEAKING (one pool whatever is active), WRONG FALLBACK (the user own balance). Fund only one organization and a 0 read under the other is indistinguishable from the fallback, which is also 0. The seeder therefore funds all three and REFUSES to record a triple in which any figure is equal to, an exact integer multiple of, the sum of, or the difference of the others — enforced by divergenceProblems() in the spec module and re-checked statically by td:validate:multiorg-balance. MECHANISM: there is NO balance-write API (the operation log is READ-ONLY — no set, no debit), so a balance moves ONLY when a REAL order earns. Attribution comes from order.OrganizationId, which the cart inherits from the organization_id claim on the caller token — verified live, and confirmed in vc-module-loyalty PR #17 LoyaltyProgramHandler. An accrual lands at organization scope ONLY while the store setting Loyalty.LoyaltyBalanceCalculationMode reads \"Organization\"; the platform default (and what the rest of the loyalty corpus assumes) is \"Customer\", so the seeder flips it, earns, and restores it in a finally. store_mode_at_seed records what it found and restored. LIMITS: balances are EARNED, drift upward forever, CANNOT be reset or torn down, and re-seeding earns AGAIN — so every assertion must be a RELATIVE delta against a reading taken immediately before the action, and *_balance_at_seed is a seed-time READING, not a contract. A user-scope read is UserId==x AND OrganizationId==null while an organization read is OrganizationId==x, so the two ledgers are independent and an organization-mode earn does NOT credit the earner own balance. This fixture makes the two pools distinguishable; it concludes nothing about WHICH organization the storefront displays or about token re-minting on a switch."
   }
 }

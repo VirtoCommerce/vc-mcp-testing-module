@@ -1,58 +1,48 @@
 {
-  "runId": "REG-2026-09-10-1453",
+  "runId": "REG-2026-09-14-1052",
   "status": "completed",
-  "startedAt": "2026-09-10T14:53:00Z",
-  "finishedAt": "2026-09-10T13:17:12.096Z",
-  "selection": "006,050d --ids (exact-set, VCST-5317 / qa-test Step 4c C1)",
+  "startedAt": "2026-09-14T10:53:21.509Z",
+  "finishedAt": "2026-09-14T11:17:15.101Z",
+  "selection": "083e",
   "env": "vcst",
-  "ticket": "VCST-5317",
-  "noPromote": true,
-  "note": "C1 ticket-regression run for VCST-5317. Exact 9-case scope: 006 (7 cases, MULTI_ORG_TF_BR_ALT) + 050d (2 cases, MULTI_ORG_TF_BR). No promotion, no tracker filing.",
+  "note": "Fifth 083e run. TWO things differ from REG-2026-09-14-0928: (1) the multi-org loyalty pools are now SEEDED and discriminating (TechFlow 98916 / BuildRight 219416 / ALT user 68916), so LOYORG-E2E-003 is decidable for the FIRST time; (2) execution follows CSV ORDER per the corrected manifest notes - the previous destructiveness-derived order hoisted E2E-002 ahead of its producer E2E-001 and BLOCKED it for a reason that was not the product.",
+  "caseOrder": [
+    "LOYORG-E2E-001",
+    "LOYORG-E2E-002",
+    "LOYORG-E2E-003",
+    "LOYORG-E2E-004",
+    "LOYORG-E2E-005",
+    "LOYORG-E2E-006"
+  ],
+  "caseOrderRationale": "CSV order. E2E-002 depends on E2E-001 state; E2E-005 writes the store mode and restores Organization itself.",
+  "multiOrgPools": {
+    "techflow": 98916,
+    "buildright": 219416,
+    "altUserScope": 68916
+  },
+  "knownOpenBugs": [
+    "VCST-5953 (LOYORG-E2E-006 asserts the broken behaviour directly)"
+  ],
   "suites": [
     {
-      "id": "006",
-      "name": "B2B Organization",
-      "file": "regression/suites/Frontend/b2b/006-b2b-organization.csv",
+      "id": "083e",
+      "name": "Loyalty Organization Balance Storefront",
+      "file": "regression/suites/Frontend/loyalty/083e-loyalty-organization-balance.csv",
       "status": "done",
       "browser": "playwright-chrome",
       "agent": "qa-frontend-expert",
       "lane": "browser",
-      "testCount": 7,
-      "layer": "Frontend",
-      "scopedIds": [
-        "B2C-ORG-041",
-        "B2C-ORG-047",
-        "B2C-ORG-066",
-        "B2C-ORG-067",
-        "B2C-ORG-068",
-        "B2C-ORG-069",
-        "B2C-ORG-070"
-      ],
-      "pass": 4,
-      "fail": 2,
-      "blocked": 1,
-      "skipped": 0,
-      "attempts": 1
-    },
-    {
-      "id": "050d",
-      "name": "GraphQL xProfile",
-      "file": "regression/suites/Backend/graphql/050d-graphql-xprofile.csv",
-      "status": "done",
-      "browser": "playwright-edge",
-      "agent": "qa-backend-expert",
-      "lane": "browser",
-      "testCount": 2,
-      "layer": "Backend",
-      "scopedIds": [
-        "PRF-GQL-092",
-        "PRF-GQL-093"
-      ],
-      "pass": 1,
-      "fail": 1,
-      "blocked": 0,
-      "skipped": 0,
-      "attempts": 1
+      "testCount": 6,
+      "startedAt": "2026-09-14T10:54:04.362Z",
+      "finishedAt": "2026-09-14T11:17:15.101Z",
+      "passed": 3,
+      "failed": 3,
+      "blocked": 0
     }
-  ]
+  ],
+  "storeModeRestored": {
+    "value": "Customer",
+    "verified": true,
+    "at": "2026-09-14T11:17:15.101Z"
+  }
 }

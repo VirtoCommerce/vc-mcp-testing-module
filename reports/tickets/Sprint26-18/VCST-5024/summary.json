@@ -268,22 +268,50 @@
     "dismissed": 0,
     "report_path": "reports/regression/REG-2026-09-11-1510/"
   },
-  "bugs_filed": [],
+  "bugs_filed": [
+    {
+      "key": "VCST-5953",
+      "severity": "Critical",
+      "priority": "Highest",
+      "title": "[Loyalty][Org mode] A buyer with no organization sees their points balance and cannot spend it",
+      "relationship": "IN-SCOPE -> Sub-task of VCST-5024",
+      "report": "reports/bugs/open/critical-high/BUG-org-mode-no-organization-buyer-cannot-spend-own-points-VCST-5953.md",
+      "filed": "2026-09-11",
+      "evidence_comment": {
+        "id": "109358",
+        "posted": "2026-09-14",
+        "images_inline": 3,
+        "verified": "renderedBody: 3 attachment-backed <img>, 0 surviving !png! tokens, 0 error spans, 0 emoticons",
+        "attachments": [
+          "83853 sf-11-D1-noorg-READS-38916.png",
+          "83854 02-cart-blocked-needs-6-have-0.png",
+          "83855 03-customer-mode-no-error.png"
+        ]
+      }
+    },
+    {
+      "key": "VCST-5954",
+      "severity": "Critical",
+      "priority": "Highest",
+      "title": "[Loyalty][Org mode] Switching a store to Organization mode re-mints every past mission reward and strands existing balances",
+      "relationship": "IN-SCOPE -> Sub-task of VCST-5024",
+      "report": "reports/bugs/open/critical-high/BUG-org-mode-switch-remints-mission-rewards-and-strands-balances-VCST-5954.md",
+      "filed": "2026-09-11",
+      "evidence_comment": {
+        "id": "109357",
+        "posted": "2026-09-14",
+        "images_inline": 3,
+        "verified": "renderedBody: 3 attachment-backed <img>, 0 surviving !png! tokens, 0 error spans",
+        "attachments": [
+          "83850 I1-org-oplog-blade-filtered-by-organizationId.png",
+          "83851 I1-E2-org-ledger-40152-no-member-column.png",
+          "83852 D4-contact-blade-A-user-scoped-39533.png"
+        ]
+      },
+      "relive": "Re-confirmed read-only 2026-09-14: org pool 163,505 and Member A 39,533 still coexist as disjoint pools; store back in Customer mode. Not re-reproduced (the flip is an irreversible write)."
+    }
+  ],
   "bugs_not_filed": [
-    {
-      "severity": "Critical",
-      "title": "Organization mode: a buyer with no organization sees their loyalty balance and cannot spend it",
-      "draft": "reports/bugs/open/critical-high/BUG-org-mode-no-organization-buyer-cannot-spend-own-points-VCST-5024.md",
-      "relationship": "IN-SCOPE -> Sub-task of VCST-5024",
-      "reason": "drafted, awaiting operator review before filing"
-    },
-    {
-      "severity": "Critical",
-      "title": "Switching a store to Organization mode re-mints every past mission reward and strands existing balances",
-      "draft": "reports/bugs/open/critical-high/BUG-org-mode-switch-remints-mission-rewards-and-strands-balances-VCST-5024.md",
-      "relationship": "IN-SCOPE -> Sub-task of VCST-5024",
-      "reason": "drafted, awaiting operator review"
-    },
     {
       "severity": "High",
       "title": "Organization mode: contact-level loyalty transactions are written but unreachable from every user-scoped read",

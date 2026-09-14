@@ -2,7 +2,7 @@
 
 ## Status: CONFIRMED
 
-**Severity:** Critical · **Priority:** High · **Found:** 2026-09-11 · **Ticket:** VCST-5024 (in-scope)
+**Severity:** Critical · **Priority:** High · **Found:** 2026-09-11 · **Ticket:** VCST-5954 (filed 2026-09-11, sub-task of VCST-5024)
 **Env:** vcst-qa — `BACK_URL=https://vcst-qa.govirto.com`, store `B2B-store`
 **Found by:** `/qa-test VCST-5024`, observed across a live `Customer → Organization → Customer` cycle. Figures re-derived from the live ledger at the 5b verifier gate.
 
@@ -34,6 +34,20 @@ So **20 of 21 reproduce the earlier set amount-for-amount**: `617, 508×3, 506×
 On the flip, members' pre-existing balances (39,533 and 100,033) read as **0** at organization scope and their mission progress reverted to `0%`. On the flip back, the organization's 163,505 points became readable **only** through the admin-only `GET /api/loyalty-program-operation-log/balance/organization/{organizationId}` — no member can see or spend them from either scope.
 
 **Expected:** a mode change either migrates the existing records to the new scope, or refuses while records exist under the other scope. Points already granted are never granted a second time.
+
+## Re-confirmed live 2026-09-14 (read-only)
+
+Re-checked three days after the run with an admin token, mutating nothing. The effect is durable, not a transient of the test window:
+
+| Read | Result |
+|---|---|
+| `GET /api/loyalty-program-operation-log/balance/organization/d2efa4d2-…` | **163,505** |
+| `GET /api/loyalty-program-operation-log/balance/user/e663868a-…` (Member A) | **39,533** |
+| `GET /api/stores/B2B-store` → `Loyalty.LoyaltyBalanceCalculationMode` | `null` — effective **Customer** |
+
+Two disjoint pools still coexist. Member A reads their original 39,533; the 163,505 organization pool (containing the 9,533 re-minted) is reachable only from the admin-only organization endpoint. Nothing reconciled on its own, and per `BL-LOY-019` nothing will.
+
+**Not re-reproduced deliberately** — re-running the flip is an irreversible write to loyalty balances and would mint a further round of duplicates. The read-only check establishes the same thing at no cost.
 
 ## Root cause analysis
 
@@ -77,3 +91,26 @@ The proportion is environment-specific — it reflects however much mission hist
 - The re-mint was measured for **one** member over **one** flip. The per-member and per-store totals will differ.
 - Whether a *third* mode change re-mints again is **not tested** — the org-scope progress rows now exist, so a second flip to the same organization plausibly does not. Untested either way.
 - No claim about behaviour on a store with no prior mission history; the defect needs history to be visible.
+
+## Fixture reset — 2026-09-14, repro identities no longer exist
+
+The org-loyalty fixtures this report and its tracker evidence were captured against were **deliberately
+torn down and re-seeded** on 2026-09-14, at operator instruction. The accounts and organization below
+were deleted; a re-seed created fresh ones with new GUIDs at zero balance.
+
+**A developer picking this ticket up cannot reproduce against the original identities.** The mechanism is
+unchanged and reproducible on freshly seeded fixtures; only these specific rows are gone.
+
+| Entity | Id | Final balance |
+|---|---|---|
+| Organization (AGENT-TEST-Org-LoyaltyOutlet) | `d2efa4d2-202f-4764-86b4-538ea2ba411e` | **433,912** |
+| ORG_LOY_A (member A) | `e663868a-8654-49d3-ae60-0d49e3559c0f` | 39,533 |
+| ORG_LOY_B (member B) | `c26999e3-d9e3-42f2-9b23-1a2434e41889` | 100,033 |
+| ORG_LOY_LOCKED | `7a403b1c-3086-45ad-8282-f8bde496d05a` | 0 |
+| LOY_PERSONAL_NOORG | `f3f27c56-adf5-43ba-afcc-c095d6a60101` | 38,916 |
+
+Full 44-row organization ledger as it stood at deletion:
+`reports/regression/REG-2026-09-14-0852/evidence-org-ledger-postrun.json`.
+
+Note the teardown **cannot un-earn points** (`seed-org-loyalty.mjs:34`) — it deletes the accounts, and
+their operation-log rows remain stranded in the database with no owner.

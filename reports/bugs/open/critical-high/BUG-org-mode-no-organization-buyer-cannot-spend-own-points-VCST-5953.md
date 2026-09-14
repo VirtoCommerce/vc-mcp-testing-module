@@ -2,7 +2,7 @@
 
 ## Status: CONFIRMED
 
-**Severity:** Critical · **Priority:** High · **Found:** 2026-09-11 · **Ticket:** VCST-5024 (in-scope)
+**Severity:** Critical · **Priority:** High · **Found:** 2026-09-11 · **Ticket:** VCST-5953 (filed 2026-09-11, sub-task of VCST-5024)
 **Env:** vcst-qa — `FRONT_URL=https://vcst-qa-storefront.govirto.com`, `BACK_URL=https://vcst-qa.govirto.com`, store `B2B-store`
 **Found by:** `/qa-test VCST-5024`, then re-investigated end-to-end via `/qa-investigate`. Reproduced on a fresh session and a fresh page load; deterministic.
 
@@ -83,3 +83,26 @@ Note `BL-LOY-008` **passes on its own terms** here — `required > available`, b
 - **No trace ID and no HAR** were captured. For this failure class none exists: the response is HTTP **200** carrying a `validationErrors[]` entry, so App Insights holds no exception, no failed request and no dependency failure (0 product exceptions across the whole test window). Stated rather than left blank.
 - Whether a **non-member or locked member can spend** an organization's pool is **not tested** — that is the restrictive half of the story's second sentence and is a separate open question.
 - The exact proportion of affected shoppers on any real store is not estimated.
+
+## Fixture reset — 2026-09-14, repro identities no longer exist
+
+The org-loyalty fixtures this report and its tracker evidence were captured against were **deliberately
+torn down and re-seeded** on 2026-09-14, at operator instruction. The accounts and organization below
+were deleted; a re-seed created fresh ones with new GUIDs at zero balance.
+
+**A developer picking this ticket up cannot reproduce against the original identities.** The mechanism is
+unchanged and reproducible on freshly seeded fixtures; only these specific rows are gone.
+
+| Entity | Id | Final balance |
+|---|---|---|
+| Organization (AGENT-TEST-Org-LoyaltyOutlet) | `d2efa4d2-202f-4764-86b4-538ea2ba411e` | **433,912** |
+| ORG_LOY_A (member A) | `e663868a-8654-49d3-ae60-0d49e3559c0f` | 39,533 |
+| ORG_LOY_B (member B) | `c26999e3-d9e3-42f2-9b23-1a2434e41889` | 100,033 |
+| ORG_LOY_LOCKED | `7a403b1c-3086-45ad-8282-f8bde496d05a` | 0 |
+| LOY_PERSONAL_NOORG | `f3f27c56-adf5-43ba-afcc-c095d6a60101` | 38,916 |
+
+Full 44-row organization ledger as it stood at deletion:
+`reports/regression/REG-2026-09-14-0852/evidence-org-ledger-postrun.json`.
+
+Note the teardown **cannot un-earn points** (`seed-org-loyalty.mjs:34`) — it deletes the accounts, and
+their operation-log rows remain stranded in the database with no owner.
