@@ -6,6 +6,7 @@ import { spawn, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1586,6 +1587,146 @@ function oauthLaunchDeps(entryName, decl, cfg, { backend = detectLocalBackend(),
     };
 }
 
+// The per-launch delivery channel a mid-session renewal uses to hand a fresh token into the
+// server process it is already running -- the launcher's other half of ensureFreshToken's
+// contract. Nothing here decides WHEN to renew; cmdLaunch (Task 20) owns the timer and calls
+// push() on it.
+const CHANNEL_GREETING_MAX = 4096;
+
+// NOT the lock's namespace, and the asymmetry is deliberate: the lock binds an abstract socket
+// precisely because nothing secret crosses it, and a token crosses this one. An abstract name has
+// no filesystem entry and therefore no mode bits at all, so the channel is a filesystem socket at
+// 0600 -- gated by uid AND by the nonce. On Windows a named pipe takes no mode bits either, which
+// is what makes the nonce mandatory rather than defence in depth.
+// On Windows the pipe name is the channel's ENTIRE identity: a named pipe takes no mode bits, so
+// nothing else separates one developer's channel from another's, or one launch from a concurrent
+// one. Per LAUNCH rather than per server -- two sessions may run the same server at once -- so the
+// pid belongs in the name rather than in every caller's memory. Extracted for the same reason
+// lockPathFor is: the collision properties are worth asserting, and an inlined name cannot be.
+function channelPipeName(name, scopeKey, { env = process.env, pid = process.pid } = {}) {
+    return `\\\\.\\pipe\\vc-secrets-ch-${cache.sanitize(env.USERNAME || "user")}-${cache.sanitize(scopeKey)}-${cache.sanitize(name)}-${pid}`;
+}
+
+async function createChannel({ name, scopeKey, nonce, onRefusal = () => {}, chmod = fs.chmodSync,
+    rm = (dir) => fs.rmSync(dir, { recursive: true, force: true }) }) {
+    // /tmp rather than os.tmpdir(): sun_path is ~104 bytes, and a redirected TMPDIR is routinely
+    // long enough to overflow it -- the same measurement that made lockPathFor hardcode /tmp on
+    // darwin. An overflow is an EINVAL at bind time on a machine where everything else works.
+    const dir = process.platform === "win32" ? null : fs.mkdtempSync(path.join("/tmp", "vc-secrets-ch-"));
+    const channelPath = process.platform === "win32" ? channelPipeName(name, scopeKey) : path.join(dir, "c.sock");
+    const nonceDigest = crypto.createHash("sha256").update(String(nonce)).digest();
+    const clients = new Set();
+    // The last token pushed, handed to a client that authenticates later. A push reaching only
+    // the sockets connected at that instant is lost with no error anywhere when the server has
+    // not finished starting, and the session then runs to the expiry of its env token -- the very
+    // failure the channel exists to prevent, reintroduced by the delivery mechanism.
+    let latest = null;
+    const frameOf = (token) => JSON.stringify({ token }) + "\n";
+    const server = net.createServer((sock) => {
+        let greeting = "";
+        const refuse = (why) => {
+            onRefusal(why);
+            fs.writeSync(2, `vc-secrets: channel client refused (${why})\n`);
+            sock.destroy();
+        };
+        const onData = (buf) => {
+            greeting += buf.toString("utf8");
+            if (greeting.length > CHANNEL_GREETING_MAX) {
+                refuse("oversize");
+
+                return;
+            }
+            const nl = greeting.indexOf("\n");
+            if (nl < 0) {
+                return;   // a stream socket may deliver the greeting in pieces
+            }
+            sock.off("data", onData);
+            let ok = false;
+            try {
+                const presented = JSON.parse(greeting.slice(0, nl)).nonce;
+                // Digests, because timingSafeEqual throws on unequal lengths: comparing the raw
+                // values would make a wrong-LENGTH nonce distinguishable from a wrong-value one.
+                ok = crypto.timingSafeEqual(crypto.createHash("sha256").update(String(presented)).digest(), nonceDigest);
+            } catch {
+                ok = false;
+            }
+            if (!ok) {
+                refuse("nonce");
+
+                return;
+            }
+            clients.add(sock);
+            if (latest !== null) {
+                sock.write(frameOf(latest));
+            }
+        };
+        sock.on("data", onData);
+        sock.on("close", () => clients.delete(sock));
+        sock.on("error", () => { clients.delete(sock); sock.destroy(); });
+    });
+    try {
+        await new Promise((resolve, reject) => {
+            server.once("error", reject);
+            server.listen(channelPath, resolve);
+        });
+        if (dir !== null) {
+            chmod(channelPath, 0o600);
+        }
+    } catch (e) {
+        // The directory exists from mkdtempSync above and the server may already be bound. A
+        // caller that CATCHES this would otherwise hang on a live listener and leave the
+        // directory behind -- and the launcher's own exit handler is not registered yet.
+        try {
+            server.close();
+        } catch { /* never listened */ }
+        if (dir !== null) {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+        throw e;
+    }
+    // The listen promise CONSUMED the one-shot listener, and a net.Server whose error reaches no
+    // listener throws -- straight into process.on("uncaughtException") and out through fail(). A
+    // channel that cannot accept a client must degrade to a session that stops renewing, never
+    // to a session that dies.
+    server.removeAllListeners("error");
+    server.on("error", (e) => fs.writeSync(2, `vc-secrets: channel error: ${e.code ?? e.message}\n`));
+    server.unref();   // the channel must not keep the launcher alive
+    const removeSync = () => {
+        if (dir !== null) {
+            try {
+                rm(dir);
+            } catch { /* best effort: an exit handler has nowhere to report to */ }
+        }
+    };
+
+    return {
+        path: channelPath,
+        push: (token) => {
+            latest = token;
+            let delivered = 0;
+            for (const sock of clients) {
+                sock.write(frameOf(token));
+                delivered += 1;
+            }
+
+            return delivered;
+        },
+        removeSync,
+        close: () => new Promise((resolve) => {
+            // Destroyed rather than left to drain: server.close() waits for open connections, so
+            // a live server child would turn teardown into a hang.
+            for (const sock of clients) {
+                sock.destroy();
+            }
+            clients.clear();
+            server.close(() => {
+                removeSync();
+                resolve();
+            });
+        }),
+    };
+}
+
 // The interactive sign-in callback surface: the loopback listener that receives Entra's redirect,
 // the leaf that decides what a given request means, the two tiny pages the browser ends up
 // looking at, and the browser opener. No storage, no mutex — that is `login`'s job, not this one's.
@@ -3075,6 +3216,7 @@ export {
     buildKeyvaultRead, TIMEOUT_LOCAL_MS, TIMEOUT_AZ_MS, VALUE_ON_STDIN,
     COMMAND_ON_STDIN, quoteForSecurityInteractive, writeSecretValue,
     tokenLockFor, acquireTokenLock, ensureFreshToken, oauthLaunchDeps,
+    CHANNEL_GREETING_MAX, channelPipeName, createChannel,
     REDIRECT_PATH, MAX_ERROR_PARAMS, closeTabPage, forTerminal, escapeHtml, failedPage, listenForCallback,
     openBrowser, buildBrowserCommand, handleCallback, cmdLogin, cmdLogout,
     runTool, resolveSpawnCommand, buildSpawnInvocation, makeSecretResolver, cmdRun, cmdTask, cmdLaunch, killProcessTree,

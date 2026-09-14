@@ -2922,7 +2922,7 @@ test("isTargetEntry never throws: a malformed target is simply not matched", () 
 });
 
 // -----
-// The preload, run as a real process against a stub channel
+// The preload, run as a real process against the real channel or a raw-socket fixture
 
 // The module URLs the fixtures below load, computed once from this test file's own URL so they
 // resolve regardless of the spawned process's working directory.
@@ -2976,11 +2976,395 @@ const channelTest = (name, fn) => test(name, async (t) => {
     await fn(t);
 });
 
-// A minimal stand-in for the real vc-secrets channel: it speaks the wire protocol and nothing
-// more -- one greeting in, newline-delimited frames out -- and implements none of the channel's
-// own checks (no nonce comparison, no single-client enforcement), which is why no test here
-// asserts a refusal. Task 17 replaces this with the real createChannel.
-function startStubChannel(onGreeting) {
+// ---- The token channel itself (Task 17): createChannel, channelPipeName, CHANNEL_GREETING_MAX ----
+//
+// These drive the real channel directly, at the wire protocol -- no spawned process, no
+// preload -- because that is the layer Task 17 owns. The preload-level tests below (against
+// startRawSocketFixture, and the four re-pointed at the real channel) are the integration half.
+
+// Strips comments from a function's toString() before a source-text assertion matches it, so a
+// comment or a disabled line quoting the same identifier cannot satisfy the match. Not a full
+// parser -- it tracks string/template literals only so a "//" or "/*" inside one is left alone,
+// which is all this file's own functions ever need.
+function stripComments(src) {
+    let out = "";
+    let i = 0;
+    while (i < src.length) {
+        const two = src.slice(i, i + 2);
+        if (two === "//") {
+            const nl = src.indexOf("\n", i);
+            if (nl < 0) {
+                break;
+            }
+            i = nl;
+            continue;
+        }
+        if (two === "/*") {
+            const end = src.indexOf("*/", i + 2);
+            i = end < 0 ? src.length : end + 2;
+            continue;
+        }
+        const ch = src[i];
+        if (ch === '"' || ch === "'" || ch === "`") {
+            out += ch;
+            i += 1;
+            while (i < src.length && src[i] !== ch) {
+                if (src[i] === "\\") {
+                    out += src[i] + (src[i + 1] ?? "");
+                    i += 2;
+                    continue;
+                }
+                out += src[i];
+                i += 1;
+            }
+            out += src[i] ?? "";
+            i += 1;
+            continue;
+        }
+        out += ch;
+        i += 1;
+    }
+
+    return out;
+}
+
+// A raw client for the real channel's wire protocol: one JSON greeting line out, then whatever
+// comes back. Used only by the tests below that drive createChannel directly.
+function connectAndGreet(channelPath, { nonce }) {
+    return new Promise((resolve, reject) => {
+        const sock = net.connect(channelPath);
+        let received = "";
+        // Both callers expect a REFUSAL, i.e. the server closing the connection. Without a bound,
+        // a broken refusal (the defect these tests exist to catch) hangs the whole suite instead
+        // of failing it -- this timer turns that into an ordinary failed assertion.
+        const timer = setTimeout(() => {
+            sock.destroy();
+            reject(new Error("connectAndGreet: the server never closed the connection"));
+        }, 2000);
+        sock.once("connect", () => sock.write(JSON.stringify({ nonce }) + "\n"));
+        sock.on("data", (chunk) => { received += chunk.toString("utf8"); });
+        sock.once("close", () => { clearTimeout(timer); resolve(received); });
+        sock.once("error", (e) => { clearTimeout(timer); reject(e); });
+    });
+}
+
+// Writes raw bytes with no framing at all -- for the oversize-greeting case, which must never
+// see a newline.
+function connectAndSend(channelPath, raw) {
+    return new Promise((resolve, reject) => {
+        const sock = net.connect(channelPath);
+        const timer = setTimeout(() => {
+            sock.destroy();
+            reject(new Error("connectAndSend: the server never closed the connection"));
+        }, 2000);
+        sock.once("connect", () => sock.write(raw));
+        sock.once("close", () => { clearTimeout(timer); resolve(); });
+        sock.once("error", (e) => { clearTimeout(timer); reject(e); });
+    });
+}
+
+// Greets and resolves with the token from the first frame the channel sends back.
+function connectAndReadToken(channelPath, { nonce }) {
+    return new Promise((resolve, reject) => {
+        const sock = net.connect(channelPath);
+        let buf = "";
+        // A dropped delivery (the defect these tests exist to catch) otherwise hangs the whole
+        // suite instead of failing it.
+        const timer = setTimeout(() => {
+            sock.destroy();
+            reject(new Error("connectAndReadToken: no token frame arrived"));
+        }, 2000);
+        sock.once("connect", () => sock.write(JSON.stringify({ nonce }) + "\n"));
+        sock.on("data", (chunk) => {
+            buf += chunk.toString("utf8");
+            const nl = buf.indexOf("\n");
+            if (nl >= 0) {
+                clearTimeout(timer);
+                sock.destroy();
+                try {
+                    resolve(JSON.parse(buf.slice(0, nl)).token);
+                } catch (e) {
+                    reject(e);
+                }
+            }
+        });
+        sock.once("error", (e) => { clearTimeout(timer); reject(e); });
+    });
+}
+
+// Greets and resolves once the FIRST frame arrives, leaving the socket open -- unlike
+// connectAndReadToken, which destroys it. A first frame is proof of authentication (the server
+// serves `latest` to it the instant it authenticates), so this makes "is this client
+// authenticated yet" observable instead of assumed after a fixed delay. Returns { sock, first,
+// next } -- `next()` awaits the frame after that one; the caller owns destroying `sock`.
+//
+// A frame that arrives before `next()` is called is queued rather than dropped: a caller driving
+// two clients (push, then await client A's next(), then client B's) has B's frame land during the
+// await on A -- with no queue that frame is lost and B's later next() hangs forever.
+function connectAndAwaitAuth(channelPath, { nonce }) {
+    return new Promise((resolve, reject) => {
+        const sock = net.connect(channelPath);
+        let buf = "";
+        let authenticated = false;
+        const queue = [];
+        let pending = null;
+        const timer = setTimeout(() => {
+            sock.destroy();
+            reject(new Error("connectAndAwaitAuth: no token frame arrived"));
+        }, 2000);
+        const deliver = (token) => {
+            if (pending !== null) {
+                pending.resolve(token);
+                pending = null;
+            } else {
+                queue.push(token);
+            }
+        };
+        sock.once("connect", () => sock.write(JSON.stringify({ nonce }) + "\n"));
+        sock.on("data", (chunk) => {
+            buf += chunk.toString("utf8");
+            let nl;
+            while ((nl = buf.indexOf("\n")) >= 0) {
+                const line = buf.slice(0, nl);
+                buf = buf.slice(nl + 1);
+                let token;
+                try {
+                    token = JSON.parse(line).token;
+                } catch (e) {
+                    if (pending !== null) {
+                        pending.reject(e);
+                        pending = null;
+                    }
+                    continue;
+                }
+                if (!authenticated) {
+                    authenticated = true;
+                    clearTimeout(timer);
+                    resolve({
+                        sock,
+                        first: token,
+                        next: () => (queue.length > 0
+                            ? Promise.resolve(queue.shift())
+                            : new Promise((res, rej) => { pending = { resolve: res, reject: rej }; })),
+                    });
+                } else {
+                    deliver(token);
+                }
+            }
+        });
+        sock.once("error", (e) => { clearTimeout(timer); reject(e); });
+    });
+}
+
+channelTest("a client presenting no nonce or a wrong one is refused and gets no token", async () => {
+    // AC 13. The channel is reachable by any same-user process; the nonce is mandatory rather
+    // than defence in depth. Pushed BEFORE connecting so a leaked frame is observable -- without
+    // it, "received nothing" has two causes (refused, or simply never served), and the mcpw.test.js:3589
+    // preload test below is the faithful port of this refusal at the process level.
+    const refusals = [];
+    const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "right",
+        onRefusal: (w) => refusals.push(w) });
+    try {
+        ch.push("t1");
+        const received = await connectAndGreet(ch.path, { nonce: "wrong" });
+        assert.deepEqual(refusals, ["nonce"]);
+        assert.equal(received, "", "a refused client must receive no token frame");
+    } finally {
+        await ch.close();
+    }
+});
+
+test("a wrong-LENGTH nonce is not distinguishable from a wrong-value one", () => {
+    // timingSafeEqual throws on unequal lengths, so both sides are hashed to equal length first.
+    // No behavioural seam can observe this -- the catch turns either kind of mismatch into the
+    // same "nonce" refusal -- so this asserts on source text, with comments stripped first.
+    // Matching the two identifiers separately proves nothing: nonceDigest's OWN construction
+    // also calls createHash("sha256"), so a mutant comparing raw presented/nonce values still
+    // satisfies two lone matches. The binding under test is the timingSafeEqual CALL itself --
+    // its first argument hashing `presented`, its second the digest built from `nonce`.
+    const src = stripComments(m.createChannel.toString());
+    assert.match(src, /crypto\.timingSafeEqual\(crypto\.createHash\("sha256"\)\.update\(String\(presented\)\)\.digest\(\), nonceDigest\)/);
+    assert.match(src, /const nonceDigest = crypto\.createHash\("sha256"\)\.update\(String\(nonce\)\)\.digest\(\);/);
+});
+
+channelTest("an oversize greeting is refused rather than buffered without bound", async () => {
+    const refusals = [];
+    const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "n",
+        onRefusal: (w) => refusals.push(w) });
+    try {
+        await connectAndSend(ch.path, "x".repeat(m.CHANNEL_GREETING_MAX + 1));
+        assert.deepEqual(refusals, ["oversize"]);
+    } finally {
+        await ch.close();
+    }
+});
+
+channelTest("a client that authenticates AFTER a push still receives the latest token", async () => {
+    // A push reaching only the sockets connected AT THAT INSTANT is lost with no error anywhere
+    // when the server has not finished starting -- and the session then runs to the expiry of
+    // its env token, which is the failure the channel exists to prevent. Ported from
+    // mcpw.test.js:3621, at the channel's own level rather than through a spawned preload.
+    const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "n" });
+    try {
+        assert.equal(ch.push("t1"), 0);
+        assert.equal(await connectAndReadToken(ch.path, { nonce: "n" }), "t1");
+    } finally {
+        await ch.close();
+    }
+});
+
+channelTest("the socket is private to this uid, and its directory goes on close", async () => {
+    // Ported from mcpw.test.js:3638.
+    const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "n" });
+    const dir = path.dirname(ch.path);
+    if (process.platform !== "win32") {
+        assert.equal(fs.statSync(ch.path).mode & 0o777, 0o600);
+        assert.equal(fs.statSync(dir).mode & 0o777, 0o700);
+    }
+    await ch.close();
+    if (process.platform !== "win32") {
+        assert.equal(fs.existsSync(dir), false, "one leftover directory per launch, otherwise");
+    }
+    // Asserted on BOTH platforms, because on Windows the two above are not: a named pipe has no
+    // directory and no mode bits, so without this the whole test degrades to "create a channel,
+    // close it, assert nothing" there -- and a close() that never released the endpoint is green.
+    await assert.rejects(() => new Promise((resolve, reject) => {
+        const probe = net.connect(ch.path);
+        probe.once("connect", () => { probe.destroy(); resolve(); });
+        probe.once("error", reject);
+    }), "a closed channel must not still accept clients");
+});
+
+channelTest("close() releases the endpoint, not merely the directory", async (t) => {
+    // Ported from mcpw.test.js:3659. The connect assertion in the test above cannot fail on
+    // POSIX: close() removes the whole directory, so a connect answers ENOENT whether or not the
+    // listener was ever released. Suppressing only the directory teardown makes the guarantee
+    // falsifiable: node unlinks a unix socket exactly when the server closes and not before, so
+    // with the directory still present, the FILE's absence is the release, and its presence is a
+    // listener that outlived its channel.
+    if (process.platform === "win32") {
+        t.skip("no directory to suppress -- the connect assertion above is load-bearing there");
+
+        return;
+    }
+    let dir = null;
+    const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "n",
+        rm: (d) => { dir = d; } });
+    try {
+        await ch.close();
+        assert.ok(dir !== null && fs.existsSync(dir),
+            "the directory must survive, or the socket's absence would prove nothing");
+        assert.equal(fs.existsSync(ch.path), false,
+            "the socket file outliving close() means the listener did too");
+    } finally {
+        fs.rmSync(dir ?? "/nonexistent", { recursive: true, force: true });
+    }
+});
+
+channelTest("close() destroys still-open client sockets rather than waiting for them to drain", async () => {
+    // Neither test above ever leaves a connection open when close() runs, so neither can catch
+    // this comment's own claim going missing: server.close() alone waits for every open
+    // connection to end, and a client that never destroys its own end would turn teardown into a
+    // hang. Authentication is made OBSERVABLE -- the client waits for the pushed frame `latest`
+    // serves on a successful greet -- rather than assumed after a fixed delay, which under load
+    // can fail this test for the wrong reason (the socket not yet in `clients` when close() runs).
+    // Racing close() against a timer is the only way to see "did not hang" without actually
+    // hanging this suite if it regresses.
+    const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "n" });
+    ch.push("t1");
+    const { sock, first } = await connectAndAwaitAuth(ch.path, { nonce: "n" });
+    try {
+        assert.equal(first, "t1", "the client must be authenticated before close() races it");
+        const closed = ch.close().then(() => "closed");
+        const timedOut = new Promise((resolve) => { setTimeout(() => resolve("timed-out"), 2000); });
+        assert.equal(await Promise.race([closed, timedOut]), "closed",
+            "a live, un-destroyed client must not turn close() into a hang");
+        await closed;
+    } finally {
+        sock.destroy();
+    }
+});
+
+channelTest("the channel path is a filesystem socket, never the lock's abstract namespace", async () => {
+    // NOT the lock's namespace, on purpose (see the comment above createChannel): an abstract
+    // name has no mode bits, and a token needs the 0600 the "socket is private to this uid" test
+    // above checks -- the lock never carries a secret, which is why it can afford one.
+    const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "n" });
+    try {
+        assert.ok(!ch.path.startsWith("\0"), "an abstract name has no mode bits to set");
+    } finally {
+        await ch.close();
+    }
+});
+
+test("channelPipeName: two users, two scopes, two servers and two launches never share a pipe", () => {
+    // Ported from mcpw.test.js:3687, extended with two scopes -- the property scopeKey adds and
+    // the source could not have had. The Windows channel has no mode bits, so the NAME is the
+    // whole of what separates one developer's, one project's, or one launch's token stream from
+    // another's.
+    const at = (user, scopeKey, name, pid) => m.channelPipeName(name, scopeKey, { env: { USERNAME: user }, pid });
+    assert.match(at("usera", "p1", "azure-mcp", 1234), /^\\\\\.\\pipe\\vc-secrets-ch-usera-p1-azure-mcp-1234$/);
+    assert.notEqual(at("usera", "p1", "azure-mcp", 1234), at("userb", "p1", "azure-mcp", 1234), "two users");
+    assert.notEqual(at("usera", "p1", "azure-mcp", 1234), at("usera", "p2", "azure-mcp", 1234), "two scopes");
+    assert.notEqual(at("usera", "p1", "azure-mcp", 1234), at("usera", "p1", "github", 1234), "two servers");
+    assert.notEqual(at("usera", "p1", "azure-mcp", 1234), at("usera", "p1", "azure-mcp", 5678), "two launches");
+    assert.equal(at("dom\\user", "p1", "a/b", 1), "\\\\.\\pipe\\vc-secrets-ch-dom_user-p1-a_b-1",
+        "a separator in either name cannot reshape the pipe path");
+});
+
+test("a channel that cannot accept a client degrades to no renewal, never to a dead session", () => {
+    // The listen promise consumes the one-shot error listener, and a net.Server whose error
+    // reaches no listener throws -- into uncaughtException and out through fail(). No
+    // behavioural seam observes this without actually killing the process, so this asserts on
+    // source text, with comments stripped first.
+    const src = stripComments(m.createChannel.toString());
+    assert.match(src, /server\.removeAllListeners\("error"\)/);
+});
+
+channelTest("a failure after the directory exists takes the directory with it", async (t) => {
+    // Ported from mcpw.test.js:4044. mkdtemp runs before the bind, and the launcher's own exit
+    // handler is not registered yet -- so a throw here leaves the directory (and a live
+    // listener) behind with nothing to remove it.
+    if (process.platform === "win32") {
+        t.skip("a named pipe has no directory, so chmod is never reached");
+
+        return;
+    }
+    let dir = null;
+    await assert.rejects(() => m.createChannel({ name: "s", scopeKey: "p1", nonce: "n",
+        chmod: (p) => { dir = path.dirname(p); throw new Error("chmod refused"); } }), /chmod refused/);
+    assert.ok(dir !== null, "the failure must happen after the directory exists, or this proves nothing");
+    assert.equal(fs.existsSync(dir), false);
+});
+
+channelTest("the channel serves every authenticated client, so an earlier matching process cannot starve the server of renewals", async () => {
+    // Both clients must be authenticated before the SECOND push, or the count below proves
+    // nothing about a second client -- a late one is already covered by the "authenticates AFTER
+    // a push" test above via `latest`, which is a different mechanism from this one. Authentication
+    // is made observable (each client waits for the first pushed frame) rather than assumed after
+    // a fixed delay, which under load can fail this test for the wrong reason.
+    const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "n" });
+    ch.push("first");
+    const a = await connectAndAwaitAuth(ch.path, { nonce: "n" });
+    const b = await connectAndAwaitAuth(ch.path, { nonce: "n" });
+    try {
+        assert.equal(a.first, "first");
+        assert.equal(b.first, "first");
+        assert.equal(ch.push("shared-token"), 2, "an earlier matching process must not have taken the only slot");
+        assert.equal(await a.next(), "shared-token");
+        assert.equal(await b.next(), "shared-token");
+    } finally {
+        a.sock.destroy();
+        b.sock.destroy();
+        await ch.close();
+    }
+});
+
+// A raw-socket fixture, not a stand-in for the channel's own checks: it exists because it can
+// write bytes the real push() never produces (a split frame, coalesced frames, an unparsable
+// frame, a null frame) and because it can observe a connection that never authenticates
+// (`connections`), which the real channel exposes to no caller.
+function startRawSocketFixture(onGreeting) {
     const channelPath = stubChannelPath();
     const greetings = [];
     const sockets = new Set();
@@ -3111,22 +3495,44 @@ function preloadEnv(stub, overrides = {}) {
 const TARGET_ENTRY = "node_modules/@vendor/server/dist/index.js";
 
 channelTest("a target process receives the token into the variable its own environment names, and writes nothing on fd 1", async () => {
-    const stub = await startStubChannel((sock) => {
-        sock.write(JSON.stringify({ token: "delivered-token" }) + "\n");
-    });
+    // Moved from a stub to the real createChannel (Decision 9): pushed before the child starts,
+    // so `latest` serves it once the preload authenticates -- the delivery itself is now the
+    // proof of the handshake that `stub.greetings` used to stand for.
+    const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "right-nonce" });
     try {
+        ch.push("delivered-token");
         const entry = writeEntry(TARGET_ENTRY, pollingBody("SERVER_TOKEN", 5000));
-        const { out, err } = await runEntry(entry, preloadEnv(stub));
+        const { out, err } = await runEntry(entry, preloadEnv(ch));
         assert.match(err, /VAR=delivered-token/);
         assert.equal(out, "", "the preload must never write on fd 1");
-        assert.deepEqual(stub.greetings, [{ nonce: "right-nonce" }], "the preload's half of the handshake");
     } finally {
-        await stub.close();
+        await ch.close();
+    }
+});
+
+channelTest("preload: a wrong nonce is refused and nothing is assigned", async () => {
+    // Faithful port of mcpw.test.js:3589-3604, against the real createChannel: a push BEFORE the
+    // wrong-nonce child runs is what makes "nothing is assigned" a claim about the refusal rather
+    // than about a token that was simply never sent. The channel-level test above pins the same
+    // refusal at the channel's own API; this one pins it at the process boundary the preload
+    // actually crosses.
+    const refusals = [];
+    const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "right-nonce",
+        onRefusal: (w) => refusals.push(w) });
+    try {
+        ch.push("delivered-token");
+        const entry = writeEntry(TARGET_ENTRY, pollingBody("SERVER_TOKEN", 800));
+        const { out, err } = await runEntry(entry, preloadEnv(ch, { VC_SECRETS_CHANNEL_NONCE: "wrong-nonce" }));
+        assert.match(err, /VAR=<unset>/);
+        assert.equal(out, "");
+        assert.deepEqual(refusals, ["nonce"], "the refusal must be observable, or this test cannot fail");
+    } finally {
+        await ch.close();
     }
 });
 
 channelTest("a process that is not the target takes no action on either fd", async () => {
-    const stub = await startStubChannel((sock) => {
+    const stub = await startRawSocketFixture((sock) => {
         sock.write(JSON.stringify({ token: "delivered-token" }) + "\n");
     });
     try {
@@ -3144,7 +3550,7 @@ channelTest("a process that is not the target takes no action on either fd", asy
 channelTest("a frame split across two writes is reassembled, not dropped", async () => {
     // A stream socket may split writes; "one chunk is one frame" works on every machine it is
     // tried on and fails as a silently ignored renewal.
-    const stub = await startStubChannel((sock) => {
+    const stub = await startRawSocketFixture((sock) => {
         sock.write('{"tok');
         setTimeout(() => sock.write('en":"split-token"}\n'), 100);
     });
@@ -3159,7 +3565,7 @@ channelTest("a frame split across two writes is reassembled, not dropped", async
 });
 
 channelTest("of frames coalesced into one write, the last one wins", async () => {
-    const stub = await startStubChannel((sock) => {
+    const stub = await startRawSocketFixture((sock) => {
         sock.write('{"token":"first"}\n{"token":"second"}\n');
     });
     try {
@@ -3172,7 +3578,7 @@ channelTest("of frames coalesced into one write, the last one wins", async () =>
 });
 
 channelTest("an unreadable frame is reported on fd 2 without echoing any of it, and reading continues", async () => {
-    const stub = await startStubChannel((sock) => {
+    const stub = await startRawSocketFixture((sock) => {
         sock.write('NOT-JSON-secret-prefix\n{"token":"after"}\n');
     });
     try {
@@ -3190,7 +3596,7 @@ channelTest("an unreadable frame is reported on fd 2 without echoing any of it, 
 });
 
 channelTest("a null frame is ignored, and reading continues", async () => {
-    const stub = await startStubChannel((sock) => {
+    const stub = await startRawSocketFixture((sock) => {
         sock.write('null\n{"token":"after"}\n');
     });
     try {
@@ -3214,57 +3620,78 @@ channelTest("an unreachable channel is reported on fd 2 and costs the renewal, n
 });
 
 channelTest("the token receiver does not keep the server process alive", async () => {
-    const stub = await startStubChannel(() => {});
+    // Moved from a stub to the real createChannel (Decision 9): pushed before the child starts.
+    // The old positive control (`stub.greetings.length === 1`) is replaced by the delivery
+    // itself -- the entry now also polls and reports the variable, without exiting on it, so the
+    // "MAIN DONE" / timedOut assertions this test is actually named for still run on their own
+    // timing and are not raced by the poll's own exit(0).
+    const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "right-nonce" });
     try {
-        const entry = writeEntry(TARGET_ENTRY, 'setTimeout(() => process.stderr.write("MAIN DONE\\n"), 300);');
-        const { err, code, timedOut } = await runEntry(entry, preloadEnv(stub), { timeoutMs: 4000 });
+        ch.push("delivered-token");
+        const entry = writeEntry(TARGET_ENTRY, `
+            let waited = 0;
+            const tick = setInterval(() => {
+                const v = process.env.SERVER_TOKEN;
+                waited += 25;
+                if (v || waited >= 800) {
+                    clearInterval(tick);
+                    process.stderr.write("VAR=" + (v ?? "<unset>") + "\\n");
+                }
+            }, 25);
+            setTimeout(() => process.stderr.write("MAIN DONE\\n"), 300);
+        `);
+        const { err, code, timedOut } = await runEntry(entry, preloadEnv(ch), { timeoutMs: 4000 });
         assert.equal(timedOut, false, "an un-unref'd socket keeps the server alive until the launcher goes away");
         assert.equal(code, 0);
         assert.match(err, /MAIN DONE/);
-        assert.equal(stub.greetings.length, 1, "positive control: the receiver WAS connected when the process exited");
+        assert.match(err, /VAR=delivered-token/, "positive control: the receiver WAS connected and assigned the token");
     } finally {
-        await stub.close();
+        await ch.close();
     }
 });
 
 channelTest("a missing or malformed target package costs the renewal, never the process", async () => {
     // A throw in a module loaded through --import exits 1 before the entry script runs (measured on
     // node 22), so a throwing matcher would end this process before "MAIN RAN" is ever written.
-    const stub = await startStubChannel((sock) => {
-        sock.write(JSON.stringify({ token: "delivered-token" }) + "\n");
-    });
+    // Moved from a stub to the real createChannel (Decision 9): `stub.connections === 0` is
+    // replaced by the delivery itself -- the entry polls too. VAR=<unset> shows no token reached
+    // the process; it does NOT distinguish "no connection was attempted" from "a connection
+    // attempted but never authenticated", which the real channel exposes to no caller.
+    const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "right-nonce" });
     try {
-        const entry = writeEntry(TARGET_ENTRY, 'process.stderr.write("MAIN RAN\\n");');
+        ch.push("delivered-token");
+        const entry = writeEntry(TARGET_ENTRY,
+            'process.stderr.write("MAIN RAN\\n");' + pollingBody("SERVER_TOKEN", 300));
         for (const targetPackage of [undefined, ".*"]) {
-            const { err, code } = await runEntry(entry, preloadEnv(stub, { VC_SECRETS_TARGET_PACKAGE: targetPackage }));
+            const { err, code } = await runEntry(entry, preloadEnv(ch, { VC_SECRETS_TARGET_PACKAGE: targetPackage }));
             assert.equal(code, 0);
             assert.match(err, /MAIN RAN/);
+            assert.match(err, /VAR=<unset>/, "a malformed target package must never let the token through");
         }
-        assert.equal(stub.connections, 0);
     } finally {
-        await stub.close();
+        await ch.close();
     }
 });
 
 channelTest("importing the target module wakes no receiver; importing the preload does", async () => {
     // Both halves, because "wakes nothing" alone passes for a fixture that cannot observe a
-    // receiver at all.
-    const stub = await startStubChannel((sock) => {
-        sock.write(JSON.stringify({ token: "delivered-token" }) + "\n");
-    });
+    // receiver at all. Moved from a stub to the real createChannel (Decision 9): both
+    // `stub.connections` assertions are dropped -- the VAR=<unset> / VAR=delivered-token
+    // assertions already below them are the delivery itself, and the real channel exposes no
+    // connection count to replace them with.
+    const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "right-nonce" });
     try {
+        ch.push("delivered-token");
         const entryA = writeEntry(TARGET_ENTRY,
             `import(${JSON.stringify(TARGET_URL)}).then(() => { ${pollingBody("SERVER_TOKEN", 800)} });`);
-        const runA = await runEntry(entryA, preloadEnv(stub), { preload: false });
+        const runA = await runEntry(entryA, preloadEnv(ch), { preload: false });
         assert.match(runA.err, /VAR=<unset>/);
-        assert.equal(stub.connections, 0);
 
         const entryB = writeEntry(TARGET_ENTRY,
             `import(${JSON.stringify(PRELOAD_URL)}).then(() => { ${pollingBody("SERVER_TOKEN", 5000)} });`);
-        const runB = await runEntry(entryB, preloadEnv(stub), { preload: false });
+        const runB = await runEntry(entryB, preloadEnv(ch), { preload: false });
         assert.match(runB.err, /VAR=delivered-token/);
-        assert.equal(stub.connections, 1);
     } finally {
-        await stub.close();
+        await ch.close();
     }
 });
