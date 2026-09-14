@@ -1609,9 +1609,13 @@ function channelPipeName(name, scopeKey, { env = process.env, pid = process.pid 
 
 async function createChannel({ name, scopeKey, nonce, onRefusal = () => {}, chmod = fs.chmodSync,
     rm = (dir) => fs.rmSync(dir, { recursive: true, force: true }) }) {
-    // /tmp rather than os.tmpdir(): sun_path is ~104 bytes, and a redirected TMPDIR is routinely
-    // long enough to overflow it -- the same measurement that made lockPathFor hardcode /tmp on
-    // darwin. An overflow is an EINVAL at bind time on a machine where everything else works.
+    // /tmp rather than os.tmpdir(): sun_path is ~104 bytes, and a redirected TMPDIR can be long
+    // enough to overflow it. An overflowing path still BINDS -- libuv truncates it rather than
+    // refusing it -- so where the cut lands decides what happens next: measured here, the chmod
+    // below can throw ENOENT because nothing exists at the full path, or the bind can land on a
+    // path already in use (EADDRINUSE), or truncation can place the socket outside this
+    // directory entirely. lockPathFor's own darwin comment (vc-secrets-cache.mjs:192) makes the
+    // same call for the same reason: "Short and outside secretsDir(): sun_path is ~104 bytes here."
     const dir = process.platform === "win32" ? null : fs.mkdtempSync(path.join("/tmp", "vc-secrets-ch-"));
     const channelPath = process.platform === "win32" ? channelPipeName(name, scopeKey) : path.join(dir, "c.sock");
     const nonceDigest = crypto.createHash("sha256").update(String(nonce)).digest();
@@ -1684,10 +1688,14 @@ async function createChannel({ name, scopeKey, nonce, onRefusal = () => {}, chmo
         }
         throw e;
     }
-    // The listen promise CONSUMED the one-shot listener, and a net.Server whose error reaches no
-    // listener throws -- straight into process.on("uncaughtException") and out through fail(). A
-    // channel that cannot accept a client must degrade to a session that stops renewing, never
-    // to a session that dies.
+    // A successful listen does NOT remove the once("error", reject) above -- a `once` listener is
+    // removed only when it FIRES, and that promise already resolved without one. So an error
+    // emitted after this point would still reach that stale, already-settled `reject`: a silent
+    // no-op, reported nowhere. What actually keeps the channel from dying is the reporter added
+    // below -- a net.Server with NO listener at all for "error" throws, straight into
+    // process.on("uncaughtException") and out through fail(). removeAllListeners here only clears
+    // the stale reject before adding the reporter, so the two do not both run on one emit for no
+    // reason; it is the reporter, not this call, that stands between an error and a crash.
     server.removeAllListeners("error");
     server.on("error", (e) => fs.writeSync(2, `vc-secrets: channel error: ${e.code ?? e.message}\n`));
     server.unref();   // the channel must not keep the launcher alive
@@ -1825,9 +1833,10 @@ function listenForCallback(expectedState, { entryName = null,
         });
         // `reject` rejects the BIND, and is inert once listen has resolved -- after that a server
         // error would vanish while next() waited forever. Settling as well makes a listener that dies
-        // mid-sign-in end the wait with a reason instead of hanging. The source fixes the same shape
-        // at the listener inside createChannel -- a helper of its run verb, not a verb itself, and one
-        // this package has no counterpart to until Task 20 wires the token channel.
+        // mid-sign-in end the wait with a reason instead of hanging. createChannel's own
+        // `server.on("error", ...)` is the counterpart for the same shape there -- it reports
+        // rather than settles, because by the time that listener fires createChannel has already
+        // returned and left no pending caller to settle.
         server.once("error", (e) => {
             reject(e);
             settle({ error: "listener_failed", description: e.code ?? e.message });

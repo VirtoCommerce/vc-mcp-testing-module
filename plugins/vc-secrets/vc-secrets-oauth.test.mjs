@@ -2980,12 +2980,14 @@ const channelTest = (name, fn) => test(name, async (t) => {
 //
 // These drive the real channel directly, at the wire protocol -- no spawned process, no
 // preload -- because that is the layer Task 17 owns. The preload-level tests below (against
-// startRawSocketFixture, and the four re-pointed at the real channel) are the integration half.
+// startRawSocketFixture, and the five re-pointed at the real channel) are the integration half.
 
 // Strips comments from a function's toString() before a source-text assertion matches it, so a
 // comment or a disabled line quoting the same identifier cannot satisfy the match. Not a full
-// parser -- it tracks string/template literals only so a "//" or "/*" inside one is left alone,
-// which is all this file's own functions ever need.
+// parser: it tracks string/template literals, so a "//" or "/*" inside one is left alone, which
+// covers every function in this file as written today. Known gaps it does NOT handle: a regex
+// literal containing a quote character (read as an unterminated string), and a backtick nested
+// inside a template literal's `${}` expression (read as closing the outer template).
 function stripComments(src) {
     let out = "";
     let i = 0;
@@ -3034,12 +3036,15 @@ function connectAndGreet(channelPath, { nonce }) {
     return new Promise((resolve, reject) => {
         const sock = net.connect(channelPath);
         let received = "";
-        // Both callers expect a REFUSAL, i.e. the server closing the connection. Without a bound,
-        // a broken refusal (the defect these tests exist to catch) hangs the whole suite instead
-        // of failing it -- this timer turns that into an ordinary failed assertion.
+        // The one caller expects a REFUSAL, i.e. the server closing the connection. Without a
+        // bound, a broken refusal (the defect that test exists to catch) hangs the whole suite
+        // instead of failing it -- this timer turns that into an ordinary failed assertion.
         const timer = setTimeout(() => {
             sock.destroy();
-            reject(new Error("connectAndGreet: the server never closed the connection"));
+            // What was actually received, not just that a timeout fired: a leaked token frame
+            // and a merely-slow server both time out identically otherwise, and only one of them
+            // is the defect this helper's callers exist to catch.
+            reject(new Error(`connectAndGreet: the server never closed the connection; received ${JSON.stringify(received)}`));
         }, 2000);
         sock.once("connect", () => sock.write(JSON.stringify({ nonce }) + "\n"));
         sock.on("data", (chunk) => { received += chunk.toString("utf8"); });
@@ -3096,7 +3101,8 @@ function connectAndReadToken(channelPath, { nonce }) {
 // connectAndReadToken, which destroys it. A first frame is proof of authentication (the server
 // serves `latest` to it the instant it authenticates), so this makes "is this client
 // authenticated yet" observable instead of assumed after a fixed delay. Returns { sock, first,
-// next } -- `next()` awaits the frame after that one; the caller owns destroying `sock`.
+// next } -- `next()` awaits the frame after that one, bounded by the same 2s as the other
+// helpers here; the caller owns destroying `sock`.
 //
 // A frame that arrives before `next()` is called is queued rather than dropped: a caller driving
 // two clients (push, then await client A's next(), then client B's) has B's frame land during the
@@ -3140,13 +3146,26 @@ function connectAndAwaitAuth(channelPath, { nonce }) {
                 if (!authenticated) {
                     authenticated = true;
                     clearTimeout(timer);
-                    resolve({
-                        sock,
-                        first: token,
-                        next: () => (queue.length > 0
-                            ? Promise.resolve(queue.shift())
-                            : new Promise((res, rej) => { pending = { resolve: res, reject: rej }; })),
-                    });
+                    // Same 2s bound as connectAndReadToken's: a push that returns a delivered
+                    // count but writes nothing (or a server that stops serving a client it
+                    // already authenticated) must not hang the run with no failure text.
+                    const next = () => {
+                        if (queue.length > 0) {
+                            return Promise.resolve(queue.shift());
+                        }
+
+                        return new Promise((res, rej) => {
+                            const nextTimer = setTimeout(() => {
+                                pending = null;
+                                rej(new Error("connectAndAwaitAuth: next() timed out waiting for a frame"));
+                            }, 2000);
+                            pending = {
+                                resolve: (v) => { clearTimeout(nextTimer); res(v); },
+                                reject: (e) => { clearTimeout(nextTimer); rej(e); },
+                            };
+                        });
+                    };
+                    resolve({ sock, first: token, next });
                 } else {
                     deliver(token);
                 }
@@ -3158,17 +3177,28 @@ function connectAndAwaitAuth(channelPath, { nonce }) {
 
 channelTest("a client presenting no nonce or a wrong one is refused and gets no token", async () => {
     // AC 13. The channel is reachable by any same-user process; the nonce is mandatory rather
-    // than defence in depth. Pushed BEFORE connecting so a leaked frame is observable -- without
-    // it, "received nothing" has two causes (refused, or simply never served), and the mcpw.test.js:3589
-    // preload test below is the faithful port of this refusal at the process level.
+    // than defence in depth. Covers BOTH halves of the title -- a greeting with no `nonce` field
+    // at all, and one with a wrong value -- because the source reads `JSON.parse(...).nonce`, so
+    // a missing field and a wrong value reach the same comparison but are not the same input, and
+    // a matcher that special-cases "absent" (accepting it) would pass a title that only ever
+    // tested "wrong". Each half pushes BEFORE connecting: without that, "received nothing" has
+    // two causes (refused, or simply never served). A leak is then observable either way --
+    // `received` carries it if the connection still closes, and connectAndGreet's own timeout
+    // names it if a wrongly-accepted client is instead left open. The wrong-nonce half is also
+    // ported, faithfully, at the process level: mcpw.test.js:3589 below.
     const refusals = [];
     const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "right",
         onRefusal: (w) => refusals.push(w) });
     try {
         ch.push("t1");
-        const received = await connectAndGreet(ch.path, { nonce: "wrong" });
+        const missing = await connectAndGreet(ch.path, {});
         assert.deepEqual(refusals, ["nonce"]);
-        assert.equal(received, "", "a refused client must receive no token frame");
+        assert.equal(missing, "", "a client with no nonce field must receive no token frame");
+
+        ch.push("t2");
+        const wrong = await connectAndGreet(ch.path, { nonce: "wrong" });
+        assert.deepEqual(refusals, ["nonce", "nonce"]);
+        assert.equal(wrong, "", "a client with a wrong nonce must receive no token frame");
     } finally {
         await ch.close();
     }
@@ -3271,17 +3301,24 @@ channelTest("close() destroys still-open client sockets rather than waiting for 
     // Racing close() against a timer is the only way to see "did not hang" without actually
     // hanging this suite if it regresses.
     const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "n" });
-    ch.push("t1");
-    const { sock, first } = await connectAndAwaitAuth(ch.path, { nonce: "n" });
+    let sock = null;
     try {
-        assert.equal(first, "t1", "the client must be authenticated before close() races it");
+        ch.push("t1");
+        const auth = await connectAndAwaitAuth(ch.path, { nonce: "n" });
+        sock = auth.sock;
+        assert.equal(auth.first, "t1", "the client must be authenticated before close() races it");
         const closed = ch.close().then(() => "closed");
         const timedOut = new Promise((resolve) => { setTimeout(() => resolve("timed-out"), 2000); });
         assert.equal(await Promise.race([closed, timedOut]), "closed",
             "a live, un-destroyed client must not turn close() into a hang");
         await closed;
     } finally {
-        sock.destroy();
+        // Guarded: connectAndAwaitAuth rejecting (its own 2s bound) would otherwise skip both the
+        // socket destroy and ch.close(), leaking a listener into the rest of the run.
+        if (sock !== null) {
+            sock.destroy();
+        }
+        await ch.close().catch(() => {});
     }
 });
 
@@ -3312,13 +3349,47 @@ test("channelPipeName: two users, two scopes, two servers and two launches never
         "a separator in either name cannot reshape the pipe path");
 });
 
-test("a channel that cannot accept a client degrades to no renewal, never to a dead session", () => {
-    // The listen promise consumes the one-shot error listener, and a net.Server whose error
-    // reaches no listener throws -- into uncaughtException and out through fail(). No
-    // behavioural seam observes this without actually killing the process, so this asserts on
-    // source text, with comments stripped first.
-    const src = stripComments(m.createChannel.toString());
-    assert.match(src, /server\.removeAllListeners\("error"\)/);
+test("a channel that cannot accept a client degrades to no renewal, never to a dead session", async () => {
+    // A net.Server with NO listener for "error" throws -- into uncaughtException and out through
+    // fail(). Driven behaviourally rather than by matching source text: net.createServer is
+    // wrapped for this one call so the real server createChannel builds is captured, then a real
+    // "error" is emitted at it and the actual outcome (reported, not thrown) is observed. This
+    // catches a deletion, a REORDER of removeAllListeners/on (measured: the text match alone
+    // stays green across a reorder, because it does not care about order, while the reordered
+    // code ends up with zero listeners and throws), and a relocation of the reporter -- not only
+    // its presence in the text.
+    let captured = null;
+    const realCreateServer = net.createServer;
+    net.createServer = (...args) => {
+        captured = realCreateServer(...args);
+
+        return captured;
+    };
+    let ch;
+    try {
+        ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "n" });
+    } finally {
+        net.createServer = realCreateServer;
+    }
+    try {
+        assert.ok(captured !== null, "createChannel must have created a server to capture");
+        const written = [];
+        const realWriteSync = fs.writeSync;
+        fs.writeSync = (fd, data) => { written.push([fd, data]); };
+        try {
+            assert.doesNotThrow(() => {
+                captured.emit("error", Object.assign(new Error("synthetic"), { code: "EMFILE" }));
+            }, "an error after listen must be reported, never thrown");
+        } finally {
+            fs.writeSync = realWriteSync;
+        }
+        assert.ok(written.some(([fd, data]) => fd === 2 && String(data).includes("EMFILE")),
+            "the error must be reported on fd 2, naming its code");
+    } finally {
+        // ch is undefined if createChannel itself threw above -- ch.close() there would raise a
+        // TypeError that masks the real failure.
+        await ch?.close();
+    }
 });
 
 channelTest("a failure after the directory exists takes the directory with it", async (t) => {
@@ -3344,26 +3415,40 @@ channelTest("the channel serves every authenticated client, so an earlier matchi
     // is made observable (each client waits for the first pushed frame) rather than assumed after
     // a fixed delay, which under load can fail this test for the wrong reason.
     const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "n" });
-    ch.push("first");
-    const a = await connectAndAwaitAuth(ch.path, { nonce: "n" });
-    const b = await connectAndAwaitAuth(ch.path, { nonce: "n" });
+    let a = null;
+    let b = null;
     try {
+        ch.push("first");
+        a = await connectAndAwaitAuth(ch.path, { nonce: "n" });
+        b = await connectAndAwaitAuth(ch.path, { nonce: "n" });
         assert.equal(a.first, "first");
         assert.equal(b.first, "first");
         assert.equal(ch.push("shared-token"), 2, "an earlier matching process must not have taken the only slot");
         assert.equal(await a.next(), "shared-token");
         assert.equal(await b.next(), "shared-token");
     } finally {
-        a.sock.destroy();
-        b.sock.destroy();
-        await ch.close();
+        // Guarded: either connectAndAwaitAuth call rejecting (its own 2s bound) would otherwise
+        // skip the sockets' destroy and ch.close(), leaking a listener into the rest of the run.
+        if (a !== null) {
+            a.sock.destroy();
+        }
+        if (b !== null) {
+            b.sock.destroy();
+        }
+        await ch.close().catch(() => {});
     }
 });
 
 // A raw-socket fixture, not a stand-in for the channel's own checks: it exists because it can
-// write bytes the real push() never produces (a split frame, coalesced frames, an unparsable
-// frame, a null frame) and because it can observe a connection that never authenticates
-// (`connections`), which the real channel exposes to no caller.
+// write bytes DETERMINISTICALLY -- a split frame, an unparsable frame, a null frame, or two
+// frames coalesced into one write. Real pushes DO arrive at a reader as one chunk (measured), but
+// this fixture writes both frames in a single write() call, so the coalesced-frame test does not
+// depend on how the OS happens to chunk two separate ones. It can also observe a connection that
+// never authenticates (`connections`) -- not a REFUSED one: a wrong nonce, an unparsable
+// greeting, and an oversize greeting are all refused and reported via `onRefusal` on the real
+// channel. The unexposed case is a connection that never sends a COMPLETE greeting line at all,
+// which is what stub.connections pins for "a process that is not the target takes no action on
+// either fd" below.
 function startRawSocketFixture(onGreeting) {
     const channelPath = stubChannelPath();
     const greetings = [];
