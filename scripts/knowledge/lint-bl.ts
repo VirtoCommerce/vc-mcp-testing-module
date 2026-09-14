@@ -103,7 +103,7 @@ interface Finding {
  * citation that the canonical `parseSuite` finds, undercounting by 2 ids and 15 cases. The
  * ratchet caught it on the first run, which is exactly what it is for.
  */
-const BLC_002_BASELINE: Record<string, number> = {
+export const BLC_002_BASELINE: Record<string, number> = {
   "BL-API-001": 26, "BL-API-002": 7, "BL-API-003": 16, "BL-API-004": 25, "BL-CART-018": 6,
   "BL-CFG-001": 2, "BL-CFG-003": 8, "BL-CFG-004": 4, "BL-CFG-007": 4, "BL-CFG-008": 5,
   "BL-CMS-001": 1, "BL-CMS-002": 1, "BL-CMS-003": 1, "BL-CMS-004": 1, "BL-CMS-005": 1,
