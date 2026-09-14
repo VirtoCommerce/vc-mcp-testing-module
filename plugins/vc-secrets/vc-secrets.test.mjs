@@ -1952,6 +1952,65 @@ test("a dangerous env key is refused and stripped whatever its case — Windows 
     }
 });
 
+test("buildChildEnv: the inherited injection vectors are dropped, not extended", () => {
+    // Asserting only that NODE_OPTIONS ends up composed is a TAUTOLOGY: this function assigns
+    // that variable last, so the assertion holds even if the inherited environment is copied
+    // wholesale. Measured -- a mutation replacing sanitizeEnv(base) with a plain spread survived
+    // the earlier form of this test (mcpw.test.js:3432). The claim worth making is about the
+    // SIBLING vectors, which nothing downstream overwrites: an inherited LD_PRELOAD reaching the
+    // child is the same arbitrary-code execution inside the credential holder that the carve-out
+    // promises to keep closed.
+    // A rooted POSIX path resolves against the current DRIVE on Windows, so the path and the URL
+    // it must become are both stated per platform rather than computed -- computing the
+    // expectation with pathToFileURL would assert nothing about the transformation.
+    const onWindows = process.platform === "win32";
+    const preloadPath = onWindows ? "C:\\abs\\p.mjs" : "/abs/p.mjs";
+    const expected = onWindows ? '--import "file:///C:/abs/p.mjs"' : '--import "file:///abs/p.mjs"';
+    const env = m.buildChildEnv({ NODE_OPTIONS: "--require /evil.js", LD_PRELOAD: "/evil.so",
+        DYLD_INSERT_LIBRARIES: "/evil.dylib", PATH: "/bin" },
+        { token: "tok", envVar: "ADO_MCP_AUTH_TOKEN", channelPath: "/tmp/c.sock", nonce: "n", preloadPath });
+    assert.equal(env.NODE_OPTIONS, expected);
+    assert.equal(env.LD_PRELOAD, undefined);
+    assert.equal(env.DYLD_INSERT_LIBRARIES, undefined);
+    assert.equal(env.PATH, "/bin", "the rest of the environment is untouched");
+});
+
+test("buildChildEnv: the token, channel, nonce and target variables travel in env, none in argv", () => {
+    const env = m.buildChildEnv({}, { token: "tok", envVar: "ADO_MCP_AUTH_TOKEN",
+        channelPath: "/tmp/c.sock", nonce: "n", preloadPath: "/abs/p.mjs",
+        targetPackage: "some-oauth-package", binName: "mcp-server-x" });
+    assert.equal(env.ADO_MCP_AUTH_TOKEN, "tok");
+    assert.equal(env.VC_SECRETS_TOKEN_CHANNEL, "/tmp/c.sock");
+    assert.equal(env.VC_SECRETS_CHANNEL_NONCE, "n");
+    assert.equal(env.VC_SECRETS_TOKEN_ENV, "ADO_MCP_AUTH_TOKEN",
+        "the preload learns the variable from its own environment, never from the wire");
+    assert.equal(env.VC_SECRETS_TARGET_PACKAGE, "some-oauth-package");
+    assert.equal(env.VC_SECRETS_TARGET_BIN, "mcp-server-x");
+});
+
+test("PRELOAD_PATH is anchored beside the launcher module, never against argv[1]", () => {
+    // The launcher is normally entered through vc-secrets-shim.mjs, so argv[1] is the shim in the
+    // plugin DATA dir while the preload sits beside vc-secrets.mjs in the versioned plugin CACHE.
+    // Anchoring on argv[1] yields a path that exists, is wrong, and produces a child that starts
+    // fine and never renews.
+    //
+    // A same-directory equality check cannot tell the two mechanisms apart: this test file lives
+    // beside vc-secrets.mjs, so under `node --test` argv[1] (this file's own path) already
+    // resolves to the same directory an import.meta.url anchor would -- measured, an
+    // argv[1]-anchored mutant left that equality green. So the fixture is a launcher entered from
+    // somewhere ELSE: an entry script written to a fresh tmp dir that imports vc-secrets.mjs and
+    // reports its PRELOAD_PATH, exactly as vc-secrets-shim.mjs does in production.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-argv-"));
+    tmpDirs.push(dir);
+    const entry = path.join(dir, "elsewhere.mjs");
+    fs.writeFileSync(entry, `
+        import * as m from ${JSON.stringify(LAUNCHER_PATH)};
+        process.stdout.write(m.PRELOAD_PATH);
+    `);
+    const { stdout, stderr } = spawnSync(process.execPath, [entry], { encoding: "utf8" });
+    assert.equal(stdout, path.join(path.dirname(LAUNCHER_PATH), "vc-secrets-preload.mjs"), stderr);
+});
+
 // The pre-rename suite pinned two properties against the ONE repo's committed declaration. This plugin
 // ships no servers, so there is no such file — and re-stating a fixture as its own assertion would be a
 // test that cannot fail. What survives the move is the launcher property each check was really about.

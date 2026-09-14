@@ -9,7 +9,7 @@ import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { VcSecretsError } from "./vc-secrets-error.mjs";
 import { clientNames, clientDescriptor, MIN_VERSION_UNKNOWN } from "./clients.mjs";
@@ -1735,6 +1735,32 @@ async function createChannel({ name, scopeKey, nonce, onRefusal = () => {}, chmo
     };
 }
 
+// The preload side of the same channel, entered inside the child via NODE_OPTIONS=--import. It
+// must be resolved beside THIS file, never against process.argv[1]: the launcher is normally
+// entered through vc-secrets-shim.mjs, so argv[1] is the shim in the plugin DATA dir while the
+// preload sits beside this module in the versioned plugin CACHE -- anchoring on argv[1] yields a
+// path that exists, is wrong, and produces a child that starts fine and never renews.
+const PRELOAD_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), "vc-secrets-preload.mjs");
+
+function buildChildEnv(base, { token, envVar, channelPath, nonce, preloadPath, targetPackage, binName }) {
+    const env = sanitizeEnv(base);   // drops any inherited NODE_OPTIONS first
+    env[envVar] = token;
+    env.VC_SECRETS_TOKEN_CHANNEL = channelPath;
+    env.VC_SECRETS_CHANNEL_NONCE = nonce;
+    // The preload reads the variable name from here, not from the socket payload: the process
+    // holding the credential should not take instructions about where to put it.
+    env.VC_SECRETS_TOKEN_ENV = envVar;
+    env.VC_SECRETS_TARGET_PACKAGE = targetPackage;
+    env.VC_SECRETS_TARGET_BIN = binName;
+    // The one place this package's env-sanitization decision is reversed, and the bound is this
+    // line: the value is composed HERE, from a path derived from this file's own location, after
+    // the inherited one has been dropped. Configuration still cannot express it (loadConfig
+    // rejects the key) and backend tools still never see it (runTool sanitizes unconditionally).
+    env.NODE_OPTIONS = `--import "${pathToFileURL(preloadPath).href}"`;
+
+    return env;
+}
+
 // The interactive sign-in callback surface: the loopback listener that receives Entra's redirect,
 // the leaf that decides what a given request means, the two tiny pages the browser ends up
 // looking at, and the browser opener. No storage, no mutex — that is `login`'s job, not this one's.
@@ -3225,7 +3251,7 @@ export {
     buildKeyvaultRead, TIMEOUT_LOCAL_MS, TIMEOUT_AZ_MS, VALUE_ON_STDIN,
     COMMAND_ON_STDIN, quoteForSecurityInteractive, writeSecretValue,
     tokenLockFor, acquireTokenLock, ensureFreshToken, oauthLaunchDeps,
-    CHANNEL_GREETING_MAX, channelPipeName, createChannel,
+    CHANNEL_GREETING_MAX, channelPipeName, createChannel, PRELOAD_PATH, buildChildEnv,
     REDIRECT_PATH, MAX_ERROR_PARAMS, closeTabPage, forTerminal, escapeHtml, failedPage, listenForCallback,
     openBrowser, buildBrowserCommand, handleCallback, cmdLogin, cmdLogout,
     runTool, resolveSpawnCommand, buildSpawnInvocation, makeSecretResolver, cmdRun, cmdTask, cmdLaunch, killProcessTree,

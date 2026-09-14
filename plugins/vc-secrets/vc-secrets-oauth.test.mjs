@@ -3526,20 +3526,43 @@ function pollingBody(varName, waitMs) {
     `;
 }
 
-// Runs one entry script as a real child process. NODE_OPTIONS is composed here by hand until Task
-// 18's buildChildEnv exists; Task 18 routes this through it, because the quoted URL node parses
-// back out of an environment variable is the delivery path's last mile.
+// Runs one entry script as a real child process. The preload path is routed through
+// buildChildEnv (Task 18), exactly as mcpw.test.js's runWithPreload routes its own: the quoted
+// file: URL node has to parse back out of NODE_OPTIONS is the delivery path's last mile, and
+// composing it here by hand would never exercise the function a real launch actually uses.
 function runEntry(entry, env, { preload = true, timeoutMs = 10000 } = {}) {
-    const childEnv = { ...process.env };
+    let childEnv = { ...process.env };
     delete childEnv.NODE_OPTIONS;
+    // buildChildEnv's own sanitizeEnv only drops DANGEROUS_ENV_VARS, never these -- so this scrub
+    // stays even routed through it, or a stray VC_SECRETS_* left over in this test process would
+    // leak into every child and these tests would start depending on the ambient environment.
     for (const key of Object.keys(childEnv)) {
         if (key.startsWith("VC_SECRETS_")) {
             delete childEnv[key];
         }
     }
     if (preload) {
-        childEnv.NODE_OPTIONS = `--import "${PRELOAD_URL}"`;
+        // Seeded and deleted below, so that "the preload assigned it" stays observable: with the
+        // launch's own initial token already in place the fixture would report that instead of
+        // the delivery (mcpw.test.js's runWithPreload does the same).
+        const composed = m.buildChildEnv(childEnv, {
+            token: "seed-token-that-must-not-be-visible",
+            envVar: env.VC_SECRETS_TOKEN_ENV,
+            channelPath: env.VC_SECRETS_TOKEN_CHANNEL,
+            nonce: env.VC_SECRETS_CHANNEL_NONCE,
+            preloadPath: m.PRELOAD_PATH,
+            targetPackage: env.VC_SECRETS_TARGET_PACKAGE,
+            binName: env.VC_SECRETS_TARGET_BIN,
+        });
+        if (env.VC_SECRETS_TOKEN_ENV !== undefined) {
+            delete composed[env.VC_SECRETS_TOKEN_ENV];
+        }
+        childEnv = composed;
     }
+    // Reapplied even on the preload path: an explicit `undefined` here (the "malformed target
+    // package" fixture) means the key must be ABSENT from the child, not present with the
+    // stringified "undefined" that spawn would otherwise write -- buildChildEnv has no way to
+    // express that, so this loop is what actually removes it.
     for (const [key, value] of Object.entries(env)) {
         if (value === undefined) {
             delete childEnv[key];
