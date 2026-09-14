@@ -1,47 +1,50 @@
 {
-  "runId": "REG-2026-09-14-1146",
+  "runId": "REG-2026-09-14-1802",
   "status": "completed",
-  "startedAt": "2026-09-14T11:47:15.445Z",
-  "finishedAt": "2026-09-14T12:09:08.901Z",
-  "selection": "083e",
+  "startedAt": "2026-09-14T16:02:37.378Z",
+  "selection": "075f",
   "env": "vcst",
-  "note": "Sixth 083e run. Purpose: produce a run whose CSV matches the file byte-for-byte, so LOYORG-E2E-003 can be promoted without the PR-014 \"suite CSV changed after the run finished\" caveat. Three edits since REG-2026-09-14-1052, two of them BEHAVIOURAL: (a) E2E-003 assertions grounded {HYPOTHESIS}->{OBSERVED} (non-behavioural), (b) [PRE:RESET_CART] prepended to E2E-001 Steps, (c) [PRE:CLEAR_SESSION]+[PRE:SIGNIN_AS:ORG_LOY_A] prepended to E2E-005 Steps. (b) and (c) cleared two PRE-002 findings but mean those steps now actually execute - this run confirms they do not disturb the passing cases.",
+  "note": "075f first execution. Store flipped Customer->Organization via GET-merge-PUT /api/stores (settings-v2 is a confirmed 204 no-op) and VERIFIED on the store entity. Re-mint probe before the flip: all 3 org owners this suite touches (12b52a61 AGENT-TEST-Org-LoyaltyOutlet = ORG_LOY_A+B+LOCKED, 23525b44 BuildRight, 96f109a7 TechFlow) already held org-scoped mission rows (31/20/19), so VCST-5954 replays nothing for them. Cart preflight swept 1 surplus cart from MULTI_ORG_TF_BR. LOYORG-009 is DESTRUCTIVE (drains the pooled balance) and is pinned LAST per the manifest. All 19 cases are Draft => Step 6.5 is a dry no-op. MUST restore mode to Customer in teardown.",
   "caseOrder": [
-    "LOYORG-E2E-001",
-    "LOYORG-E2E-002",
-    "LOYORG-E2E-003",
-    "LOYORG-E2E-004",
-    "LOYORG-E2E-005",
-    "LOYORG-E2E-006"
-  ],
-  "multiOrgPools": {
-    "techflow": 98916,
-    "buildright": 219416,
-    "altUserScope": 68916
-  },
-  "knownOpenBugs": [
-    "VCST-5953 (LOYORG-E2E-006)"
+    "LOYORG-001",
+    "LOYORG-002",
+    "LOYORG-003",
+    "LOYORG-004",
+    "LOYORG-005",
+    "LOYORG-006",
+    "LOYORG-007",
+    "LOYORG-008",
+    "LOYORG-010",
+    "LOYORG-011",
+    "LOYORG-012",
+    "LOYORG-013",
+    "LOYORG-014",
+    "LOYORG-015",
+    "LOYORG-016",
+    "LOYORG-017",
+    "LOYORG-018",
+    "LOYORG-019",
+    "LOYORG-009"
   ],
   "suites": [
     {
-      "id": "083e",
-      "name": "Loyalty Organization Balance Storefront",
-      "file": "regression/suites/Frontend/loyalty/083e-loyalty-organization-balance.csv",
-      "status": "done",
-      "browser": "playwright-chrome",
-      "agent": "qa-frontend-expert",
-      "lane": "browser",
-      "testCount": 6,
-      "startedAt": "2026-09-14T11:47:58.146Z",
-      "finishedAt": "2026-09-14T12:09:08.901Z",
-      "passed": 2,
-      "failed": 3,
-      "blocked": 1
+      "id": "075f",
+      "name": "Loyalty Organization Balance",
+      "file": "regression/suites/Backend/loyalty/075f-loyalty-organization-balance.csv",
+      "status": "completed",
+      "browser": "playwright-edge",
+      "lane": 2,
+      "cases": 19,
+      "attempts": 1,
+      "summary": {
+        "total": 19,
+        "passed": 9,
+        "failed": 4,
+        "blocked": 6,
+        "notDeployed": 0,
+        "skipped": 0
+      }
     }
   ],
-  "storeModeRestored": {
-    "value": "Customer",
-    "verified": true,
-    "at": "2026-09-14T12:09:08.901Z"
-  }
+  "finishedAt": "2026-09-14T16:32:19.555Z"
 }

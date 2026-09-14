@@ -375,6 +375,55 @@ The `label=` selects which response the predicate runs against. `[VAR]` is the o
 
 Every successful GraphQL operation MUST have an `[ERRORS label=<L>] errors[] empty` assertion (ECL-14.1). HTTP 200 alone does NOT mean success.
 
+#### ⚠ `errors[] empty` is NOT a success check for a CART MUTATION
+
+`addItem`, `addItemsToCart`, `changeCartItemQuantity`, `addCoupon`, `addOrUpdateCartShipment` and
+`addOrUpdateCartPayment` do **not** throw on a business refusal — there is no `.ThrowOnFailures()` on
+the line-item path. A refused mutation returns **HTTP 200, `errors[] EMPTY`, and does nothing**. The
+reason is on the mutation's **own payload**:
+
+```graphql
+addItem(command: { … quantity: 1000000 }) {
+  id itemsCount
+  items { id sku quantity }
+  validationErrors { errorCode errorMessage errorParameters { key value } }   # ← REQUIRED
+}
+```
+```json
+{"addItem":{"itemsCount":0,"items":[],
+ "validationErrors":[{"errorCode":"LINE_ITEM_LIMIT",
+   "errorMessage":"You can order maximum 999999 items.",
+   "errorParameters":[{"key":"limit","value":"999999"}]}]}}
+```
+
+**Two kinds of validation error, and only one survives a re-read — this is the trap.**
+
+| Kind | Example | Lives in | Visible on a later `cart` query? |
+|---|---|---|---|
+| **Operation-level** (the mutation was REFUSED, no line created) | `LINE_ITEM_LIMIT` on `addItem` | `CartAggregate.OperationValidationErrors` — **in memory** | **NO.** `SaveAsync → ClearValidationCache()` deliberately keeps it, but it lives only as long as that aggregate instance |
+| **Line-level** (the line exists but is invalid) | `PRODUCT_QTY_CHANGED` after an over-stock `changeCartItemQuantity` | persisted on the line item | **YES** — `items { isValid validationErrors { … } }` |
+
+So **a read-back oracle works for the line-level kind and is BLIND to the operation-level kind** —
+against an outright refusal the follow-up `cart` query returns an empty cart with
+`validationErrors: []`, which reads exactly like "nothing was supposed to happen".
+
+**Therefore every cart mutation needs ONE of these, and `errors[] empty` is never enough on its own:**
+
+1. `validationErrors { errorCode … }` selected on the mutation **and** asserted (`[COUNT] … validationErrors.length = 0` for a happy path) — the only form that catches BOTH kinds; or
+2. a **positive post-condition on the mutation's own response** — `[DATA label=add] data.addItem.itemsCount = 1`, `items[?sku=…].quantity = N`; or
+3. a **read-back** asserting the line exists — valid for line-level errors and for proving an add landed, but see the table above before relying on it alone.
+
+A setup `addItem` with no assertion at all is acceptable **only** when a later assertion in the same
+case would demonstrably fail on a short cart. If you cannot name that assertion, guard the setup.
+
+> **Measured 2026-09-14 (`075f` `LOYORG-009`).** The case selected `addItem { id }` and asserted only
+> `errors[] empty`. `addItem` at quantity 34,516,797 was refused by `LINE_ITEM_LIMIT`; the case saw
+> 200 + empty `errors[]`, both carts stayed empty, and the run reported a **candidate Critical product
+> bug** that live verification then refuted. The limit is
+> `ModuleConstants.LineItemQualityLimit = 999999` in `vc-module-x-cart` (note the "Quality" typo) —
+> a compile-time constant with no store or module setting. The cost of the missing field was a false
+> Critical and a round of investigation.
+
 ### 4.2 `[DATA label=<L>]` predicates
 
 The path may begin with `data.…` or be relative — the runner strips a leading `data.` for you. Available shapes:
@@ -604,6 +653,8 @@ Walks: AUTH → set up vars → declare op + vars + body → execute → capture
 | `[GQL-OP foo]` body + `[GQL-EXEC bar]` (label mismatch) | EXEC has no matching OP | match labels |
 | Hardcoded password in `[GQL-VARS]` | Leaks creds; breaks multi-env | use `[AUTH role=…]` |
 | Mixed OR + AND in single predicate | Parser only handles homogeneous composition | split into multiple assertion lines |
+| `addItem { id }` + only `[ERRORS] errors[] empty` | A refused cart mutation returns 200 with EMPTY `errors[]` — the case passes having added nothing (§4.1) | select `validationErrors { errorCode … }`, or assert `data.addItem.itemsCount` |
+| Verifying a cart mutation ONLY by a later `cart` read-back | Operation-level refusals are in-memory and **gone** by the next query — an outright refusal looks like an empty cart (§4.1) | assert on the mutation's OWN response |
 
 ---
 
