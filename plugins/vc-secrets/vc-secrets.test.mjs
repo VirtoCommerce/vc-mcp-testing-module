@@ -2026,20 +2026,21 @@ test("childNodeSupportsImport: a version it cannot read is refused, not assumed 
     assert.equal(m.childNodeSupportsImport(undefined), false);
 });
 
-test("childNodeVersionIo: an inherited loader variable neither runs nor breaks the probe", () => {
+test("childNodeVersionIo: an inherited NODE_OPTIONS does not break the probe", () => {
     // The poison goes in process.env, not in the injected argument, and that is the whole point:
     // without the fix the spawn inherits the real environment, so a bogus value passed as an
     // ARGUMENT would be ignored and the probe would succeed either way — the first version of this
-    // test asserted nothing for exactly that reason.
+    // test in mcpw.test.js asserted nothing for exactly that reason.
     //
     // With an inherited NODE_OPTIONS node rejects, the probe reads empty and the launcher refuses a
-    // server that would have started; an inherited --require would instead have executed, inside a
-    // diagnostic, in the one file whose policy is that nothing inherited runs.
+    // server that would have started. Measured: --version exits before any preload runs, so an
+    // inherited --require does not execute in this child. That is why the poison below is a
+    // rejected flag and not a loader, and why the title claims only that the probe does not break.
     const saved = process.env.NODE_OPTIONS;
     process.env.NODE_OPTIONS = "--not-a-real-flag";
     try {
         const version = m.childNodeVersionIo();
-        assert.match(version, /^v\d+\.\d+\.\d+/, `the probe must not inherit a loader variable: "${version}"`);
+        assert.match(version, /^v\d+\.\d+\.\d+/, `the probe must not inherit NODE_OPTIONS: "${version}"`);
     } finally {
         if (saved === undefined) {
             delete process.env.NODE_OPTIONS;

@@ -1782,17 +1782,18 @@ function childNodeSupportsImport(version) {
 }
 
 // The node that runs the server is whatever npx resolves on PATH, which need not be the one
-// running mcpw — so the gate reads the CHILD's version. Reading our own would pass happily on a
-// machine where the server cannot start.
+// running this launcher — so the gate reads the CHILD's version. Reading our own would pass
+// happily on a machine where the server cannot start.
 function childNodeVersionIo({ platform = process.platform, env = process.env } = {}) {
     const invocation = buildSpawnInvocation(resolveSpawnCommand("node", { platform, env }), ["--version"]);
     const r = spawnSync(invocation.cmd, invocation.args,
-        // Sanitized like every other child, and last so no invocation option can put a loader back.
-        // Two things go wrong without it, and the quiet one is worse: an inherited `--require` runs
-        // inside a diagnostic whose whole job is to answer a version question, in a file that strips
-        // loader variables from the server precisely so nothing inherited executes. The loud one is
-        // an inherited NODE_OPTIONS node rejects — the probe then reads empty and the launcher
-        // refuses a server that would have started, naming a node version nobody chose.
+        // Sanitized like runTool's and cmdLaunch's children, and last so no invocation option can
+        // put a loader back. What this seam can actually show is the loud failure: node validates
+        // NODE_OPTIONS even for --version, so an inherited value it rejects leaves the probe empty
+        // and the launcher refuses a server that would have started. Measured: --version exits
+        // before any preload runs, so an inherited `--require` does not execute in THIS child; it
+        // would in any child that runs code, which is why this call sanitizes on the same rule
+        // rather than on a weaker per-site judgement.
         { encoding: "utf8", timeout: TIMEOUT_LOCAL_MS, windowsHide: true, ...invocation.opts,
             env: sanitizeEnv(env) });
 
