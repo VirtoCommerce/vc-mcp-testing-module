@@ -69,7 +69,7 @@ The `Steps` cell is parsed line-by-line by `parseSteps()`. Recognized tags (case
 | Tag | Purpose | Body |
 |-----|---------|------|
 | `[GQL-ENDPOINT <path>]` | Point every op in this case at a scoped schema (default `/graphql`); see §3.0 | none |
-| `[AUTH role=<alias>]` | Acquire OAuth token; set as `Authorization: Bearer …` for subsequent ops | none |
+| `[AUTH role=<alias>]` | Acquire OAuth token; set as `Authorization: Bearer …` for subsequent ops | `org=<@td ref>` |
 | `[GQL-OP <label>]` | Declare a GraphQL operation under `<label>` | multi-line query/mutation body until next tag |
 | `[GQL-VARS <label>]` | Bind variables (JSON) for the named op | inline JSON on same line, OR multi-line JSON until next tag |
 | `[GQL-EXEC <label>]` | Validate (vs. introspected schema) + POST /graphql | none — body must already be present |
@@ -99,7 +99,7 @@ query { salesRepCustomers(first: 20, storeId: ""{{STORE_ID}}"", sort: ""name:asc
 - **CLI equivalent:** `--endpoint /graphql/sales-rep` (per-case `[GQL-ENDPOINT]` overrides the flag). On **Windows Git-Bash**, prefix the command with `MSYS_NO_PATHCONV=1` so a leading-slash `--endpoint` arg isn't mangled into a filesystem path — this affects only the CLI flag, never the in-CSV tag.
 - Implemented in `graphql-case-parser.ts` (`EndpointStep`), `graphql-executor.ts` + `graphql-validator.ts` (`endpointPath` option), and `graphql-runner.ts` (`--endpoint` + per-endpoint schema cache). Default behavior for existing suites is unchanged.
 
-### 3.1 `[AUTH role=<alias>]`
+### 3.1 `[AUTH role=<alias>]` (+ optional `org=`)
 
 ```text
 [AUTH role=ORG_USER]
@@ -118,6 +118,35 @@ The alias is resolved through `test-data/aliases.json` (preferred) or the `<ROLE
 **No `[AUTH]` line ⇒ the request is sent without an `Authorization` header** (PUBLIC). Use this for `productConfiguration`, anonymous catalog, and any guest flow.
 
 **Never hardcode passwords** in the CSV — always go through `[AUTH role=…]` so credentials come from `.env` at runtime (feedback memory `feedback_agents_read_env_creds.md`).
+
+#### `org=` — sign the SAME user in under a different organization
+
+```text
+[AUTH role=MULTI_ORG_USER org=@td(ORG_TECHFLOW.platform_id)]
+[AUTH role=MULTI_ORG_USER org=@td(ORG_BUILDRIGHT.platform_id)]
+```
+
+Optional, and order-independent (`[AUTH org=… role=…]` is identical). The value is sent as
+`organization_id` on the password grant, **overriding the org the alias itself declares** for that
+grant only.
+
+**Why it exists.** An alias declares at most ONE org, fixed for its lifetime, so before this a case
+could not express *"same person, other org"* at all — which made the whole org-switch class (does
+balance / permission / visibility follow the ACTIVE org?) unauthorable on the backend. Nothing was
+broken; the sentence could not be written.
+
+**Author the value as an `@td()` token resolving to the PLATFORM GUID.** Not a literal (the GOLDEN
+RULE, `.claude/rules/test-data.md`; `td:validate` DV-013 fails it anyway) and **not a CSV business
+key** such as `ORG-002` — the token endpoint ignores an unknown org and issues a **200** token under
+the contact's DEFAULT org, so the case passes while asserting against the wrong organization. An
+`@td()` token that does not resolve therefore **throws** rather than passing through.
+
+**One token per `(role, org)`.** The per-run cache is keyed on the pair, so two `[AUTH]` steps for one
+role under two orgs mint two tokens; `evidence.auth[]` reports the scope as `role@org`. A token is
+org-scoped inside itself — keyed on the role alone, the second step would silently reuse the first
+step's scope.
+
+**Omitting `org=` changes nothing** — the alias's own `organization_id` still applies, exactly as before.
 
 ### 3.2 `[GQL-OP <label>]` + body
 

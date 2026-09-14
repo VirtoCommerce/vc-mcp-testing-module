@@ -110,6 +110,54 @@ the batch-3 triangulation record; it is a one-word semantic narrowing plus its t
 
 ---
 
+## 3. NEW INVARIANT FAMILY — loyalty MISSIONS · 39 uncited cases across 4 suites · **5 candidates, each with a proposed severity**
+
+The second oracle gap of the same shape as §1, and the larger one. `BL-001` fires **98** times across
+the 11 loyalty suites; **39** of those are *missions* cases, in `075d` (19), `075e` (13), `083c` (6)
+and `083d` (1). They are uncited because **no citable invariant exists** — the three mission entries
+that do exist (`BL-LOY-015` attribution, `BL-LOY-018` once-per-owner granting, `BL-LOY-019` reversal)
+cover the accrual ledger and nothing else. Visibility, targeting, periodicity, the feature toggle and
+progress math have no oracle at all.
+
+**Why this is filed as candidates-with-severities rather than as another audit run.** The 2026-09-14
+audit ranked 20 candidates and **HELD all 20** on the same reason: *business value undeclared*. That
+is a structural deadlock, not a backlog — `oracle-significance.ts` never promotes an `unknown`-business
+candidate, and only a human-initiated triangulation can declare the tag. Re-running
+`/qa-review-oracles bl domain loyalty` without declared severities reproduces the identical 20 HOLDs.
+So each family below carries a **proposed** tag; the audit's job is to confirm or correct it, not to
+invent it.
+
+| # | Candidate family | Proposed | Demand (uncited cases) | What a violation costs |
+|---|---|---|---|---|
+| 3a | **`Loyalty.Missions.Enable` governs the whole surface — visibility AND accrual** | `P0-revenue` | 6 — MSN-009, MSN-010, MSN-017, MSN-018, MSNA-020, MSNF-076 | Accrual continuing while the feature reads as off mints points nobody authorised. MSN-018 asserts exactly this and can cite nothing. |
+| 3b | **A mission is visible only to its declared audience — group scope, `public`, targeting** | `P1-data` | 5 — MSN-008, MSN-011, MSN-015, MSN-030, MSN-034 | The wrong customers see (and can complete) a promotion scoped to someone else. Four of the five are group/targeting cases whose whole assertion is the audience boundary. |
+| 3c | **A declared periodicity either constrains accrual or is rejected — never silently accepted** | `P1-data` | 1 — MSN-003 | MSN-003's finding IS the invariant: a non-`None` periodicity is accepted and then never branched on, so a "monthly" mission behaves as unlimited. One case, but it is the only thing standing over the whole periodicity field. |
+| 3d | **Progress is bounded and total — capped at 100%, defined at a zero target, and a partial payload failure never voids the rest** | `P1-data` | 11 — MSN-001, MSN-016, MSN-020, MSN-022, MSN-026, MSN-031, MSNF-016, MSNF-025, MSNF-054, MSNF-074, MSN-E2E-002 | The largest cluster. Degenerate targets (zero-target, divide-by-zero), the 100% cap, `ALL` vs `ANY` divergence, and two resilience cases where one bad mission must not take the response down. |
+| 3e | **A Published mission is immutable, and the Draft→Published transition is one-way** | `P1-ux` | 13 — MSN-006 + the `075e` admin set | Admin-authoring surface. MSN-006 (edit of a Published mission returns **500**, not a 4xx) is the one with a data edge; the rest are blade/validation behaviour. Lowest tier of the five and the one most likely to be corrected downward on triangulation. |
+
+**One of the 39 is a REMAP, not an ADD.** `MSN-032` ("no reverse edge exists anywhere in the chain —
+cancelling the order behind a Completed mission…") is precisely `BL-LOY-019`. It needs a citation, not
+an invariant — hand it to `npm run bl:remap -- --from … --to BL-LOY-019` via `/qa-review-tests --fix`,
+which is now a capability that exists (`scripts/knowledge/remap-bl-citations.ts`, added this cycle).
+
+**Against the value gate, as proposed.** 3a promotes on business value alone (`high` business ⇒ always).
+3b/3c/3d are `medium` business and need product `medium`+ — 3b (5 cases) and 3d (11 cases) clear the
+≥3-citing-case bar comfortably; **3c has a demand of 1 and would HOLD**, which is the correct outcome
+to record rather than to argue around. 3e at `P1-ux` also needs 3+ and has 13.
+
+**What the audit must still do — this section declares value, it does NOT establish truth.** Every
+family above needs the three axes (docs / live / source) before anything is written. Two have a known
+axis risk worth naming up front: 3a's toggle semantics are a **store setting** whose write path is
+itself a confirmed defect (settings-v2 `204` no-op), so the live axis must read `GET /api/stores/{id}`
+→ `settings[]`, never the settings API's own echo; and 3d's resilience pair (MSN-031, MSNF-074) can
+only be observed by provoking a partial failure, which may be unreachable live and would then be a
+two-axis result under the applicable-axes waiver.
+
+**Scope for the run this releases:** `/qa-review-oracles bl domain loyalty`, restricted to these five
+candidates, with the proposed tags supplied as the `--severity` input to `oracles:rank --explain`.
+
+---
+
 ## Routed elsewhere, not oracle changes
 
 1. **`bl-audit-criteria.md` §1a names "the Mixed-Cart Loyalty domain" as its class-2 example — that premise is now stale.** The domain has a real published surface in both the Platform and Storefront user guides (the Mixed cart mode, the points price list, a Troubleshooting table, and the customer-facing split-cart description). `N/A` can no longer be granted to a BL-LOY entry on blanket domain grounds; each entry needs its own judgment. Recommend dropping that example. **This is a criteria-file edit and was deliberately not made by the audit.**
