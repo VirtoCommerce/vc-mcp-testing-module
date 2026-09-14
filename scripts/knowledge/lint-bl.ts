@@ -87,7 +87,7 @@ interface Finding {
  * was added, with their citing-case counts. A RATCHET, not an exemption — the same shape
  * and the same reason as `XREF_BASELINE` in sync-test-suites.ts.
  *
- * 44 ids across 198 citing cases were in the corpus on 2026-09-14. They accumulated because
+ * 46 ids across 213 citing cases were in the corpus on 2026-09-14. They accumulated because
  * nothing could WRITE a `Business_Rule` cell on an existing row until `npm run bl:remap`
  * existed, and BLC-002 is Medium so no gate ever failed. Hard-failing on day one would mean
  * everyone runs the lint at a lower gate and the signal dies.
@@ -96,21 +96,24 @@ interface Finding {
  * An id that stops dangling is reported as a stale entry — delete it. Goal: keep this empty.
  * Burn down with `npm run bl:remap` (--from/--to to remap onto an existing invariant,
  * --propose for an ADD candidate awaiting triangulation, --drop for a ref that is wrong).
+ *
+ * REGENERATE FROM THIS LINT'S OWN OUTPUT, never from a second parser. The counts below come
+ * from `npm run bl:lint`'s "cited in Business_Rule of N case(s)". A hand-written parser was
+ * tried first and disagreed — it missed a `"BL-CHK-001; BL-SEC-001"` two-ids-in-one-cell
+ * citation that the canonical `parseSuite` finds, undercounting by 2 ids and 15 cases. The
+ * ratchet caught it on the first run, which is exactly what it is for.
  */
 const BLC_002_BASELINE: Record<string, number> = {
-  "BL-API-001": 26, "BL-API-002": 7, "BL-API-003": 16, "BL-API-004": 25,
-  "BL-CART-018": 6,
-  "BL-CFG-001": 2, "BL-CFG-003": 4, "BL-CFG-004": 3,
+  "BL-API-001": 26, "BL-API-002": 7, "BL-API-003": 16, "BL-API-004": 25, "BL-CART-018": 6,
+  "BL-CFG-001": 2, "BL-CFG-003": 8, "BL-CFG-004": 4, "BL-CFG-007": 4, "BL-CFG-008": 5,
   "BL-CMS-001": 1, "BL-CMS-002": 1, "BL-CMS-003": 1, "BL-CMS-004": 1, "BL-CMS-005": 1,
   "BL-CMS-006": 1, "BL-CMS-007": 1, "BL-CMS-008": 1, "BL-CMS-009": 1, "BL-CMS-010": 1,
-  "BL-CMS-011": 1,
-  "BL-CR-002": 3, "BL-CR-003": 2, "BL-CR-004": 3, "BL-CR-005": 2, "BL-CR-006": 1,
-  "BL-CR-007": 2, "BL-CR-011": 1, "BL-CR-014": 1, "BL-CR-015": 1,
-  "BL-CROSS-013": 1,
-  "BL-GA4-001": 10, "BL-GA4-002": 5, "BL-GA4-003": 14, "BL-GA4-004": 4,
-  "BL-PAY-002": 4, "BL-PAY-005": 6, "BL-PAY-006": 1,
-  "BL-SEC-001": 5, "BL-SEC-002": 3, "BL-SEC-003": 8, "BL-SEC-004": 6, "BL-SEC-005": 2,
-  "BL-STORE-002": 1, "BL-STORE-003": 3, "BL-STORE-004": 9,
+  "BL-CMS-011": 1, "BL-CR-002": 3, "BL-CR-003": 2, "BL-CR-004": 3, "BL-CR-005": 2,
+  "BL-CR-006": 1, "BL-CR-007": 2, "BL-CR-011": 1, "BL-CR-014": 1, "BL-CR-015": 1,
+  "BL-CROSS-013": 1, "BL-GA4-001": 10, "BL-GA4-002": 5, "BL-GA4-003": 14, "BL-GA4-004": 4,
+  "BL-PAY-002": 4, "BL-PAY-005": 6, "BL-PAY-006": 1, "BL-SEC-001": 6, "BL-SEC-002": 3,
+  "BL-SEC-003": 8, "BL-SEC-004": 6, "BL-SEC-005": 2, "BL-STORE-002": 1, "BL-STORE-003": 3,
+  "BL-STORE-004": 9,
 };
 
 const find = (rule: string, severity: Severity, id: string, message: string): Finding => ({ rule, severity, id, message });
