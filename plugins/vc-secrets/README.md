@@ -132,9 +132,11 @@ environment does not help there; that case wants a git credential helper, not th
   family: `secrets:<name>` with the plural no longer means anything, so it cannot be silently accepted
   as a constant.
 - `secret:<name>` resolves the whole value; `secret:<name>.<field>` needs `"format": "json"`.
-- `oauth:<name>` takes no `.<field>` — a token is not a JSON document. **`vc-secrets login <name>` acquires and
-  stores a token, but this build does not yet hand one to a server**, so launching a server that
-  references an `oauth:` value still fails with a message saying exactly that.
+- `oauth:<name>` takes no `.<field>` — a token is not a JSON document. `vc-secrets login <name>` acquires and
+  stores the token; launching a server that references an `oauth:` value hands it to the child and keeps
+  it fresh for as long as the launch lives. One `oauth:` reference per launch — a second is refused, rather
+  than silently renewing whichever of the two was written last — and the child must run a node new enough
+  for `--import`, which is how a renewed token reaches it.
 - `literal:` is stripped once: `literal:literal:x` sets the value `literal:x`.
 - The rule covers `env`, which is where a credential belongs if it must be given to a process at all.
   `args` stay free text — a token there would be visible in the machine's process list anyway, so it is
@@ -168,15 +170,15 @@ and the server process that is meant to hold the token:
   into this tool.
 - `scopes` must include `offline_access`. Without it the sign-in returns no refresh token, and
   `vc-secrets login` refuses it.
-- `targetPackage` is **required**: the npm package of the server the token is meant for. Once a launch
-  hands tokens over (not yet in this build — see above), a renewed token is delivered only into a node
-  process whose entry file is that package's `dist/index.js` (or, with `binName`, a file of that name),
-  because the launch environment reaches every node process below it — `npx` and its helpers included —
-  and being started there is not evidence of being the server. It is a package **name**, held to the npm
-  naming rules, never a pattern: a declaration names the server it means, and cannot write an expression
-  that matches more. The match is by path segment, so an unscoped name also matches a scoped package of
-  the same name (`@other/<name>`), and a `binName` matches any file so named — within the launched
-  server's own process tree, which already holds the token it was started with.
+- `targetPackage` is **required**: the npm package of the server the token is meant for. A renewed token
+  is delivered only into a node process whose entry file is that package's `dist/index.js` (or, with
+  `binName`, a file of that name), because the launch environment reaches every node process below it
+  — `npx` and its helpers included — and being started there is not evidence of being the server. It is
+  a package **name**, held to the npm naming rules, never a pattern: a declaration names the server it
+  means, and cannot write an expression that matches more. The match is by path segment, so an unscoped
+  name also matches a scoped package of the same name (`@other/<name>`), and a `binName` matches any
+  file so named — within the launched server's own process tree, which already holds the token it was
+  started with.
 - `binName` is optional: the package's executable, as `npx` normally starts it (`node_modules/.bin/<bin>`).
   It is its own key because a bin name is not derivable from the package name — the example's package
   ships the bin `mcp-server-azuredevops`, not `mcp`. **Leave it out and a server started through its

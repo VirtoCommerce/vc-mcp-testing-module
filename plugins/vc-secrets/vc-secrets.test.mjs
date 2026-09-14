@@ -1,6 +1,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -49,6 +50,15 @@ function scopedPaths({ user, project, local } = {}) {
         project: project ? write("project.json", project) : null,
         local: local ? write("local.json", local) : null,
     };
+}
+
+// A minimal stand-in for a spawned child, for cmdLaunch tests that inject spawnFn: never signalled
+// in these tests.
+function fakeChild() {
+    const child = new EventEmitter();
+    child.pid = process.pid;
+
+    return child;
 }
 
 test("parseReference: plain name", () => {
@@ -1807,18 +1817,131 @@ test("resolveEnvEntries: an env entry declared after an oauth reference still re
     assert.equal(out.oauth.length, 1);
 });
 
-test("cmdLaunch: an authorized oauth reference is refused, and the secret beside it is still not leaked", async () => {
-    // The interim refusal lives in cmdLaunch, so resolution runs first and a secret beside the oauth
-    // ref IS fetched before the refusal. That is the measured cost of moving the seam; Task 20 removes
-    // it. What must hold meanwhile is that the launch does not proceed.
+// ---------------------------------------------------------------------------------------------
+// cmdLaunch (Task 20) — the real launch path: resolve, refuse a second oauth reference, acquire
+// and deliver a token through the channel for the ones that carry one, spawn, and forward signals.
+// Ported from mcpw.js's cmdRun and mcpw.test.js's own cmdRun test block, with the naming map
+// applied: cmdRun(server, cfg, deps) -> cmdLaunch(kind, name, cfg, deps), McpwError ->
+// VcSecretsError, MCPW_* -> VC_SECRETS_*.
+// The tests below that need a real bound channel live in vc-secrets-oauth.test.mjs (channelTest) —
+// these do not reach createChannel at all, so a plain `test` is enough.
+// ---------------------------------------------------------------------------------------------
+
+test("cmdLaunch: a server with no oauth reference gets no NODE_OPTIONS and no channel", async () => {
+    let seen = null;
+    const cfg = m.loadConfig(projectPaths({ secrets: {},
+        servers: { github: { command: process.execPath, args: ["-e", ""], env: { LIT: "literal:x" } } } }));
+    const handle = await m.cmdLaunch("servers", "github", cfg,
+        { spawnFn: (cmd, args, opts) => { seen = opts.env; return fakeChild(); } });
+    try {
+        assert.equal(seen.LIT, "x");
+        assert.equal(seen.NODE_OPTIONS, undefined);
+        assert.equal(seen.VC_SECRETS_TOKEN_CHANNEL, undefined);
+        assert.equal(handle.channel, null, "no channel is created for a server that cannot renew");
+    } finally {
+        await handle.dispose();
+    }
+});
+
+test("cmdLaunch: a child node below the flag floor is refused before anything is spawned or bound", async () => {
+    // "or bound" is the half a name can claim for free: the gate has to run BEFORE createChannel,
+    // or a refused launch mkdtemps a directory the "exit" handler removes only when the process
+    // leaves -- which a suite driving cmdLaunch in-process never does, so they accumulate.
+    const channelDirs = () => (process.platform === "win32" ? []
+        : fs.readdirSync("/tmp").filter((x) => x.startsWith("vc-secrets-ch-")));
+    const before = channelDirs();
+    const cfg = m.loadConfig(authorizedOauthPaths());
+    let spawned = 0;
+    await assert.rejects(() => m.cmdLaunch("servers", "s", cfg, {
+        childNodeVersion: () => "v18.17.1",
+        readCache: async () => ({ state: "valid", accessToken: "cached" }),
+        spawnFn: () => { spawned++; return fakeChild(); },
+    }), /18\.18\.0/);
+    assert.equal(spawned, 0);
+    assert.deepEqual(channelDirs(), before, "the version gate must precede createChannel");
+});
+
+test("cmdLaunch: no usable token fails naming login, and never spawns", async () => {
+    const cfg = m.loadConfig(authorizedOauthPaths());
+    let spawned = 0;
+    await assert.rejects(() => m.cmdLaunch("servers", "s", cfg, {
+        readCache: async () => ({ state: "absent" }),
+        spawnFn: () => { spawned++; return fakeChild(); },
+    }), /vc-secrets login ado/);
+    assert.equal(spawned, 0);
+});
+
+test("cmdLaunch: dispose detaches the handlers that would exit the process", async () => {
+    // The handle exists for callers that end a launch without ending the process. child.on("close")
+    // calls process.exit, so leaving it attached means the whole CLI exits when a child the caller
+    // no longer owns happens to close.
+    const cfg = m.loadConfig(projectPaths({ secrets: {},
+        servers: { github: { command: process.execPath, args: ["-e", ""], env: {} } } }));
+    const child = fakeChild();
+    // Counted as a DELTA: the runner holds signal listeners of its own, so an absolute count would
+    // pin the harness rather than the launch. SIGINT/SIGTERM are registered unconditionally, unlike
+    // the "exit" handler, which only the oauth path installs -- that one is pinned in
+    // vc-secrets-oauth.test.mjs, where a launch reaches it.
+    const signals = ["SIGINT", "SIGTERM"];
+    const before = signals.map((s) => process.listenerCount(s));
+    const handle = await m.cmdLaunch("servers", "github", cfg, { spawnFn: () => child });
+    assert.equal(child.listenerCount("close"), 1);
+    assert.deepEqual(signals.map((s) => process.listenerCount(s)), before.map((n) => n + 1));
+    await handle.dispose();
+    assert.equal(child.listenerCount("close"), 0);
+    assert.equal(child.listenerCount("error"), 0);
+    // A surviving onSignal closure still holds the disposed child, so the next Ctrl-C signals
+    // -child.pid for a process this handle no longer owns.
+    assert.deepEqual(signals.map((s) => process.listenerCount(s)), before);
+});
+
+test("cmdLaunch: hands createChannel the same namespace keyFor keys the entry under, at both scopes", async () => {
+    // createChannel reads scopeKey only on its win32 branch, so on POSIX a wrong namespace reaches
+    // no observable: the channel still binds and the launch still works, while it and the lock
+    // guarding the same renewal land in different namespaces. What is handed over is the only thing
+    // to assert, hence deps.createChannel -- and it is asserted against keyFor rather than against
+    // a literal, because agreeing with keyFor is the whole requirement.
+    const launch = async (cfg) => {
+        let passed;
+        const handle = await m.cmdLaunch("servers", "s", cfg, {
+            childNodeVersion: () => "v20.11.0",
+            readCache: async () => ({ state: "valid", accessToken: "cached" }),
+            createChannel: ({ scopeKey }) => {
+                passed = scopeKey;
+
+                return { path: "/tmp/not-a-real.sock", push: () => 1, close: async () => {}, removeSync: () => {} };
+            },
+            spawnFn: () => fakeChild(),
+        });
+        await handle.dispose();
+
+        return passed;
+    };
+    const project = m.loadConfig(authorizedOauthPaths());
+    assert.equal(`${m.KEY_PREFIX}:${await launch(project)}:probe`,
+        m.keyFor("probe", project.oauth.ado, project));
+
+    const user = m.loadConfig(scopedPaths({ user: {
+        oauth: { ado: OAUTH_DECL },
+        servers: { s: { command: "npx", args: [], env: { ADO_TOKEN: "oauth:ado" } } },
+    } }));
+    assert.equal(`${m.KEY_PREFIX}:${await launch(user)}:probe`,
+        m.keyFor("probe", user.oauth.ado, user));
+});
+
+test("cmdLaunch: a launch can renew only one", async () => {
+    // New coverage (source gap): mcpw.js's cmdRun has this too-many-oauth-entries refusal, but the
+    // source's own test suite has no test for it. Both oauth entries are declared and referenced at
+    // USER scope so this never needs a registration grant -- the point of this test is the count,
+    // not authorization.
     const cfg = m.loadConfig(scopedPaths({
-        user: { registrations: { [OAUTH_TENANT_ID]: { [OAUTH_CLIENT_ID]: {
-            servers: { s: { command: "npx", args: ["-y", "some-oauth-package"], envKeys: ["ADO_TOKEN", "OTHER"] } } } } } },
-        project: { projectId: "proj-x", oauth: { ado: OAUTH_DECL }, secrets: { plain: { backend: "local" } },
-            servers: { s: { command: "npx", args: ["-y", "some-oauth-package"],
-                env: { ADO_TOKEN: "oauth:ado", OTHER: "secret:plain" } } } },
+        user: {
+            oauth: { ado: OAUTH_DECL, ado2: OAUTH_DECL },
+            servers: { s: { command: "npx", args: [], env: { A: "oauth:ado", B: "oauth:ado2" } } },
+        },
     }));
-    await assert.rejects(() => m.cmdLaunch("servers", "s", cfg), /does not yet hand one to a server/);
+    await assert.rejects(() => m.cmdLaunch("servers", "s", cfg),
+        /server "s" references 2 oauth entries \(A, B\) -- a launch can renew only one/);
 });
 
 test("resolveEnvEntries: an oauth reference with no registration grant is refused before any backend is contacted", async () => {
@@ -1855,13 +1978,6 @@ test("an oauth reference cannot smuggle a value into a dangerous env key either,
         oauth: { ado: OAUTH_DECL },
         servers: { s: { command: "npx", args: [], env: { NODE_OPTIONS: "oauth:ado" } } },
     })), /NODE_OPTIONS/);
-});
-
-test("cmdLaunch refuses an authorized oauth reference while nothing hands a token to a child", async () => {
-    // The interim refusal moved out of resolveEnvEntries rather than being deleted, so the CLI
-    // behaviour is unchanged while the resolver gains its reporting shape. Task 20 removes it.
-    const cfg = m.loadConfig(authorizedOauthPaths());
-    await assert.rejects(() => m.cmdLaunch("servers", "s", cfg), /does not yet hand one to a server/);
 });
 
 test("doctorReport: an oauth reference sharing a user-scope secret's name reports no grant", () => {

@@ -10,7 +10,8 @@ import http from "node:http";
 import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 
 // Two of the acquireLock socket tests below spawn a real second process to race or kill, and each
 // writes its own throwaway script into a fresh tmp dir. Removed here rather than per-test so a
@@ -903,12 +904,20 @@ test("LOCK_WAIT_MS outlasts the holder's whole critical section, not just its ex
         `LOCK_WAIT_MS=${cache.LOCK_WAIT_MS} must exceed ${oauth.TIMEOUT_OAUTH_MS} + 2 * ${m.TIMEOUT_LOCAL_MS}`);
 });
 
-test("the margin covers the tick, the exchange, the skew allowance and a worst-case call",
-    { todo: true }, () => {
-    // Four terms live in three modules and nothing else connects them. Cannot be written yet:
-    // RENEWAL_TICK_MS arrives with Task 20. Then the relation is
-    //   MARGIN_MS >= RENEWAL_TICK_MS + TIMEOUT_OAUTH_MS + SKEW_ALLOWANCE + WORST_CALL
-    });
+test("the margin covers the tick, the exchange, the skew allowance and both keystore writes", () => {
+    // Four terms live in three modules and nothing else connects them: RENEWAL_TICK_MS (this
+    // launcher) is how late entering the margin can be noticed; TIMEOUT_OAUTH_MS (the protocol) is
+    // the exchange the margin must still have time for; SKEW_TOLERANCE_MS (the cache) is the
+    // ordinary clock-correction allowance cacheStatus absorbs before calling it a rollback;
+    // TIMEOUT_LOCAL_MS (this launcher) is one keystore call, counted twice because the renewal
+    // writes the refresh entry and then the access entry after the exchange -- the same pair
+    // LOCK_WAIT_MS's own relation above has to cover.
+    assert.ok(cache.MARGIN_MS >= m.RENEWAL_TICK_MS + oauth.TIMEOUT_OAUTH_MS + cache.SKEW_TOLERANCE_MS
+            + 2 * m.TIMEOUT_LOCAL_MS,
+        `MARGIN_MS=${cache.MARGIN_MS} must be at least RENEWAL_TICK_MS(${m.RENEWAL_TICK_MS}) + `
+        + `TIMEOUT_OAUTH_MS(${oauth.TIMEOUT_OAUTH_MS}) + SKEW_TOLERANCE_MS(${cache.SKEW_TOLERANCE_MS}) + `
+        + `2 * TIMEOUT_LOCAL_MS(${m.TIMEOUT_LOCAL_MS})`);
+});
 
 // acquireLock binds a UNIX socket (abstract on linux, a filesystem path on darwin) — a different
 // privilege from socketTest's loopback TCP probe above. Measured on this sandbox: TCP loopback
@@ -3803,5 +3812,322 @@ channelTest("importing the target module wakes no receiver; importing the preloa
         assert.match(runB.err, /VAR=delivered-token/);
     } finally {
         await ch.close();
+    }
+});
+
+// ---------------------------------------------------------------------------------------------
+// cmdLaunch (Task 20) — the oauth-branch tests that need a REAL bound channel, so they run under
+// channelTest rather than plain `test` (see the comment above channelTest, and the sandbox note
+// above lockTest: a unix-domain-socket / filesystem-socket bind is refused here, and skipping is
+// the expected outcome, not a signal). The tests that never reach createChannel at all live in
+// vc-secrets.test.mjs beside the rest of cmdLaunch's coverage.
+//
+// Ported from mcpw.js's cmdRun and mcpw.test.js's own cmdRun test block: cmdRun(server, cfg, deps)
+// becomes cmdLaunch(kind, name, cfg, deps), McpwError becomes VcSecretsError, MCPW_* becomes
+// VC_SECRETS_*.
+// ---------------------------------------------------------------------------------------------
+
+const launcherModuleUrl = new URL("./vc-secrets.mjs", import.meta.url).href;
+
+// A minimal stand-in for a spawned child: never signalled in these tests.
+function fakeChild() {
+    const child = new EventEmitter();
+    child.pid = process.pid;
+
+    return child;
+}
+
+// A launchable declared entirely at USER scope, so neither the oauth entry nor the server it is
+// referenced from needs a registration grant (resolveEnvEntries exempts a user-scope launchable
+// outright) or a projectId (keyFor and cmdLaunch's scopeKey both short-circuit on
+// decl.scope === "user"). That keeps these tests about the launch mechanics cmdLaunch adds, not
+// about the authorization machinery already covered elsewhere.
+const CMD_LAUNCH_OAUTH_DECL = { ...DECL_IDENTITY, scope: "user", home: "user", kind: "oauth",
+    declaredName: "ado", targetPackage: "some-oauth-package" };
+const CMD_LAUNCH_CFG = {
+    projectId: null,
+    oauth: { ado: CMD_LAUNCH_OAUTH_DECL },
+    servers: { s: { command: "npx", args: ["-y", "some-oauth-package"], scope: "user", home: "user",
+        env: { ADO_TOKEN: "oauth:ado" } } },
+};
+
+channelTest("cmdLaunch: the oauth server is launched with the token, the channel and the preload", async () => {
+    let seen = null;
+    const handle = await m.cmdLaunch("servers", "s", CMD_LAUNCH_CFG, {
+        childNodeVersion: () => "v20.11.0",
+        readCache: async () => ({ state: "valid", accessToken: "cached" }),
+        spawnFn: (cmd, args, opts) => { seen = opts.env; return fakeChild(); },
+    });
+    try {
+        assert.equal(seen.ADO_TOKEN, "cached");
+        assert.equal(seen.VC_SECRETS_TOKEN_ENV, "ADO_TOKEN");
+        assert.equal(seen.VC_SECRETS_TOKEN_CHANNEL, handle.channel.path);
+        assert.match(seen.NODE_OPTIONS, /^--import "file:\/\/.*vc-secrets-preload\.mjs"$/);
+        assert.ok(seen.VC_SECRETS_CHANNEL_NONCE?.length >= 20, "a guessable nonce is the only gate on Windows");
+    } finally {
+        await handle.dispose();
+    }
+});
+
+channelTest("cmdLaunch: the channel directory is gone once the launch is disposed", async () => {
+    const handle = await m.cmdLaunch("servers", "s", CMD_LAUNCH_CFG, {
+        childNodeVersion: () => "v20.11.0",
+        readCache: async () => ({ state: "valid", accessToken: "cached" }),
+        spawnFn: () => fakeChild(),
+    });
+    const dir = path.dirname(handle.channel.path);
+    await handle.dispose();
+    if (process.platform !== "win32") {
+        assert.equal(fs.existsSync(dir), false);
+    }
+});
+
+channelTest("cmdLaunch: dispose detaches the exit handler that removes the channel directory", async () => {
+    // A delta, not a count: the runner has "exit" listeners of its own. Only the oauth path
+    // installs this one, so it cannot be pinned from the plain cmdLaunch tests.
+    const before = process.listenerCount("exit");
+    const handle = await m.cmdLaunch("servers", "s", CMD_LAUNCH_CFG, {
+        childNodeVersion: () => "v20.11.0",
+        readCache: async () => ({ state: "valid", accessToken: "cached" }),
+        spawnFn: () => fakeChild(),
+    });
+    assert.equal(process.listenerCount("exit"), before + 1);
+    await handle.dispose();
+    // Left attached, the closure holds a channel that is already closed, and each later launch in
+    // this process adds another.
+    assert.equal(process.listenerCount("exit"), before);
+});
+
+channelTest("cmdLaunch: the channel directory is removed when the launcher process exits", async (t) => {
+    // dispose() is the SUITE's path, not production's: a real launch leaves through
+    // child.on("close") -> process.exit or through fail(), where only an "exit" handler runs. A
+    // filesystem socket outlives its process, so a launcher that cleans up anywhere else leaves
+    // one directory per launch behind and no test would ever say so.
+    if (process.platform === "win32") {
+        t.skip("a named pipe has no directory to leak");
+
+        return;
+    }
+    const scriptDir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-exit-"));
+    tmpDirs.push(scriptDir);
+    const script = path.join(scriptDir, "launch.mjs");
+    fs.writeFileSync(script, `
+        import * as m from ${JSON.stringify(launcherModuleUrl)};
+        import path from "node:path";
+        import { EventEmitter } from "node:events";
+        const handle = await m.cmdLaunch("servers", "s", ${JSON.stringify(CMD_LAUNCH_CFG)}, {
+            readCache: async () => ({ state: "valid", accessToken: "t" }),
+            childNodeVersion: () => "v20.11.0",
+            spawnFn: () => Object.assign(new EventEmitter(), { pid: process.pid }),
+        });
+        process.stdout.write(path.dirname(handle.channel.path));
+        process.exit(0);   // the production exit path: no dispose, no close
+    `);
+    const r = spawnSync(process.execPath, [script], { encoding: "utf8" });
+    assert.match(r.stdout, /^\/tmp\/vc-secrets-ch-/, `${r.stdout}${r.stderr}`);
+    assert.equal(fs.existsSync(r.stdout), false, "one leftover directory per launch, otherwise");
+});
+
+channelTest("cmdLaunch: a spawn that throws leaves no channel directory behind", async () => {
+    if (process.platform === "win32") {
+        return;   // a named pipe has no directory to leak
+    }
+    const scriptDir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-leak-"));
+    tmpDirs.push(scriptDir);
+    const script = path.join(scriptDir, "launch.mjs");
+    fs.writeFileSync(script, `
+        import * as m from ${JSON.stringify(launcherModuleUrl)};
+        import fs from "node:fs";
+        const before = new Set(fs.readdirSync("/tmp").filter((x) => x.startsWith("vc-secrets-ch-")));
+        m.cmdLaunch("servers", "s", ${JSON.stringify(CMD_LAUNCH_CFG)}, {
+            readCache: async () => ({ state: "valid", accessToken: "t" }),
+            childNodeVersion: () => "v20.11.0",
+            spawnFn: () => { throw new Error("spawn refused"); },
+        }).catch(() => {
+            process.on("exit", () => {
+                const after = fs.readdirSync("/tmp").filter((x) => x.startsWith("vc-secrets-ch-"));
+                fs.writeSync(1, JSON.stringify(after.filter((x) => !before.has(x))));
+            });
+            process.exit(1);   // what fail() does
+        });
+    `);
+    const r = spawnSync(process.execPath, [script], { encoding: "utf8" });
+    assert.equal(r.stdout, "[]", `leaked ${r.stdout}${r.stderr}`);
+});
+
+channelTest("cmdLaunch: a renewal is pushed to the running server, and a slow tick does not stack", async () => {
+    // Without the re-entrancy guard a tick that outlasts its interval -- the contended wait alone
+    // runs to 45 s -- starts another one on top of it.
+    let inFlight = 0, maxInFlight = 0, calls = 0;
+    const handle = await m.cmdLaunch("servers", "s", CMD_LAUNCH_CFG, {
+        childNodeVersion: () => "v20.11.0",
+        spawnFn: () => fakeChild(),
+        renewalTickMs: 5,
+        readCache: async () => {
+            inFlight += 1;
+            maxInFlight = Math.max(maxInFlight, inFlight);
+            calls += 1;
+            await new Promise((r) => setTimeout(r, 40));   // a tick far slower than its interval
+            inFlight -= 1;
+
+            return { state: "valid", accessToken: `t${calls}` };
+        },
+    });
+    try {
+        await new Promise((r) => setTimeout(r, 200));
+        assert.ok(calls >= 2, `the renewal must actually run, ran ${calls}`);
+        assert.equal(maxInFlight, 1, "overlapping ticks multiply the load on the backend least able to absorb it");
+    } finally {
+        await handle.dispose();
+    }
+});
+
+channelTest("cmdLaunch: a renewal reaching nobody is reported once, not every tick", async (t) => {
+    // New coverage (source gap): mcpw.js's cmdRun and the reportedUndelivered flag it sets have no
+    // test in the source's own suite. No client ever connects here, so channel.push() returns 0 on
+    // every tick; the warning must still fire exactly once.
+    const stderr = [];
+    t.mock.method(fs, "writeSync", (fd, str) => {
+        if (fd !== 2) {
+            throw new Error(`unexpected fs.writeSync(${fd}, ...) in this test`);
+        }
+        stderr.push(str);
+
+        return Buffer.byteLength(str);
+    });
+    let calls = 0;
+    const handle = await m.cmdLaunch("servers", "s", CMD_LAUNCH_CFG, {
+        childNodeVersion: () => "v20.11.0",
+        spawnFn: () => fakeChild(),
+        renewalTickMs: 5,
+        readCache: async () => { calls += 1; return { state: "valid", accessToken: `t${calls}` }; },
+    });
+    try {
+        await new Promise((r) => setTimeout(r, 60));
+        const undelivered = stderr.filter((s) => s.includes("nothing is connected to the channel"));
+        assert.ok(calls >= 2, `the renewal must actually run more than once, ran ${calls}`);
+        assert.equal(undelivered.length, 1, `expected exactly one undelivered warning, got ${undelivered.length}`);
+    } finally {
+        await handle.dispose();
+    }
+});
+
+channelTest("cmdLaunch: a failed renewal is loud on fd 2, and does not disturb the session", async (t) => {
+    // New coverage (source gap): mcpw.js's cmdRun renewal-failure branch has no test in the
+    // source's own suite. The first readCache is the launch-time acquisition and must succeed, or
+    // the session never starts; only the RENEWAL call fails, and the child must survive it untouched.
+    const stderr = [];
+    t.mock.method(fs, "writeSync", (fd, str) => {
+        if (fd !== 2) {
+            throw new Error(`unexpected fs.writeSync(${fd}, ...) in this test`);
+        }
+        stderr.push(str);
+
+        return Buffer.byteLength(str);
+    });
+    const child = fakeChild();
+    let killed = false;
+    child.kill = () => { killed = true; };
+    let calls = 0;
+    const handle = await m.cmdLaunch("servers", "s", CMD_LAUNCH_CFG, {
+        childNodeVersion: () => "v20.11.0",
+        spawnFn: () => child,
+        renewalTickMs: 5,
+        readCache: async () => {
+            calls += 1;
+            if (calls === 1) {
+                return { state: "valid", accessToken: "initial" };
+            }
+            throw new Error("network down");
+        },
+    });
+    try {
+        await new Promise((r) => setTimeout(r, 30));
+        assert.ok(stderr.some((s) => /renewal failed: network down/.test(s)));
+        assert.equal(killed, false, "a failed renewal must not touch the child");
+        assert.equal(child.listenerCount("close"), 1, "the session must still be intact");
+    } finally {
+        await handle.dispose();
+    }
+});
+
+// A tiny stub binary on PATH, intercepting the real "gpg" invocation runTool makes for a local
+// secret read -- the same technique vc-secrets.test.mjs uses (withStubOnPath/stubBinary), inlined
+// here rather than imported so this file stays independent of that one's fixtures.
+function stubGpgOnPath(plaintext) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-gpgstub-"));
+    tmpDirs.push(dir);
+    fs.writeFileSync(path.join(dir, "gpg"), `#!/bin/sh\nprintf %s ${JSON.stringify(plaintext)}\n`, { mode: 0o755 });
+
+    return dir;
+}
+
+channelTest("cmdLaunch: an oauth reference and an ordinary secret both reach the child, and neither leaks on fd 1 or fd 2", async (t) => {
+    // Replaces vc-secrets.test.mjs's deleted "cmdLaunch: an authorized oauth reference is refused,
+    // and the secret beside it is still not leaked" -- that test's body asserted only the interim
+    // rejection, never the leak its own title promised. This one drives the real path: a "secret:"
+    // reference needs a real backend, so a stub "gpg" on PATH stands in for the actual tool
+    // (gpg --decrypt just prints the plaintext), while the ciphertext file only has to EXIST for
+    // makeSecretResolver's pre-check to proceed to it.
+    const secretsHome = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-both-"));
+    tmpDirs.push(secretsHome);
+    const secretPath = path.join(secretsHome, "vc-secrets", "secrets", "user", "plain.gpg");
+    fs.mkdirSync(path.dirname(secretPath), { recursive: true });
+    fs.writeFileSync(secretPath, "ciphertext-placeholder");
+    const binDir = stubGpgOnPath("PLAIN-SECRET-VALUE");
+
+    const savedPath = process.env.PATH;
+    const savedXdg = process.env.XDG_CONFIG_HOME;
+    process.env.PATH = `${binDir}${path.delimiter}${savedPath}`;
+    process.env.XDG_CONFIG_HOME = secretsHome;
+
+    const stdout = [];
+    const stderr = [];
+    t.mock.method(fs, "writeSync", (fd, str) => {
+        if (fd === 1) {
+            stdout.push(str);
+        } else if (fd === 2) {
+            stderr.push(str);
+        }
+
+        return Buffer.byteLength(str);
+    });
+    const realErr = process.stderr.write.bind(process.stderr);
+    // fd 2 has two routes and fs.writeSync is only one: cmdLaunch's timing line goes out through
+    // process.stderr.write, which an fs.writeSync mock cannot see.
+    // No matching process.stdout.write mock, deliberately: under `node --test` a test file is a
+    // child process that reports its results to the parent over fd 1, so a mock there that does
+    // not forward deletes neighbouring tests' results while the run still reports green.
+    t.mock.method(process.stderr, "write", (...a) => { stderr.push(String(a[0])); return realErr(...a); });
+
+    const cfg = {
+        projectId: null,
+        oauth: { ado: CMD_LAUNCH_OAUTH_DECL },
+        secrets: { plain: { backend: "local", scope: "user", home: "user" } },
+        servers: { both: { command: "npx", args: ["-y", "some-oauth-package"], scope: "user", home: "user",
+            env: { ADO_TOKEN: "oauth:ado", OTHER: "secret:plain" } } },
+    };
+
+    let seen = null;
+    let handle;
+    try {
+        handle = await m.cmdLaunch("servers", "both", cfg, {
+            childNodeVersion: () => "v20.11.0",
+            readCache: async () => ({ state: "valid", accessToken: "TOKEN-VALUE" }),
+            spawnFn: (cmd, args, opts) => { seen = opts.env; return fakeChild(); },
+        });
+        assert.equal(seen.OTHER, "PLAIN-SECRET-VALUE", "the secret must still reach the child beside the oauth token");
+        assert.equal(seen.ADO_TOKEN, "TOKEN-VALUE", "the oauth token must reach the child too");
+        const allOutput = [...stdout, ...stderr].join("");
+        assert.doesNotMatch(allOutput, /PLAIN-SECRET-VALUE/);
+        assert.doesNotMatch(allOutput, /TOKEN-VALUE/);
+    } finally {
+        await handle?.dispose();
+        process.env.PATH = savedPath;
+        if (savedXdg === undefined) {
+            delete process.env.XDG_CONFIG_HOME;
+        } else {
+            process.env.XDG_CONFIG_HOME = savedXdg;
+        }
     }
 });

@@ -14,12 +14,10 @@ import os from "node:os";
 import { VcSecretsError } from "./vc-secrets-error.mjs";
 
 const CACHE_SCHEMA = 1;
-// Longest in-flight call + one exchange + a clock-skew allowance + the renewal tick's granularity,
-// because entering the margin is noticed up to one tick late. Widening this costs one thing only —
-// the exchange lands slightly earlier in the token's life, never more often -- so it is the term to
-// widen when the tick has to grow. Not yet pinned by a test: the `{ todo: true }` test "the margin
-// covers the tick, the exchange, the skew allowance and a worst-case call" (vc-secrets-oauth.test.mjs)
-// waits on RENEWAL_TICK_MS, which arrives with a later task.
+// Both of the renewal's keystore writes + one exchange + a clock-skew allowance + the renewal
+// tick's granularity, because entering the margin is noticed up to one tick late. Widening this
+// costs one thing only — the exchange lands slightly earlier in the token's life, never more
+// often -- so it is the term to widen when the tick has to grow.
 const MARGIN_MS = 12 * 60 * 1000;
 // Ordinary NTP correction between the exchange and the read must not read as a rollback, or
 // every small adjustment costs a refresh-token rotation.

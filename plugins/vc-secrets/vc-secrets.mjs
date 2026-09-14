@@ -1679,7 +1679,7 @@ async function createChannel({ name, scopeKey, nonce, onRefusal = () => {}, chmo
     } catch (e) {
         // The directory exists from mkdtempSync above and the server may already be bound. A
         // caller that CATCHES this would otherwise hang on a live listener and leave the
-        // directory behind -- and the launcher's own exit handler is not registered yet.
+        // directory behind.
         try {
             server.close();
         } catch { /* never listened */ }
@@ -3048,45 +3048,86 @@ function killProcessTree(child, signal, { platform = process.platform, spawnSync
     }, 5000).unref();
 }
 
+// A repeating interval rather than one timer aimed at the margin: a timer that long fires late after
+// a host suspend, and a late wake costs a window of 401s nothing will retry, because the launcher is
+// not in the data path and cannot see one.
+//
+// BOUNDED FROM ABOVE by MARGIN_MS (vc-secrets-cache.mjs): entering the margin is noticed up to one
+// tick late, so this granularity spends the same budget the margin holds for the renewal's two
+// keystore writes, an exchange and a wrong clock. Raising it past that budget breaks nothing
+// observable, which is why a test ties the two together across the modules the terms live in
+// (vc-secrets-oauth.test.mjs).
+const RENEWAL_TICK_MS = 5 * 60 * 1000;
+
 // One launch path for both kinds. A `task` is not an MCP server, but everything that matters here is
 // the same: resolve, strip the inherited legacy vars, inject into this child only, forward stdio, and
 // take the whole process group down on a signal. Giving tasks their own copy of this is how the two
 // would drift on the parts that are security-relevant.
-async function cmdLaunch(kind, name, cfg) {
+async function cmdLaunch(kind, name, cfg, deps = {}) {
     const startedAt = process.hrtime.bigint();
     const resolver = makeSecretResolver(cfg);
-    // Interim, until Task 20 wires the token channel; delete this block with it. It runs BEFORE
-    // resolveEnvEntries because that function resolves as well as validates: refusing afterwards
-    // unlocks the keystore for a launch that cannot proceed, and a missing secret beside the oauth
-    // ref then reports "run vc-secrets set" -- the wrong problem entirely. Only a DECLARED entry is
-    // refused here, so an undeclared one still reaches the message that names the typo.
-    for (const [envVar, value] of Object.entries(cfg[kind][name]?.env ?? {})) {
-        const ref = parseReference(value);
-        if (ref?.kind === "oauth" && Object.hasOwn(cfg.oauth ?? {}, ref.name)) {
-            // Reworded, not removed, when the login verb landed: the old text said this build does
-            // not acquire tokens, which a developer who has just watched `vc-secrets login` write two
-            // keystore entries can see is false -- and it pointed away from the real cause, which is
-            // that nothing hands an acquired token to a child yet. Task 20 deletes the block.
-            throw new VcSecretsError(`env ${envVar}: oauth entry "${ref.name}" cannot be resolved -- `
-                + '"vc-secrets login" stores a token for it, but this build does not yet hand one to a server');
-        }
-    }
-    const { env: secretEnv } = await resolveEnvEntries(name, cfg, resolver, kind);
+    const entries = await resolveEnvEntries(name, cfg, resolver, kind);
     if (process.env.VC_SECRETS_TIMING === "1") {
         const ms = Number(process.hrtime.bigint() - startedAt) / 1e6;
         process.stderr.write(`vc-secrets: resolve phase took ${ms.toFixed(0)} ms\n`);   // budget measurement
     }
+    if (entries.oauth.length > 1) {
+        // One launch carries one token, one channel and one VC_SECRETS_TOKEN_ENV. Two references
+        // would silently renew whichever the last write won, so refuse where the cause is still visible.
+        throw new VcSecretsError(`${kind === "tasks" ? "task" : "server"} "${name}" references ${entries.oauth.length} `
+            + `oauth entries (${entries.oauth.map((x) => x.envVar).join(", ")}) -- a launch can renew only one`);
+    }
     const server = cfg[kind][name];
-    const childEnv = sanitizeEnv(process.env);
+    let childEnv = sanitizeEnv(process.env);
     for (const varName of LEGACY_SECRET_ENV_VARS) {
-        if (!(varName in secretEnv)) {
+        if (!(varName in entries.env)) {
             delete childEnv[varName];   // a stale session token must not leak into the child
         }
     }
-    Object.assign(childEnv, secretEnv);
+    Object.assign(childEnv, entries.env);
+
+    // Only a launchable with an oauth reference goes through what follows. Every other one keeps
+    // today's path exactly -- routing them all through it would widen the NODE_OPTIONS carve-out
+    // past the child it was authorised for.
+    const [oauthEntry] = entries.oauth;
+    let channel = null;
+    let launchDeps = null;
+    let token = null;
+    let renewalTimer = null;
+    const cleanup = () => {
+        if (renewalTimer !== null) {
+            clearInterval(renewalTimer);
+        }
+        channel?.removeSync();
+    };
+    if (oauthEntry !== undefined) {
+        launchDeps = { serverName: oauthEntry.name,
+            ...oauthLaunchDeps(oauthEntry.name, oauthEntry.decl, cfg, { ...deps }), ...deps };
+        token = await ensureFreshToken(launchDeps);
+        const version = (deps.childNodeVersion ?? childNodeVersionIo)();
+        if (!childNodeSupportsImport(version)) {
+            throw new VcSecretsError(`the node that runs "${name}" reports ${version || "no version"}, which predates `
+                + `--import (${NODE_IMPORT_FLOOR.join(".")}) -- a renewed token could not be delivered to it`);
+        }
+        const nonce = crypto.randomBytes(32).toString("base64url");
+        // "exit" is where this process actually leaves: the normal path is child.on("close") ->
+        // process.exit and a thrown error is fail() -> process.exit, neither of which runs a
+        // signal handler. A filesystem socket outlives its process unless something removes it.
+        //
+        // Registered BEFORE the channel exists, because everything in between is a window where a
+        // throw leaks the directory -- resolving the spawn command and the spawn itself both live
+        // there, and fail() runs only the handlers already installed. With a null channel the
+        // handler is a no-op, so registering early costs nothing and closes the window entirely.
+        process.on("exit", cleanup);
+        const scopeKey = oauthEntry.decl.scope === USER_SCOPE ? USER_SCOPE : cfg.projectId;
+        channel = await (deps.createChannel ?? createChannel)({ name, scopeKey, nonce });
+        childEnv = buildChildEnv(childEnv, { token, envVar: oauthEntry.envVar,
+            channelPath: channel.path, nonce, preloadPath: PRELOAD_PATH,
+            targetPackage: oauthEntry.decl.targetPackage, binName: oauthEntry.decl.binName });
+    }
 
     const invocation = buildSpawnInvocation(resolveSpawnCommand(server.command), server.args);
-    const child = spawn(invocation.cmd, invocation.args, {
+    const child = (deps.spawnFn ?? spawn)(invocation.cmd, invocation.args, {
         stdio: "inherit",
         env: childEnv,
         detached: process.platform !== "win32",   // own process group -> we can kill the whole tree
@@ -3094,17 +3135,78 @@ async function cmdLaunch(kind, name, cfg) {
     });
     resolver.resolvedValues.length = 0;   // shrink the in-heap window
 
-    for (const signal of ["SIGINT", "SIGTERM"]) {
-        process.on(signal, () => killProcessTree(child, signal));
+    let reportedUndelivered = false;
+    let renewing = false;
+    if (channel !== null) {
+        renewalTimer = setInterval(() => {
+            // A tick can outlast its own interval -- the contended wait alone runs to 45 s -- and
+            // overlapping ticks cannot double-exchange (the bind is process-wide) but do multiply
+            // the poll load on the backend least able to absorb it.
+            if (renewing) {
+                return;
+            }
+            renewing = true;
+            // Through the same locked path as the launch: every concurrent launcher computes its
+            // schedule from the same expiry, so without the lock they all wake together and all
+            // exchange -- and Entra rotates on use, which signs out every session but one.
+            ensureFreshToken(launchDeps).then((fresh) => {
+                if (fresh === token) {
+                    return;
+                }
+                token = fresh;
+                if (channel.push(fresh) === 0 && !reportedUndelivered) {
+                    reportedUndelivered = true;
+                    fs.writeSync(2, "vc-secrets: renewed the token, but nothing is connected to the channel yet; "
+                        + "it will be handed over when the server connects\n");
+                }
+            }).catch((e) => {
+                // Loud on fd 2 and nowhere else: the stdio channel is the client's, and the
+                // server keeps serving on the token it already has until that token expires.
+                fs.writeSync(2, `vc-secrets: renewal failed: ${e.message}\n`);
+            }).finally(() => {
+                renewing = false;
+            });
+        }, deps.renewalTickMs ?? RENEWAL_TICK_MS);
+        renewalTimer.unref();   // must not keep the launcher alive after the child is gone
     }
-    child.on("error", (e) => {
+
+    const onSignal = (signal) => killProcessTree(child, signal);
+    for (const signal of ["SIGINT", "SIGTERM"]) {
+        process.on(signal, onSignal);
+    }
+    // Named, because dispose() has to detach them: they end the PROCESS, and a caller holding a
+    // handle it has already disposed would otherwise have the whole CLI exit under it when the
+    // child it no longer owns happens to close.
+    const onChildError = (e) => {
         // sync write: stderr is an async pipe on Windows, and process.exit abandons pending writes
         fs.writeSync(2, `vc-secrets: failed to spawn ${server.command}: ${e.message}\n`);
         process.exit(1);
-    });
-    child.on("close", (code, signal) => {
+    };
+    const onChildClose = (code, signal) => {
         process.exit(signal ? 1 : (code ?? 1));   // signal collapse to 1 is accepted
-    });
+    };
+    child.on("error", onChildError);
+    child.on("close", onChildClose);
+
+    // A launch outlives this call in production -- the process exits from the handlers above -- so
+    // the handle exists for callers that must end one without ending the process: the suite, and
+    // any later verb that launches a server to ask it something.
+    return {
+        child,
+        channel,
+        dispose: async () => {
+            process.off("exit", cleanup);
+            for (const signal of ["SIGINT", "SIGTERM"]) {
+                process.off(signal, onSignal);
+            }
+            child.removeListener("error", onChildError);
+            child.removeListener("close", onChildClose);
+            if (renewalTimer !== null) {
+                clearInterval(renewalTimer);
+            }
+            await channel?.close();
+        },
+    };
 }
 
 function cmdRun(serverName, cfg) {
@@ -3295,6 +3397,7 @@ export {
     REDIRECT_PATH, MAX_ERROR_PARAMS, closeTabPage, forTerminal, escapeHtml, failedPage, listenForCallback,
     openBrowser, buildBrowserCommand, handleCallback, cmdLogin, cmdLogout,
     runTool, resolveSpawnCommand, buildSpawnInvocation, makeSecretResolver, cmdRun, cmdTask, cmdLaunch, killProcessTree,
+    RENEWAL_TICK_MS,
     validateLaunchables, LEGACY_ENV_VARS, LEGACY_SECRET_ENV_VARS,
     mapResolveError, applyKeystrokes, promptHidden, cmdSet, cmdUnlock, unlockTargets, cmdDoctor, cmdMigrate, newKeyPresent,
     SECRET_NAME_RE, LAUNCHABLE_NAME_RE, PACKAGE_NAME_RE, BIN_NAME_RE, doctorReport,
