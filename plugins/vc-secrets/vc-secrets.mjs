@@ -1761,6 +1761,44 @@ function buildChildEnv(base, { token, envVar, channelPath, nonce, preloadPath, t
     return env;
 }
 
+const NODE_IMPORT_FLOOR = [18, 18, 0];
+
+function childNodeSupportsImport(version) {
+    const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(version ?? ""));
+    if (match === null) {
+        // Refused rather than assumed: an unrecognised NODE_OPTIONS flag makes node abort at
+        // startup, so guessing "new enough" trades a named error here for a server that does not
+        // start behind a message pointing at the flag instead of at us.
+        return false;
+    }
+    const parts = [Number(match[1]), Number(match[2]), Number(match[3])];
+    for (const [i, floor] of NODE_IMPORT_FLOOR.entries()) {
+        if (parts[i] !== floor) {
+            return parts[i] > floor;
+        }
+    }
+
+    return true;
+}
+
+// The node that runs the server is whatever npx resolves on PATH, which need not be the one
+// running mcpw — so the gate reads the CHILD's version. Reading our own would pass happily on a
+// machine where the server cannot start.
+function childNodeVersionIo({ platform = process.platform, env = process.env } = {}) {
+    const invocation = buildSpawnInvocation(resolveSpawnCommand("node", { platform, env }), ["--version"]);
+    const r = spawnSync(invocation.cmd, invocation.args,
+        // Sanitized like every other child, and last so no invocation option can put a loader back.
+        // Two things go wrong without it, and the quiet one is worse: an inherited `--require` runs
+        // inside a diagnostic whose whole job is to answer a version question, in a file that strips
+        // loader variables from the server precisely so nothing inherited executes. The loud one is
+        // an inherited NODE_OPTIONS node rejects — the probe then reads empty and the launcher
+        // refuses a server that would have started, naming a node version nobody chose.
+        { encoding: "utf8", timeout: TIMEOUT_LOCAL_MS, windowsHide: true, ...invocation.opts,
+            env: sanitizeEnv(env) });
+
+    return (r.stdout ?? "").trim();
+}
+
 // The interactive sign-in callback surface: the loopback listener that receives Entra's redirect,
 // the leaf that decides what a given request means, the two tiny pages the browser ends up
 // looking at, and the browser opener. No storage, no mutex — that is `login`'s job, not this one's.
@@ -3252,6 +3290,7 @@ export {
     COMMAND_ON_STDIN, quoteForSecurityInteractive, writeSecretValue,
     tokenLockFor, acquireTokenLock, ensureFreshToken, oauthLaunchDeps,
     CHANNEL_GREETING_MAX, channelPipeName, createChannel, PRELOAD_PATH, buildChildEnv,
+    childNodeSupportsImport, childNodeVersionIo,
     REDIRECT_PATH, MAX_ERROR_PARAMS, closeTabPage, forTerminal, escapeHtml, failedPage, listenForCallback,
     openBrowser, buildBrowserCommand, handleCallback, cmdLogin, cmdLogout,
     runTool, resolveSpawnCommand, buildSpawnInvocation, makeSecretResolver, cmdRun, cmdTask, cmdLaunch, killProcessTree,

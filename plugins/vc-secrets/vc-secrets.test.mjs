@@ -2006,6 +2006,49 @@ test("buildChildEnv: the token, channel, nonce and target variables travel in en
     assert.equal(env.VC_SECRETS_TARGET_BIN, "mcp-server-x");
 });
 
+test("childNodeSupportsImport: 18.18.0 is the boundary, not the major version", () => {
+    // Verified against upstream: --import landed in 19.0.0 and was backported to 18.18.0;
+    // src/node_options.cc has it at v18.18.0 and not at v18.17.1, and it is registered
+    // kAllowedInEnvironment, so NODE_OPTIONS accepts it there.
+    assert.equal(m.childNodeSupportsImport("v18.17.1"), false);
+    assert.equal(m.childNodeSupportsImport("v18.18.0"), true);
+    assert.equal(m.childNodeSupportsImport("v20.5.1"), true, "a major-version floor would wrongly refuse this");
+    assert.equal(m.childNodeSupportsImport("v22.22.0"), true);
+    assert.equal(m.childNodeSupportsImport("v18.9.0"), false, "9 < 18 by number, not by string order");
+});
+
+test("childNodeSupportsImport: a version it cannot read is refused, not assumed new enough", () => {
+    // `node --version` returning nothing is what a missing or broken node looks like, and
+    // assuming "new enough" there trades a named error for a server that aborts at startup
+    // behind a message about a flag.
+    assert.equal(m.childNodeSupportsImport(""), false);
+    assert.equal(m.childNodeSupportsImport("not a version"), false);
+    assert.equal(m.childNodeSupportsImport(undefined), false);
+});
+
+test("childNodeVersionIo: an inherited loader variable neither runs nor breaks the probe", () => {
+    // The poison goes in process.env, not in the injected argument, and that is the whole point:
+    // without the fix the spawn inherits the real environment, so a bogus value passed as an
+    // ARGUMENT would be ignored and the probe would succeed either way — the first version of this
+    // test asserted nothing for exactly that reason.
+    //
+    // With an inherited NODE_OPTIONS node rejects, the probe reads empty and the launcher refuses a
+    // server that would have started; an inherited --require would instead have executed, inside a
+    // diagnostic, in the one file whose policy is that nothing inherited runs.
+    const saved = process.env.NODE_OPTIONS;
+    process.env.NODE_OPTIONS = "--not-a-real-flag";
+    try {
+        const version = m.childNodeVersionIo();
+        assert.match(version, /^v\d+\.\d+\.\d+/, `the probe must not inherit a loader variable: "${version}"`);
+    } finally {
+        if (saved === undefined) {
+            delete process.env.NODE_OPTIONS;
+        } else {
+            process.env.NODE_OPTIONS = saved;
+        }
+    }
+});
+
 test("PRELOAD_PATH is anchored beside the launcher module, never against argv[1]", () => {
     // The launcher is normally entered through vc-secrets-shim.mjs, so argv[1] is the shim in the
     // plugin DATA dir while the preload sits beside vc-secrets.mjs in the versioned plugin CACHE.
