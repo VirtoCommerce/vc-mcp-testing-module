@@ -3554,15 +3554,17 @@ function runEntry(entry, env, { preload = true, timeoutMs = 10000 } = {}) {
             targetPackage: env.VC_SECRETS_TARGET_PACKAGE,
             binName: env.VC_SECRETS_TARGET_BIN,
         });
-        if (env.VC_SECRETS_TOKEN_ENV !== undefined) {
-            delete composed[env.VC_SECRETS_TOKEN_ENV];
-        }
+        // Unguarded, as the source is. Were the name ever absent, buildChildEnv would have written
+        // the seed under a key literally spelled "undefined", and that is exactly the key this
+        // line then removes -- a `!== undefined` guard would skip it and hand the seed to the child.
+        delete composed[env.VC_SECRETS_TOKEN_ENV];
         childEnv = composed;
     }
-    // Reapplied even on the preload path: an explicit `undefined` here (the "malformed target
-    // package" fixture) means the key must be ABSENT from the child, not present with the
-    // stringified "undefined" that spawn would otherwise write -- buildChildEnv has no way to
-    // express that, so this loop is what actually removes it.
+    // The caller's overrides land last, so a fixture can still steer what the child sees after
+    // buildChildEnv has composed it. The `undefined` branch below is defence, not the mechanism:
+    // node's spawn already omits an env key whose value is undefined (measured on v22.23.2 --
+    // the child reports the key as absent, not as the string "undefined"), so the "malformed
+    // target package" fixture would get an absent key with or without it.
     for (const [key, value] of Object.entries(env)) {
         if (value === undefined) {
             delete childEnv[key];

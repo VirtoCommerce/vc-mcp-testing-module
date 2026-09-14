@@ -1297,6 +1297,24 @@ test("runTool: executes a .cmd shim instead of reporting it missing", { skip: pr
     }
 });
 
+test("runTool: a dangerous variable in the launcher's own environment never reaches a backend tool", async () => {
+    // The other end of the NODE_OPTIONS carve-out. buildChildEnv reverses this package's env policy
+    // for ONE child -- the MCP server that holds the credential -- and the comment there asserts
+    // backend tools are unaffected because runTool sanitizes unconditionally. That sentence was the
+    // only thing holding the bound: deleting the sanitizeEnv call at runTool's spawn left the whole
+    // suite green, so a later edit could drop it and ship. LD_PRELOAD rather than NODE_OPTIONS
+    // because a missing preload object is ignored by the loader -- it warns on stderr and the
+    // child runs on -- so the test observes the variable itself rather than an effect of it.
+    process.env.LD_PRELOAD = "/evil.so";
+    try {
+        const spec = { cmd: process.execPath, args: ["-e", "process.stdout.write(String(process.env.LD_PRELOAD))"],
+            timeoutMs: 10_000, captureStdout: true };
+        assert.equal(await m.runTool(spec), "undefined");
+    } finally {
+        delete process.env.LD_PRELOAD;
+    }
+});
+
 test("resolveSpawnCommand: win32 .cmd shim found case-insensitively", () => {
     const existsSync = (p) => p.toLowerCase().replace(/\\/g, "/") === "c:/program files/nodejs/npx.cmd";
     const r = m.resolveSpawnCommand("npx", {
@@ -1956,7 +1974,7 @@ test("buildChildEnv: the inherited injection vectors are dropped, not extended",
     // Asserting only that NODE_OPTIONS ends up composed is a TAUTOLOGY: this function assigns
     // that variable last, so the assertion holds even if the inherited environment is copied
     // wholesale. Measured -- a mutation replacing sanitizeEnv(base) with a plain spread survived
-    // the earlier form of this test (mcpw.test.js:3432). The claim worth making is about the
+    // the earlier form of this test in mcpw.test.js. The claim worth making is about the
     // SIBLING vectors, which nothing downstream overwrites: an inherited LD_PRELOAD reaching the
     // child is the same arbitrary-code execution inside the credential holder that the carve-out
     // promises to keep closed.
