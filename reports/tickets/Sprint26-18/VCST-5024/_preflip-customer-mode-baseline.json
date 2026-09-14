@@ -1,0 +1,50 @@
+{
+ "capturedAt": "2026-09-11T13:52:41.076Z",
+ "mode": "Customer (setting unset)",
+ "store": "B2B-store",
+ "me": {
+  "id": "95a30901-9b99-4269-a855-109607378479",
+  "orgs": []
+ },
+ "balance": {
+  "currentBalance": 2702311237,
+  "resultBalance": 2702311237
+ },
+ "historyTotal": 219,
+ "historyTop": [
+  {
+   "id": "e668b9f1-a851-4d14-af23-c6add4af63a4",
+   "operationType": "Earned",
+   "amount": 97371100,
+   "createdDate": "2026-09-10T11:51:22.2484341Z",
+   "object": {
+    "type": "CustomerOrder",
+    "orderId": "73ed7044-40f7-4cf1-b89a-4adbb9faba71",
+    "orderNumber": "CO260910-00017"
+   }
+  },
+  {
+   "id": "bbb46fbb-7667-40ea-85c4-3ea425c1cc6d",
+   "operationType": "Earned",
+   "amount": 350,
+   "createdDate": "2026-09-10T11:51:21.6596679Z",
+   "object": {
+    "type": "Mission",
+    "orderId": null,
+    "orderNumber": null
+   }
+  },
+  {
+   "id": "fb123b44-8995-4e1d-b434-30f192d6443d",
+   "operationType": "Earned",
+   "amount": 501,
+   "createdDate": "2026-09-10T11:51:21.4340708Z",
+   "object": {
+    "type": "Mission",
+    "orderId": null,
+    "orderNumber": null
+   }
+  }
+ ],
+ "missionTotal": 60
+}

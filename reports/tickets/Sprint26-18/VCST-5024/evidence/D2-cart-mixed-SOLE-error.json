@@ -1,0 +1,658 @@
+{
+ "__provenance": {
+  "ticket": "VCST-5024",
+  "run": "/qa-test VCST-5024, Sprint26-18",
+  "capturedAt": "2026-09-11T14:52:00Z (approx — after a cash line, address, delivery, payment and PO were supplied)",
+  "what": "Cart state for LOY_PERSONAL_NOORG with a MIXED cart, built to remove the confound. Expected to carry LOYALTY_INSUFFICIENT_BALANCE as the SOLE validation error.",
+  "environment": "vcst-qa (TEST_ENV=vcst)",
+  "store": "B2B-store",
+  "store_mode_at_capture": "Organization (Loyalty.LoyaltyBalanceCalculationMode), flip window 14:34:06Z-15:07:52Z",
+  "actor": "LOY_PERSONAL_NOORG (agent-test-orgloy-noorg@test-agent.com) — belongs to NO organization",
+  "actor_balance_at_capture": 38916,
+  "captured_by": "qa-frontend-expert (playwright-chrome lane)",
+  "persisted_at": "2026-09-11T15:38Z, at the 5b verifier gate, from test-results/chrome/",
+  "note": "Stamped at the 5b gate so the file is self-authenticating rather than relying on correspondence to sf-12 / sf-13. The payload below is unmodified."
+ },
+ "data": {
+  "changePurchaseOrderNumber": {
+   "id": "0e56ebc2-7e7d-4750-b314-2a3ac8ef7d75",
+   "__typename": "CartType",
+   "itemsQuantity": 2,
+   "items": [
+    {
+     "id": "ce612ddf-4e85-46f4-9c05-eac7d0674348",
+     "sku": "QA-LOY-PRIO-001",
+     "quantity": 1,
+     "productId": "357b4354-32b7-4156-a212-892c77238c32",
+     "currencyCode": "USD",
+     "__typename": "LineItemType",
+     "name": "AGENT-TEST-Loy-Priority",
+     "inStockQuantity": 81,
+     "imageUrl": "https://vcst-qa.govirto.com/cms-content/assets/catalog/QA-LOY-PRIO-001/QA-LOY-PRIO-001-main.png",
+     "selectedForCheckout": true,
+     "productType": "Physical",
+     "showPlacedPrice": true,
+     "listTotal": {
+      "amount": 60,
+      "formattedAmount": "$60.00",
+      "formattedAmountWithoutCurrency": "60.00",
+      "currency": {
+       "code": "USD",
+       "symbol": "$",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "product": {
+      "id": "357b4354-32b7-4156-a212-892c77238c32",
+      "slug": "seed-test-fixtures/agent-test-loy-priority",
+      "minQuantity": 1,
+      "maxQuantity": 0,
+      "masterVariation": null,
+      "properties": [
+       {
+        "group": null,
+        "name": "AGENT_TEST_VP9279_1786951191351",
+        "colorCode": null,
+        "value": null,
+        "valueDisplayOrder": null,
+        "propertyType": "CATALOG",
+        "hidden": false,
+        "propertyValueType": "SHORT_TEXT",
+        "label": "Alpha EN",
+        "displayOrder": null,
+        "__typename": "Property"
+       }
+      ],
+      "availabilityData": {
+       "isActive": true,
+       "isAvailable": true,
+       "isBuyable": true,
+       "isInStock": true,
+       "availableQuantity": 81,
+       "__typename": "AvailabilityData"
+      },
+      "isConfigurable": false,
+      "packSize": 1,
+      "__typename": "Product"
+     },
+     "vendor": null,
+     "extendedPrice": {
+      "amount": 60,
+      "formattedAmount": "$60.00",
+      "formattedAmountWithoutCurrency": "60.00",
+      "currency": {
+       "code": "USD",
+       "symbol": "$",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "placedPrice": {
+      "amount": 60,
+      "formattedAmount": "$60.00",
+      "formattedAmountWithoutCurrency": "60.00",
+      "currency": {
+       "code": "USD",
+       "symbol": "$",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "listPrice": {
+      "amount": 60,
+      "formattedAmount": "$60.00",
+      "formattedAmountWithoutCurrency": "60.00",
+      "currency": {
+       "code": "USD",
+       "symbol": "$",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "salePrice": {
+      "amount": 60,
+      "formattedAmount": "$60.00",
+      "formattedAmountWithoutCurrency": "60.00",
+      "currency": {
+       "code": "USD",
+       "symbol": "$",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "discountTotal": {
+      "amount": 0,
+      "formattedAmount": "$0.00",
+      "formattedAmountWithoutCurrency": "0.00",
+      "currency": {
+       "code": "USD",
+       "symbol": "$",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "validationErrors": [],
+     "configurationItems": []
+    },
+    {
+     "id": "13ab4ced-f0b2-4df5-9bc6-55393eda7aee",
+     "sku": "in724846",
+     "quantity": 1,
+     "productId": "25bd0e7f-07db-44e5-b3bd-e8c5db03734e",
+     "currencyCode": "PTS",
+     "__typename": "LineItemType",
+     "name": "Double Drum Autoclave",
+     "inStockQuantity": 1614,
+     "imageUrl": "https://in.all.biz/img/in/catalog/724846.png",
+     "selectedForCheckout": true,
+     "productType": "Physical",
+     "showPlacedPrice": true,
+     "listTotal": {
+      "amount": 6,
+      "formattedAmount": "PTS6.00",
+      "formattedAmountWithoutCurrency": "6.00",
+      "currency": {
+       "code": "PTS",
+       "symbol": "PTS",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "product": {
+      "id": "25bd0e7f-07db-44e5-b3bd-e8c5db03734e",
+      "slug": null,
+      "minQuantity": 1,
+      "maxQuantity": 0,
+      "masterVariation": null,
+      "properties": [
+       {
+        "group": null,
+        "name": "Seller",
+        "colorCode": null,
+        "value": "Rosvin Sports",
+        "valueDisplayOrder": null,
+        "propertyType": "PRODUCT",
+        "hidden": false,
+        "propertyValueType": "SHORT_TEXT",
+        "label": "Seller",
+        "displayOrder": null,
+        "__typename": "Property"
+       },
+       {
+        "group": null,
+        "name": "Description",
+        "colorCode": null,
+        "value": "Double Drum Autoclave: Large-capacity autoclave for extensive sterilization needs.",
+        "valueDisplayOrder": null,
+        "propertyType": "PRODUCT",
+        "hidden": false,
+        "propertyValueType": "SHORT_TEXT",
+        "label": "Description",
+        "displayOrder": null,
+        "__typename": "Property"
+       }
+      ],
+      "availabilityData": {
+       "isActive": true,
+       "isAvailable": true,
+       "isBuyable": true,
+       "isInStock": true,
+       "availableQuantity": 1614,
+       "__typename": "AvailabilityData"
+      },
+      "isConfigurable": false,
+      "packSize": 1,
+      "__typename": "Product"
+     },
+     "vendor": null,
+     "extendedPrice": {
+      "amount": 6,
+      "formattedAmount": "PTS6.00",
+      "formattedAmountWithoutCurrency": "6.00",
+      "currency": {
+       "code": "PTS",
+       "symbol": "PTS",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "placedPrice": {
+      "amount": 6,
+      "formattedAmount": "PTS6.00",
+      "formattedAmountWithoutCurrency": "6.00",
+      "currency": {
+       "code": "PTS",
+       "symbol": "PTS",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "listPrice": {
+      "amount": 6,
+      "formattedAmount": "PTS6.00",
+      "formattedAmountWithoutCurrency": "6.00",
+      "currency": {
+       "code": "PTS",
+       "symbol": "PTS",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "salePrice": {
+      "amount": 6,
+      "formattedAmount": "PTS6.00",
+      "formattedAmountWithoutCurrency": "6.00",
+      "currency": {
+       "code": "PTS",
+       "symbol": "PTS",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "discountTotal": {
+      "amount": 0,
+      "formattedAmount": "PTS0.00",
+      "formattedAmountWithoutCurrency": "0.00",
+      "currency": {
+       "code": "PTS",
+       "symbol": "PTS",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "validationErrors": [],
+     "configurationItems": []
+    }
+   ],
+   "validationErrors": [
+    {
+     "errorCode": "LOYALTY_INSUFFICIENT_BALANCE",
+     "errorMessage": "Insufficient loyalty points balance",
+     "errorParameters": [
+      {
+       "key": "required",
+       "value": "6",
+       "__typename": "ErrorParameterType"
+      },
+      {
+       "key": "available",
+       "value": "0",
+       "__typename": "ErrorParameterType"
+      }
+     ],
+     "objectId": "0e56ebc2-7e7d-4750-b314-2a3ac8ef7d75",
+     "objectType": "ShoppingCart",
+     "__typename": "ValidationErrorType"
+    }
+   ],
+   "shipments": [
+    {
+     "id": "5e94a2cb-c4d0-4bc6-a282-5984cc9e8058",
+     "__typename": "ShipmentType",
+     "shipmentMethodCode": "FixedRate",
+     "shipmentMethodOption": "Ground",
+     "deliveryAddress": {
+      "id": "daa90aa6-f6bc-47b3-a5db-8b4874275d10",
+      "name": null,
+      "organization": null,
+      "firstName": "Seed",
+      "lastName": "Agent",
+      "line1": "100 Main St",
+      "line2": null,
+      "city": "New York",
+      "countryCode": "US",
+      "countryName": "United States",
+      "regionId": "US-NY",
+      "regionName": "New York",
+      "postalCode": "10001",
+      "phone": null,
+      "email": null,
+      "addressType": 0,
+      "outerId": null,
+      "__typename": "CartAddressType"
+     },
+     "price": {
+      "amount": 150,
+      "formattedAmount": "$150.00",
+      "formattedAmountWithoutCurrency": "150.00",
+      "currency": {
+       "code": "USD",
+       "symbol": "$",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "discountAmount": {
+      "amount": 0,
+      "formattedAmount": "$0.00",
+      "formattedAmountWithoutCurrency": "0.00",
+      "currency": {
+       "code": "USD",
+       "symbol": "$",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "pickupLocation": null
+    }
+   ],
+   "purchaseOrderNumber": "AGENT-TEST-PO-5024",
+   "comment": "",
+   "availableGifts": [
+    {
+     "id": "||'Canon Imageclass WiFi MF232W Monochrome Laser Printer/Scanner/Copier'|'e6762b4c4ea04aa29ed428434acccd9f'|'08c33cfc9f664426a52fac8882da2df0'|1|'1'|'https://virtostart-main.govirto.com/cms-content/assets/catalog/5aa50/566903892/mf232w-1.jpg'",
+     "imageUrl": "https://virtostart-main.govirto.com/cms-content/assets/catalog/5aa50/566903892/mf232w-1.jpg",
+     "name": "Canon Imageclass WiFi MF232W Monochrome Laser Printer/Scanner/Copier",
+     "lineItemId": "1cb05cfd-dbe3-4b84-a904-dab1eeb4b879",
+     "quantity": 1,
+     "__typename": "GiftItemType"
+    }
+   ],
+   "availableShippingMethods": [
+    {
+     "id": "BuyOnlinePickupInStore_Pickup",
+     "code": "BuyOnlinePickupInStore",
+     "logoUrl": "pickup.svg",
+     "optionName": "Pickup",
+     "optionDescription": null,
+     "price": {
+      "amount": 0,
+      "formattedAmount": "$0.00",
+      "formattedAmountWithoutCurrency": "0.00",
+      "currency": {
+       "code": "USD",
+       "symbol": "$",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "__typename": "ShippingMethodType"
+    },
+    {
+     "id": "FixedRate_Ground",
+     "code": "FixedRate",
+     "logoUrl": "fedex.svg",
+     "optionName": "Ground",
+     "optionDescription": null,
+     "price": {
+      "amount": 150,
+      "formattedAmount": "$150.00",
+      "formattedAmountWithoutCurrency": "150.00",
+      "currency": {
+       "code": "USD",
+       "symbol": "$",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "__typename": "ShippingMethodType"
+    },
+    {
+     "id": "FixedRate_Air",
+     "code": "FixedRate",
+     "logoUrl": "fedex.svg",
+     "optionName": "Air",
+     "optionDescription": null,
+     "price": {
+      "amount": 250,
+      "formattedAmount": "$250.00",
+      "formattedAmountWithoutCurrency": "250.00",
+      "currency": {
+       "code": "USD",
+       "symbol": "$",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "__typename": "ShippingMethodType"
+    }
+   ],
+   "availablePaymentMethods": [
+    {
+     "code": "AuthorizeNetPaymentMethod",
+     "name": "Bank card (Authorize.Net)",
+     "description": null,
+     "logoUrl": "credit-card.svg",
+     "paymentMethodGroupType": "Alternative",
+     "allowCartPayment": true,
+     "__typename": "PaymentMethodType"
+    },
+    {
+     "code": "CyberSourcePaymentMethod",
+     "name": "Bank card (CyberSource)",
+     "description": null,
+     "logoUrl": "credit-card.svg",
+     "paymentMethodGroupType": "BankCard",
+     "allowCartPayment": true,
+     "__typename": "PaymentMethodType"
+    },
+    {
+     "code": "DatatransPaymentMethod",
+     "name": "Bank card (Datatrans)",
+     "description": null,
+     "logoUrl": "https://play-lh.googleusercontent.com/iAQnVQAfOkyv5f17JFosWvoLvRT8BISKjquOn30p_25YiX3fqlyR--6JUCBGiyObcg=s200",
+     "paymentMethodGroupType": "BankCard",
+     "allowCartPayment": false,
+     "__typename": "PaymentMethodType"
+    },
+    {
+     "code": "DefaultManualPaymentMethod",
+     "name": "Manual",
+     "description": null,
+     "logoUrl": "purchase-order.svg",
+     "paymentMethodGroupType": "Manual",
+     "allowCartPayment": false,
+     "__typename": "PaymentMethodType"
+    },
+    {
+     "code": "LoyaltyPaymentMethod",
+     "name": "Pay with points",
+     "description": null,
+     "logoUrl": "purchase-order.svg",
+     "paymentMethodGroupType": "Alternative",
+     "allowCartPayment": false,
+     "__typename": "PaymentMethodType"
+    },
+    {
+     "code": "SkyflowPaymentMethod",
+     "name": "Bank card (Skyflow)",
+     "description": null,
+     "logoUrl": "credit-card.svg",
+     "paymentMethodGroupType": "Alternative",
+     "allowCartPayment": true,
+     "__typename": "PaymentMethodType"
+    }
+   ],
+   "gifts": [
+    {
+     "id": "||'Canon Imageclass WiFi MF232W Monochrome Laser Printer/Scanner/Copier'|'e6762b4c4ea04aa29ed428434acccd9f'|'08c33cfc9f664426a52fac8882da2df0'|1|'1'|'https://virtostart-main.govirto.com/cms-content/assets/catalog/5aa50/566903892/mf232w-1.jpg'",
+     "imageUrl": "https://virtostart-main.govirto.com/cms-content/assets/catalog/5aa50/566903892/mf232w-1.jpg",
+     "name": "Canon Imageclass WiFi MF232W Monochrome Laser Printer/Scanner/Copier",
+     "lineItemId": "1cb05cfd-dbe3-4b84-a904-dab1eeb4b879",
+     "quantity": 1,
+     "__typename": "GiftItemType"
+    }
+   ],
+   "coupons": [],
+   "discounts": [],
+   "payments": [
+    {
+     "id": "46f89dbe-9e92-4c43-99d3-ba66c560a6fd",
+     "paymentGatewayCode": "DefaultManualPaymentMethod",
+     "billingAddress": null,
+     "__typename": "PaymentType"
+    }
+   ],
+   "currency": {
+    "code": "USD",
+    "symbol": "$",
+    "__typename": "CurrencyType"
+   },
+   "cartTotals": [
+    {
+     "isDefaultTotalCurrency": true,
+     "total": {
+      "amount": 252,
+      "formattedAmount": "$252.00",
+      "formattedAmountWithoutCurrency": "252.00",
+      "currency": {
+       "code": "USD",
+       "symbol": "$",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "subTotal": {
+      "amount": 60,
+      "formattedAmount": "$60.00",
+      "formattedAmountWithoutCurrency": "60.00",
+      "currency": {
+       "code": "USD",
+       "symbol": "$",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "discountTotal": {
+      "amount": 0,
+      "formattedAmount": "$0.00",
+      "formattedAmountWithoutCurrency": "0.00",
+      "currency": {
+       "code": "USD",
+       "symbol": "$",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "taxTotal": {
+      "amount": 42,
+      "formattedAmount": "$42.00",
+      "formattedAmountWithoutCurrency": "42.00",
+      "currency": {
+       "code": "USD",
+       "symbol": "$",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "__typename": "CartTotalType"
+    },
+    {
+     "isDefaultTotalCurrency": false,
+     "total": {
+      "amount": 6,
+      "formattedAmount": "PTS6.00",
+      "formattedAmountWithoutCurrency": "6.00",
+      "currency": {
+       "code": "PTS",
+       "symbol": "PTS",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "subTotal": {
+      "amount": 6,
+      "formattedAmount": "PTS6.00",
+      "formattedAmountWithoutCurrency": "6.00",
+      "currency": {
+       "code": "PTS",
+       "symbol": "PTS",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "discountTotal": {
+      "amount": 0,
+      "formattedAmount": "PTS0.00",
+      "formattedAmountWithoutCurrency": "0.00",
+      "currency": {
+       "code": "PTS",
+       "symbol": "PTS",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "taxTotal": {
+      "amount": 0,
+      "formattedAmount": "PTS0.00",
+      "formattedAmountWithoutCurrency": "0.00",
+      "currency": {
+       "code": "PTS",
+       "symbol": "PTS",
+       "__typename": "CurrencyType"
+      },
+      "__typename": "MoneyType"
+     },
+     "__typename": "CartTotalType"
+    }
+   ],
+   "total": {
+    "amount": 252,
+    "formattedAmount": "$252.00",
+    "formattedAmountWithoutCurrency": "252.00",
+    "currency": {
+     "code": "USD",
+     "symbol": "$",
+     "__typename": "CurrencyType"
+    },
+    "__typename": "MoneyType"
+   },
+   "discountTotal": {
+    "amount": 0,
+    "formattedAmount": "$0.00",
+    "formattedAmountWithoutCurrency": "0.00",
+    "currency": {
+     "code": "USD",
+     "symbol": "$",
+     "__typename": "CurrencyType"
+    },
+    "__typename": "MoneyType"
+   },
+   "subTotal": {
+    "amount": 60,
+    "formattedAmount": "$60.00",
+    "formattedAmountWithoutCurrency": "60.00",
+    "currency": {
+     "code": "USD",
+     "symbol": "$",
+     "__typename": "CurrencyType"
+    },
+    "__typename": "MoneyType"
+   },
+   "shippingPrice": {
+    "amount": 150,
+    "formattedAmount": "$150.00",
+    "formattedAmountWithoutCurrency": "150.00",
+    "currency": {
+     "code": "USD",
+     "symbol": "$",
+     "__typename": "CurrencyType"
+    },
+    "__typename": "MoneyType"
+   },
+   "shippingTotal": {
+    "amount": 150,
+    "formattedAmount": "$150.00",
+    "formattedAmountWithoutCurrency": "150.00",
+    "currency": {
+     "code": "USD",
+     "symbol": "$",
+     "__typename": "CurrencyType"
+    },
+    "__typename": "MoneyType"
+   },
+   "taxTotal": {
+    "amount": 42,
+    "formattedAmount": "$42.00",
+    "formattedAmountWithoutCurrency": "42.00",
+    "currency": {
+     "code": "USD",
+     "symbol": "$",
+     "__typename": "CurrencyType"
+    },
+    "__typename": "MoneyType"
+   }
+  }
+ }
+}

@@ -15,6 +15,13 @@
       "recordHar": {
         "path": "./test-results/edge/har/session.har",
         "omitContent": true
+      },
+      "recordVideo": {
+        "dir": "./test-results/edge/video",
+        "size": {
+          "width": 1280,
+          "height": 720
+        }
       }
     }
   },

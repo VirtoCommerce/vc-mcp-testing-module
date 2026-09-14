@@ -1,0 +1,24 @@
+{
+ "query": "exceptions | where timestamp between (datetime(2026-09-11T14:34:00Z) .. datetime(2026-09-11T15:09:00Z))",
+ "backend": {
+  "resource": "vcst-qa",
+  "appId": "7d07a5e2-1346-45b8-8b3c-2117c72a3f7b",
+  "exceptions": 4,
+  "allAttributableToTestProbes": true,
+  "detail": [
+   "2 x VirtoCommerce.Xapi.Core.Security.Authorization.AuthorizationError (the authz probes working as designed)",
+   "1 x GraphQL.Validation.Errors.FieldsOnCorrectTypeError (investigator field typo)",
+   "1 x GraphQL.Validation.Errors.ScalarLeafsError (query-shape probe)"
+  ]
+ },
+ "storefront": {
+  "resource": "vcst-qa-storefront",
+  "appId": "a03ca744-2a0d-4586-ba1c-21312b6a118a",
+  "exceptions": 1,
+  "detail": [
+   "Missing required param \"orderId\" at 15:05:31Z — ~1 min after the redeem order; NOT REPRODUCED; unrelated to this bug"
+  ]
+ },
+ "productExceptionsForThisBug": 0,
+ "interpretation": "This defect produces NO exception. The GraphQL response is HTTP 200 carrying a validationErrors[] entry, which is the designed shape for a cart validation failure. App Insights therefore holds no exception, no failed request and no dependency failure for it. The absence is evidence about the failure CLASS (silent, success-shaped), not a gap in the capture."
+}

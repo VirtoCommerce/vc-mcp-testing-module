@@ -1,0 +1,4 @@
+[    1034ms] [INFO] [WebSocket] Connecting... Attempting to establish connection. @ https://vcst-qa-storefront.govirto.com/assets/index-DMkHd1iE.js:8
+[    1462ms] [INFO] [WebSocket] Connection opened successfully. {url: wss://vcst-qa-storefront.govirto.com/graphql, protocol: graphql-transport-ws} @ https://vcst-qa-storefront.govirto.com/assets/index-DMkHd1iE.js:8
+[   10244ms] [LOG] Download the Apollo DevTools for a better development experience: %s https://chrome.google.com/webstore/detail/apollo-client-developer-t/jdkknkkbebbapilgoeccciglkfbmbnfm @ https://vcst-qa-storefront.govirto.com/assets/vendor-C7-8PTNJ.js:0
+[  141252ms] [ERROR] A bad HTTP response code (404) was received when fetching the script. @ :0

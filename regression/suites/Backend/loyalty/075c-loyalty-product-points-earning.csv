@@ -409,7 +409,7 @@ LOY-038,"ProductPoints earn lifecycle — winner factor (ALL, 500×) actually aw
 [GQL-EXEC setup_me]
 [GQL-CAPTURE setup_me.data.me.id → USER_ID]
 [GQL-OP balance_before]
-  query { loyaltyBalance(userId: ""{{USER_ID}}"") { currentBalance resultBalance } }
+  query { loyaltyBalance(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"") { currentBalance resultBalance } }
 [GQL-EXEC balance_before]
 [GQL-CAPTURE balance_before.data.loyaltyBalance.currentBalance → BAL_BEFORE]
 [GQL-OP cleanup_pre]
@@ -456,12 +456,12 @@ LOY-038,"ProductPoints earn lifecycle — winner factor (ALL, 500×) actually aw
 [GQL-CAPTURE place_order.data.createOrderFromCart.number → ORDER_NUMBER]
 [GQL-CAPTURE place_order.data.createOrderFromCart.id → ORDER_ID]
 [GQL-OP balance_after]
-  query { loyaltyBalance(userId: ""{{USER_ID}}"") { currentBalance resultBalance } }
+  query { loyaltyBalance(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"") { currentBalance resultBalance } }
 [GQL-EXEC balance_after]
 [WAIT until=balance_after timeout=40 interval=4] data.loyaltyBalance.currentBalance > {{BAL_BEFORE}}
 [GQL-CAPTURE balance_after.data.loyaltyBalance.currentBalance → BAL_AFTER]
 [GQL-OP history_check]
-  query { loyaltyPointsHistory(userId: ""{{USER_ID}}"" first: 5 sort: ""createdDate:desc"") { totalCount items { operationType amount createdDate object { orderId type } } } }
+  query { loyaltyPointsHistory(storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" first: 5 sort: ""createdDate:desc"") { totalCount items { operationType amount createdDate object { orderId type } } } }
 [GQL-EXEC history_check]
 [GQL-OP cleanup_post]
   mutation { clearCart(command: { storeId: ""{{STORE_ID}}"" userId: ""{{USER_ID}}"" cartName: ""default"" }) { id } }

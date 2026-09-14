@@ -31,6 +31,63 @@
 export const EARN_LINE_ITEM_LIMIT = 999999;
 
 /**
+ * The balance-read routes, IN PRIORITY ORDER, because vc-module-loyalty PR #17 MOVED them.
+ *
+ * MEASURED on vcst-qa 2026-09-11 against VirtoCommerce.Loyalty 3.1008.0-pr-17-116e, from the module's
+ * own swagger (`/docs/VirtoCommerce.Loyalty/swagger.json`) rather than from memory:
+ *
+ *     GET /api/loyalty-program-operation-log/balance/user/{userId}                 ← PR #17
+ *     GET /api/loyalty-program-operation-log/balance/organization/{organizationId} ← PR #17, NEW
+ *     GET /api/loyalty-program-operation-log/balance/{userId}                      ← pre-PR #17; 404s here
+ *
+ * WHY THIS IS NOT A COSMETIC RENAME. Every existing caller in this repo hits the LEGACY path with
+ * `expectStatus: [200, 404]`, so on a PR-17 build the 404 is swallowed and the balance reads **0** —
+ * for every account, always, with no error. A funding step then reports "balance 0 → 0" and a
+ * delta assertion compares two zeros. That is the silent-failure class this repo exists to prevent,
+ * so the route is RESOLVED against the live build instead of transcribed.
+ */
+export const BALANCE_ROUTES = Object.freeze({
+  user: ['/api/loyalty-program-operation-log/balance/user/', '/api/loyalty-program-operation-log/balance/'],
+  organization: ['/api/loyalty-program-operation-log/balance/organization/'],
+});
+
+/** Coerce whatever shape a balance endpoint answers with into a number, or null if it said nothing. */
+export function coerceBalance(r) {
+  if (r == null) return null;
+  if (typeof r === 'number') return r;
+  const v = r.balance ?? r.points ?? r.amount ?? r.currentBalance;
+  return v == null ? null : (Number(v) || 0);
+}
+
+/**
+ * Read a loyalty balance, whichever route this build exposes, falling back to the OPERATION LOG.
+ *
+ * The op-log fallback is not a nicety: `POST /api/loyalty-program-operation-log/search` is the one
+ * surface that has not moved, every row carries the running `balance` it produced, and it therefore
+ * answers the question even when no balance route matches. It is also the only way to read a balance
+ * that is DERIVED rather than reported, which is what makes "the endpoint 404s" distinguishable from
+ * "the account genuinely has nothing".
+ *
+ * Returns `{ balance, source }` — `source` is the route (or 'operation-log', or 'none') so a caller
+ * can say WHERE its number came from instead of asserting on an unexplained 0.
+ */
+export async function readLoyaltyBalance(api, { userId = null, organizationId = null } = {}) {
+  const key = organizationId ? 'organization' : 'user';
+  const id = organizationId || userId;
+  if (!id) throw new Error('readLoyaltyBalance needs a userId or an organizationId');
+  for (const prefix of BALANCE_ROUTES[key]) {
+    const r = await api('GET', `${prefix}${encodeURIComponent(id)}`, null, { expectStatus: [200, 404] }).catch(() => null);
+    const n = coerceBalance(r);
+    if (n != null) return { balance: n, source: `${prefix}{id}` };
+  }
+  if (organizationId) return { balance: null, source: 'none' };
+  const rows = (await api('POST', '/api/loyalty-program-operation-log/search', { userId, take: 200 }, { expectStatus: [200, 201] }))?.results || [];
+  if (!rows.length) return { balance: 0, source: 'operation-log (empty)' };
+  rows.sort((a, b) => Date.parse(b.createdDate) - Date.parse(a.createdDate));
+  return { balance: Number(rows[0].balance) || 0, source: 'operation-log' };
+}
+
+/**
  * The customer-group gate a program's condition tree declares. Walks SELECTED `children` only —
  * `availableChildren` is the palette of conditions the UI offers, not the ones in force, and reading
  * it would make every program look universally eligible. Pure.
