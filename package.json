@@ -169,6 +169,7 @@
     "bl:audit:collect": "npx tsx scripts/knowledge/lint-bl.ts --json",
     "bl:extract": "npx tsx scripts/knowledge/extract-bl.ts",
     "bl:extract:list": "npx tsx scripts/knowledge/extract-bl.ts --list",
+    "bl:remap": "npx tsx scripts/knowledge/remap-bl-citations.ts",
     "ecl:lint": "npx tsx scripts/knowledge/lint-ecl.ts",
     "ecl:extract": "npx tsx scripts/knowledge/extract-ecl.ts",
     "ecl:extract:list": "npx tsx scripts/knowledge/extract-ecl.ts --list",

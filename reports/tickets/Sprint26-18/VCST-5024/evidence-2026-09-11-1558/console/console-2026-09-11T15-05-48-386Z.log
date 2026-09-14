@@ -1,3 +1,0 @@
-[     643ms] [INFO] [WebSocket] Connecting... Attempting to establish connection. @ https://vcst-qa-storefront.govirto.com/assets/index-DMkHd1iE.js:8
-[    1034ms] [INFO] [WebSocket] Connection opened successfully. {url: wss://vcst-qa-storefront.govirto.com/graphql, protocol: graphql-transport-ws} @ https://vcst-qa-storefront.govirto.com/assets/index-DMkHd1iE.js:8
-[   10216ms] [LOG] Download the Apollo DevTools for a better development experience: %s https://chrome.google.com/webstore/detail/apollo-client-developer-t/jdkknkkbebbapilgoeccciglkfbmbnfm @ https://vcst-qa-storefront.govirto.com/assets/vendor-C7-8PTNJ.js:0

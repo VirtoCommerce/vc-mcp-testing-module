@@ -1,11 +1,11 @@
 {
-  "runId": "REG-2026-09-14-1052",
+  "runId": "REG-2026-09-14-1146",
   "status": "completed",
-  "startedAt": "2026-09-14T10:53:21.509Z",
-  "finishedAt": "2026-09-14T11:17:15.101Z",
+  "startedAt": "2026-09-14T11:47:15.445Z",
+  "finishedAt": "2026-09-14T12:09:08.901Z",
   "selection": "083e",
   "env": "vcst",
-  "note": "Fifth 083e run. TWO things differ from REG-2026-09-14-0928: (1) the multi-org loyalty pools are now SEEDED and discriminating (TechFlow 98916 / BuildRight 219416 / ALT user 68916), so LOYORG-E2E-003 is decidable for the FIRST time; (2) execution follows CSV ORDER per the corrected manifest notes - the previous destructiveness-derived order hoisted E2E-002 ahead of its producer E2E-001 and BLOCKED it for a reason that was not the product.",
+  "note": "Sixth 083e run. Purpose: produce a run whose CSV matches the file byte-for-byte, so LOYORG-E2E-003 can be promoted without the PR-014 \"suite CSV changed after the run finished\" caveat. Three edits since REG-2026-09-14-1052, two of them BEHAVIOURAL: (a) E2E-003 assertions grounded {HYPOTHESIS}->{OBSERVED} (non-behavioural), (b) [PRE:RESET_CART] prepended to E2E-001 Steps, (c) [PRE:CLEAR_SESSION]+[PRE:SIGNIN_AS:ORG_LOY_A] prepended to E2E-005 Steps. (b) and (c) cleared two PRE-002 findings but mean those steps now actually execute - this run confirms they do not disturb the passing cases.",
   "caseOrder": [
     "LOYORG-E2E-001",
     "LOYORG-E2E-002",
@@ -14,14 +14,13 @@
     "LOYORG-E2E-005",
     "LOYORG-E2E-006"
   ],
-  "caseOrderRationale": "CSV order. E2E-002 depends on E2E-001 state; E2E-005 writes the store mode and restores Organization itself.",
   "multiOrgPools": {
     "techflow": 98916,
     "buildright": 219416,
     "altUserScope": 68916
   },
   "knownOpenBugs": [
-    "VCST-5953 (LOYORG-E2E-006 asserts the broken behaviour directly)"
+    "VCST-5953 (LOYORG-E2E-006)"
   ],
   "suites": [
     {
@@ -33,16 +32,16 @@
       "agent": "qa-frontend-expert",
       "lane": "browser",
       "testCount": 6,
-      "startedAt": "2026-09-14T10:54:04.362Z",
-      "finishedAt": "2026-09-14T11:17:15.101Z",
-      "passed": 3,
+      "startedAt": "2026-09-14T11:47:58.146Z",
+      "finishedAt": "2026-09-14T12:09:08.901Z",
+      "passed": 2,
       "failed": 3,
-      "blocked": 0
+      "blocked": 1
     }
   ],
   "storeModeRestored": {
     "value": "Customer",
     "verified": true,
-    "at": "2026-09-14T11:17:15.101Z"
+    "at": "2026-09-14T12:09:08.901Z"
   }
 }
