@@ -470,8 +470,8 @@ Three rules hold it ([`SKILL.md`](../skills/qa-test/SKILL.md) §Ordering):
 | **B** | Testing checklist (both paths) — written **after `3x` returns**, so it carries what discovery observed and not only what the ACs named. **One checklist, one execution pass** | `test-management-specialist`, or the orchestrator inline for a single-surface tweak | `reports/tickets/{SPRINT}/<ticket-key>/testing-checklist.md` |
 | **C1** | Ticket regression — **the exact set: every case this run wrote or changed** | orchestrator | scope assembled **at A's append** (§C1 — the exact set); one `/qa-regression … --ids` run, executed at `4c` |
 
-**There is no C2** — the change-scoped Critical sweep answered a *release* question, not this ticket's
-(§FAST mode). Cutting a release means running [`/qa-regression`](qa-regression.md) deliberately.
+**There is no C2** — the change-scoped Critical sweep answered a *release* question, not this ticket's (§FAST mode).
+Cutting a release means running [`/qa-regression`](qa-regression.md) deliberately.
 
 #### A phase `2a` — dispose the corpus, then author the gaps *(both paths — FAST under `--coverage`)*
 
