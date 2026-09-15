@@ -77,12 +77,14 @@ const guardedSpecs = (() => {
 })();
 
 const problems = [];
+let exempt = 0;
 for (const t of addedTests) {
   const abs = join(ROOT, t);
   if (!existsSync(abs)) continue;
   const src = readFileSync(abs, 'utf8');
   if (/^\s*\/\/\s*test-roi:\s*backfill\b/m.test(src)) {
     console.log(`  ⚠ ${t} — declared \`test-roi: backfill\`, exempt`);
+    exempt++;
     continue;
   }
   // (1) no executable source in the diff at all
@@ -106,7 +108,13 @@ for (const t of addedTests) {
   }
 }
 
-if (!problems.length) { console.log(`  ✓ ${addedTests.length} new unit test(s) accompany executable source`); process.exit(0); }
+if (!problems.length) {
+  const judged = addedTests.length - exempt;
+  console.log(judged
+    ? `  ✓ ${judged} new unit test(s) accompany executable source${exempt ? `; ${exempt} exempt` : ''}`
+    : `  ✓ all ${exempt} new unit test(s) declared \`test-roi: backfill\` — nothing left to judge`);
+  process.exit(0);
+}
 
 console.log(`  ✗ ${problems.length} problem(s):\n`);
 for (const p of problems) console.log(`    • ${p}\n`);
