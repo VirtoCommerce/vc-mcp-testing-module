@@ -149,6 +149,40 @@ Every intermediate number would have supported a confident, wrong story about te
 general lesson matches the one in the cut above: **a detector that has not been checked against a case
 whose answer you already know is not evidence.**
 
+## The one low-quality test the evidence actually found
+
+A hunt for suspicious tests needs a signal sharp enough to survive checking. Two were combined:
+
+- **IFDR-undetected** — the test imports a function whose gutting it does not notice.
+- **Named-but-never-called** — the test's *name* cites an imported symbol its body never calls.
+
+Each alone is noisy. `setFlags`, `classifyLane` and `isHtmlByContract` are IFDR-undetected but are
+legitimate setup wiring; 55 tests are "named but never called" and nearly all name a *constant*
+(`SCHEMA_VERSION`, `GUID_RE`, `CSV_SOURCE`), which cannot be called. **Their intersection is exactly
+one test**, and it was a real defect:
+
+`b2b-addresses-specs.test.mjs` had `test('assertContractCoherent would REJECT a total that yields too
+few pages')` which **never called `assertContractCoherent`**. It re-derived the predicate inline and
+asserted `ADDRESSES_PER_PAGE * (MIN_PAGES - 1)` yields fewer than `MIN_PAGES` pages — arithmetic that is
+true by construction. Its own comment admits the workaround: *"TARGET_TOTAL itself is a const, so
+exercise the rule rather than mutating the module."* The GOLDEN RULE failure applied to a test: it
+transcribed the rule instead of exercising it.
+
+**The worse half, found only by checking the assumed fallback.** The first instinct was "delete it, the
+drift guard calls the function anyway" — `validate-b2b-data.mjs:228` does. But replacing the function's
+body with `return []` left **`td:validate:b2b` green too**: on the coherent committed total the real
+function also returns `[]`, so the guard can never distinguish them. **Nothing in the repo could detect
+that guard function breaking** — the `NEITHER` class, in the one place least expected.
+
+Fixed rather than merely deleted: `assertContractCoherent(total = TARGET_TOTAL)` takes the total as a
+defaulted parameter, so the rejection path is reachable at all — callers are unchanged — and the
+replacement test calls it with a one-page-short total and an exact-multiple total. Verified: gutting the
+body to `return []`, disabling the min-pages check, and disabling the partial-page check are now **all
+three caught**, where before **none** were.
+
+**That is the whole yield of the quality hunt: one test, replaced rather than removed.** The honest
+summary of all three sweeps is that this corpus's problem was volume, never quality.
+
 ## What changed
 
 1. **`test-data-engineer.md` §Step 3** — *"Write unit tests"* → *"Unit-test the DERIVATION, never the

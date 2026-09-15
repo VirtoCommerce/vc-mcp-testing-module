@@ -46,13 +46,19 @@ test('lastPageSize reports the partial final page, and a full page when it divid
   assert.equal(lastPageSize(7), 1);
 });
 
-test('assertContractCoherent would REJECT a total that yields too few pages', () => {
-  // Re-derive the same predicate against a hypothetical total to prove the check has teeth
-  // (TARGET_TOTAL itself is a const, so exercise the rule rather than mutating the module).
-  const tooSmall = ADDRESSES_PER_PAGE * (MIN_PAGES - 1); // one page short
-  assert.ok(pageCount(tooSmall) < MIN_PAGES, `${tooSmall} is deliberately one page short`);
-  const exactMultiple = ADDRESSES_PER_PAGE * MIN_PAGES;
-  assert.equal(exactMultiple % ADDRESSES_PER_PAGE, 0, 'and this one has no partial last page');
+test('assertContractCoherent REJECTS a total one page short, and ACCEPTS the committed one', () => {
+  // Calls the function — the previous test of this name re-derived the predicate inline instead, so
+  // gutting assertContractCoherent to `return []` left it green. Passing `total` is what makes the
+  // rejection path reachable at all (the guard can only ever hand it the coherent committed number).
+  assert.deepEqual(assertContractCoherent(), [], 'the committed TARGET_TOTAL is coherent');
+
+  const tooSmall = ADDRESSES_PER_PAGE * (MIN_PAGES - 1);
+  const short = assertContractCoherent(tooSmall);
+  assert.ok(short.some((e) => /needs >= /.test(e)), `one page short must be rejected: ${short.join(' | ')}`);
+
+  const exactMultiple = ADDRESSES_PER_PAGE * (MIN_PAGES + 1);
+  const noPartial = assertContractCoherent(exactMultiple);
+  assert.ok(noPartial.some((e) => /exact multiple/.test(e)), `no partial last page must be rejected: ${noPartial.join(' | ')}`);
 });
 
 /* ── content key + region mapping ────────────────────────────────────────────── */
