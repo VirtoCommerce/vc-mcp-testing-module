@@ -8,8 +8,8 @@
     },
     "contextOptions": {
       "viewport": {
-        "width": 1920,
-        "height": 1080
+        "width": 1440,
+        "height": 900
       },
       "locale": "en-US",
       "recordHar": {
@@ -19,8 +19,8 @@
       "recordVideo": {
         "dir": "./test-results/edge/video",
         "size": {
-          "width": 1280,
-          "height": 720
+          "width": 1440,
+          "height": 900
         }
       }
     }

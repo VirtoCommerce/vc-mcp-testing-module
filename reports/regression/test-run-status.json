@@ -1,6 +1,6 @@
 {
   "runId": "REG-2026-09-15-0947",
-  "status": "in_progress",
+  "status": "stalled",
   "startedAt": "2026-09-15T07:48:07.248Z",
   "selection": "loyalty",
   "env": "vcst",
@@ -153,5 +153,8 @@
       "attempts": 0,
       "summary": null
     }
-  ]
+  ],
+  "stalledAt": "2026-09-15T08:45:40.275Z",
+  "stalledReason": "no progress for 45 min (REG-2026-09-15-0947:in_progress:7:171:45)",
+  "finishedAt": "2026-09-15T08:45:40.275Z"
 }
