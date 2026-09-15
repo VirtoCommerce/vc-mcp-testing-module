@@ -8,7 +8,11 @@ const BASELINE = JSON.parse(fs.readFileSync('scripts/maintenance/.prompt-size-ba
 const CAP = BASELINE['.claude/commands/qa-test.md'];
 
 const s = fs.readFileSync(DRAFT, 'utf8');
-const lines = s.split('\n');
+// Structural checks parse LF-normalized text: the draft is CRLF and `.` never matches \r,
+// so splitting the raw string made every heading regex miss — a 7-section file read as zero.
+// SIZE still measures the RAW string, because that is what the BUDGET-004 gate counts.
+const sn = s.replace(/\r\n/g, '\n');
+const lines = sn.split('\n');
 let fail = 0;
 const bad = (code, msg) => { console.log(`  ✗ ${code}  ${msg}`); fail++; };
 const ok = (code, msg) => console.log(`  ✓ ${code}  ${msg}`);
@@ -50,11 +54,11 @@ idx.some(i => i < 0)
 
 // 4 — every label in the flow block resolves to a section or an anchor in the body
 console.log('\n[4] flow labels resolve');
-const flow = s.match(/```\nFAST {3}1a[\s\S]*?```/);
+const flow = sn.match(/```\nFAST {3}1a[\s\S]*?```/);
 if (!flow) bad('FLOW', 'flow code block not found');
 else {
   const labels = [...new Set((flow[0].match(/\b(1[abcer]|1c-map|1e-plan|2|2a|2-topup|2-load|3|3a|3x|3-exec|3-cases|4|4a|4c|4v|5[abcdefhk]|5h-map|A|B|C1)\b/g) || []))];
-  const body = s.slice(s.indexOf('## The steps'));
+  const body = sn.slice(sn.indexOf('## The steps'));
   const missing = labels.filter(L => !new RegExp(`\`?${L.replace(/[-]/g, '\\-')}\`?`).test(body));
   missing.length ? bad('LABEL', `named in the flow, absent from §The steps: ${missing.join(', ')}`)
                  : ok('LABEL', `all ${labels.length} flow labels appear in §The steps`);
