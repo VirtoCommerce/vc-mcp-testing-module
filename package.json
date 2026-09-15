@@ -250,7 +250,9 @@
     "domain:check": "node scripts/maintenance/check-domain-maps.mjs",
     "td:gen:cms-uploads": "node scripts/test-data/gen-cms-upload-fixtures.mjs",
     "td:mutation-check": "node scripts/maintenance/td-mutation-check.mjs",
-    "td:validate:all": "node scripts/maintenance/td-validate-all.mjs"
+    "td:validate:all": "node scripts/maintenance/td-validate-all.mjs",
+    "td:test-attribution": "node scripts/maintenance/td-test-attribution.mjs",
+    "test:roi-check": "node scripts/maintenance/lint-test-roi.mjs"
   },
   "repository": {
     "type": "git",

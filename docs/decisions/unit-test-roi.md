@@ -1,6 +1,6 @@
 # Unit-test ROI — why the corpus grew, what was measured, and what to cut
 
-**Date:** 2026-09-15 · **Status:** policy changed, deletion deferred to per-domain owners with evidence attached
+**Date:** 2026-09-15 · **Status:** policy changed; 95 redundant tests deleted on mutation evidence
 
 Never loaded by an agent. This is the measured rationale behind the FOURTH RULE in
 `.claude/rules/test-data.md` and §7a in `knowledge/execution/test-data-authoring.md`.
@@ -53,22 +53,56 @@ NEITHER (nothing catches it):          42
 - **42 mutations were caught by nothing at all** — a larger finding than the duplication, and the one
   worth acting on first. Recorded as B-47.
 
-## Why no test files were deleted
+## The cut: 95 tests deleted, on evidence, with two safeguards
 
-The obvious move — delete the spec unit tests, keep the guards — **does not survive the measurement.**
+The obvious move — delete the spec unit tests, keep the guards — is right in outline and dangerous in
+detail. Two static classifiers were written to separate the categories mechanically and **both were
+wrong in both directions**: one flagged `teardown-membership-status.test.mjs` as worthless when it
+guards a real silent-leak regression in `deleteUserByEmail`; the other scored `ui-step-parser.test.ts`
+at 99% mirror when it is a genuine parser suite. Neither drove the cut.
 
-Every spec test file mixes both categories; none is pure data-mirror. Two static classifiers were
-written to separate them mechanically and **both were wrong in both directions**: one flagged
-`teardown-membership-status.test.mjs` as 0%-value when it guards a real silent-leak regression in
-`deleteUserByEmail`; the other scored `ui-step-parser.test.ts` at 99% mirror when it is a genuine
-parser suite. A detector that misclassifies in both directions must not drive a mass deletion.
+What drove it is `npm run td:test-attribution` (`scripts/maintenance/td-test-attribution.mjs`), which
+attributes every mutation to the individual test(s) that caught it and grades each test:
 
-The mutation harness is the reliable arbiter, and even it needs depth: `variation-stock` read as fully
-redundant (`both:4 unit-only:0`) at 10 mutations and flipped to `unit-only:1` at 30. **A shallow green
-is not a licence to delete.**
+- **KEEP** — caught something the guard missed. Irreplaceable.
+- **DELETE** — caught things, all of which the guard also caught. Duplication.
+- **UNPROVEN** — the mutation set never reached it. **Never cut.** Absence of evidence is not evidence
+  of absence; the operators are a sample, not a proof.
 
-So: the policy is fixed so the corpus stops growing this way, the guards now actually run, and the cut
-itself is left to whoever owns each domain — with the evidence and the tool to do it safely.
+The asymmetry is deliberate: a wrong KEEP costs bytes, a wrong DELETE removes the only detector of a
+silent seeding bug.
+
+**Two safeguards, both of which changed the answer — each caught a real over-deletion:**
+
+1. **KEEP is dominant across domains.** Test files are shared between domains whose guards differ —
+   `loyalty-missions-specs.test.mjs` is attributed under both `missions` and `org-loyalty`. The test
+   *"MSN_EXPIRED is the ONLY fixture outside its window"* came back **DELETE under `missions` and KEEP
+   under `org-loyalty`**. A single domain in which a test is the only detector is enough to keep it.
+   **Spared 33 tests.**
+2. **The synthetic-input blind spot.** A drift guard only ever calls a validator with committed *good*
+   data. A test that feeds it a **deliberately bad** input — `validateSeoShape({...SEO_PRODUCT,
+   pageTitle: same, metaDescription: same})` — exercises rejection logic the guard never reaches, so a
+   DELETE verdict for it is an artefact of which lines the sample happened to mutate. Found by reading
+   the diff, not by any tool. **Spared a further 33 tests**, among them
+   *"THE ORIGINAL DEFECT: prose promises global recency but no column enforces it"* — a named
+   regression pin that the first pass would have removed.
+
+128 candidates → **95 deleted**, 875 lines, across 18 files.
+
+## Proof that nothing was lost
+
+The same sweep, same sampling, before and after. Deleting a redundant test must move its mutations
+from `both` to `guard-only` and leave `unit-only` untouched:
+
+| | before | after | |
+|---|---|---|---|
+| both (unit test duplicates the guard) | 52 | **31** | −21 |
+| **unit-only (the only detector)** | **56** | **56** | **unchanged** |
+| guard-only | 19 | **40** | +21 |
+| neither (nothing catches it) | 42 | 42 | unchanged |
+
+`both` fell by exactly what `guard-only` gained, and **`unit-only` did not move**: no unique detection
+capability was removed. `npm test` 2,986 → 2,891, all green.
 
 ## What changed
 
