@@ -1,50 +1,157 @@
 {
-  "runId": "REG-2026-09-14-1802",
-  "status": "completed",
-  "startedAt": "2026-09-14T16:02:37.378Z",
-  "selection": "075f",
+  "runId": "REG-2026-09-15-0947",
+  "status": "in_progress",
+  "startedAt": "2026-09-15T07:48:07.248Z",
+  "selection": "loyalty",
   "env": "vcst",
-  "note": "075f first execution. Store flipped Customer->Organization via GET-merge-PUT /api/stores (settings-v2 is a confirmed 204 no-op) and VERIFIED on the store entity. Re-mint probe before the flip: all 3 org owners this suite touches (12b52a61 AGENT-TEST-Org-LoyaltyOutlet = ORG_LOY_A+B+LOCKED, 23525b44 BuildRight, 96f109a7 TechFlow) already held org-scoped mission rows (31/20/19), so VCST-5954 replays nothing for them. Cart preflight swept 1 surplus cart from MULTI_ORG_TF_BR. LOYORG-009 is DESTRUCTIVE (drains the pooled balance) and is pinned LAST per the manifest. All 19 cases are Draft => Step 6.5 is a dry no-op. MUST restore mode to Customer in teardown.",
-  "caseOrder": [
-    "LOYORG-001",
-    "LOYORG-002",
-    "LOYORG-003",
-    "LOYORG-004",
-    "LOYORG-005",
-    "LOYORG-006",
-    "LOYORG-007",
-    "LOYORG-008",
-    "LOYORG-010",
-    "LOYORG-011",
-    "LOYORG-012",
-    "LOYORG-013",
-    "LOYORG-014",
-    "LOYORG-015",
-    "LOYORG-016",
-    "LOYORG-017",
-    "LOYORG-018",
-    "LOYORG-019",
-    "LOYORG-009"
-  ],
+  "note": "PHASED RUN (operator-approved). Loyalty.LoyaltyBalanceCalculationMode is a GLOBAL store setting: 075f/083e flip it to Organization as test steps, while the other 7 suites treat an Organization-mode store as a scope mismatch. Phase A runs the 7 Customer-mode suites with the store left at Customer. Then the ORG_LOY_A/B pool is re-seeded (drained by LOYORG-009 in REG-2026-09-14-1802) and the store flipped to Organization for Phase B. 083e (reads pool) runs BEFORE 075f, whose LOYORG-009 drains it and is pinned last. Store MUST be restored to Customer in close-out. Loyalty module is a PR build 3.1008.0-pr-17-116e.",
+  "phases": {
+    "A": {
+      "mode": "Customer",
+      "suites": [
+        "083c",
+        "083",
+        "083d",
+        "075",
+        "075b",
+        "083b",
+        "075c"
+      ],
+      "state": "pending"
+    },
+    "B": {
+      "mode": "Organization",
+      "suites": [
+        "083e",
+        "075f"
+      ],
+      "state": "pending"
+    }
+  },
+  "storeMode": {
+    "atRunStart": "Customer",
+    "current": "Customer",
+    "mustRestoreTo": "Customer"
+  },
   "suites": [
+    {
+      "id": "083c",
+      "name": "Loyalty Missions Storefront",
+      "file": "regression/suites/Frontend/loyalty/083c-loyalty-missions-storefront.csv",
+      "status": "running",
+      "browser": "playwright-chrome",
+      "lane": 1,
+      "phase": "A",
+      "cases": 84,
+      "attempts": 1,
+      "summary": null
+    },
+    {
+      "id": "083",
+      "name": "Loyalty Catalog Browsing",
+      "file": "regression/suites/Frontend/loyalty/083-loyalty-catalog.csv",
+      "status": "running",
+      "browser": "playwright-firefox",
+      "lane": 3,
+      "phase": "A",
+      "cases": 26,
+      "attempts": 1,
+      "summary": null
+    },
+    {
+      "id": "083d",
+      "name": "Loyalty Missions E2E",
+      "file": "regression/suites/Frontend/loyalty/083d-loyalty-missions-e2e.csv",
+      "status": "running",
+      "browser": "playwright-firefox",
+      "lane": 3,
+      "phase": "A",
+      "cases": 8,
+      "attempts": 1,
+      "summary": null
+    },
+    {
+      "id": "075",
+      "name": "Loyalty",
+      "file": "regression/suites/Backend/loyalty/075-loyalty.csv",
+      "status": "blocked",
+      "browser": "playwright-edge",
+      "lane": 2,
+      "phase": "A",
+      "cases": 29,
+      "attempts": 1,
+      "summary": {
+        "note": "Lane 2 (playwright-edge) agent terminated: org monthly spend limit hit (HTTP 429 rate_limit) before any test case ran (stopped at admin sign-in during setup). Not a per-request rate limit that a 60s retry resolves — org limit resets weekly. Held for orchestrator/operator decision, not auto-retried."
+      }
+    },
+    {
+      "id": "075b",
+      "name": "Loyalty Mixed Cart Order",
+      "file": "regression/suites/Backend/loyalty/075b-loyalty-mixed-cart-order.csv",
+      "status": "blocked",
+      "browser": "playwright-edge",
+      "lane": 2,
+      "phase": "A",
+      "cases": 13,
+      "attempts": 1,
+      "summary": {
+        "note": "Lane 2 (playwright-edge) agent terminated: org monthly spend limit hit (HTTP 429 rate_limit) before any test case ran (stopped at admin sign-in during setup). Not a per-request rate limit that a 60s retry resolves — org limit resets weekly. Held for orchestrator/operator decision, not auto-retried."
+      }
+    },
+    {
+      "id": "083b",
+      "name": "Loyalty Mixed Cart Order",
+      "file": "regression/suites/Frontend/loyalty/083b-loyalty-mixed-cart-order.csv",
+      "status": "running",
+      "browser": "playwright-firefox",
+      "lane": 3,
+      "phase": "A",
+      "cases": 8,
+      "attempts": 1,
+      "summary": null
+    },
+    {
+      "id": "075c",
+      "name": "Loyalty Product Points Earning",
+      "file": "regression/suites/Backend/loyalty/075c-loyalty-product-points-earning.csv",
+      "status": "done",
+      "browser": null,
+      "lane": 0,
+      "phase": "A",
+      "cases": 10,
+      "attempts": 0,
+      "summary": {
+        "total": 10,
+        "pass": 6,
+        "fail": 4,
+        "blocked": 0,
+        "skipped": 0,
+        "lane": "fastpath"
+      }
+    },
+    {
+      "id": "083e",
+      "name": "Loyalty Organization Balance Storefront",
+      "file": "regression/suites/Frontend/loyalty/083e-loyalty-organization-balance.csv",
+      "status": "pending",
+      "browser": "playwright-chrome",
+      "lane": 1,
+      "phase": "B",
+      "cases": 7,
+      "attempts": 0,
+      "summary": null
+    },
     {
       "id": "075f",
       "name": "Loyalty Organization Balance",
       "file": "regression/suites/Backend/loyalty/075f-loyalty-organization-balance.csv",
-      "status": "completed",
-      "browser": "playwright-edge",
-      "lane": 2,
+      "status": "pending",
+      "browser": "playwright-chrome",
+      "lane": 1,
+      "phase": "B",
       "cases": 19,
-      "attempts": 1,
-      "summary": {
-        "total": 19,
-        "passed": 9,
-        "failed": 4,
-        "blocked": 6,
-        "notDeployed": 0,
-        "skipped": 0
-      }
+      "attempts": 0,
+      "summary": null
     }
-  ],
-  "finishedAt": "2026-09-14T16:32:19.555Z"
+  ]
 }
