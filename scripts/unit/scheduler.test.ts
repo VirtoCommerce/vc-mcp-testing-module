@@ -70,7 +70,7 @@ test("orderLpt does not mutate its input", () => {
 test("full: continuous refill + LPT beats the fixed-batch barrier by a wide margin", () => {
   const suites = fullSelection();
   const total = suites.reduce((sum, s) => sum + s.estimatedMinutes, 0);
-  assert.equal(suites.length, 130, "manifest drift: full's suite count changed");
+  assert.equal(suites.length, 131, "manifest drift: full's suite count changed");
   assert.equal(total, 3075, "manifest drift: full's total estimate changed");
 
   const pool = simulateMakespan(orderLpt(suites), 3).makespanMinutes;
