@@ -35,6 +35,12 @@ scripts/.graphql-evidence/
 # The committed project-profile.example.json is the template; the real one is local.
 project-profile.json
 
+# The browser MCP's staging area. Every driven session drops page snapshots, console
+# logs and element grabs here under a per-browser folder; it reached 1,056 files / 33 MB
+# over six days of agent runs, none of it evidence anybody had chosen to keep. Bug
+# evidence is what somebody MOVED out of _incoming, and that stays tracked.
+reports/bugs/screenshots/_incoming/
+
 # Regression / lifecycle / coverage run evidence — ephemeral by policy.
 # Root paths catch live customer / VC active runs.
 # vc/shared/reports/ paths catch the archived Layer-2 mirror after the
