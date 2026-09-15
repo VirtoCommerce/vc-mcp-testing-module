@@ -104,6 +104,51 @@ from `both` to `guard-only` and leave `unit-only` untouched:
 `both` fell by exactly what `guard-only` gained, and **`unit-only` did not move**: no unique detection
 capability was removed. `npm test` 2,986 → 2,891, all green.
 
+## Quality, measured separately (2026-09-15)
+
+Redundancy and quality are different questions. The cut above removed tests that *duplicated a guard*;
+it said nothing about whether the survivors are any good. Measured after the cut:
+
+**Static smells are absent.** Across 2,737 test blocks: 10 with no assertion, 4 with only trivial
+assertions, 33 never touching an imported repo symbol. Spot-checking those found them to be **false
+positives** — `lint-unscoreable-assertions.test.ts` asserts through a local `notScoreable()` helper, and
+`gen-mcp-evidence.test.mjs` uses an `execFileSync` whose *throw* is the assertion. Static shape is a
+poor proxy for whether a test can fail when it should.
+
+**Test-to-test duplication is negligible.** 3 identical-body clusters, all legitimate: two twin
+extractor suites over *different* modules (`extract-bl` / `extract-ecl`), and section-local clean
+baselines for files whose other tests perturb that baseline.
+
+**The behavioural measure: IFDR 99%.** `npm run test:quality` gives every function a test file imports
+a `return undefined;` body, one at a time, and re-runs that file. Detection rate = detected / gutted.
+**117 files scored, mean 99%, 110 at 100%, none at 0%.** The six below 100% are almost entirely
+`setFlags` — a harness flag-setter imported for setup, not a subject under test. Only two are
+substantive (`assertContractCoherent` in `b2b-addresses-specs`, `classifyLane` in
+`suite-split-integrity`), and both are single functions inside otherwise-complete files.
+
+**Conclusion: this corpus never had a quality problem. It had a volume problem**, and the volume came
+from redundancy against guards that were not running — which is what the rest of this document fixes.
+
+### The metric took three attempts, and the first two lied
+
+Recorded because the failures are more instructive than the number:
+
+1. **Operator mutation, budget split across every import.** `ui-step-parser.test.ts` scored **13%** —
+   half its mutants landed in a 688-line module it imports for one helper. Aiming the budget at its
+   real subject moved it to 50%. *The metric was measuring the sampler.*
+2. **Operator mutation, aimed.** `hooks/redact.mjs` is almost entirely regex literals, so the sampler
+   produced **one** mutant and scored a security-critical test **0%**. Hand-written semantic mutations
+   of the same rules — neutering `redact()`, passthrough on the AWS-key replacement — were both
+   **caught**. *The metric was measuring the operator set.*
+3. **Gut-the-imported-function.** Semantic by construction; no regex blind spot; scoped to what a test
+   actually took a dependency on. Scoping to a module's *exported* surface instead reproduced the
+   artefact one level up (`pick-baseline-tag.test.mjs` owns one function of a twelve-function module
+   and scored 2/12).
+
+Every intermediate number would have supported a confident, wrong story about test quality. The
+general lesson matches the one in the cut above: **a detector that has not been checked against a case
+whose answer you already know is not evidence.**
+
 ## What changed
 
 1. **`test-data-engineer.md` §Step 3** — *"Write unit tests"* → *"Unit-test the DERIVATION, never the
