@@ -158,3 +158,97 @@ gate `3` (`3-cases`) checks that the phase **RAN** as well as that its hits are 
 into a larger step can be skipped as well as wrong, and an absent disposition block reads exactly like a
 clean triage. Locked by `scripts/unit/verify-gate.test.ts`. Full rules:
 `.claude/skills/qa-test/coverage-triage.md` §2a-own.
+
+---
+
+## The `technical-change` flow (2026-09-16)
+
+**A fourth FLOW, beside `verify-fix`, `hotfix-verify` and `feature-test`**, for work whose subject is
+machinery rather than capability: a refactor, an SDK or dependency migration, a runtime or build-target
+bump. Routing rule: `.claude/knowledge/execution/ticket-routing.md` §5d. Methodology:
+`.claude/skills/qa-test/technical-change.md`.
+
+### What was wrong
+
+Three tickets, all `Task`, all routed through the old matrix to `feature-test`:
+
+| | | Routed to | What the run did |
+|---|---|---|---|
+| **VCST-4386** | *"Move skyflow to a separate module on frontend"* | FAST | wrote and executed a checklist from acceptance criteria the ticket does not have |
+| **VCST-4717** | *"Migrate Application Insights to Azure Monitor OpenTelemetry"* | FULL (cross-layer) | a full Test Model + case authoring + four verifier dispatches, for behaviour the change does not add |
+| **VCST-4328** | *"Update VC Modules to NET10 — Stable 14"* | FULL | as above |
+
+The §4 `Technical task` row had **named this case since it was written** — *"Refactor/config — low
+behavioral risk"* — and then routed it to a checklist anyway. The row identified the class correctly and
+had nowhere to send it.
+
+**And in all three the actual risk went unasked.** A technical change puts nothing new in front of a user
+and puts every existing caller at risk. `/qa-test` runs no cross-suite sweep on either path (the `5r`/C2
+deletion, above), so *"did this break its callers?"* depended on an operator remembering to run
+`/qa-regression` by hand — §5a's *"run the sweep deliberately"* escape hatch, which is a documented manual
+step and therefore a step that is sometimes not taken.
+
+### Why a FLOW and not a shape class
+
+`ui-kit` is a shape class because it changes what the resolved path **produces**. This changes **which path
+exists**: it removes the Artifact B checklist and its execution agent, which is everything FAST *is*
+(*"FAST is one execution agent — that is the promise"*). A classifier that deletes the thing a path is
+defined as is not modifying that path; naming it `feature-test` would have been a false name, and §6
+already forbids inventing a flow quietly. It joins the sentence §1 had already written for the other two:
+*own fixed shape, ignores the EFFORT axis* (`path: null`).
+
+### Why ONE flow and not two
+
+The first design had two classifiers — `no-behavior-change` routing a `regression-only` flow (VCST-4386)
+and an `infra-migration` shape class that merely *added* a regression to a normal feature test (VCST-4717).
+It was discarded before it shipped. The two differed in exactly one respect — **whether the ticket leaves
+anything to verify** — and that is a step inside a run, not a different pipeline. Two classifiers with
+overlapping detection, a stated precedence rule between them, and one shared regression recipe is three
+ways to get the routing wrong in place of one.
+
+So the checklist became **conditional**, and the condition is not the AC field. It is *does the ticket carry
+a machinery claim the regression is structurally blind to?* VCST-4717's telemetry properties are such a
+claim — no storefront suite asserts on Application Insights — while its AC *"Doc: Migration Plan"* is not a
+QA claim at all. VCST-4386 carries none, so its checklist is skipped and **stated**.
+
+### The inversion, which is the part a reader gets wrong
+
+§5a and §5b both end on *"reach, not diff size"*: a reach exceeding its diff **escalates** a run to FULL.
+On this flow reach-exceeds-diff is the **defining property**, present in every run, and it argues the other
+way — for a regression instead of a bigger feature test. **A checklist tests the diff; a regression tests
+the radius.** A reader carrying §5a's rule into §5d will escalate exactly the tickets the flow is for, which
+is why §5d states the inversion explicitly rather than leaving it to be inferred.
+
+### It fails closed, and harder than `ui-kit`
+
+A wrong `ui-kit` deletes durable coverage from a run that needed it. A wrong `technical-change` **routes a
+real feature away from the pipeline built to test it**. So every signal must resolve affirmatively, and
+*"the diff did not obviously contradict it"* is not a finding — the `axes.md` §3 `data_surface` defect read
+backwards. **No fetchable diff ⇒ NOT this flow**, with no exception: the classifier reads the diff and
+nothing else, so with no diff it has read nothing.
+
+`.claude/rules/reports.md`-style honesty applies to the rest: the flow authors no cases, so
+`feature_release_gate` stays `not-assessed` and is never satisfied by substituting the regression's own
+number.
+
+### The self-audit that makes the routing falsifiable
+
+`2a`'s dispositions audit the decision that routed the run. On a change with no new user-facing capability
+they should be overwhelmingly `REPAIR` — mechanically stale rows naming a moved path. **`RE-BASE` means a
+row's expected VALUE is now contradicted, which is a user-facing behaviour change by definition.** One or
+two are noise; a pattern means the classifier was wrong, and the flow is abandoned mid-run and re-routed to
+`feature-test`, with the abandonment recorded. A flow that can detect its own misrouting and does not act on
+it is worse than one that cannot, because the run still reports a verdict.
+
+### What it is NOT
+
+**It does not reopen the `5r`/C2 argument.** C2 was deleted because it answered a *release* question the
+ticket had not asked, and its findings triaged as PRE-EXISTING or OUT-OF-SCOPE — neither of which fails a
+ticket. Here *"a suite that passed before this change now fails"* **is** the subject, so 5a classifies it
+IN-SCOPE and it fails the ticket. A proposal to re-add a general cross-suite sweep to `feature-test` still
+has to answer §5a.
+
+**And the regression is the ordinary one.** The flow subtracts the feature test, not the testing:
+`regression:select` picks the suites, `regression-orchestrator` runs them with the normal runner agents on
+the normal browser lanes, with the normal HAR and evidence capture. Nothing about execution is lighter or
+headless. The only new step in the whole design is the two-command `RG`.

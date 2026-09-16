@@ -194,7 +194,7 @@ dispatch, so making it opt-in would restore the always-on cost it exists to end.
 both paths — on FAST it gates the same `3a`, which that path had always described as *"test data if
 needed"* without ever saying who decides.
 
-**Two narrow exceptions — and both are per-CLASSIFIER defaults, not new always-on axes.** Neither adds an
+**Two narrow exceptions on the FAST path — and both are per-CLASSIFIER defaults, not new always-on axes.** Neither adds an
 axis, neither changes the effort, and neither applies to any other ticket. This is the shape the
 "revisit at 5+ runs" rule below asks for: promote an axis where the evidence for it actually is, against
 one classifier, rather than flipping it on for every FAST run.
@@ -211,6 +211,14 @@ one classifier, rather than flipping it on for every FAST run.
    contrast failure or a token collision by construction. **The `coverage` half rests on thinner evidence,
    and §5c records both sides rather than only the argument** — so the revisit rule below applies to that
    default in particular. `contract` stays opt-in.
+
+**A third classifier does not take an axis — it takes the whole flow.** The `technical-change` FLOW
+([`ticket-routing.md`](../../knowledge/execution/ticket-routing.md) §5d;
+[`technical-change.md`](technical-change.md)) is not on the FAST/FULL axis at all, so nothing here opts in
+or out on it: `coverage` is not an axis there, it is the flow's own `2a` step and always runs; `layer`
+still derives, because 5f and 5h need it; `visual` and `contract` do not run at all, argued in
+`technical-change.md` §7. Listed here so a reader counting exceptions on this page does not conclude the
+flow simply forgot to declare its axes.
 
 This restores a promise the pipeline had quietly inverted. `SKILL.md` §Effort routing records that the
 FAST/FULL split was made precisely because the old design marked everything expensive

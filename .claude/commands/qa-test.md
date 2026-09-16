@@ -1,5 +1,5 @@
 ---
-description: "Test a tracker ticket, feature area, or PR. Step 1a routes by ticket type × status (per ticket-routing.md) to the right flow — a fix-ready Bug runs /qa-verify-fix inline, else feature-test at a FAST path (a checklist, plus the design/a11y visual lane when the ticket is UI-visible) or a FULL path (mandatory Test Model, case authoring, independent verifier gates). Regression is C1 — the exact set of cases this run wrote or changed. Dispatches specialist agents, correlates App Insights logs for the test window, and produces a verdict. --iterate drives a bounded test→fix→re-test loop; --epic runs a series of sibling stories with cross-story integration."
+description: "Test a tracker ticket, feature area, or PR. Step 1a routes by ticket type × status (per ticket-routing.md) to the right flow — a fix-ready Bug runs /qa-verify-fix inline, a refactor/migration/dependency bump takes the fixed-shape technical-change flow (2a + a blast-radius regression, no feature test), else feature-test at a FAST path (a checklist, plus the design/a11y visual lane when the ticket is UI-visible) or a FULL path (mandatory Test Model, case authoring, independent verifier gates). Regression is C1 — the exact set of cases this run wrote or changed. Dispatches specialist agents, correlates App Insights logs for the test window, and produces a verdict. --iterate drives a bounded test→fix→re-test loop; --epic runs a series of sibling stories with cross-story integration."
 argument-hint: "<ticket-key> | feature name | PR #NNN | --epic <EPIC-KEY> [--iterate [--max-rounds N]]"
 disable-model-invocation: true
 ---
@@ -31,6 +31,7 @@ a judgment call a gate does not settle, or when you are about to change how a st
 | `1b` 2d — the GraphQL schema + fixture refresh | [`skills/qa-test/contract-refresh.md`](../skills/qa-test/contract-refresh.md) |
 | Artifact A phase `2a` — triaging the EXISTING corpus against the change | [`skills/qa-test/coverage-triage.md`](../skills/qa-test/coverage-triage.md) |
 | The `ui-kit` shape class — when the change IS the design system | [`skills/qa-test/ui-kit-class.md`](../skills/qa-test/ui-kit-class.md) |
+| The `technical-change` FLOW — a refactor, migration or dependency bump | [`skills/qa-test/technical-change.md`](../skills/qa-test/technical-change.md) |
 
 ## Usage
 ```
@@ -79,6 +80,7 @@ existing `§2a` citations still resolve.
 · [`decisions`](../../docs/decisions/qa-test-evolution.md) §Removing 5r and 5g).
 
 ```
+TECH   1a → 1b → 2a ‖ [B] ‖ RG → 5a → 5b → 5c → 5d → 5e → 5f → 5h   ← a FLOW, not a path
 FAST   1a → 1b → 2 → 3 → 4 → 5a → 5b → 5c → 5d → 5e → 5f → 5h
 FULL   1a → 1b → 1r ‖ 1c ‖ 1d ‖ [1c-map] ‖ 2-load
                 → 1e → 1e-plan → 2-topup
@@ -268,9 +270,10 @@ for `feature-test`, the **EFFORT**, then the **SHAPE CLASS** (§5c) off the same
 | `feature-test` | continue to `1b` and run the pipeline at the resolved effort — the rest of this document. A `ui-kit` shape class changes what that path produces (§5c) |
 | `verify-fix` | **run `/qa-verify-fix` inline — execute its Steps 0–7 as written** ([`qa-verify-fix.md`](qa-verify-fix.md)). Steps 2–5 do not run. **Fail-safe:** a `fix-ready` Bug with no STR *and* no linked fix PR has nothing to prove RED→GREEN against → fall back to `feature-test` FAST and note the missing repro basis |
 | `hotfix-verify` | **STOP** — `Run /qa-hotfix-check <ticket-key>`. File nothing; transition nothing |
+| `technical-change` | run the fixed-shape flow — [`technical-change.md`](../skills/qa-test/technical-change.md). `2a` + a standard `/qa-regression` over the blast radius, then **Step 5 in full**; the checklist only if the ticket has machinery to verify. No Test Model, no authoring |
 | a **Sub-task** | resolve the parent and re-enter this classification as the **parent's** type × status |
 
-**Then, on the `feature-test` branch only: move the ticket to the in-testing status — the OPENING HOP.**
+**Then, on the `feature-test` and `technical-change` branches: move the ticket to the in-testing status — the OPENING HOP.**
 `qa-lead` makes it, **no confirmation**: it is the direct, reversible consequence of the operator invoking
 this command, and on Jira it is also the precondition both closing transitions need. The full state
 machine — the two hops, the confirmation asymmetry, the per-verdict closing table, the `--iterate` rule,
@@ -279,10 +282,9 @@ the Azure behaviour and the mandatory record — is
 **Cite it; do not restate it.**
 
 **It sits HERE, after routing, and not at Step 4 where it used to.** *In testing* means **QA owns this
-ticket now**, which is true the moment the run is accepted — not when the first browser opens. A STOP
-before Step 4 (Step 3 is a hard-STOP gate) therefore leaves the ticket in-testing **with a comment saying
-why nobody is testing it** — the honest state, and the same shape as a `BLOCKED` verdict. What the old
-placement cost: [`decisions`](../../docs/decisions/qa-test-evolution.md).
+ticket now** — true the moment the run is accepted, not when the first browser opens. Why a pre-Step-4 STOP
+then leaves the honest state, and what the old placement cost:
+[`decisions`](../../docs/decisions/qa-test-evolution.md).
 
 **After routing is load-bearing, not incidental:** `verify-fix` owns its own close-out (two flows
 transitioning one ticket is how a ticket gets moved twice for one run) and `hotfix-verify` transitions

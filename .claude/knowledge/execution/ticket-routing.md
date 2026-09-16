@@ -17,11 +17,13 @@ Consumers: `/qa-test` (§1a — the primary router), and, by reference, the comm
 
 Routing is two decisions, in order:
 
-1. **FLOW** (which pipeline): `verify-fix` · `hotfix-verify` · `feature-test`. Decided by **type × status**
-   (§4). A fix-ready **Bug** is a *verification*, not a feature test — it must not run the feature-test
-   authoring/promotion machinery.
+1. **FLOW** (which pipeline): `verify-fix` · `hotfix-verify` · `technical-change` · `feature-test`. Decided
+   by **type × status** (§4) — except `technical-change`, which is decided by the classifier of **§5d** and
+   can be reached from any type. A fix-ready **Bug** is a *verification*, not a feature test — it must not
+   run the feature-test authoring/promotion machinery.
 2. **EFFORT** (how much of the pipeline): `FAST` · `FULL`. Applies **only** to the `feature-test` flow
-   (§5). `verify-fix` and `hotfix-verify` have their own fixed shape and ignore this axis.
+   (§5). `verify-fix`, `hotfix-verify` and `technical-change` have their own fixed shape and ignore this
+   axis — each records `path: null`.
 
 Record **flow + type + path** on the run (they are `summary.json` fields — `flow`, `ticket_type`, `path`).
 
@@ -44,10 +46,20 @@ type — infer it from diff size + surface (a one-file single-surface change is 
 FAST bug fix; anything net-new/cross-layer is a *feature*).
 
 **A SHAPE CLASS is not a type, and is resolved separately.** This set is the tracker's own vocabulary, so a
-property a tracker does not model cannot be added to it. The one such property this pipeline acts on —
-*the change IS the design system* — is derived from the diff at `1a` and recorded beside the type, never
-instead of it: **§5c**. A ticket carries a type **and** a class; the class changes what the resolved path
-produces, never which path is resolved.
+property a tracker does not model cannot be added to it. **Two** such properties are derived from the diff
+at `1a` and recorded *beside* the type, never instead of it — a ticket carries a type **and** its classes:
+
+| Class | The property | What it changes |
+|---|---|---|
+| `ui-kit` (**§5c**) | *the change IS the design system* | what the resolved path **produces** — never which path |
+| `technical-change` (**§5d**) | *the change adds no new USER-FACING capability* | the **FLOW** itself → `technical-change` |
+
+Both are derived from the diff, never asked, and **both fail CLOSED** — see §6. **Resolve the flow class
+first**: §5d decides *which pipeline runs at all*, §5c only decides what a `feature-test` produces, so a
+`technical-change` never reaches the §5c question.
+
+A tracker-unmodelled property earns a classifier only when acting on it changes what a run **does**, not
+merely how it is described.
 
 ---
 
@@ -68,15 +80,20 @@ Resolve via the 16-status map in `skills/qa-defect/defect-lifecycle-workflow.md`
 
 ## 4. The FLOW matrix (type × status)
 
+**The first row is checked before the type rows** and can be reached from any type, because the property it
+reads — *does this change add behaviour at all?* — is one no tracker models (§2). It fails closed, so when it
+does not resolve the type rows decide exactly as they always have.
+
 | Canonical type | Status role | **FLOW** | What runs next |
 |---|---|---|---|
+| **any** — with the `technical-change` class (**§5d**) | `testable` | **technical-change** | `1a`·`1b` → Artifact A's **`2a`** triage + `REPAIR` → **a standard `/qa-regression` run over the change's blast radius** (`regression:select` picks the suites; `regression-orchestrator` executes them with the normal runner agents on the normal browser lanes) → **Step 5 in full** (`5a`–`5h`, bugs filed at `5d`), at the FAST cadence. A checklist runs **only if the ticket declares machinery to verify**. Dropped always: the Test Model, case authoring, `3x`, the verifier gates. Methodology: [`skills/qa-test/technical-change.md`](../../skills/qa-test/technical-change.md) |
 | **Bug** | `fix-ready` | **verify-fix** | Run `/qa-verify-fix` **inline** — RED→GREEN (3×), regression, VERIFIED/REOPEN. Feature-test Steps 2–5 (authoring/AC-reconcile/promotion) are skipped. |
 | **Bug** | `hotfix-ready` | **hotfix-verify** | STOP with a pointer to `/qa-hotfix-check <key>` (the hotfix delivery/verification flow). |
 | **Bug** | `not-fixed` | **feature-test** (FAST) | Reproduce/characterize live, attach fresh evidence to the ticket; state next = `/qa-fix <key>` (nothing to *verify* yet). |
 | **Story** | any | **feature-test** | **FULL** unless the story is *narrow on every axis* — the six-token test in §5b — in which case **FAST**. A story is the unit of NEW behaviour, so FULL is the default and the burden is on the downgrade, not on the escalation. Any token unestablished ⇒ FULL (§5 doubt rule); an `UNDECLARED` surface purpose ⇒ FULL whatever the six say (§5b). |
 | **Epic** | any | **feature-test** (FULL) | Full cycle; a bare Epic key → suggest `--epic` (serial child-story run). |
-| **Task** | any | **feature-test** | **FULL** if cross-layer or P0/P1, else **FAST**. |
-| **Technical task** | any | **feature-test** (FAST) | Refactor/config — low behavioral risk; **FULL** only if it crosses layers or is P0/P1 (fail-safe). |
+| **Task** | any | **feature-test** | **FULL** if cross-layer or P0/P1, else **FAST** — *unless* `technical-change` resolves, which takes the first row (§5d). Both of §5d's worked examples are this type. |
+| **Technical task** | any | **feature-test** (FAST) | Refactor/config — low behavioral risk; **FULL** only if it crosses layers or is P0/P1 (fail-safe). **This is the row §5d was written for**: it named the technical case and then routed it to a checklist anyway. A `Technical task` whose diff resolves `technical-change` takes the first row instead; one whose diff does not still routes here. |
 | **Review task** | any | **feature-test** | A **contribution** — a fix or improvement arriving as a PR, the ticket auto-created as a wrapper (description = PR link + title; no ACs, no STR, auto-set `Medium`). Its fields carry no signal, so **effort derives from the PR diff, never the ticket fields**: **FAST** for a one-file, single-surface diff; **FULL** if it crosses layers, spans ≥2 domains, is net-new, or its **REACH exceeds its diff** (shared infrastructure that already-shipped callers also use). **Domain membership alone does NOT escalate** — on this storefront nearly every change touches a critical-revenue domain, so that test would swallow the FAST default sitting beside it (§5a). **Artifact A's `2a` triage phase runs by default; there is no cross-suite sweep on either path** — §5a. |
 | **Sub-task** | any | **inherit parent** | Resolve the parent work item and re-enter this matrix as the **parent's** type × status. |
 | *inferred tweak/config* (PR / feature, no ticket type) | — | **feature-test** (FAST) | One-file, single-surface change. |
@@ -299,6 +316,92 @@ checkout controls, sales-rep blocks — are where a kit regression is actually s
 where it is written. **vc-shell / Vendor Portal is excluded**: a separate product with its own hosted
 Storybook, which is precisely why the exclusion must be explicit (`ui-kit-class.md` §11).
 
+
+### 5d. `technical-change` — the one flow for work that has no user-facing subject
+
+§5a and §5b derive an **effort** from a type; §5c derives what a `feature-test` **produces**. This one
+derives the **FLOW**, and it is the only classifier that does. It answers: *does this change add any new
+capability a user, an operator or an integrator could exercise?* When the answer is a positive no, the
+pipeline's central instrument — a checklist written from acceptance criteria — is aimed at nothing.
+
+**One flow covers the whole technical family.** A module extracted, an SDK replaced, a dependency or
+framework migrated, a runtime or build target bumped, a config or tooling change. They differ only in
+whether the ticket leaves anything to *verify*, and that difference is a step inside the flow, not a
+different flow:
+
+| Provenance | The change | Is there machinery to verify? |
+|---|---|---|
+| **VCST-4386** *"Move skyflow to a separate module on frontend"* | a module extraction | **no** — no ACs, nothing new to exercise. The checklist is skipped, stated |
+| **VCST-4717** *"Migrate Application Insights to Azure Monitor OpenTelemetry"* | an SDK swap | **yes** — *does telemetry still arrive, with which properties* is real work no suite asserts on |
+| **VCST-4328** *"Update VC Modules to NET10"* | a runtime bump | **yes** — *does it still build, start and serve* |
+
+**What unites them is the risk, and the risk is the same in every row: reach.** A technical change puts
+nothing new in front of a user and puts every existing caller at risk, so the question is never *does the
+new thing work* — it is *did the old things survive*. **A checklist tests the diff; a regression tests the
+radius.** That is why the regression is the deliverable on this flow and the checklist is the optional part,
+which is the exact inverse of `feature-test`.
+
+**It inverts the usual relationship between reach and diff.** §5a and §5b both end on *"reach, not diff
+size"* — a reach exceeding its diff **escalates** a run to FULL. Here it does the opposite: reach exceeding
+the diff is the **defining property**, present in every run on this flow, and it argues for a regression
+rather than a bigger feature test. **A reader who carries §5a's rule into this section will escalate exactly
+the tickets this flow is for.**
+
+**Detection — derived from the diff at `1a`, never asked** (the `axes.md` §2 contract). The first two must
+hold affirmatively; the third corroborates:
+
+| Signal | Resolves affirmatively when |
+|---|---|
+| user-facing contract | **unchanged** — GraphQL schema, REST routes and payloads, rendered surfaces, and any other surface a user or integrator can reach |
+| diff shape | one recognisable technical shape: a move / rename / extract / re-export · a dependency, SDK, framework or runtime swap · a build-target, config or tooling change. Typically a manifest change plus call-site churn following **one mechanical pattern** |
+| the ticket | declares no new user capability. ACs, where present, are about the machinery (*does it still emit, still build, still start*) |
+
+**It fails CLOSED — any signal unresolved ⇒ NOT `technical-change` ⇒ route by type as normal.** This is
+§5c's inversion and it is sharper here, because this classifier subtracts more than any other in this file:
+a wrong `ui-kit` deletes durable coverage from a run that needed it; a wrong `technical-change` **routes a
+real feature away from the pipeline built to test it**. So it needs positive findings, and "the diff did not
+obviously contradict it" is not one — that is the `data_surface` defect
+[`axes.md`](../../skills/qa-test/axes.md) §3 diagnoses, read backwards. **No diff fetchable ⇒ unresolved ⇒
+NOT this flow**, with no exception: the classifier reads the diff and nothing else, so with no diff it has
+read nothing.
+
+**The EFFORT axis does not apply (`path: null`), and the checklist is not a FAST/FULL decision.** Whether a
+checklist runs is read off the ticket — *is there a machinery claim to verify?* — not off an effort score,
+because the things FULL would have added are all aimed at new behaviour: a Test Model is a fault model for
+behaviour this change does not add, authoring writes durable cases for it, and the verifier gates gate
+those two. A cross-layer technical change is served by the regression widening (`regression:select` fails
+open to the whole layer), not by a heavier feature test.
+
+| Runs | Conditional | Never |
+|---|---|---|
+| `1a` · `1b` · Artifact A's **`2a`** triage (`REPAIR` applied, `RE-BASE` carried) · **a standard `/qa-regression` over the blast radius** · **the whole of Step 5** — `5a` triage, `5b` reconcile, `5c` verdict, **`5d` file bugs**, `5e` report, `5f` status, `5h` docs — at the FAST cadence | the **Artifact B checklist** + its execution agent — only when the ticket declares machinery to verify; absent ⇒ a **stated** skip, never a silent one | the Test Model · `1c`/`1d`/`1r`/`1e` · Artifact A's **authoring** phase · `3x` · the `3-cases` gate · the verifier dispatches · the `visual` and `contract` axes |
+
+**The regression is the ORDINARY one — this flow subtracts the feature test, not the testing.**
+`regression:select` picks the suites from the change; `/qa-regression` runs them through
+`regression-orchestrator` with the normal runner agents, on the normal browser lanes, at the normal
+parallelism and with the normal HAR/evidence capture. Nothing about execution is lighter, headless or
+special-cased here.
+
+**Its regression failures are the ticket's own, and that is what distinguishes this from the deleted C2
+sweep.** `5r`/C2 was removed on 2026-09-10 because it answered a *release* question the ticket did not ask,
+and its findings triaged as PRE-EXISTING or OUT-OF-SCOPE — neither of which fails a ticket (§5a). Here,
+*"a suite that passed before this change now fails"* **is** the subject: a technical change that breaks a
+caller is precisely the defect this flow exists to catch, so 5a classifies it IN-SCOPE. **A proposal to
+re-add a general cross-suite sweep to `feature-test` still has to answer §5a; this flow does not reopen it.**
+
+**The escape hatch, and it is load-bearing.** `2a` disposes each affected row; for a change with no new
+user-facing capability the dispositions should be overwhelmingly `REPAIR` — mechanically stale rows naming a
+moved path or a renamed symbol. **`RE-BASE` means a row's expected VALUE is now contradicted, which is a
+user-facing behaviour change by definition.** One or two are noise; **a pattern is evidence the classifier
+was wrong** — stop, re-route to `feature-test`, and record in the report which flow was abandoned, at which
+step, and on what evidence.
+
+**What this run does NOT produce, stated rather than discovered** — the same honesty clause §5a and §5c both
+end on. It authors **no** test cases, so it adds no durable coverage and `/qa-test-lifecycle` is the route
+back in. It carries **no** release recommendation: record `feature_release_gate: not-assessed` explicitly,
+never as a blank regression block, and never by substituting the regression's own number — that answers a
+different question (§5a).
+
 ---
 
 ## 6. Fail-safe defaults
@@ -314,7 +417,12 @@ instance of this — *when in doubt → FULL* — is stated once, at §5.
   nothing to prove RED→GREEN against) → fall to `feature-test`, noting the missing repro basis.
 - **`verify-fix` still honours its own deploy gate** (`/qa-verify-fix` Step 3): if the fix isn't live it
   offers `/qa-deploy-pr` — unchanged. A route to `verify-fix` is not a claim the fix is deployed.
-- **Shape class unestablished** → **NOT `ui-kit`**; author cases as normal. The one classifier here that
-  fails *closed*, because it is the one that SUBTRACTS — the reasoning is §5c's, and it is the exception
-  that makes the rest of this list's direction meaningful rather than reflexive.
+- **Shape class unestablished** → **NOT `ui-kit`**; author cases as normal. The reasoning is §5c's.
+- **`technical-change` unestablished** (a signal unresolved, or no diff to read at all) → **NOT
+  `technical-change`**; route by type as normal and run the feature test. The reasoning is §5d's.
+- **Those two are the classifiers that fail CLOSED, and they are the exception that makes the rest of this
+  list's direction meaningful rather than reflexive.** Every other rule here widens an uncertain run,
+  because widening is the safe direction when a classifier ADDS. These two SUBTRACT — `ui-kit` removes
+  durable coverage, `technical-change` removes the feature test itself — so for them the safe direction is
+  the other one, and doubt must narrow the classifier rather than the run.
 - **Uncertain ownership / a status role that maps to nothing** → surface it and ask; never invent a flow.
