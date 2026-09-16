@@ -19,11 +19,16 @@ ticket leaves anything to verify, and §3 makes that a step rather than a second
 regression it runs is the ordinary `/qa-regression` — real runner agents, real browsers, real evidence —
 and it closes out through the ordinary Step 5, bugs filed and all.
 
-Provenance: **VCST-4386** *"Move skyflow to a separate module on frontend"* (nothing to verify),
-**VCST-4717** *"Migrate Application Insights to Azure Monitor OpenTelemetry"* and **VCST-4328**
-*"Update VC Modules to NET10"* (machinery to verify). All three are `Task`; none adds a user-facing
-capability; all three put every existing caller at risk. Every command in §2, §4 and §5 below was
-**executed against these tickets before being written down** — §8 records what that dry run corrected.
+Provenance, and read the second paragraph before using the first. **VCST-4717** *"Migrate Application
+Insights to Azure Monitor OpenTelemetry"* and **VCST-4328** *"Update VC Modules to NET10"* are the
+qualifying cases: both are `Task`, neither adds a user-facing capability, both put every existing caller at
+risk, and both carry machinery to verify (§3).
+
+**VCST-4386** *"Move skyflow to a separate module on frontend"* is the ticket that MOTIVATED this flow and
+is also its worked **refusal** — it reads as a pure extraction and its diff is not one (**§7a**). Keep both
+facts together: the case that makes a flow look necessary is not automatically a case the flow should take.
+Every command in §2, §4 and §5 was **executed against these tickets before being written down** — §8
+records what that dry run corrected, §7a what the routing test did.
 
 ---
 
@@ -99,7 +104,7 @@ a FAST `feature-test` — [`authoring.md`](authoring.md) owns the artifact and i
 
 | Ticket | Machinery claim | `B` |
 |---|---|---|
-| VCST-4386 — a module moved | none. Nothing new is exercisable; the move either broke callers or it did not, and `RG` answers that | **skipped, stated** |
+| a **pure** module move — no new page, route or export | none. Nothing new is exercisable; the move either broke callers or it did not, and `RG` answers that | **skipped, stated** |
 | VCST-4717 — telemetry SDK swapped | *does telemetry still arrive, and with which properties?* No storefront suite asserts on Application Insights, so `RG` is structurally blind to it | **runs** |
 | VCST-4328 — runtime bumped | *does it still build, start and serve?* | **runs** |
 
@@ -266,6 +271,36 @@ exercise real pages in real browsers and fail on what actually broke.
 If a diff genuinely does change rendering, then its user-facing contract changed, the classifier should not
 have resolved, and the fix is at §5d's detection rather than a lane bolted on here. `--visual` remains
 available on `feature-test`, which is where such a ticket belongs.
+
+---
+
+## 7a. The routing test — VCST-4386 correctly REFUSED (2026-09-16)
+
+The flow was tested against the ticket it was designed from, and the right answer turned out to be *no*.
+
+`1a` ladder rung 1 found the PR — **not** in `issuelinks`, which carries only a *Blocks* link, but in a QA
+comment. That is the rung working as written, and it is why the ladder does not stop at `issuelinks`.
+
+| Signal | Verdict on PR #2440 (61 files, +442−295) |
+|---|---|
+| user-facing contract unchanged | **contradicted** — `pages/checkout/payment.vue`, `pages/account/order-payment.vue`, `core/api/graphql/types.ts`, `client-app/config/menu.json` |
+| exported surface | **contradicted** — adds `modules/skyflow/pages/saved-credit-cards.vue`, a net-new page, plus a net-new `cartPayment` extension point |
+| one mechanical pattern | **unresolved** — a module extraction, but also a new extension-point category and a codegen change |
+| ticket declares no new capability | **holds** — and this is the trap: the ticket alone passes |
+
+**Class does not resolve ⇒ `feature-test` FULL** — which is what the ticket actually took on 2026-09-15,
+finding **VCST-5986** (High: a guest is offered Skyflow, the card form never mounts, the order cannot be
+completed, console clean). **Had the classifier keyed on the ticket rather than the diff, that bug would
+have shipped.** The fail-closed direction of §5d is not theoretical; this is the run that exercised it.
+
+Two defects it exposed, both now fixed in `ticket-routing.md` §5d:
+
+1. **The exported-surface signal had been lost** when the two draft classifiers were merged into one. It is
+   the *mechanically checkable* one — a new page or export either appears in the file list or it does not —
+   whereas *"user-facing contract unchanged"* needs judgment. Restored as its own row, and checked first.
+2. **The §4 row pinned status role `testable`**, which VCST-4386 (at `Tested`) does not satisfy and which §3
+   does not even map. The class reads the CHANGE, not the lifecycle stage, so the row now reads `any`, as
+   the `Task` and `Technical task` rows beside it do.
 
 ---
 

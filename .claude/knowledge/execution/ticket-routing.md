@@ -86,7 +86,7 @@ does not resolve the type rows decide exactly as they always have.
 
 | Canonical type | Status role | **FLOW** | What runs next |
 |---|---|---|---|
-| **any** — with the `technical-change` class (**§5d**) | `testable` | **technical-change** | `1a`·`1b` → Artifact A's **`2a`** triage + `REPAIR` → **a standard `/qa-regression` run over the change's blast radius** (`regression:select` picks the suites; `regression-orchestrator` executes them with the normal runner agents on the normal browser lanes) → **Step 5 in full** (`5a`–`5h`, bugs filed at `5d`), at the FAST cadence. A checklist runs **only if the ticket declares machinery to verify**. Dropped always: the Test Model, case authoring, `3x`, the verifier gates. Methodology: [`skills/qa-test/technical-change.md`](../../skills/qa-test/technical-change.md) |
+| **any** — with the `technical-change` class (**§5d**) | any | **technical-change** | `1a`·`1b` → Artifact A's **`2a`** triage + `REPAIR` → **a standard `/qa-regression` run over the change's blast radius** (`regression:select` picks the suites; `regression-orchestrator` executes them with the normal runner agents on the normal browser lanes) → **Step 5 in full** (`5a`–`5h`, bugs filed at `5d`), at the FAST cadence. A checklist runs **only if the ticket declares machinery to verify**. Dropped always: the Test Model, case authoring, `3x`, the verifier gates. Methodology: [`skills/qa-test/technical-change.md`](../../skills/qa-test/technical-change.md) |
 | **Bug** | `fix-ready` | **verify-fix** | Run `/qa-verify-fix` **inline** — RED→GREEN (3×), regression, VERIFIED/REOPEN. Feature-test Steps 2–5 (authoring/AC-reconcile/promotion) are skipped. |
 | **Bug** | `hotfix-ready` | **hotfix-verify** | STOP with a pointer to `/qa-hotfix-check <key>` (the hotfix delivery/verification flow). |
 | **Bug** | `not-fixed` | **feature-test** (FAST) | Reproduce/characterize live, attach fresh evidence to the ticket; state next = `/qa-fix <key>` (nothing to *verify* yet). |
@@ -354,7 +354,19 @@ hold affirmatively; the third corroborates:
 |---|---|
 | user-facing contract | **unchanged** — GraphQL schema, REST routes and payloads, rendered surfaces, and any other surface a user or integrator can reach |
 | diff shape | one recognisable technical shape: a move / rename / extract / re-export · a dependency, SDK, framework or runtime swap · a build-target, config or tooling change. Typically a manifest change plus call-site churn following **one mechanical pattern** |
+| **exported surface** | **nothing net-new is exported, and nothing exported is removed without an equivalent re-export.** A new page, route, component, extension point or public export is net-new capability however technical the ticket sounds — and unlike the row above it is *mechanically checkable*, so check it first |
 | the ticket | declares no new user capability. ACs, where present, are about the machinery (*does it still emit, still build, still start*) |
+
+**Worked refusal — VCST-4386, and it is the reason the exported-surface row exists.** *"Move skyflow to a
+separate module on frontend"* is a `Task` that reads as a pure extraction, and its ticket text declares no
+new capability, so the third signal HOLDS. The diff refuses it: PR #2440 is 61 files / +442−295 and adds
+`modules/skyflow/pages/saved-credit-cards.vue` — **a net-new page** — while touching
+`pages/checkout/payment.vue`, `pages/account/order-payment.vue`, `core/api/graphql/types.ts`,
+`client-app/config/menu.json` and a net-new `cartPayment` extension point. Signals one and two are contradicted, so the
+class does not resolve and the ticket routes `feature-test` FULL — which is what it actually took on
+2026-09-15, finding VCST-5986 (**High**: a guest is offered Skyflow, the card form never mounts, the order
+cannot be completed, and the console stays clean). **A classifier keyed on the ticket would have skipped
+that feature test.** Read the diff; the title is not evidence.
 
 **It fails CLOSED — any signal unresolved ⇒ NOT `technical-change` ⇒ route by type as normal.** This is
 §5c's inversion and it is sharper here, because this classifier subtracts more than any other in this file:
