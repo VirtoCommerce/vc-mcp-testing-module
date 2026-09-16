@@ -195,7 +195,7 @@ Store {{STORE_ID}} is in Organization mode — the store setting Loyalty.Loyalty
 [API] LOYORG-019 asks the same question at the API layer, where no client cache exists; a disagreement between the two localises the staleness to the storefront
 [ADMIN] no loyalty regression suite may run on {{STORE_ID}} inside this case's mode window
 [CONSOLE] no unhandled JS error on any of the three loads","BAL_CUST still equals BAL_ORG after a reload (stale scope served to the buyer); BAL_RESTORED does not return to BAL_ORG; the page errors or renders an endless skeleton at any reading; the restore write answers non-200, leaving the store in Customer mode for every following case","An administrator POSTs {""Loyalty.LoyaltyBalanceCalculationMode"": ""Organization""} to the store settings endpoint as an idempotent safety net, returning the store to the state this suite declares even if the case aborted mid-window. Then sign out.",VCST-5024 · Archetype:CONFIG · Technique:ST | Promoted: REG-2026-09-14-0928 (2026-09-14),Automated
-LOYORG-E2E-006,"Organization mode — a buyer with no organization can spend the points shown on their account page, and is not blocked by a zero-available error",Loyalty > Organization Balance > Storefront,Critical,BL-LOY-008,ECL-14.3,"[PRE:CLEAR_SESSION]
+LOYORG-E2E-006,"Organization mode — a buyer with no organization can spend the points shown on their account page, and is not blocked by a zero-available error",Loyalty > Organization Balance > Storefront,Critical,"BL-LOY-008, BL-LOY-010",ECL-14.3,"[PRE:CLEAR_SESSION]
 [PRE:SIGNIN_AS:LOY_PERSONAL_NOORG]
 [PRE:RESET_CART]
 Store {{STORE_ID}} is in Organization mode — the store setting Loyalty.LoyaltyBalanceCalculationMode reads ""Organization"". This is NOT the ambient state of the environment (the platform default is ""Customer"", which the rest of the loyalty corpus assumes), so the run sets it before this suite and restores it after; a case that finds the store in Customer mode must report BLOCKED rather than assert. @td(LOY_PERSONAL_NOORG.email) belongs to NO organization and holds a balance strictly above @td(LOY_PERSONAL_NOORG.cheapest_pts_price) — the seeder guarantees that floor, so a refusal to spend is attributable to the scope split and never to a genuine shortfall. This is the customer-facing half of a question the backend organization-balance suite also asks at the API layer: what a personal shopper experiences on a store the merchant switched to company points. No execution dependency — this case establishes its own state. A loyalty balance CANNOT be reset on this platform — vc-module-loyalty exposes the operation log read-only, with no balance set/debit API — so every balance figure below is a RELATIVE DELTA against a value read immediately before the action, never an absolute number. A promotion adds a gift line (isGift true, price 0) to every order placed on the seeded earn products, so nothing here counts cart lines or pins an order total.",front_url={{FRONT_URL}}; store_id={{STORE_ID}}; no_org_user=@td(LOY_PERSONAL_NOORG.email); pts_sku=@td(LOY_SKU_PTS_UNIT.sku),"--- SCREEN: account points-history ---
@@ -207,9 +207,11 @@ Store {{STORE_ID}} is in Organization mode — the store setting Loyalty.Loyalty
 [WAIT] the storefront home page has rendered
 [ACT] add the points-priced product '@td(LOY_SKU_PTS_UNIT.sku)' to the cart at quantity 1
 [WAIT] the cart badge shows at least 1
+[ACT] add any in-stock cash-priced catalog product to the cart at quantity 1
+[WAIT] the cart badge shows at least 2
 --- SCREEN: cart ---
 [NAV] {{FRONT_URL}}/cart
-[WAIT] the cart page has rendered with the points-priced line
+[WAIT] the cart page has rendered with both a cash line and a points-priced line
 [ACT] record any inline message the cart renders about the loyalty balance
 [ACT] record the available figure that message names, if it names one
 [ACT] record whether the 'Place Order' control is enabled

@@ -1,58 +1,37 @@
 {
- "runId": "REG-2026-09-16-1624",
- "status": "completed",
- "startedAt": "2026-09-16T14:24:24.286Z",
- "selection": "083e (explicit id — full suite, 8 cases)",
+ "runId": "REG-2026-09-16-1727",
+ "status": "in_progress",
+ "startedAt": "2026-09-16T15:29:16.634Z",
+ "selection": "083e --ids LOYORG-E2E-006 --no-promote (scoped re-run after /qa-review-tests --fix)",
  "env": "localhost",
- "scoped": false,
- "note": "Full-suite run of 083e requested as /qa-regression 083e. RUN ON localhost, NOT the default vcst: the feature under test (store setting Loyalty.LoyaltyBalanceCalculationMode) ships in vc-module-loyalty PR #17. vcst-qa runs VirtoCommerce.Loyalty@3.1007.0, which does not declare that setting at all — every case would be NOT_DEPLOYED/BLOCKED there. localhost runs VirtoCommerce.Loyalty@3.1008.0-pr-17-973e. Pre-flight: carts:check clean on all 4 loyalty accounts (no competing carts); store mode verified Organization off the store entity; 8/8 cases classified browser lane by suites:lanes (0 machine). Run in CSV order per the manifest note — E2E-002 depends on E2E-001, E2E-005 writes the store mode and goes last.",
+ "scoped": true,
+ "note": "Re-run of the ONE case repaired by /qa-review-tests 083e --fix. LOYORG-E2E-006 returned AMBIGUOUS in REG-2026-09-16-1624 because its Steps never added the cash line BL-LOY-010 requires, so the Place-Order-disabled state it observed could not discriminate the org-scope/fallback hypothesis. Fix added the cash line + [WAIT] and cited BL-LOY-010. Delegated-style scope, so NO PROMOTION. Note: PTS was removed from store.currencies by the owner between runs (config fix, not a product change); loyalty catalog verified still working (PDP renders PTS1, in stock).",
  "storeMode": {
   "atRunStart": "Organization",
-  "source": "GET /api/stores/B2B-store settings[] Loyalty.LoyaltyBalanceCalculationMode",
-  "mustRestoreTo": "Organization",
-  "atRunEnd": "Organization",
-  "restored": true
+  "mustRestoreTo": "Organization"
  },
  "baselines": {
-  "ORG pool (org 01a0a9fa-8015-76aa-ac3a-0237b8e17e10)": 131665,
-  "org ledger rows": 19,
-  "ORG_LOY_A (user-scope)": 0,
-  "ORG_LOY_B (user-scope)": 0,
-  "ORG_LOY_LOCKED (user-scope)": 0,
-  "LOY_PERSONAL_NOORG (no org)": 95646
+  "LOY_PERSONAL_NOORG balance": 95646,
+  "cheapest_pts_price": 1,
+  "store.currencies": "USD, CNY, GBP, CZK, GHS, XPT, EUR, AUD (PTS removed)"
  },
  "suites": [
   {
    "id": "083e",
    "name": "Loyalty Organization Balance Storefront",
    "file": "regression/suites/Frontend/loyalty/083e-loyalty-organization-balance.csv",
-   "status": "done",
+   "status": "running",
    "browser": "playwright-chrome",
    "lane": "browser",
    "laneId": 1,
-   "cases": 8,
+   "cases": 1,
    "sourceCases": 8,
    "attempts": 1,
-   "pass": 3,
-   "fail": 4,
+   "startedAt": "2026-09-16T15:29:16.634Z",
+   "pass": 0,
+   "fail": 0,
    "blocked": 0,
-   "skipped": 0,
-   "startedAt": "2026-09-16T14:26:19.668Z",
-   "completedAt": "2026-09-16T14:53:52.000Z",
-   "ambiguous": 1,
-   "summary": {
-    "pass": 3,
-    "fail": 4,
-    "blocked": 0,
-    "ambiguous": 1,
-    "total": 8
-   }
+   "skipped": 0
   }
- ],
- "windowStart": "2026-09-16T14:26:19.669Z",
- "finishedAt": "2026-09-16T14:57:27.505Z",
- "finalBalances": {
-  "ORG pool": 132415,
-  "LOY_PERSONAL_NOORG": 95646
- }
+ ]
 }
