@@ -86,7 +86,7 @@ does not resolve the type rows decide exactly as they always have.
 
 | Canonical type | Status role | **FLOW** | What runs next |
 |---|---|---|---|
-| **any** — with the `technical-change` class (**§5d**) | **any EXCEPT `not-fixed`** | **technical-change** | `1a`·`1b` → Artifact A's **`2a`** triage + `REPAIR` → **a standard `/qa-regression` run over the change's blast radius** (`regression:select` picks the suites; `regression-orchestrator` executes them with the normal runner agents on the normal browser lanes) → **Step 5 in full** (`5a`–`5h`, bugs filed at `5d`), at the FAST cadence. A checklist runs **only if the ticket declares machinery to verify**. Dropped always: the Test Model, case authoring, `3x`, the verifier gates. Methodology: [`skills/qa-test/technical-change.md`](../../skills/qa-test/technical-change.md) |
+| **any** — with the `technical-change` class (**§5d**) | **any EXCEPT `not-fixed`** | **technical-change** | `1a`·`1b` → Artifact A's **`2a`** triage + `REPAIR` → **a standard `/qa-regression` run over the change's blast radius** (`regression:select` picks the suites; `regression-orchestrator` executes them with the normal runner agents on the normal browser lanes) → **Step 5 in full** (`5-triage`–`5-docs`, bugs filed at `5-file`), at the FAST cadence. A checklist runs **only if the ticket declares machinery to verify**. Dropped always: the Test Model, case authoring, `3x`, the verifier gates. Methodology: [`skills/qa-test/technical-change.md`](../../skills/qa-test/technical-change.md) |
 | **Bug** | `fix-ready` | **verify-fix** | Run `/qa-verify-fix` **inline** — RED→GREEN (3×), regression, VERIFIED/REOPEN. Feature-test Steps 2–5 (authoring/AC-reconcile/promotion) are skipped. |
 | **Bug** | `hotfix-ready` | **hotfix-verify** | STOP with a pointer to `/qa-hotfix-check <key>` (the hotfix delivery/verification flow). |
 | **Bug** | `not-fixed` | **feature-test** (FAST) | Reproduce/characterize live, attach fresh evidence to the ticket; state next = `/qa-fix <key>` (nothing to *verify* yet). |
@@ -108,7 +108,7 @@ that hides the consequence of its own decision is half a routing file:
 
 | Path | When | What runs |
 |---|---|---|
-| **FAST** | Bug fix / copy-tweak / config / Technical task, a **`Review task` contribution whose PR diff is one-file and single-surface** (§5a), or a **`Story` narrow on all six tokens** (§5b); **P2–P3**, single-layer, single-domain, obvious surface. | **A checklist.** `1a`+`1b` → Artifact B checklist (written to the ticket folder) → the inline `3-exec` gate → one execution agent → `5a`–`5f`, then `5h` documentation. **No `1r` reachability pass** — FAST reaches execution in minutes, so a separate probe would cost more than the wait it removes. **No** change-scoped Critical sweep — `5r`/C2 was removed from the pipeline entirely on 2026-09-10, on both paths; cutting a release means running `/qa-regression` deliberately (§5a argues why, for `Review task` first and then for every type). **No** `1c`/`1d` agents, **no** Test Model, **no** archetype/UIP/`VC-*` sweeps, **no** case authoring, **no** independent verifier. Three of the six derived axes (visual · contract · coverage) are **opt-in** here (`--visual` / `--contract` / `--coverage` / `--axes`) and run in full on FULL — with one per-type exception, a `Review task`, whose `coverage` defaults **ON** (§5a); `layer`, `data_surface` and `domain_map` derive and apply on both paths, none being able to add an agent. |
+| **FAST** | Bug fix / copy-tweak / config / Technical task, a **`Review task` contribution whose PR diff is one-file and single-surface** (§5a), or a **`Story` narrow on all six tokens** (§5b); **P2–P3**, single-layer, single-domain, obvious surface. | **A checklist.** `1a`+`1b` → Artifact B checklist (written to the ticket folder) → the inline `3-exec` gate → one execution agent → `5-triage`–`5-status`, then `5-docs` documentation. **No `1r` reachability pass** — FAST reaches execution in minutes, so a separate probe would cost more than the wait it removes. **No** change-scoped Critical sweep — `5r`/C2 was removed from the pipeline entirely on 2026-09-10, on both paths; cutting a release means running `/qa-regression` deliberately (§5a argues why, for `Review task` first and then for every type). **No** `1c`/`1d` agents, **no** Test Model, **no** archetype/UIP/`VC-*` sweeps, **no** case authoring, **no** independent verifier. Three of the six derived axes (visual · contract · coverage) are **opt-in** here (`--visual` / `--contract` / `--coverage` / `--axes`) and run in full on FULL — with one per-type exception, a `Review task`, whose `coverage` defaults **ON** (§5a); `layer`, `data_surface` and `domain_map` derive and apply on both paths, none being able to add an agent. |
 | **FULL** | New feature / **Story** (the default — downgraded only per §5b) / Epic; **P0–P1**; cross-layer; ≥2 domains; critical-revenue flow; unclear surface. | The whole pipeline: `1r` ‖ `1c` ‖ `1d` → **Test Model (required)** → `3x` discovery ‖ `3a` seeding → the checklist, written from what discovery returned → **`3-exec` releases execution while case authoring continues in the background** → two hard-STOP verifier gates (`3-cases`, `5b`). Cases are left at `Draft`; promotion is a later `/qa-test-lifecycle` pass. |
 
 **When in doubt → FULL.** A real regression is worse missed than a fast run saved; FAST’s own conditions
@@ -175,11 +175,11 @@ contribution that genuinely needs a durable new case is itself a reason to route
 > **This section argued C2's opt-in for `Review task`. The opt-in became the FAST-wide rule on
 > 2026-09-09, and on 2026-09-10 the sweep was REMOVED from `/qa-test` on both paths** (§4 above, and
 > `docs/decisions/qa-test-evolution.md` §Removing 5r and 5g). Every clause below turned out to be
-> type-independent — the verdict comes from 5c, C2 could only amend it, and the sweep answers a release
+> type-independent — the verdict comes from 5-verdict, C2 could only amend it, and the sweep answers a release
 > question the ticket did not ask — and the one type-specific clause (a contribution's diff is small) was
 > never the load-bearing one. What settled it is FAST's own stated promise, *"FAST is one execution
 > agent"*: C2 dispatched a whole suite selection, measured by the 2026-09-07 audit at ~24 runner
-> dispatches / ~3.08M tokens — 93% of a FAST run's total, for a track whose findings 5a's provenance rules
+> dispatches / ~3.08M tokens — 93% of a FAST run's total, for a track whose findings 5-triage's provenance rules
 > classify as PRE-EXISTING or OUT-OF-SCOPE, neither of which fails the ticket. **Two narrowings did not fix
 > that; the third was deletion.** The argument is kept here because it is the reasoning a future proposal
 > to re-add a cross-suite sweep to this pipeline has to answer. This began as item 10 of
@@ -190,14 +190,14 @@ contribution that genuinely needs a durable new case is itself a reason to route
 | Artifact B checklist · **Artifact A's `2a` phase** (`coverage`) · C1 when it leaves `RE-BASE` ids | `visual` · `contract` | Artifact A's **authoring** phase · `1c`/`1d` · the Test Model · the independent verifier · **the change-scoped Critical sweep, which no longer exists on either path** |
 
 **Why the cross-suite sweep is gone entirely.** It answered *did this change break anything else* — a
-**release** question, consumed by the Feature Release Gate at 5e — and it never produced the verdict: 5c
+**release** question, consumed by the Feature Release Gate at 5-report — and it never produced the verdict: 5-verdict
 derives that from the checklist plus the AC/DoD reconciliation, and an IN-SCOPE finding from a sweep could
 only *amend* it (§Execution order of [`commands/qa-test.md`](../../commands/qa-test.md)). For a
 contribution it routinely spent a ~40-minute Critical pass over a whole domain answering a question the
 ticket did not ask.
 
 **Two consequences, stated rather than discovered.** A `/qa-test` run carries **no release
-recommendation** — 5e reports the ticket verdict and records the gate as `not-assessed`, **never as a
+recommendation** — 5-report reports the ticket verdict and records the gate as `not-assessed`, **never as a
 pass, and never by substituting C1's number**, which answers a different question. And that is written
 into `summary.json.regression` **and** the checklist, because an omitted regression track reads exactly
 like a passing one (the §1 rule of [`skills/qa-test/SKILL.md`](../../skills/qa-test/SKILL.md): silence is
@@ -284,7 +284,7 @@ cannot establish the class still gets the visual pass it would have had anyway.
 
 | Runs by default | Opt-in | Not run at all |
 |---|---|---|
-| Artifact B checklist · **`visual`** · **`coverage`** (Artifact A's `2a` phase) · everything else the resolved path already runs — `1c`/`1d`/`1e`, `3x`, Step 4, Step 5, and **`5b` stays a hard STOP** | `contract` | **Artifact A's authoring phase** · the **`3-cases`** gate · **`4c`/C1** — on FULL as on FAST |
+| Artifact B checklist · **`visual`** · **`coverage`** (Artifact A's `2a` phase) · everything else the resolved path already runs — `1c`/`1d`/`1e`, `3x`, Step 4, Step 5, and **`5-verdict`'s reconciliation still gates the verdict** | `contract` | **Artifact A's authoring phase** · the **`3-cases`** gate · **`4c`/C1** — on FULL as on FAST |
 
 **The deliverable is Artifact B and executing it.** Say in one line that the run adds **no durable
 regression coverage** and that `/qa-test-lifecycle` is the route back in; record `C1: skipped — no authored
@@ -415,7 +415,7 @@ open to the whole layer), not by a heavier feature test.
 
 | Runs | Conditional | Never |
 |---|---|---|
-| `1a` · `1b` · Artifact A's **`2a`** triage (`REPAIR` applied, `RE-BASE` carried) · **a standard `/qa-regression` over the blast radius** · **the whole of Step 5** — `5a` triage, `5b` reconcile, `5c` verdict, **`5d` file bugs**, `5e` report, `5f` status, `5h` docs — at the FAST cadence | the **Artifact B checklist** + its execution agent — only when the ticket declares machinery to verify; absent ⇒ a **stated** skip, never a silent one | the Test Model · `1c`/`1d`/`1r`/`1e` · Artifact A's **authoring** phase · `3x` · the `3-cases` gate · the verifier dispatches · the `visual` and `contract` axes |
+| `1a` · `1b` · Artifact A's **`2a`** triage (`REPAIR` applied, `RE-BASE` carried) · **a standard `/qa-regression` over the blast radius** · **the whole of Step 5** — `5-triage` triage, `5-verdict` reconcile + verdict, **`5-file` file bugs**, `5-report` report, `5-status` status, `5-docs` docs — at the FAST cadence | the **Artifact B checklist** + its execution agent — only when the ticket declares machinery to verify; absent ⇒ a **stated** skip, never a silent one | the Test Model · `1c`/`1d`/`1r`/`1e` · Artifact A's **authoring** phase · `3x` · the `3-cases` gate · the verifier dispatches · the `visual` and `contract` axes |
 
 **The regression is the ORDINARY one — this flow subtracts the feature test, not the testing.**
 `regression:select` picks the suites from the change; `/qa-regression` runs them through
@@ -427,7 +427,7 @@ special-cased here.
 sweep.** `5r`/C2 was removed on 2026-09-10 because it answered a *release* question the ticket did not ask,
 and its findings triaged as PRE-EXISTING or OUT-OF-SCOPE — neither of which fails a ticket (§5a). Here,
 *"a suite that passed before this change now fails"* **is** the subject: a technical change that breaks a
-caller is precisely the defect this flow exists to catch, so 5a classifies it IN-SCOPE. **A proposal to
+caller is precisely the defect this flow exists to catch, so 5-triage classifies it IN-SCOPE. **A proposal to
 re-add a general cross-suite sweep to `feature-test` still has to answer §5a; this flow does not reopen it.**
 
 **The escape hatch, and it is load-bearing.** `2a` disposes each affected row; for a change with no new

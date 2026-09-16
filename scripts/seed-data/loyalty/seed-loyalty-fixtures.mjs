@@ -49,18 +49,63 @@ const loyaltySlug = (s) => {
 
 let VIRTUAL_CATALOG_ID = null;
 
-/** Find an existing PTS-currency price list by exact name; create + assign to the virtual catalog if absent. */
+/** Find an existing PTS-currency price list by exact name; create it if absent. */
 async function ensurePtsPriceList() {
   const search = await api('GET', `/api/pricing/pricelists?keyword=${encodeURIComponent(PTS_PRICELIST_NAME)}`, null, { expectStatus: [200, 404] });
   let pl = (search?.results || []).find((p) => p?.name === PTS_PRICELIST_NAME);
   if (pl) { log(`  ↻ PTS price list: ${PTS_PRICELIST_NAME} (${pl.id})`); return pl; }
   if (DRY_RUN) { log(`  [DRY] would create PTS price list "${PTS_PRICELIST_NAME}" (currency=${PTS})`); return { id: `dry-pl-pts` }; }
   pl = await api('POST', '/api/pricing/pricelists', { name: PTS_PRICELIST_NAME, currency: PTS, description: 'VCST-5103 loyalty PTS divisor pricing (1 PTS/unit)' }, { expectStatus: [200, 201] });
-  try {
-    await api('POST', '/api/pricing/assignments', { name: `${PTS_PRICELIST_NAME} → ${STORE_ID}`, pricelistId: pl.id, catalogId: VIRTUAL_CATALOG_ID, priority: 100 }, { expectStatus: [200, 201] });
-    log(`  ✓ PTS price list + catalog assignment: ${PTS_PRICELIST_NAME} (${pl.id})`);
-  } catch (e) { log(`  ⚠ PTS price list created but assignment failed: ${String(e.message).slice(0, 150)}`); }
+  log(`  ✓ PTS price list: ${PTS_PRICELIST_NAME} (${pl.id})`);
   return pl;
+}
+
+/**
+ * Ensure the PTS price list is ASSIGNED to the store's virtual catalog — separately from creating it.
+ *
+ * Why this is its own step, and why a failure here throws (both fixed 2026-09-16):
+ *   VirtoOZ `Set Up Loyalty Catalog Browsing` makes the assignment load-bearing — "assign the price
+ *   list to your store and catalog", and its troubleshooting table lists "a product is missing from
+ *   the loyalty catalog" against "verify that the points price list is assigned to the correct store
+ *   and catalog". Without it the product carries a PTS price that nothing resolves, so it silently
+ *   vanishes from /loyalty-catalog.
+ *   (1) The assignment used to live inside ensurePtsPriceList() AFTER its `if (pl) return pl` early
+ *       exit, so it was attempted ONLY on the run that created the price list. An environment whose
+ *       price list existed without an assignment — deleted by hand, or a prior run that created the
+ *       list and then threw into the catch below — stayed broken through every later run, because
+ *       the seeder short-circuited before it could repair it. Now it runs on BOTH paths and is
+ *       idempotent: it looks the assignment up first and creates one only when none targets this
+ *       catalog.
+ *   (2) The failure used to be swallowed into a `⚠` log line, so the seeder exited 0 while leaving
+ *       exactly the documented broken state. A seeder that cannot satisfy a documented precondition
+ *       has not seeded; it throws.
+ */
+async function ensurePtsAssignment(pricelistId) {
+  if (DRY_RUN) { log(`  [DRY] would ensure assignment ${PTS_PRICELIST_NAME} → catalog ${VIRTUAL_CATALOG_ID}`); return; }
+  const existing = await api('GET', `/api/pricing/assignments?priceListId=${encodeURIComponent(pricelistId)}`, null, { expectStatus: [200, 404] });
+  const hit = (existing?.results || existing || []).find?.((a) => a?.catalogId === VIRTUAL_CATALOG_ID);
+  if (hit) { log(`  ↻ PTS catalog assignment → ${VIRTUAL_CATALOG_ID} (${hit.id})`); return; }
+  await api('POST', '/api/pricing/assignments', { name: `${PTS_PRICELIST_NAME} → ${STORE_ID}`, pricelistId, catalogId: VIRTUAL_CATALOG_ID, priority: 100 }, { expectStatus: [200, 201] });
+  log(`  ✓ PTS catalog assignment → ${VIRTUAL_CATALOG_ID}`);
+}
+
+/**
+ * Post-condition: assert the two things VirtoOZ says govern loyalty-catalog visibility, rather than
+ * assuming the writes above achieved them. "Products appear in the loyalty catalog only if they
+ * carry a price in your loyalty currency" and "only products with a points price greater than 0
+ * appear — products priced at 0 are filtered out."
+ *
+ * setPtsPrice() writes list: 1, so >0 holds by construction TODAY — which is exactly why it is worth
+ * checking: PUT /api/products/prices REPLACES, so a later edit that drops or zeroes the row would
+ * still let this seeder print "Done" over a fixture that is invisible in the loyalty catalog.
+ */
+async function verifyLoyaltyCatalogVisibility(productId, pricelistId) {
+  const found = await api('POST', '/api/catalog/products/prices/search', { productIds: [productId], take: 20 }, { expectStatus: [200, 201] });
+  const prices = (found?.results || []).find((r) => r.productId === productId)?.prices || [];
+  const pts = prices.find((p) => p.currency === PTS && p.pricelistId === pricelistId);
+  if (!pts) throw new Error(`no ${PTS} price on ${SKU} in price list ${pricelistId} — the product would not appear in the loyalty catalog`);
+  if (!(Number(pts.list) > 0)) throw new Error(`${SKU} has a ${PTS} price of ${pts.list} — a points price of 0 is filtered out of the loyalty catalog`);
+  log(`  ✓ verified loyalty-catalog visibility: ${pts.list} ${PTS} (> 0) in ${pricelistId}`);
 }
 
 async function findProductByCode(code, catalogId) {
@@ -96,6 +141,7 @@ async function seed() {
   log(`  Virtual catalog: ${VIRTUAL_CATALOG_ID}`);
   await ensureCurrencies(api, [PTS]);                       // PTS must be a registered currency for the price list
   const pl = await ensurePtsPriceList();
+  await ensurePtsAssignment(pl.id);                         // runs on BOTH paths — see the note on ensurePtsAssignment
   const ffc = await ensureFulfillmentCenter(api);           // resolved for completeness; product is trackInventory=false
   const loc = await ensureCategoryPath(api, CATEGORY_PATH);
   if (!loc) throw new Error(`could not resolve category path "${CATEGORY_PATH}"`);
@@ -121,6 +167,7 @@ async function seed() {
     log(`  ✓ linked into virtual catalog under ${loc.name}`);
     const okProduct = await verifyCreated(api, 'product', product.id);
     log(okProduct ? `  ✓ verified product present (${product.id})` : `  ⚠ product NOT found on read-back (${product.id})`);
+    await verifyLoyaltyCatalogVisibility(product.id, pl.id);
     // Multi-env write-back: runtime GUIDs → aliases.<env>.json (base alias keeps only sku/price/currency).
     writeEnvAliasOverride({ LOY_SKU_PTS_UNIT: { id: product.id, pricelistId: pl.id } });
     log(`  ✓ aliases.${process.env.TEST_ENV || 'vcst'}.json: LOY_SKU_PTS_UNIT.id + .pricelistId`);

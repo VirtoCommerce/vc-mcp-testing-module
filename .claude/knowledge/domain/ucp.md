@@ -208,7 +208,7 @@ The one thing worth recording as **settled** for the next pass: `reports/bugs/re
 
 ## §7 — Amendments
 
-*(none yet — appended by `/qa-test` `5h-map` after a run verifies something against this map)*
+*(none yet — appended by `/qa-test` `5-docs-map` after a run verifies something against this map)*
 
 | Date | By | What moved |
 |---|---|---|

@@ -40,19 +40,20 @@ records what that dry run corrected, §7a what the routing test did.
   2a  tc:scope -> dispose -> apply REPAIR         coverage-triage.md            [2a ALONE, no authoring]
   B   Artifact B checklist + 1 execution agent    authoring.md                  [CONDITIONAL — §3]
   RG  regression:select -> /qa-regression         §4 below                      *** the flow's own step
-  5a → 5b → 5c → 5d → 5e → 5f → 5h                commands/qa-test.md §Step 5   [unchanged, FAST cadence]
+  5-triage → 5-verdict → 5-file → 5-report → 5-status → 5-docs                     commands/qa-test.md §Step 5   [unchanged, FAST cadence]
 ```
 
 **Step 5 runs IN FULL, at the FAST cadence** — every phase, minus only the three FULL-only verifier
 dispatches, exactly as a FAST run omits them. Do not trim it:
 
-- **`5d` files the bugs.** A regression failure *is* this flow's deliverable. A close-out that triages a
+- **`5-file` files the bugs.** A regression failure *is* this flow's deliverable. A close-out that triages a
   failure, folds it into a verdict and reports it but never files it produces a run whose entire output is a
   sentence in a chat window.
-- **`5b` feeds `5c`.** The verdict is *"derived from 5a + 5b — no new judgment"*, so skipping 5b leaves 5c
-  with half its input. Where the ticket carries machinery claims (VCST-4717 has five), 5b is what reconciles
-  them; where it carries none, 5b resolves in a line and costs nothing.
-- **`5h` refuses on its own.** Its `not-user-visible` refusal is the *expected* outcome for most runs here,
+- **`5-verdict.1` feeds `5-verdict.2`.** The verdict is *"derived from 5-triage + the reconciliation — no new judgment"*, so
+  skipping the reconciliation leaves the verdict with half its input. Where the ticket carries machinery
+  claims (VCST-4717 has five), `5-verdict.1` is what reconciles them; where it carries none, it resolves in a line
+  and costs nothing.
+- **`5-docs` refuses on its own.** Its `not-user-visible` refusal is the *expected* outcome for most runs here,
   and `virto-doc-style.md` §10 already says so — but a migration with integrator-facing consequences is
   exactly the case that refusal is not meant to swallow. Let the step decide; do not pre-empt it.
 
@@ -196,7 +197,7 @@ three browser lanes, the fallback chain, retries, HAR capture, `test-run-status.
 report. **Nothing here is headless, lighter or special-cased.** This flow has no opinion about how a suite
 runs; `/qa-regression` and [`regression-pipelines.md`](../../knowledge/execution/regression-pipelines.md)
 own that and are unmodified. Launch the run's watcher as usual — a regression is the deliverable here, not a
-side track. Carry its `RUN_ID` into `5a`, which triages through `/qa-triage-results <RUN_ID>`, never from
+side track. Carry its `RUN_ID` into `5-triage`, which triages through `/qa-triage-results <RUN_ID>`, never from
 scratch.
 
 **A backend-only technical change still runs storefront suites.** A telemetry SDK or a runtime bump is
@@ -278,10 +279,10 @@ change under test does not get to certify itself.
 | a visual/design pass | the `visual` and `contract` axes do not run — §7 |
 | a checklist, when there was no machinery claim | the stated skip of §3, with its reason |
 
-Everything else in Step 5 **is** produced: bugs filed at 5d under the ordinary severity floor, the tracker
-comment at 5e, the transition at 5f, and 5h's documentation or its own stated refusal.
+Everything else in Step 5 **is** produced: bugs filed at 5-file under the ordinary severity floor, the tracker
+comment at 5-report, the transition at 5-status, and 5-docs's documentation or its own stated refusal.
 
-**`5a` triages the regression's failures as the ticket's own.** *"A suite that passed before this change now
+**`5-triage` triages the regression's failures as the ticket's own.** *"A suite that passed before this change now
 fails"* **is** the subject here — a technical change that breaks a caller is precisely the defect this flow
 exists to catch — so such a finding is IN-SCOPE and fails the ticket. That is what distinguishes this
 regression from the `5r`/C2 sweep deleted on 2026-09-10, whose findings triaged as PRE-EXISTING or
@@ -376,9 +377,9 @@ the first draft, all fixed above — recorded because each is a shape a future e
 
 | # | Defect | Fix |
 |---|---|---|
-| 1 | Close-out written as `5a → 5c → 5e → 5f`, dropping **`5d`** — so the regression failures that are the flow's entire deliverable were triaged, judged and reported but **never filed** | Step 5 runs in full — §1 |
-| 2 | `5b` dropped, but `5c` is defined as *derived from 5a + 5b*, and VCST-4717 has five ACs to reconcile | `5b` runs, verifier omitted as on FAST |
-| 3 | `5h` dropped silently, pre-empting a refusal the step already owns | `5h` runs and refuses on its own terms |
+| 1 | Close-out written as `5-triage → 5-verdict → 5-report → 5-status`, dropping **`5-file`** — so the regression failures that are the flow's entire deliverable were triaged, judged and reported but **never filed** | Step 5 runs in full — §1 |
+| 2 | The AC/DoD reconciliation dropped, but the verdict is defined as *derived from 5-triage + that reconciliation*, and VCST-4717 has five ACs to reconcile | `5-verdict.1` runs, inline as on FAST |
+| 3 | `5-docs` dropped silently, pre-empting a refusal the step already owns | `5-docs` runs and refuses on its own terms |
 | 4 | `--target 40` prescribed, copied from §5a's operator-chosen sweep — it **drops 21 of 37 suites to save 45 predicted minutes** | no cap by default — §4, with the measurement |
 | 5 | `tc:scope --module skyflow` prescribed — **returns 0 suites, 0 rows**, reading exactly like a clean corpus, because `skyflow` is a *tag* and `--module` matches `requiresModules` | look the term up in the manifest first — §5.1, with both verified invocations |
 | 6 | Scope told to come from the diff, contradicting the tool (*"`--changed-files` … does not by itself scope a scan"*), and `1a` hard-required a linked PR that neither ticket exposes | vocabulary scopes / paths refine — §5.1; the §2 resolution ladder |

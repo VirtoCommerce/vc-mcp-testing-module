@@ -1,23 +1,25 @@
 {
- "runId": "REG-2026-09-16-1437",
+ "runId": "REG-2026-09-16-1624",
  "status": "completed",
- "startedAt": "2026-09-16T12:43:08.237Z",
- "selection": "075f,083e (explicit ids — 20 cases)",
+ "startedAt": "2026-09-16T14:24:24.286Z",
+ "selection": "083e (explicit id — full suite, 8 cases)",
  "env": "localhost",
- "scoped": true,
- "note": "Ticket regression C1 for /qa-test VCST-5024, step 4c. SCOPED to 20 explicit case ids (14 of 22 in 075f, 6 of 8 in 083e). SERIAL by requirement: ORG_LOY_A.sibling_org_id == the multiorg lane buildright_org_id (23525b44-f0d0-43a4-b45e-b162080a4d29), so the two suites share one org ledger and must never run concurrently. Order 083e -> 075f: 075f LOYORG-009 drains the Outlet pool that 083e E2E-002/E2E-004 read; the same order was recorded in REG-2026-09-15-0947. LOYORG-009 additionally pinned LAST inside 075f per the manifest note. Store mode verified Organization off the store entity before dispatch. NO PROMOTION (--no-promote): every case stays at its current status.",
+ "scoped": false,
+ "note": "Full-suite run of 083e requested as /qa-regression 083e. RUN ON localhost, NOT the default vcst: the feature under test (store setting Loyalty.LoyaltyBalanceCalculationMode) ships in vc-module-loyalty PR #17. vcst-qa runs VirtoCommerce.Loyalty@3.1007.0, which does not declare that setting at all — every case would be NOT_DEPLOYED/BLOCKED there. localhost runs VirtoCommerce.Loyalty@3.1008.0-pr-17-973e. Pre-flight: carts:check clean on all 4 loyalty accounts (no competing carts); store mode verified Organization off the store entity; 8/8 cases classified browser lane by suites:lanes (0 machine). Run in CSV order per the manifest note — E2E-002 depends on E2E-001, E2E-005 writes the store mode and goes last.",
  "storeMode": {
   "atRunStart": "Organization",
   "source": "GET /api/stores/B2B-store settings[] Loyalty.LoyaltyBalanceCalculationMode",
-  "mustRestoreTo": "Organization"
+  "mustRestoreTo": "Organization",
+  "atRunEnd": "Organization",
+  "restored": true
  },
  "baselines": {
-  "LOY_PERSONAL_NOORG (Nina Solo, no org)": 33872,
-  "ORG_LOY_A (Ada Outlet, org 01a0a9fa-8015-76aa-ac3a-0237b8e17e10)": 127040,
-  "ORG_LOY_B (Ben Outlet, same org)": 127040,
-  "ORG_LOY_LOCKED (Lena Outlet, organizationId=null)": 0,
-  "MULTI_ORG_TF_BR_ALT (BuildRight 23525b44-...)": 214372,
-  "MULTI_ORG_TF_BR_EMPLOYEE (BuildRight)": 214372
+  "ORG pool (org 01a0a9fa-8015-76aa-ac3a-0237b8e17e10)": 131665,
+  "org ledger rows": 19,
+  "ORG_LOY_A (user-scope)": 0,
+  "ORG_LOY_B (user-scope)": 0,
+  "ORG_LOY_LOCKED (user-scope)": 0,
+  "LOY_PERSONAL_NOORG (no org)": 95646
  },
  "suites": [
   {
@@ -28,55 +30,29 @@
    "browser": "playwright-chrome",
    "lane": "browser",
    "laneId": 1,
-   "cases": 6,
+   "cases": 8,
    "sourceCases": 8,
    "attempts": 1,
-   "summary": {
-    "pass": 2,
-    "fail": 2,
-    "blocked": 2,
-    "total": 6
-   },
-   "startedAt": "2026-09-16T12:43:15.621Z",
-   "completedAt": "2026-09-16T13:00:30Z",
-   "pass": 2,
-   "fail": 2,
-   "blocked": 2,
-   "skipped": 0
-  },
-  {
-   "id": "075f",
-   "name": "Loyalty Organization Balance",
-   "file": "regression/suites/Backend/loyalty/075f-loyalty-organization-balance.csv",
-   "status": "done",
-   "browser": null,
-   "lane": "machine",
-   "cases": 14,
-   "sourceCases": 22,
-   "attempts": 1,
+   "pass": 3,
+   "fail": 4,
+   "blocked": 0,
+   "skipped": 0,
+   "startedAt": "2026-09-16T14:26:19.668Z",
+   "completedAt": "2026-09-16T14:53:52.000Z",
+   "ambiguous": 1,
    "summary": {
     "pass": 3,
-    "fail": 11,
+    "fail": 4,
     "blocked": 0,
-    "total": 14
-   },
-   "startedAt": "2026-09-16T13:02:21.074Z",
-   "completedAt": "2026-09-16T13:05:18.498Z",
-   "pass": 3,
-   "fail": 11,
-   "blocked": 0,
-   "skipped": 0
+    "ambiguous": 1,
+    "total": 8
+   }
   }
  ],
- "finishedAt": "2026-09-16T13:10:33.049Z",
- "totals": {
-  "cases": 20,
-  "pass": 5,
-  "fail": 13,
-  "blocked": 2,
-  "skipped": 0,
-  "passRate": "25.0%"
- },
- "report": "reports/regression/regression-2026-09-16.md",
- "promotion": "SUPPRESSED (--no-promote) — no case status changed"
+ "windowStart": "2026-09-16T14:26:19.669Z",
+ "finishedAt": "2026-09-16T14:57:27.505Z",
+ "finalBalances": {
+  "ORG pool": 132415,
+  "LOY_PERSONAL_NOORG": 95646
+ }
 }
