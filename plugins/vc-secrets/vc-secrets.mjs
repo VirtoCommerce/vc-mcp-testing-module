@@ -805,8 +805,13 @@ const COMMAND_ON_STDIN = "<COMMAND_ON_STDIN>";
 // is escaped fragments of the value, echoed in stderr where runTool's whole-value redaction cannot
 // match them. On a refresh Entra has already invalidated the previous token by that point, so the
 // truncated entry is a signed-out state. The wcm path needs no twin of this -- its own script refuses
-// at 2560 bytes (exit 4) -- and gpg has no command line to overflow.
+// at WCM_BLOB_LIMIT bytes (exit 4) -- and gpg has no command line to overflow.
 const SECURITY_LINE_LIMIT = 4095;
+// CRED_MAX_CREDENTIAL_BLOB_SIZE, 5 * 512, measured by bisection and matching the documented value.
+// This is the BLOB -- the stored value -- not the value plus its name. The PowerShell write script
+// below reads this constant: the script is a JS template literal, so it interpolates like any
+// other, and the number is stated here once rather than in both places.
+const WCM_BLOB_LIMIT = 2560;
 
 // Quoting for `security -i`'s own tokenizer: double quotes with backslash escapes. A newline cannot be
 // quoted into it at all — it ends the command — so the caller must not offer one.
@@ -936,7 +941,7 @@ $c.Type=1; $c.TargetName="$env:VC_SECRETS_NAME"; $c.UserName=$env:USERNAME; $c.P
 $c.CredentialBlob=$blob; $c.CredentialBlobSize=$bytes.Length
 if(-not [CredManW]::CredWrite([ref]$c,0)){
   $e=[System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
-  if($e -eq 1783){ [Console]::Error.Write("value too large for Credential Manager ($($bytes.Length) bytes; limit 2560)"); exit 4 }
+  if($e -eq 1783){ [Console]::Error.Write("value too large for Credential Manager ($($bytes.Length) bytes; limit ${WCM_BLOB_LIMIT})"); exit 4 }
   [Console]::Error.Write("CredWrite failed win32err=$e"); exit 3
 }
 `;
@@ -1304,7 +1309,7 @@ function mapResolveError(backend, name, e) {
         const size = /(\d+) bytes/.exec(e.message)?.[1];
         const measured = size ? ` (${size} bytes)` : "";
 
-        return new VcSecretsError(`secret "${name}" is too large for Credential Manager${measured} -- the blob limit is 2560 bytes`);
+        return new VcSecretsError(`secret "${name}" is too large for Credential Manager${measured} -- the blob limit is ${WCM_BLOB_LIMIT} bytes`);
     }
     if (backend === "keychain" && e.toolExitCode === 44) {
         return new VcSecretsError(`secret "${name}" not found in Keychain -- run "vc-secrets set ${name}"`);
@@ -2886,7 +2891,7 @@ async function oauthTenantChecks(cfg, references, { resolveOrgTenant: resolve = 
     return checks;
 }
 
-function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, toolsMissing, wired, configDirOverride, legacyOnly = [], shimContract = null, wiringProblems = [], clientConfigsSeen = [], oauthStatus = {}, tenantChecks = [], childNode = null }) {
+function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, toolsMissing, wired, configDirOverride, legacyOnly = [], shimContract = null, wiringProblems = [], clientConfigsSeen = [], writeProbe = null, oauthStatus = {}, tenantChecks = [], childNode = null }) {
     const lines = [];
     const loadedFiles = Object.entries(cfg.files ?? {}).map(([scope, file]) => `${scope}=${file}`).join(", ");
     if (loadedFiles) {
@@ -2964,6 +2969,13 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
     }
     for (const name of skipped) {
         lines.push(`SKIP secret "${name}" (keyvault) -- no enabled server consumes it; use --all to force`);
+    }
+    if (writeProbe === "ok") {
+        lines.push(`OK ${backend ?? "the keystore"} accepts a write at the size limit`
+            + " (login and token renewal can store)");
+    } else if (typeof writeProbe === "string") {
+        lines.push(`FAIL ${backend ?? "the keystore"} rejected a write at the size limit`
+            + ` -- "vc-secrets login" may not be able to store a token: ${writeProbe}`);
     }
     for (const [name, status] of Object.entries(oauthStatus)) {
         // The home is part of the verdict, not decoration: cfg.oauth merges config scopes (user,
@@ -3096,6 +3108,90 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
     return lines;
 }
 
+const WRITE_PROBE_NAME = "vc-secrets-writeprobe";
+
+// The write probe's own throwaway key. Always this name -- distinct from any real secret or oauth
+// entry -- so the probe can never collide with, and therefore never clobbers, a live value. Scoped to
+// the project when one is declared (mirroring where a real local secret would actually live), or to
+// the user otherwise, so the key stays syntactically valid (vc-secrets:<scope>:<name>) even with no
+// project configured at all.
+function writeProbeKey(cfg) {
+    return cfg && cfg.projectId
+        ? `${KEY_PREFIX}:${cfg.projectId}:${WRITE_PROBE_NAME}`
+        : `${KEY_PREFIX}:${USER_SCOPE}:${WRITE_PROBE_NAME}`;
+}
+
+// The probe writes the LARGEST value the keychain path will ever be asked to store, not a token
+// literal. A short probe passes on exactly the machine where a real refresh token would overflow
+// security(1)'s line buffer, so it would certify the one write it exists to catch.
+// Rehearses at the LIMIT, not with a token-shaped string, and the two backends fail at different
+// places. On macOS/keychain the constraint is the length of the command line `security` receives, so
+// the value is sized to put that line exactly at its limit. On Windows the constraint is the blob
+// itself, so the value IS the limit. Either way a probe that writes something small passes on
+// precisely the machine where a real entry would not fit.
+function writeProbeValue(cfg, env = process.env, backend = "keychain") {
+    if (backend === "wcm") {
+        return "p".repeat(WCM_BLOB_LIMIT);
+    }
+    // Sized from the key the probe actually writes under, which is what puts the composed line at
+    // exactly the limit -- the limit is a property of the LINE, not of the key, so every key sized
+    // this way rehearses the same thing. Sizing from some other key (a real oauth entry's, say)
+    // breaks that: the value is then padded for a different overhead, and where the other key is
+    // the shorter one the probe overflows its own budget and reports a FAIL on a healthy machine.
+    const key = writeProbeKey(cfg);
+    const overhead = Buffer.byteLength(buildLocalWrite("keychain", key, env, { value: "" }).stdinCommand(""));
+
+    return "p".repeat(Math.max(1, SECURITY_LINE_LIMIT - overhead));
+}
+
+// macOS is the only platform whose non-interactive write differs from the one `vc-secrets set`
+// exercises: `set` types into a TTY, while login and the mid-session renewal go through
+// `security -i`. That path has no other rehearsal, so doctor rehearses it -- a throwaway entry
+// written and immediately removed. Without this the first proof that it works is a token
+// rotation in the middle of a session, which is the worst possible place to find out.
+const WRITE_PROBED_BACKENDS = ["keychain", "wcm"];
+
+// Windows was added because that is where the ceiling is: `doctor` was silent about whether a token
+// could be STORED on the one platform whose store refuses an oversize value, and the refusal arrives
+// after the authorization code is spent, which cannot be retried. gpg stays out for now: there the
+// write is a file, and a probe there answers a different question (a directory that reads but does
+// not write) worth its own decision.
+async function probeKeystoreWrite({ backend, write = writeSecretValue, remove = null, cfg = null }) {
+    if (!WRITE_PROBED_BACKENDS.includes(backend)) {
+        return null;
+    }
+    if (cfg && Object.hasOwn(cfg.secrets ?? {}, WRITE_PROBE_NAME)) {
+        // A declared secret of this name can be overwritten with the probe value and then deleted --
+        // a diagnostic destroying the thing it was asked to check on. The test is on the NAME while
+        // the probe writes a scoped KEY, so it is deliberately wider than the collision: a secret at
+        // project or local scope does collide and is caught, and a user-scoped one while a projectId
+        // is declared does not, yet is refused anyway. Wider is the safe direction here -- the cost
+        // is a doctor run silently missing one line, and the alternative risks the entry itself.
+        return null;
+    }
+    const key = writeProbeKey(cfg);
+    const removeEntry = remove ?? deleteEntryIo(backend);
+    try {
+        await write(key, writeProbeValue(cfg, process.env, backend), { backend });
+    } catch (e) {
+        return e.message;
+    } finally {
+        // Best effort, and deliberately also on the success path: a probe entry left behind is
+        // clutter in the developer's keychain that nothing else would ever clean up.
+        try {
+            await removeEntry(key);
+        } catch (e) {
+            // The verdict is about the write, not the cleanup -- but a diagnostic that silently
+            // leaves a stray entry behind has told the developer something untrue by omission.
+            if (e.toolExitCode !== 3) {
+                process.stderr.write(`vc-secrets: could not remove the write probe "${key}" (${e.message})\n`);
+            }
+        }
+    }
+
+    return "ok";
+}
+
 function commandOnPath(tool) {
     const probe = process.platform === "win32" ? "where" : "which";
 
@@ -3208,6 +3304,13 @@ async function cmdDoctor(cfg, flags = []) {
         && (checkAll || [...consumed].some((n) => cfg.secrets[n]?.backend === "keyvault"));
     const toolsMissing = [...backendTools, ...(needsAz ? ["az"] : [])].filter((t) => !commandOnPath(t));
 
+    // cfg passed, because the probe's own guard is worthless without it: it refuses to run when a
+    // DECLARED secret carries the probe name, and a caller not handing it the config would check
+    // nothing. A guard nothing feeds is a comment.
+    const writeProbe = localBackend === null
+        ? null
+        : await probeKeystoreWrite({ backend: localBackend, cfg });
+
     // Read, never exchanged: proving a token is refreshable would rotate the refresh token as a side
     // effect of a diagnostic -- and Entra rotates on use, which signs out every session but one.
     const oauthStatus = {};
@@ -3235,7 +3338,7 @@ async function cmdDoctor(cfg, flags = []) {
         env: process.env, platform: process.platform, enableLists, resolvable, skipped,
         toolsMissing, wired, configDirOverride: Boolean(process.env.VC_SECRETS_CONFIG_DIR), legacyOnly,
         shimContract: activeShimContract, wiringProblems, clientConfigsSeen,
-        oauthStatus, tenantChecks, childNode,
+        writeProbe, oauthStatus, tenantChecks, childNode,
     });
     // sync write: stderr is an async pipe on Windows, and process.exit abandons pending writes
     fs.writeSync(2, lines.join("\n") + "\n");
@@ -3627,7 +3730,8 @@ export {
     ORG_FLAGS_WITH_VALUE, organisationFromArgs, resolveOrgTenant, TIMEOUT_TENANT_MS,
     resolveEnvEntries, detectLocalBackend, redactSecrets, secretsDir, psEncode, psCommand, PS_CRED_READ, PS_CRED_WRITE,
     PS_CRED_DELETE, decodeCredBlobHex, buildLocalRead, buildLocalWrite, buildLocalDelete, deleteEntryIo,
-    buildKeyvaultRead, TIMEOUT_LOCAL_MS, TIMEOUT_AZ_MS, VALUE_ON_STDIN,
+    probeKeystoreWrite, WRITE_PROBE_NAME, writeProbeValue, WRITE_PROBED_BACKENDS,
+    buildKeyvaultRead, TIMEOUT_LOCAL_MS, TIMEOUT_AZ_MS, VALUE_ON_STDIN, SECURITY_LINE_LIMIT, WCM_BLOB_LIMIT,
     COMMAND_ON_STDIN, quoteForSecurityInteractive, writeSecretValue,
     tokenLockFor, acquireTokenLock, ensureFreshToken, oauthLaunchDeps,
     CHANNEL_GREETING_MAX, channelPipeName, createChannel, PRELOAD_PATH, buildChildEnv,

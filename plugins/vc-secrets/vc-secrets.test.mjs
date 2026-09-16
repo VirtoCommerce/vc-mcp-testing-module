@@ -1195,6 +1195,241 @@ test("deleteEntryIo: a malformed gpg key is refused, not read as already-absent"
     });
 });
 
+// ── the keystore write probe ────────────────────────────────────────────────────────────────────
+//
+// Ported from mcpw.js/mcpw.test.js (probeKeystoreWrite, writeProbeValue, WRITE_PROBE_NAME,
+// WRITE_PROBED_BACKENDS, and the two doctorReport/cmdDoctor wiring points).
+//
+// One behavioural addition, small and deliberate: writeProbeKey has no counterpart in the source,
+// which writes a bare WRITE_PROBE_NAME -- one probe entry per machine. Here the entry is scoped, so
+// there is one per declared project. The key grammar does not force this (vc-secrets:user:<name>
+// satisfies KEY_RE unconditionally); it is chosen so two projects' diagnostics cannot write over
+// each other's slot, and it is pinned by the scope test below.
+//
+// The other adaptation is mechanical: this package's keys are three segments
+// (vc-secrets:<scope>:<name>) against the source's two, and it has no composeStdin, so the overhead
+// is measured through buildLocalWrite(...).stdinCommand("") for the key the probe writes under. That
+// overhead moves byte for byte with the length of USER, of cfg.projectId and of the name segment, so
+// there is no correct constant and it is computed per call.
+//
+// An earlier round sized the padding from the longest REAL oauth key instead, reasoning that the
+// probe should rehearse the largest real entry. That is wrong: the limit bounds the composed LINE,
+// not the key, so sizing from the written-under key already puts every key at the same rehearsal --
+// and where the real key is the shorter one the value overflows the probe's own budget and doctor
+// reports FAIL on a healthy machine. Pinned by "the probe's value composes to exactly the limit
+// under the key it writes under, for any cfg".
+
+test("probeKeystoreWrite: gpg is not rehearsed, and that is a decision rather than an omission", async () => {
+    let wrote = false;
+    assert.equal(await m.probeKeystoreWrite({ backend: "gpg",
+        write: async () => { wrote = true; } }), null);
+    assert.equal(wrote, false);
+    assert.deepEqual(m.WRITE_PROBED_BACKENDS, ["keychain", "wcm"], "the scope is pinned, not incidental");
+});
+
+test("probeKeystoreWrite: the value it actually writes is the boundary-sized one", async () => {
+    // writeProbeValue being correct is not the same as the probe using it. Swapping the call back
+    // for a short literal would leave the suite green -- and a short probe reports ok on precisely
+    // the machine where a real refresh token overflows security(1)'s line buffer.
+    // A MULTI-BYTE, deliberately synthetic login (not a real name -- this repo is public) for the
+    // length of this test, so the assertion below distinguishes bytes from code units instead of
+    // agreeing by accident the way an ASCII login would.
+    const savedUser = process.env.USER;
+    process.env.USER = "tëst-üser";
+    let wrote = null;
+    let line = null;
+    try {
+        await m.probeKeystoreWrite({ backend: "keychain",
+            write: async (key, value) => { wrote = value; }, remove: async () => {} });
+        const key = `${m.KEY_PREFIX}:user:${m.WRITE_PROBE_NAME}`;
+        line = m.buildLocalWrite("keychain", key, process.env, { value: wrote }).stdinCommand(wrote);
+    } finally {
+        if (savedUser === undefined) { delete process.env.USER; } else { process.env.USER = savedUser; }
+    }
+    assert.notEqual(Buffer.byteLength(line), line.length,
+        "the fixture must make the two units disagree, or this test cannot see the difference");
+    // BYTES, because that is the unit security(1) counts and the unit production measures in
+    // (Buffer.byteLength at both stdinCommand's own guard and writeProbeValue).
+    assert.equal(Buffer.byteLength(line), m.SECURITY_LINE_LIMIT,
+        `the probe wrote ${Buffer.byteLength(wrote ?? "")} bytes, composing to ${Buffer.byteLength(line)}; `
+        + "the rehearsal must sit at the limit");
+});
+
+test("probeKeystoreWrite: Credential Manager is probed too, at the blob limit", async () => {
+    // The platform whose store REFUSES an oversize value was the one `doctor` said nothing about, and
+    // the refusal arrives after the authorization code is spent, which cannot be retried.
+    let wrote = null;
+    const status = await m.probeKeystoreWrite({ backend: "wcm",
+        write: async (key, value) => { wrote = value; }, remove: async () => {} });
+    assert.equal(status, "ok");
+    // The literal, not the constant: asserting against WCM_BLOB_LIMIT passes for any value of it,
+    // including a wrong one, and the number is a documented platform fact (CRED_MAX_CREDENTIAL_BLOB_SIZE).
+    assert.equal(Buffer.byteLength(wrote), 2560,
+        "a probe smaller than the limit passes on precisely the machine where a real entry would not fit");
+    assert.equal(m.WCM_BLOB_LIMIT, 2560, "and the constant must still be the documented ceiling");
+});
+
+test("probeKeystoreWrite: a Credential Manager refusal is reported, not swallowed", async () => {
+    const status = await m.probeKeystoreWrite({ backend: "wcm",
+        write: async () => { throw new m.VcSecretsError("win32err=1783"); }, remove: async () => {} });
+    assert.match(status, /1783/);
+});
+
+test("probeKeystoreWrite: gpg is still out of scope, and says so by returning null", async () => {
+    // Deliberate: there the write is a file, and probing it answers a different question. Kept
+    // explicit so the omission reads as a decision rather than an oversight.
+    let wrote = false;
+    assert.equal(await m.probeKeystoreWrite({ backend: "gpg",
+        write: async () => { wrote = true; }, remove: async () => {} }), null);
+    assert.equal(wrote, false);
+});
+
+test("doctorReport: the write-probe lines name the backend they probed", () => {
+    const base = { env: {}, enableLists: { enabled: [], disabled: [], envKeys: [] },
+        resolvable: {}, skipped: [], toolsMissing: [], wired: new Set(), configDirOverride: false };
+    const okLine = m.doctorReport({ secrets: {}, servers: {}, oauth: {} },
+        { ...base, platform: "win32", writeProbe: "ok" }).find((l) => l.includes("accepts a write"));
+    assert.match(okLine, /wcm/, `must name the backend, got: ${okLine}`);
+    const failLine = m.doctorReport({ secrets: {}, servers: {}, oauth: {} },
+        { ...base, platform: "win32", writeProbe: "win32err=1783" }).find((l) => l.includes("rejected a write"));
+    assert.match(failLine, /^FAIL wcm .*1783/, `must name the backend and the cause, got: ${failLine}`);
+});
+
+test("probeKeystoreWrite: a working keychain write reports ok and leaves nothing behind", async () => {
+    const removed = [];
+    const status = await m.probeKeystoreWrite({ backend: "keychain",
+        write: async () => {}, remove: async (key) => { removed.push(key); } });
+    assert.equal(status, "ok");
+    assert.deepEqual(removed, [`${m.KEY_PREFIX}:user:${m.WRITE_PROBE_NAME}`],
+        "the probe entry must not survive the probe");
+});
+
+test("the probe writes AND deletes under the scope the config declares, in both directions", async () => {
+    // Both branches in one test because the subject is the rule, not either site. And both SEAMS,
+    // because the write key is the one that can do damage and the delete key is the one every other
+    // probe test happens to observe: pointing `write` at some other key while leaving `removeEntry`
+    // correct leaves the whole suite green, and models a doctor run that either strands a permanent
+    // stray entry or overwrites a real secret with 4008 bytes of padding. The collision guard does
+    // not cover that -- it keys on the probe NAME, so nothing else ties the name to the key written.
+    const keysFor = async (cfg) => {
+        const wrote = [];
+        const removed = [];
+        await m.probeKeystoreWrite({ backend: "keychain", cfg,
+            write: async (key) => { wrote.push(key); }, remove: async (key) => { removed.push(key); } });
+
+        return { wrote, removed };
+    };
+    for (const [cfg, scope, why] of [
+        [{ projectId: "proj1", secrets: {}, oauth: {} }, "proj1", "a declared project scopes the probe to it"],
+        [{ secrets: {}, oauth: {} }, "user", "and no project falls back to user scope"],
+    ]) {
+        const expected = [`${m.KEY_PREFIX}:${scope}:${m.WRITE_PROBE_NAME}`];
+        const { wrote, removed } = await keysFor(cfg);
+        assert.deepEqual(wrote, expected, `${why} -- on the WRITE`);
+        assert.deepEqual(removed, expected, `${why} -- and the delete must match it exactly`);
+    }
+});
+
+test("probeKeystoreWrite: a refused write is reported, and cleanup still runs", async () => {
+    // The point of the rehearsal: this must surface at setup, not during a token rotation in
+    // the middle of a session, where nothing is watching and the session simply dies.
+    const removed = [];
+    const status = await m.probeKeystoreWrite({ backend: "keychain",
+        write: async () => { throw new m.VcSecretsError("security exited 1: interaction required"); },
+        remove: async (key) => { removed.push(key); } });
+    assert.match(status, /interaction required/);
+    assert.deepEqual(removed, [`${m.KEY_PREFIX}:user:${m.WRITE_PROBE_NAME}`]);
+});
+
+test("probeKeystoreWrite: a failing cleanup does not turn a good write into a bad verdict", async () => {
+    const status = await m.probeKeystoreWrite({ backend: "keychain",
+        write: async () => {}, remove: async () => { throw new m.VcSecretsError("delete failed"); } });
+    assert.equal(status, "ok", "the probe's verdict is about the write, not the cleanup");
+});
+
+test("cmdDoctor: the write probe is actually wired to the report, not merely available", () => {
+    // Both halves were tested and the seam between them was not: replacing the probe call in
+    // cmdDoctor with a literal null would leave the suite green, which is the whole of what that
+    // commit added. Source-inspected because cmdDoctor performs real keystore io.
+    // STRIP_COMMENTS first, and it is load-bearing rather than tidiness: `.match` takes the FIRST
+    // textual hit, so `// const writeProbe = await probeKeystoreWrite(...)` left above a live
+    // `const writeProbe = null;` satisfies every assertion below while the probe is unwired -- a
+    // mutant measured byte-identical to the green baseline. The rule is the one already stated where
+    // STRIP_COMMENTS is declared; this site is the third, and it was added without it.
+    const source = fs.readFileSync(LAUNCHER_PATH, "utf8").replace(STRIP_COMMENTS, "");
+    const call = source.match(/const writeProbe = [\s\S]*?;/);
+    assert.ok(call, "cmdDoctor must compute writeProbe");
+    assert.match(call[0], /probeKeystoreWrite\(/, `writeProbe is not computed from the probe: ${call[0]}`);
+    assert.match(call[0], /cfg/, "and must hand it the config, or the probe's own guard checks nothing");
+    const doctorCall = source.match(/const lines = doctorReport\(cfg, \{[\s\S]*?\}\);/);
+    assert.ok(doctorCall, "the doctorReport call site moved");
+    assert.match(doctorCall[0], /\bwriteProbe\b/, "and must pass it to doctorReport");
+});
+
+test("probeKeystoreWrite: a declared secret of the probe's name is not overwritten", () => {
+    // The probe writes then deletes. If someone declares a secret called vc-secrets-writeprobe, a
+    // diagnostic would destroy the very thing it was asked to check on.
+    const cfg = { secrets: { "vc-secrets-writeprobe": { backend: "local" } }, servers: {} };
+
+    return m.probeKeystoreWrite({ backend: "keychain", cfg,
+        write: async () => { throw new Error("must not be called"); } })
+        .then((status) => assert.equal(status, null));
+});
+
+test("doctorReport: the write probe is reported in both directions, naming the backend", () => {
+    // The platform is part of the fixture: the line names the backend it probed, and a report that
+    // says "keychain" on Windows sends the reader to the wrong store.
+    const cfg = { secrets: {}, servers: {}, oauth: {} };
+    const base = { env: {}, platform: "linux", enableLists: { enabled: [], disabled: [], envKeys: [] },
+        resolvable: {}, skipped: [], toolsMissing: [], wired: new Set(), configDirOverride: false };
+    const ok = m.doctorReport(cfg, { ...base, platform: "darwin", oauthStatus: {}, writeProbe: "ok" });
+    assert.ok(ok.some((l) => l.startsWith("OK keychain accepts")), ok.join("\n"));
+    const bad = m.doctorReport(cfg, { ...base, platform: "darwin", writeProbe: "interaction required" });
+    const fail = bad.find((l) => l.startsWith("FAIL"));
+    assert.match(fail, /login/, "the line must say what the developer loses, not just that a write failed");
+    // A platform where the probe does not run must stay SILENT rather than report a passing check it
+    // never made -- the difference between "verified" and "not applicable". base is linux, so gpg.
+    assert.equal(m.doctorReport(cfg, base).some((l) => /accepts a write|rejected a write/.test(l)), false);
+});
+
+test("writeProbeValue: the probe writes the largest value the path will ever carry", () => {
+    // A short probe passes on exactly the machine where a real refresh token overflows, so it
+    // would certify the one write it exists to catch. No oauth entry declared, so this exercises
+    // the probe's-own-key fallback at user scope.
+    const cfg = { secrets: {}, oauth: {} };
+    const env = { USER: "dev" };
+    const key = `${m.KEY_PREFIX}:user:${m.WRITE_PROBE_NAME}`;
+    const value = m.writeProbeValue(cfg, env);
+    const line = m.buildLocalWrite("keychain", key, env, { value }).stdinCommand(value);
+    assert.equal(Buffer.byteLength(line), m.SECURITY_LINE_LIMIT,
+        "the rehearsal must sit exactly at the boundary it is rehearsing");
+});
+
+test("the probe's value composes to exactly the limit under the key it writes under, for any cfg", () => {
+    // Named after the RULE, not a call site, because the rule is what a later change will be tempted
+    // to undo. A round of this port sized the padding from the longest REAL oauth key instead, on the
+    // reasoning that the probe should rehearse the largest real entry. That reasoning is wrong twice
+    // over: the limit is a property of the composed LINE, not of the key, so same-key sizing already
+    // puts every key at the same rehearsal; and when the real key is the SHORTER one the value
+    // overflows the probe's own budget, writeSecretValue's guard refuses it, and doctor reports FAIL
+    // on a machine with nothing wrong. "ado" is the first fixture below because it is the only oauth
+    // name in README.md, so that FAIL was the documented configuration's default outcome.
+    const env = { USER: "abcde" };
+    for (const oauth of [{ ado: { scope: "project" } },                      // shorter than the probe's key
+                         { "a-very-long-mcp-server-name": { scope: "project" } },   // longer
+                         {}]) {                                             // none declared at all
+        const cfg = { projectId: "proj1", secrets: {}, oauth };
+        const key = `${m.KEY_PREFIX}:${cfg.projectId}:${m.WRITE_PROBE_NAME}`;
+        const value = m.writeProbeValue(cfg, env);
+        // stdinCommand THROWS when the line is over the limit, so this call is itself half the
+        // assertion: a regression cannot reach the equality below.
+        const line = m.buildLocalWrite("keychain", key, env, { value }).stdinCommand(value);
+        assert.equal(Buffer.byteLength(line), m.SECURITY_LINE_LIMIT,
+            `oauth=${JSON.stringify(oauth)}: the rehearsal must sit exactly at the limit under the `
+            + `key the probe writes under, got ${Buffer.byteLength(line)} for a ${Buffer.byteLength(value)}-byte value`);
+    }
+});
+
 test("cmdUnlock: must keep showing pinentry interactively — no --pinentry-mode reaches the gpg it runs", { skip: process.platform === "win32" && "gpg backend is not selected on win32" }, async () => {
     const secretsHome = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-unlock-"));
     tmpDirs.push(secretsHome);
