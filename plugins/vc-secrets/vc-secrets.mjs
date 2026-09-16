@@ -307,26 +307,44 @@ function authorizationFor(cfg, decl) {
     return null;
 }
 
-function crossingProblem(cfg, kind, name, secretName) {
+// The ONE predicate that decides whether a crossing reference -- a project/local-scoped launchable
+// consuming a secret OR an oauth entry declared by someone else -- is authorized, and if not, what
+// block would authorize it. Both resolveEnvEntries (which refuses an unauthorized launch) and
+// doctorReport's crossing loop (which reports the same finding without launching anything) call
+// this. Splitting it into two bodies is what let an oauth refusal drift out of doctor's report the
+// first time, while the secret refusal stayed covered -- but a single predicate does not by itself
+// stop that from recurring: restoring one kind filter inside the crossing loop reproduces the drift
+// with this function untouched. What stops it is two tests in vc-secrets.test.mjs, not the shape of
+// this function: "every authorization refusal names the doctor command, and doctor's own report
+// names the same where", and "doctorReport: an oauth crossing is reported like a secret's, and a
+// launchable naming both kinds gets a line for each" -- restoring the kind filter reddens both
+// (wiki: a-rule-pinned-at-one-site-reads-as-pinned-everywhere).
+// refKind defaults to "secret" so every pre-existing call naming only a secret keeps working
+// unchanged; an oauth reference passes "oauth" explicitly.
+function crossingProblem(cfg, kind, name, refName, refKind = "secret") {
     const launchable = own(cfg[kind], name);
-    const decl = own(cfg.secrets, secretName);
+    const decl = refKind === "oauth" ? own(cfg.oauth, refName) : own(cfg.secrets, refName);
     if (!launchable || !decl || launchable.home === USER_SCOPE) {
         return null;
     }
-    const source = authorizationFor(cfg, { ...decl, declaredName: secretName });
+    // An oauth declaration already carries its own declaredName (stamped where cfg.oauth is built),
+    // so re-stamping it here is a no-op rather than a correction -- unlike a secret's, which needs it
+    // added because the secret merge does not stamp one. Kept as one uniform call rather than a
+    // branch on refKind, since the two forms cannot produce different results.
+    const source = authorizationFor(cfg, { ...decl, declaredName: refName });
     if (source === null) {
         return null;
     }
     const actual = consumerShape(launchable);
     const authorized = own(own(source.block, kind), name);
     if (authorized === undefined) {
-        return { secretName, actual, where: source.where, reason: "not authorized" };
+        return { actual, where: source.where, reason: "not authorized" };
     }
     const diffs = shapeDifferences(authorized, actual);
 
     return diffs === null
         ? null
-        : { secretName, actual, where: source.where, reason: `authorized for a different shape: ${diffs.join("; ")}` };
+        : { actual, where: source.where, reason: `authorized for a different shape: ${diffs.join("; ")}` };
 }
 
 // Servers and tasks are validated identically — same declaration shape, same env rules, same refusal
@@ -685,14 +703,20 @@ function oauthKeyClashes(cfg) {
     return clashes;
 }
 
-// The remedy is per-kind and NOT shared: `doctor`'s crossing loop reports secret references only,
-// so pointing an oauth refusal at it would name a command that prints nothing.
-function authorizationRefusal(envVar, kind, refName, { reason, where, remedy = "" }) {
+// The remedy is appended unconditionally, for both kinds: doctor's crossing loop reports an oauth
+// reference exactly as it reports a secret's (crossingProblem is the one predicate behind both), so
+// every refusal this constructs can truthfully send the reader to "vc-secrets doctor" for the block
+// to paste. Enforced by "every authorization refusal names the doctor command, and doctor's own
+// report names the same where" in vc-secrets.test.mjs.
+function authorizationRefusal(envVar, kind, refName, { reason, where }) {
     return new VcSecretsError(`env ${envVar}: this ${kind === "tasks" ? "task" : "server"} is `
         + `${reason} to receive "${refName}" -- the authorization for it lives at `
-        + `${where} in ${path.join("~", ".claude", CONFIG_NAME)}${remedy}`);
+        + `${where} in ${path.join("~", ".claude", CONFIG_NAME)}${DOCTOR_REMEDY}`);
 }
 
+// Enforced by "every authorization refusal names the doctor command, and doctor's own report names
+// the same where" in vc-secrets.test.mjs -- see the rule above authorizationRefusal for why this is
+// unconditional.
 const DOCTOR_REMEDY = '; run "vc-secrets doctor" for the block to add';
 
 // `kind` is "servers" or "tasks". Both are launchables with the same declaration shape; the only
@@ -720,19 +744,9 @@ async function resolveEnvEntries(name, cfg, resolveSecret, kind = "servers") {
                 throw new VcSecretsError(`env ${envVar}: undeclared oauth entry "${ref.name}" -- declare it in the "oauth" section of ${CONFIG_NAME}`);
             }
             const oauthDecl = cfg.oauth[ref.name];
-            // Same exemption crossingProblem makes for secrets: a launchable declared in the user's
-            // own file is not crossing a scope boundary, so there is nothing for a grant to police.
-            const source = server.home === USER_SCOPE ? null : authorizationFor(cfg, oauthDecl);
-            if (source !== null) {
-                const grant = own(own(source.block, kind), name);
-                if (grant === undefined) {
-                    throw authorizationRefusal(envVar, kind, ref.name, { reason: "not authorized", where: source.where });
-                }
-                const shapeDiffs = shapeDifferences(grant, consumerShape(server));
-                if (shapeDiffs !== null) {
-                    throw authorizationRefusal(envVar, kind, ref.name,
-                        { reason: `authorized for a different shape: ${shapeDiffs.join("; ")}`, where: source.where });
-                }
+            const problem = crossingProblem(cfg, kind, name, ref.name, "oauth");
+            if (problem !== null) {
+                throw authorizationRefusal(envVar, kind, ref.name, problem);
             }
             // The declaration travels so the launcher needs no cfg of its own to acquire the token.
             oauthEntries.push({ envVar, name: ref.name, decl: oauthDecl });
@@ -743,7 +757,7 @@ async function resolveEnvEntries(name, cfg, resolveSecret, kind = "servers") {
         }
         const problem = crossingProblem(cfg, kind, name, ref.name);
         if (problem !== null) {
-            throw authorizationRefusal(envVar, kind, ref.name, { ...problem, remedy: DOCTOR_REMEDY });
+            throw authorizationRefusal(envVar, kind, ref.name, problem);
         }
         const decl = cfg.secrets[ref.name];
         if (ref.field !== null && decl.format !== "json") {
@@ -2079,14 +2093,16 @@ async function cmdLogin(serverName, cfg, {
     if (decl.home !== USER_SCOPE) {
         const source = authorizationFor(cfg, decl);
         if (source.block === undefined) {
-            // No DOCTOR_REMEDY, for the reason authorizationRefusal's own comment gives and the
-            // reason resolveEnvEntries omits it on this same kind: doctor's crossing loop reports
-            // secret references only, so naming it here would send the developer to a command that
-            // prints nothing about registrations. Task 21 gives doctor that report; the remedy goes
-            // back on BOTH refusals then, not on one of them now.
+            // Carries DOCTOR_REMEDY like every other authorization refusal, because doctor now reports
+            // an absent registration block through TWO paths: the crossing loop, when a project- or
+            // local-scope launchable already names the entry (crossingProblem's own comment); and the
+            // loop below it otherwise, for a declaration nothing references or that only a user-scope
+            // launchable does. Either way naming the command here is true. Enforced by "every authorization
+            // refusal names the doctor command, and doctor's own report names the same where" in
+            // vc-secrets.test.mjs.
             throw new VcSecretsError(`"vc-secrets login ${serverName}" is not authorized -- the app`
                 + ` registration it names must be acknowledged at ${source.where} in`
-                + ` ${path.join("~", ".claude", CONFIG_NAME)}`);
+                + ` ${path.join("~", ".claude", CONFIG_NAME)}${DOCTOR_REMEDY}`);
         }
     }
     if (!LOCAL_BACKENDS.includes(backend)) {
@@ -3056,9 +3072,12 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
             }
         }
     }
-    // Crossing from a project declaration to a personal secret is allowed and often intended, but it is
-    // the one relationship a reader of either file alone cannot see: the project file names a secret it
-    // did not declare, and the user file has no idea who consumes it.
+    // Crossing from a project declaration to a personal secret OR sign-in is allowed and often
+    // intended, but it is the one relationship a reader of either file alone cannot see: the
+    // project file names something it did not declare, and the user file has no idea who consumes
+    // it. Secret and oauth references share this loop because they share the rule crossingProblem
+    // decides -- reporting one kind and not the other is the defect that rule exists to remove.
+    const reportedWheres = new Set();
     for (const [kind, map] of [["servers", cfg.servers], ["tasks", cfg.tasks ?? {}]]) {
         const label = kind === "tasks" ? "task" : "server";
         for (const [name, decl] of Object.entries(map)) {
@@ -3071,19 +3090,26 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
                 try {
                     ref = parseReference(value);
                 } catch { /* reported as a FAIL above */ }
-                // An oauth reference is filtered by kind rather than by the lookup below: a name held
-                // by both kinds would find the secret and report a grant the reference never needed.
-                if (ref === null || ref.kind !== "secret" || reported.has(ref.name)) {
+                // Keyed on kind AND name, not name alone: the two kinds share one name space, so a
+                // launchable referencing both "secret:ado" and "oauth:ado" needs a line for each.
+                if (ref === null || reported.has(`${ref.kind}:${ref.name}`)) {
                     continue;
                 }
-                const sdecl = cfg.secrets[ref.name];
+                const refDecl = ref.kind === "oauth" ? cfg.oauth?.[ref.name] : cfg.secrets[ref.name];
                 // Only references that need authorizing are worth a line: a project-declared `local`
-                // secret is namespaced to the project, so there is no grant to report either way.
-                if (!sdecl || authorizationFor(cfg, { ...sdecl, declaredName: ref.name }) === null) {
+                // secret is namespaced to the project, and an undeclared reference is already a FAIL
+                // above -- either way there is no grant to report.
+                // No branch on ref.kind here either, for the same reason crossingProblem's own
+                // declaredName comment gives: an oauth declaration already carries its own
+                // declaredName, so re-stamping it is a no-op rather than a correction.
+                const source = refDecl === undefined ? null
+                    : authorizationFor(cfg, { ...refDecl, declaredName: ref.name });
+                if (source === null) {
                     continue;
                 }
-                reported.add(ref.name);
-                const problem = crossingProblem(cfg, kind, name, ref.name);
+                reported.add(`${ref.kind}:${ref.name}`);
+                reportedWheres.add(source.where);
+                const problem = crossingProblem(cfg, kind, name, ref.name, ref.kind);
                 if (problem === null) {
                     lines.push(`INFO ${label} "${name}" (${decl.home}) is authorized to receive "${ref.name}"`);
                     continue;
@@ -3092,11 +3118,30 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
                 // launch is one paste, and asking them to translate a diff into JSON adds a way to get it
                 // wrong. A shape they can read is also a shape they can refuse.
                 const shape = JSON.stringify({ [name]: problem.actual }, null, 2).split("\n").map((l) => `       ${l}`).join("\n");
-                lines.push(`FAIL ${label} "${name}" (${decl.home}) wants "${ref.name}" and is ${problem.reason}.`
-                    + `\n     Read the command below; if you want it to have that secret, put this under`
+                // The kind is named here, not just the name: a launchable naming both "secret:ado"
+                // and "oauth:ado" gets two FAIL lines whose headlines would otherwise be
+                // byte-identical apart from the where on the continuation line.
+                lines.push(`FAIL ${label} "${name}" (${decl.home}) wants ${ref.kind} "${ref.name}" and is ${problem.reason}.`
+                    + `\n     Read the command below; if you want it to have that, put this under`
                     + ` ${problem.where}.${kind} in ~/.claude/${CONFIG_NAME}:\n${shape}`);
             }
         }
+    }
+    // A non-user-scope oauth declaration the loop above never named: either nothing references it,
+    // or only a user-scope launchable does (exempt above -- you wrote both sides). Its own
+    // authorization is still worth reporting when the block is absent, because that is the report
+    // cmdLogin's refusal promises exists -- see "every authorization refusal names the doctor
+    // command, and doctor's own report names the same where" in vc-secrets.test.mjs.
+    for (const [oauthName, oauthDecl] of Object.entries(cfg.oauth ?? {})) {
+        if (oauthDecl.home === USER_SCOPE) {
+            continue;
+        }
+        const source = authorizationFor(cfg, oauthDecl);
+        if (source === null || source.block !== undefined || reportedWheres.has(source.where)) {
+            continue;
+        }
+        lines.push(`INFO oauth "${oauthName}" (${oauthDecl.home}): no registration block yet --`
+            + ` add {} under ${source.where} in ~/.claude/${CONFIG_NAME} so "vc-secrets login ${oauthName}" will run`);
     }
     if (typeof shimContract === "number" && shimContract < REQUIRED_SHIM_CONTRACT) {
         lines.push(`WARN the installed shim speaks contract ${shimContract}, this launcher expects ${REQUIRED_SHIM_CONTRACT} -- re-run the vc-secrets install skill`);

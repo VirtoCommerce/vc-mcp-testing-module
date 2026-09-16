@@ -33,7 +33,9 @@ those FAILs as findings.
 |---|---|---|
 | `OK` | resolved | — |
 | `INFO` | which declaration files loaded | confirm the expected scopes are there; a missing project file usually means the wrong working directory |
-| `INFO … uses "x", which you declared at user scope` | a project-declared server or task consumes one of your personal secrets | allowed and often intended; report it so the operator knows the crossing exists |
+| `INFO <server/task> "x" (home) is authorized to receive "y"` | a project- or local-declared server or task consumes a secret or oauth entry whose authorization lives in your user file | allowed and often intended; report it so the operator knows the crossing exists |
+| `FAIL <server/task> "x" (home) wants <secret\|oauth> "y" and is not authorized` / `... authorized for a different shape` | the same crossing, but the granting file has not granted it, or the launch shape has drifted from what was granted | paste the JSON block the line prints under the `where` it names, in the user file |
+| `INFO oauth "y" (home): no registration block yet -- add {} under <where> ...` | a non-user-scope oauth entry has no registration block, and no non-user-scope launchable has already reported the same path | add `{}` at the named path so `vc-secrets login y` will run |
 | `INFO … still required until the vc-secrets switch lands` | a plaintext token is present and this project has nothing wired yet | expected mid-migration; it becomes the `WARN` below once a server is wrapped |
 | `WARN the installed shim speaks contract N` | the shim predates the launcher | re-run the vc-secrets install skill |
 | `WARN … only under the legacy key` | the value exists, under the pre-plugin key | run the vc-secrets migrate skill — it cannot be re-typed, the store never hands a value back |
@@ -45,7 +47,7 @@ those FAILs as findings.
 | `WARN <file>: cannot be read … so advice about leftover tokens may be wrong` | the file behind a wiring check couldn't be read | the legacy-token verdict above it is unreliable — fix the read access and re-run |
 | `WARN … looks like a mistyped reference but is treated as a literal` | an env value looks like a `secrets:`-style typo for `secret:<name>` | fix the reference, or confirm the literal is intended |
 | `WARN … projectId is meaningless at user scope` | a user-scope declaration sets `projectId` | remove it — user scope doesn't use one |
-| `FAIL server "x" env Y: undeclared secret "z"` | the env entry references a secret name absent from `secrets` | declare it, or fix the typo — this is different from the plain `FAIL` row above, which means a *declared* secret didn't resolve |
+| `FAIL server "x" env Y: undeclared <secret\|oauth> "z"` | the env entry references a secret or oauth name absent from `secrets`/`oauth` | declare it, or fix the typo — this is different from the plain `FAIL` row above, which means a *declared* secret or oauth entry didn't resolve |
 
 Exit code is 1 if any line is a `FAIL`, so it works as a gate in a script.
 

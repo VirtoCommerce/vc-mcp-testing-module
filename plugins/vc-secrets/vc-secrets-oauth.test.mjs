@@ -2487,17 +2487,6 @@ test("cmdLogin: the refusal names the registration that must be acknowledged, no
         new RegExp(`registrations\\."${DECL_IDENTITY.tenantId}"\\."${DECL_IDENTITY.clientId}"`));
 });
 
-test("cmdLogin: the refusal names no command, because doctor does not report registrations yet", async () => {
-    // The decision authorizationRefusal's own comment records, and the one resolveEnvEntries
-    // already makes on this kind: doctor's crossing loop reports secret references only, so naming
-    // it here would send the developer to a command that prints nothing about this block. It was
-    // pinned at that site alone, and this verb did the opposite for a commit with nothing red. The
-    // /not authorized/ half is the control: without it an empty message would satisfy the absence.
-    const { deps } = loginDeps();
-    await assert.rejects(() => m.cmdLogin("azure-mcp", UNACKNOWLEDGED_CFG, deps),
-        (e) => /not authorized/.test(e.message) && !/vc-secrets doctor/.test(e.message));
-});
-
 test("cmdLogin: the policy refusal wins over the capability refusal", async () => {
     // Both would refuse this call. If the backend check ran first the developer would be told their
     // machine has no keystore -- true, and the wrong thing to go and fix, because installing one

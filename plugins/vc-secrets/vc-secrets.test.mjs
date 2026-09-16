@@ -1875,10 +1875,18 @@ test("doctorReport: a shim contract below REQUIRED_SHIM_CONTRACT is a WARN", () 
 // loadConfig actually produces one (home included), matching how the other doctorReport tests in this
 // file build their cfg by hand rather than through loadConfig's file IO.
 const OAUTH_DOCTOR_DECL = { ...OAUTH_DECL, scope: "project", home: "project", kind: "oauth", declaredName: "azure-mcp" };
+// Authorized (a registrations block matching the server's shape): the crossing loop now reports an
+// oauth reference exactly as it reports a secret's, and an unauthorized one here would add its own
+// FAIL/INFO line that the status/tenant assertions below are not about and do not expect. The server
+// also carries `home: "project"`, mirroring the `home: scope` that loadConfig's server merge stamps
+// on every server -- without it the crossing INFO line below prints "(undefined)" instead of
+// "(project)".
 const OAUTH_DOCTOR_CFG = {
     secrets: {}, tasks: {},
     oauth: { "azure-mcp": OAUTH_DOCTOR_DECL },
-    servers: { "azure-mcp": { command: "npx", args: ["-y"], env: { ADO_MCP_AUTH_TOKEN: "oauth:azure-mcp" } } },
+    registrations: { [OAUTH_TENANT_ID]: { [OAUTH_CLIENT_ID]: {
+        servers: { "azure-mcp": { command: "npx", args: ["-y"], envKeys: ["ADO_MCP_AUTH_TOKEN"] } } } } },
+    servers: { "azure-mcp": { command: "npx", args: ["-y"], home: "project", env: { ADO_MCP_AUTH_TOKEN: "oauth:azure-mcp" } } },
 };
 
 function oauthDoctorLines(overrides = {}) {
@@ -2419,15 +2427,133 @@ test("resolveEnvEntries: the exemption follows the launchable's home, not the de
     assert.equal(out.oauth.length, 1, "the server is the user's own; the grant polices a crossing that is not happening");
 });
 
-test("resolveEnvEntries: an oauth refusal names no command, because doctor does not report one yet", async () => {
-    // doctorReport's crossing loop reports secret references only, so the secret refusal's closing
-    // advice is true and the same advice on an oauth refusal would name a command that prints nothing.
-    const noGrant = m.loadConfig(collidingProjectPaths("oauth:ado"));
-    await assert.rejects(() => m.resolveEnvEntries("s", noGrant, async () => "x"),
-        (e) => /not authorized to receive "ado"/.test(e.message) && !/vc-secrets doctor/.test(e.message));
-    // The positive control: the secret path still carries it, so this pins a difference, not an absence.
-    const secretSide = m.loadConfig(crossingPaths(undefined));
-    await assert.rejects(() => m.resolveEnvEntries("gh", secretSide, async () => "x"), /run "vc-secrets doctor"/);
+test("every authorization refusal names the doctor command, and doctor's own report names the same where", async () => {
+    // The rule this replaces two site-scoped tests for: doctor's crossing loop used to report secret
+    // references only, so an oauth refusal naming "vc-secrets doctor" sent a reader to a command that
+    // printed nothing about their case (wiki meta/process/
+    // a-rule-pinned-at-one-site-reads-as-pinned-everywhere.md). crossingProblem is now the one predicate
+    // behind both the refusal and the report, so the refusal's promise is checkable: pull the `where` it
+    // names out of the message and confirm doctor's own output names that same string, for every shape
+    // of refusal this package has -- both kinds, both reasons, and the one that is not resolveEnvEntries
+    // at all.
+    const whereFromMessage = (message) => {
+        const found = / at (.+?) in ~\//.exec(message);
+        assert.ok(found, `no "at <where> in ~/" found in: ${message}`);
+
+        return found[1];
+    };
+    // `launchable` is the name each refusal's report line must ALSO carry, quoted, beside `where` --
+    // without it "an oauth entry is not authorized" is satisfied by the unrelated point-3 INFO line
+    // (which names the same `where` for a different reason: no registration block at all), so a
+    // mutation that drops the crossing loop's oauth handling entirely reddens a different case than
+    // the one it actually breaks, because that case's `where` is shared with the point-3 INFO line.
+    // "login refuses ..." names no launchable -- nothing references that declaration -- so it is
+    // left undefined and only `where` is required there.
+    const cases = [
+        {
+            name: "a secret is not authorized",
+            cfg: m.loadConfig(crossingPaths(undefined)),
+            run: (cfg) => m.resolveEnvEntries("gh", cfg, async () => "x"),
+            launchable: "gh",
+        },
+        {
+            name: "a secret is authorized for a different shape",
+            cfg: m.loadConfig(scopedPaths({
+                user: { secrets: { "personal-pat": { backend: "local", authorized: { servers: { gh: CROSSING_SHAPE } } } } },
+                project: { projectId: "proj-x",
+                    servers: { gh: { command: "printenv", args: [], env: { T: "secret:personal-pat" } } } },
+            })),
+            run: (cfg) => m.resolveEnvEntries("gh", cfg, async () => "x"),
+            launchable: "gh",
+        },
+        {
+            name: "an oauth entry is not authorized",
+            cfg: m.loadConfig(scopedPaths({
+                project: { projectId: "proj-x", oauth: { ado: OAUTH_DECL },
+                    servers: { s: { command: "npx", args: [], env: { ADO_TOKEN: "oauth:ado" } } } },
+            })),
+            run: (cfg) => m.resolveEnvEntries("s", cfg, async () => "x"),
+            launchable: "s",
+        },
+        {
+            name: "an oauth entry is authorized for a different shape",
+            cfg: m.loadConfig(scopedPaths({
+                user: { registrations: { [OAUTH_TENANT_ID]: { [OAUTH_CLIENT_ID]: REGISTRATION_BLOCK } } },
+                project: { projectId: "proj-x", oauth: { ado: OAUTH_DECL },
+                    servers: { s: { command: "npx", args: ["-y", "a-different-package"], env: { ADO_TOKEN: "oauth:ado" } } } },
+            })),
+            run: (cfg) => m.resolveEnvEntries("s", cfg, async () => "x"),
+            launchable: "s",
+        },
+        {
+            name: "login refuses a project-scope declaration with no authorization block",
+            cfg: m.loadConfig(scopedPaths({ project: { projectId: "proj-x", oauth: { ado: OAUTH_DECL } } })),
+            run: (cfg) => m.cmdLogin("ado", cfg),
+        },
+    ];
+
+    for (const { name, cfg, run, launchable } of cases) {
+        let message = null;
+        await assert.rejects(() => run(cfg), (e) => {
+            assert.ok(e instanceof m.VcSecretsError, `${name}: not a VcSecretsError: ${e}`);
+            message = e.message;
+
+            return true;
+        }, name);
+        assert.match(message, /vc-secrets doctor/, `${name}: refusal does not name the doctor command: ${message}`);
+        const where = whereFromMessage(message);
+        const reportLines = crossingReport(cfg);
+        const hasLine = launchable === undefined
+            ? reportLines.some((l) => l.includes(where))
+            : reportLines.some((l) => l.includes(where) && l.includes(`"${launchable}"`));
+        assert.ok(hasLine, `${name}: doctor's own report has no line for ${where}`
+            + `${launchable ? ` naming "${launchable}"` : ""}:\n${reportLines.join("\n")}`);
+    }
+});
+
+test("doctorReport: an oauth crossing is reported like a secret's, and a launchable naming both kinds gets a line for each", () => {
+    // Named after the rule, not the crossingProblem call site (wiki meta/process/
+    // a-rule-pinned-at-one-site-reads-as-pinned-everywhere.md): the test above reaches the oauth
+    // crossing only through its FAIL lines, whose `where` point 3 also produces -- so it leaves the
+    // authorized `INFO` line and the kind-keyed dedup unpinned. Both are honest value-mutants,
+    // injected as a value, never a throw, so the surrounding catch cannot absorb it -- each with its
+    // own positive control.
+
+    // 1a: an authorized oauth crossing gets its own INFO line, exactly as a secret's does. A guard of
+    // `if (ref.kind !== "oauth")` around the INFO push leaves the whole suite green without this.
+    const okLines = crossingReport(m.loadConfig(authorizedOauthPaths()));
+    assert.ok(okLines.some((l) => l.startsWith("INFO") && l.includes('server "s"') && l.includes('is authorized to receive "ado"')),
+        `expected the authorized oauth crossing to be reported, got:\n${okLines.join("\n")}`);
+
+    // An unauthorized oauth crossing gets the FAIL and the pasteable block, under the registrations
+    // path -- the other half of the same behaviour, so the positive control above has a counterpart.
+    const failCfg = m.loadConfig(scopedPaths({
+        project: { projectId: "proj-x", oauth: { ado: OAUTH_DECL },
+            servers: { s: { command: "npx", args: [], env: { ADO_TOKEN: "oauth:ado" } } } },
+    }));
+    const failLines = crossingReport(failCfg);
+    const fail = failLines.find((l) => l.startsWith("FAIL") && l.includes('server "s"'));
+    assert.ok(fail, `expected a FAIL naming the server, got:\n${failLines.join("\n")}`);
+    assert.match(fail, /not authorized/);
+    assert.match(fail, new RegExp(`registrations\\."${OAUTH_TENANT_ID}"\\."${OAUTH_CLIENT_ID}"\\.servers`));
+
+    // 1b: a launchable naming both an oauth entry and a same-named secret gets a line for EACH -- the
+    // dedup set is keyed by kind AND name, not name alone. Reverting the key to name-only leaves this
+    // green too: whichever kind is iterated first suppresses the second, silently dropping one FAIL.
+    const bothCfg = m.loadConfig(scopedPaths({
+        user: { secrets: { ado: { backend: "local" } } },
+        project: { projectId: "proj-x", oauth: { ado: OAUTH_DECL },
+            servers: { s: { command: "npx", args: [],
+                env: { ADO_TOKEN: "oauth:ado", ADO_PAT: "secret:ado" } } } },
+    }));
+    const bothLines = crossingReport(bothCfg);
+    const crossingFails = bothLines.filter((l) => l.startsWith("FAIL") && l.includes('server "s"') && l.includes('"ado"'));
+    assert.equal(crossingFails.length, 2,
+        `expected one crossing line for each kind, got:\n${bothLines.join("\n")}`);
+    assert.ok(crossingFails.some((l) => /registrations\./.test(l)),
+        `expected an oauth crossing line, got:\n${bothLines.join("\n")}`);
+    assert.ok(crossingFails.some((l) => /secrets\."ado"\.authorized/.test(l)),
+        `expected a secret crossing line, got:\n${bothLines.join("\n")}`);
 });
 
 test("resolveEnvEntries: a grant naming the task list does not authorize a server of the same name", async () => {
@@ -2618,15 +2744,18 @@ test("an oauth reference cannot smuggle a value into a dangerous env key either,
     })), /NODE_OPTIONS/);
 });
 
-test("doctorReport: an oauth reference sharing a user-scope secret's name reports no grant", () => {
+test("doctorReport: an oauth reference sharing a user-scope secret's name reports no SECRET grant", () => {
     // The crossing loop looked the name up in cfg.secrets, found the user-scope secret, and printed
     // the authorization FAIL for it — advising a grant for a reference that needs none, and exiting 1
-    // on a legal config.
+    // on a legal config. The oauth reference itself is now reported too (its own crossing, keyed by
+    // kind AND name), so the assertion narrows to the SECRET's own `where` rather than to the whole
+    // "not authorized" text — a bare match on that text would also catch the oauth FAIL this fixture
+    // now legitimately produces.
     const lines = crossingReport(m.loadConfig(collidingUserPaths("oauth:ado"))).join("\n");
-    assert.doesNotMatch(lines, /not authorized/);
-    // The positive control: the same fixture with a secret reference DOES report the crossing, so a
-    // loop that reported nothing at all would not satisfy this pair.
-    assert.match(crossingReport(m.loadConfig(collidingUserPaths("secret:ado"))).join("\n"), /not authorized/);
+    assert.doesNotMatch(lines, /secrets\."ado"\.authorized/);
+    // The positive control: the same fixture with a secret reference DOES report the crossing under
+    // that exact where, so a loop that reported nothing at all would not satisfy this pair.
+    assert.match(crossingReport(m.loadConfig(collidingUserPaths("secret:ado"))).join("\n"), /secrets\."ado"\.authorized/);
 });
 
 const CONSUMED_LISTS = { enabled: ["srv"], disabled: [], envKeys: [] };

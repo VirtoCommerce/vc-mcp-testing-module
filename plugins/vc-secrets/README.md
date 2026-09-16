@@ -216,6 +216,11 @@ authorization gets. For the `azure-devops` server above, with its env value chan
 
 `vc-secrets login <name>` refuses a repository-declared entry with no such block, and says which key to
 add. `registrations` takes effect only in the user file, and tenant ids match without regard to case.
+`doctor` reports this crossing the same way it reports a secret's: `INFO` when the entry is authorized,
+`FAIL` with the block to paste when it is not, and `INFO` naming the block to add when the entry has no
+registration block and no project- or local-scope launchable has claimed it -- whether nothing
+references it at all, or only a user-scope launchable does (which needs no authorization, since you
+would be writing both sides).
 
 ## Where a secret is stored, and under what key
 
