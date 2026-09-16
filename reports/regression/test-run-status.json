@@ -1,160 +1,82 @@
 {
-  "runId": "REG-2026-09-15-0947",
-  "status": "stalled",
-  "startedAt": "2026-09-15T07:48:07.248Z",
-  "selection": "loyalty",
-  "env": "vcst",
-  "note": "PHASED RUN (operator-approved). Loyalty.LoyaltyBalanceCalculationMode is a GLOBAL store setting: 075f/083e flip it to Organization as test steps, while the other 7 suites treat an Organization-mode store as a scope mismatch. Phase A runs the 7 Customer-mode suites with the store left at Customer. Then the ORG_LOY_A/B pool is re-seeded (drained by LOYORG-009 in REG-2026-09-14-1802) and the store flipped to Organization for Phase B. 083e (reads pool) runs BEFORE 075f, whose LOYORG-009 drains it and is pinned last. Store MUST be restored to Customer in close-out. Loyalty module is a PR build 3.1008.0-pr-17-116e.",
-  "phases": {
-    "A": {
-      "mode": "Customer",
-      "suites": [
-        "083c",
-        "083",
-        "083d",
-        "075",
-        "075b",
-        "083b",
-        "075c"
-      ],
-      "state": "pending"
-    },
-    "B": {
-      "mode": "Organization",
-      "suites": [
-        "083e",
-        "075f"
-      ],
-      "state": "pending"
-    }
+ "runId": "REG-2026-09-16-1437",
+ "status": "completed",
+ "startedAt": "2026-09-16T12:43:08.237Z",
+ "selection": "075f,083e (explicit ids — 20 cases)",
+ "env": "localhost",
+ "scoped": true,
+ "note": "Ticket regression C1 for /qa-test VCST-5024, step 4c. SCOPED to 20 explicit case ids (14 of 22 in 075f, 6 of 8 in 083e). SERIAL by requirement: ORG_LOY_A.sibling_org_id == the multiorg lane buildright_org_id (23525b44-f0d0-43a4-b45e-b162080a4d29), so the two suites share one org ledger and must never run concurrently. Order 083e -> 075f: 075f LOYORG-009 drains the Outlet pool that 083e E2E-002/E2E-004 read; the same order was recorded in REG-2026-09-15-0947. LOYORG-009 additionally pinned LAST inside 075f per the manifest note. Store mode verified Organization off the store entity before dispatch. NO PROMOTION (--no-promote): every case stays at its current status.",
+ "storeMode": {
+  "atRunStart": "Organization",
+  "source": "GET /api/stores/B2B-store settings[] Loyalty.LoyaltyBalanceCalculationMode",
+  "mustRestoreTo": "Organization"
+ },
+ "baselines": {
+  "LOY_PERSONAL_NOORG (Nina Solo, no org)": 33872,
+  "ORG_LOY_A (Ada Outlet, org 01a0a9fa-8015-76aa-ac3a-0237b8e17e10)": 127040,
+  "ORG_LOY_B (Ben Outlet, same org)": 127040,
+  "ORG_LOY_LOCKED (Lena Outlet, organizationId=null)": 0,
+  "MULTI_ORG_TF_BR_ALT (BuildRight 23525b44-...)": 214372,
+  "MULTI_ORG_TF_BR_EMPLOYEE (BuildRight)": 214372
+ },
+ "suites": [
+  {
+   "id": "083e",
+   "name": "Loyalty Organization Balance Storefront",
+   "file": "regression/suites/Frontend/loyalty/083e-loyalty-organization-balance.csv",
+   "status": "done",
+   "browser": "playwright-chrome",
+   "lane": "browser",
+   "laneId": 1,
+   "cases": 6,
+   "sourceCases": 8,
+   "attempts": 1,
+   "summary": {
+    "pass": 2,
+    "fail": 2,
+    "blocked": 2,
+    "total": 6
+   },
+   "startedAt": "2026-09-16T12:43:15.621Z",
+   "completedAt": "2026-09-16T13:00:30Z",
+   "pass": 2,
+   "fail": 2,
+   "blocked": 2,
+   "skipped": 0
   },
-  "storeMode": {
-    "atRunStart": "Customer",
-    "current": "Customer",
-    "mustRestoreTo": "Customer"
-  },
-  "suites": [
-    {
-      "id": "083c",
-      "name": "Loyalty Missions Storefront",
-      "file": "regression/suites/Frontend/loyalty/083c-loyalty-missions-storefront.csv",
-      "status": "running",
-      "browser": "playwright-chrome",
-      "lane": 1,
-      "phase": "A",
-      "cases": 84,
-      "attempts": 1,
-      "summary": null
-    },
-    {
-      "id": "083",
-      "name": "Loyalty Catalog Browsing",
-      "file": "regression/suites/Frontend/loyalty/083-loyalty-catalog.csv",
-      "status": "running",
-      "browser": "playwright-firefox",
-      "lane": 3,
-      "phase": "A",
-      "cases": 26,
-      "attempts": 1,
-      "summary": null
-    },
-    {
-      "id": "083d",
-      "name": "Loyalty Missions E2E",
-      "file": "regression/suites/Frontend/loyalty/083d-loyalty-missions-e2e.csv",
-      "status": "running",
-      "browser": "playwright-firefox",
-      "lane": 3,
-      "phase": "A",
-      "cases": 8,
-      "attempts": 1,
-      "summary": null
-    },
-    {
-      "id": "075",
-      "name": "Loyalty",
-      "file": "regression/suites/Backend/loyalty/075-loyalty.csv",
-      "status": "blocked",
-      "browser": "playwright-edge",
-      "lane": 2,
-      "phase": "A",
-      "cases": 29,
-      "attempts": 1,
-      "summary": {
-        "note": "Lane 2 (playwright-edge) agent terminated: org monthly spend limit hit (HTTP 429 rate_limit) before any test case ran (stopped at admin sign-in during setup). Not a per-request rate limit that a 60s retry resolves — org limit resets weekly. Held for orchestrator/operator decision, not auto-retried."
-      }
-    },
-    {
-      "id": "075b",
-      "name": "Loyalty Mixed Cart Order",
-      "file": "regression/suites/Backend/loyalty/075b-loyalty-mixed-cart-order.csv",
-      "status": "blocked",
-      "browser": "playwright-edge",
-      "lane": 2,
-      "phase": "A",
-      "cases": 13,
-      "attempts": 1,
-      "summary": {
-        "note": "Lane 2 (playwright-edge) agent terminated: org monthly spend limit hit (HTTP 429 rate_limit) before any test case ran (stopped at admin sign-in during setup). Not a per-request rate limit that a 60s retry resolves — org limit resets weekly. Held for orchestrator/operator decision, not auto-retried."
-      }
-    },
-    {
-      "id": "083b",
-      "name": "Loyalty Mixed Cart Order",
-      "file": "regression/suites/Frontend/loyalty/083b-loyalty-mixed-cart-order.csv",
-      "status": "running",
-      "browser": "playwright-firefox",
-      "lane": 3,
-      "phase": "A",
-      "cases": 8,
-      "attempts": 1,
-      "summary": null
-    },
-    {
-      "id": "075c",
-      "name": "Loyalty Product Points Earning",
-      "file": "regression/suites/Backend/loyalty/075c-loyalty-product-points-earning.csv",
-      "status": "done",
-      "browser": null,
-      "lane": 0,
-      "phase": "A",
-      "cases": 10,
-      "attempts": 0,
-      "summary": {
-        "total": 10,
-        "pass": 6,
-        "fail": 4,
-        "blocked": 0,
-        "skipped": 0,
-        "lane": "fastpath"
-      }
-    },
-    {
-      "id": "083e",
-      "name": "Loyalty Organization Balance Storefront",
-      "file": "regression/suites/Frontend/loyalty/083e-loyalty-organization-balance.csv",
-      "status": "pending",
-      "browser": "playwright-chrome",
-      "lane": 1,
-      "phase": "B",
-      "cases": 7,
-      "attempts": 0,
-      "summary": null
-    },
-    {
-      "id": "075f",
-      "name": "Loyalty Organization Balance",
-      "file": "regression/suites/Backend/loyalty/075f-loyalty-organization-balance.csv",
-      "status": "pending",
-      "browser": "playwright-chrome",
-      "lane": 1,
-      "phase": "B",
-      "cases": 19,
-      "attempts": 0,
-      "summary": null
-    }
-  ],
-  "stalledAt": "2026-09-15T08:45:40.275Z",
-  "stalledReason": "no progress for 45 min (REG-2026-09-15-0947:in_progress:7:171:45)",
-  "finishedAt": "2026-09-15T08:45:40.275Z"
+  {
+   "id": "075f",
+   "name": "Loyalty Organization Balance",
+   "file": "regression/suites/Backend/loyalty/075f-loyalty-organization-balance.csv",
+   "status": "done",
+   "browser": null,
+   "lane": "machine",
+   "cases": 14,
+   "sourceCases": 22,
+   "attempts": 1,
+   "summary": {
+    "pass": 3,
+    "fail": 11,
+    "blocked": 0,
+    "total": 14
+   },
+   "startedAt": "2026-09-16T13:02:21.074Z",
+   "completedAt": "2026-09-16T13:05:18.498Z",
+   "pass": 3,
+   "fail": 11,
+   "blocked": 0,
+   "skipped": 0
+  }
+ ],
+ "finishedAt": "2026-09-16T13:10:33.049Z",
+ "totals": {
+  "cases": 20,
+  "pass": 5,
+  "fail": 13,
+  "blocked": 2,
+  "skipped": 0,
+  "passRate": "25.0%"
+ },
+ "report": "reports/regression/regression-2026-09-16.md",
+ "promotion": "SUPPRESSED (--no-promote) — no case status changed"
 }

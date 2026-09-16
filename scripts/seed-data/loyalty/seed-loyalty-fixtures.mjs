@@ -39,6 +39,13 @@ const PTS = 'PTS';
 const PTS_PRICELIST_NAME = 'Loyalty PTS price list';   // currency=PTS — NOT the MOA 'BoltsLoyalty' list
 const CATEGORY_PATH = 'Loyalty Fixtures';              // stable ad-hoc seed category (created + linked into virtual)
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+// Every slug under the loyalty catalog starts with "loyalty" — the catalog, its categories and its
+// products alike. Without this the product would seed as `agent-test-pts-unit-divisor`, which breaks
+// the rule and silently reverts a corrected slug the next time this seeder creates the product.
+const loyaltySlug = (s) => {
+  const base = slug(s).replace(/^seed-/, '').replace(/^agent-test-/, '');
+  return base === 'loyalty' || base.startsWith('loyalty-') ? base : `loyalty-${base}`;
+};
 
 let VIRTUAL_CATALOG_ID = null;
 
@@ -102,7 +109,7 @@ async function seed() {
       catalogId: loc.catalogId, categoryId: loc.categoryId,
       name: PRODUCT_NAME, code: SKU, productType: 'Physical', vendor: 'QA',
       isActive: true, isBuyable: true, trackInventory: false,
-      seoInfos: [buildStoreSeo({ semanticUrl: slug(PRODUCT_NAME), pageTitle: PRODUCT_NAME })],
+      seoInfos: [buildStoreSeo({ semanticUrl: loyaltySlug(PRODUCT_NAME), pageTitle: PRODUCT_NAME })],
     }, { expectStatus: [200, 201] });
     log(`  ✓ product: ${PRODUCT_NAME} (${product?.id})`);
   }
