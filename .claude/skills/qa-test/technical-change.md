@@ -304,6 +304,39 @@ Two defects it exposed, both now fixed in `ticket-routing.md` §5d:
 
 ---
 
+## 7b. The second routing test — VCST-5662 correctly DEFERRED (2026-09-16)
+
+*"Replacing AutoMapper - Wave 4"* (`Task`, **High**) is the cleanest qualifying SHAPE this class has seen —
+and it still must not run yet. Both outcomes matter, so record both.
+
+**The signals all hold.** One mechanical pattern (one mapper facade per module, with naming, null semantics
+and factory construction all prescribed in the ticket itself), no new user capability, an unchanged GraphQL
+contract, and a blast radius that is every response body the Experience API produces — the textbook case
+for *a checklist tests the diff, a regression tests the radius*.
+
+**Two deferrals fire anyway**, and neither is a signal failure ([`ticket-routing.md`](../../knowledge/execution/ticket-routing.md) §5d):
+
+| Deferral | VCST-5662 |
+|---|---|
+| the change must be IN the environment | status **In review** ⇒ role `not-fixed`. Three PRs OPEN (x-api#85, x-order#51, x-cart#142), none merged. A blast-radius regression here passes every suite **because the change is absent** |
+| one repo per run | the change spans **three** product repos; §4 resolves a single `--repo` |
+
+**The non-finding is worth as much as the findings.** The ticket declares a *"breaking change (public
+constructors changed)"*, which reads like an exported-surface contradiction and is not one: a public C#
+constructor is **compile-time** API. Nobody exercises it at runtime, a compiler catches its breakage, and no
+storefront suite can see it either way. It is a **machinery claim for §3** — *do the dependent modules still
+build and start?* — which is exactly what the conditional checklist is for. Refusing the class on it would
+have rejected the canonical member of the family.
+
+**What this test corrected:** the §4 row had been loosened to status role `any` one commit earlier, while
+fixing the opposite defect on VCST-4386. `any` admits `not-fixed`, so the flow would have regressed a change
+that is not in the build. The row now excludes that one role and takes every other — **including a re-test
+of something already at `TESTED`**, which was the VCST-4386 problem, since §3's `testable` means *deployed
+for testing* and a tested ticket is deployed. The signal-vs-deferral split is what keeps both fixes from
+fighting: **signals ask whether this is the right FLOW; deferrals ask whether it can run YET.**
+
+---
+
 ## 8. What the dry run corrected (2026-09-16)
 
 The flow was walked end to end against VCST-4386 and VCST-4717 before it was trusted. Six defects, all in

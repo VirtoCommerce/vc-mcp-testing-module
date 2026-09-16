@@ -86,7 +86,7 @@ does not resolve the type rows decide exactly as they always have.
 
 | Canonical type | Status role | **FLOW** | What runs next |
 |---|---|---|---|
-| **any** — with the `technical-change` class (**§5d**) | any | **technical-change** | `1a`·`1b` → Artifact A's **`2a`** triage + `REPAIR` → **a standard `/qa-regression` run over the change's blast radius** (`regression:select` picks the suites; `regression-orchestrator` executes them with the normal runner agents on the normal browser lanes) → **Step 5 in full** (`5a`–`5h`, bugs filed at `5d`), at the FAST cadence. A checklist runs **only if the ticket declares machinery to verify**. Dropped always: the Test Model, case authoring, `3x`, the verifier gates. Methodology: [`skills/qa-test/technical-change.md`](../../skills/qa-test/technical-change.md) |
+| **any** — with the `technical-change` class (**§5d**) | **any EXCEPT `not-fixed`** | **technical-change** | `1a`·`1b` → Artifact A's **`2a`** triage + `REPAIR` → **a standard `/qa-regression` run over the change's blast radius** (`regression:select` picks the suites; `regression-orchestrator` executes them with the normal runner agents on the normal browser lanes) → **Step 5 in full** (`5a`–`5h`, bugs filed at `5d`), at the FAST cadence. A checklist runs **only if the ticket declares machinery to verify**. Dropped always: the Test Model, case authoring, `3x`, the verifier gates. Methodology: [`skills/qa-test/technical-change.md`](../../skills/qa-test/technical-change.md) |
 | **Bug** | `fix-ready` | **verify-fix** | Run `/qa-verify-fix` **inline** — RED→GREEN (3×), regression, VERIFIED/REOPEN. Feature-test Steps 2–5 (authoring/AC-reconcile/promotion) are skipped. |
 | **Bug** | `hotfix-ready` | **hotfix-verify** | STOP with a pointer to `/qa-hotfix-check <key>` (the hotfix delivery/verification flow). |
 | **Bug** | `not-fixed` | **feature-test** (FAST) | Reproduce/characterize live, attach fresh evidence to the ticket; state next = `/qa-fix <key>` (nothing to *verify* yet). |
@@ -354,8 +354,29 @@ hold affirmatively; the third corroborates:
 |---|---|
 | user-facing contract | **unchanged** — GraphQL schema, REST routes and payloads, rendered surfaces, and any other surface a user or integrator can reach |
 | diff shape | one recognisable technical shape: a move / rename / extract / re-export · a dependency, SDK, framework or runtime swap · a build-target, config or tooling change. Typically a manifest change plus call-site churn following **one mechanical pattern** |
-| **exported surface** | **nothing net-new is exported, and nothing exported is removed without an equivalent re-export.** A new page, route, component, extension point or public export is net-new capability however technical the ticket sounds — and unlike the row above it is *mechanically checkable*, so check it first |
+| **exported surface** — *runtime*, not compile-time | **nothing net-new is exported on a surface someone can EXERCISE at runtime, and nothing so exported is removed without an equivalent re-export.** A new page, route, component, extension point or GraphQL/REST operation is net-new capability however technical the ticket sounds — and unlike the row above it is *mechanically checkable*, so check it first. **A breaking change to a compile-time .NET/TS API — a changed public constructor, a removed interface — does NOT contradict this row**: no user or integrator exercises it at runtime, a compiler catches it, and no storefront suite can see it either way. It becomes a **machinery claim for §3's checklist** (*do the dependent modules still build and start?*), which is where it belongs |
 | the ticket | declares no new user capability. ACs, where present, are about the machinery (*does it still emit, still build, still start*) |
+
+**Two DEFERRALS that are not signal failures, and must be checked before the signals.** A change can be
+exactly this shape and still not be runnable yet:
+
+- **The change must be IN the environment.** Status role `not-fixed` (draft / to do / in progress / **in
+  review**) means it is not, and a blast-radius regression against a build that does not contain the change
+  is a false-green machine — every suite passes for the wrong reason. Hence the §4 row excludes that one
+  role rather than taking `any`. Every other role is fine, **including a re-test of something already at
+  `TESTED`**: §3's `testable` means *deployed for testing*, and a tested ticket is deployed.
+- **One repo per run.** §4's regression resolves a single `--repo`, and this repo's developer rules are
+  single-repo throughout. A technical change spanning several product repos — the usual shape of a
+  dependency removal — runs **per repo**, each with its own blast radius, or **STOPs and says so**. It does
+  not silently pick one.
+
+**Worked deferral — VCST-5662** *"Replacing AutoMapper - Wave 4"* (`Task`, **High**). The signals are as
+clean as this class gets: one mechanical pattern (one mapper facade per module, with the naming and null
+semantics prescribed in the ticket), no new user capability, an unchanged GraphQL contract, and a blast
+radius that is every response body in the Experience API. It still does not run: it sits at **In review**
+with **three OPEN PRs** (x-api#85, x-order#51, x-cart#142) and nothing merged, so both deferrals fire at
+once. Its declared *"breaking change (public constructors changed)"* is **not** a third reason — that is
+compile-time API, which the exported-surface row explicitly excludes and §3 picks up as a machinery claim.
 
 **Worked refusal — VCST-4386, and it is the reason the exported-surface row exists.** *"Move skyflow to a
 separate module on frontend"* is a `Task` that reads as a pure extraction, and its ticket text declares no
