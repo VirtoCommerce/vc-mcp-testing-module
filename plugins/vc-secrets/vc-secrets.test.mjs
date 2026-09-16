@@ -1634,6 +1634,409 @@ test("doctorReport: a shim contract below REQUIRED_SHIM_CONTRACT is a WARN", () 
     assert.ok(lines.some((l) => l.startsWith("WARN") && l.includes("install skill")));
 });
 
+// ── oauth verdicts, the tenant check, and the child node floor ──────────────────────────────────
+//
+// The doctorReport shape the tests below share -- a single project-scope oauth entry, merged the way
+// loadConfig actually produces one (home included), matching how the other doctorReport tests in this
+// file build their cfg by hand rather than through loadConfig's file IO.
+const OAUTH_DOCTOR_DECL = { ...OAUTH_DECL, scope: "project", home: "project", kind: "oauth", declaredName: "azure-mcp" };
+const OAUTH_DOCTOR_CFG = {
+    secrets: {}, tasks: {},
+    oauth: { "azure-mcp": OAUTH_DOCTOR_DECL },
+    servers: { "azure-mcp": { command: "npx", args: ["-y"], env: { ADO_MCP_AUTH_TOKEN: "oauth:azure-mcp" } } },
+};
+
+function oauthDoctorLines(overrides = {}) {
+    return m.doctorReport(OAUTH_DOCTOR_CFG, {
+        env: {}, platform: "linux", enableLists: { enabled: [], disabled: [], envKeys: [] },
+        resolvable: {}, skipped: [], toolsMissing: [], wired: new Set(),
+        ...overrides,
+    });
+}
+
+test("doctorReport: a signed-in entry reports OK", () => {
+    const lines = oauthDoctorLines({ oauthStatus: { "azure-mcp": "ok" } });
+    assert.ok(lines.some((l) => l.startsWith("OK") && l.includes("azure-mcp")), lines.join("\n"));
+    assert.ok(!lines.some((l) => l.startsWith("FAIL")), lines.join("\n"));
+});
+
+test("doctorReport: sign-in-required is a normal state, not a FAIL", () => {
+    // The state every developer is in before their first login. Reporting it as a failure makes a
+    // working setup look broken, and the one thing doctor must not do is cry wolf on day one.
+    const lines = oauthDoctorLines({ oauthStatus: { "azure-mcp": "signin-required" } });
+    assert.ok(lines.some((l) => l.includes("vc-secrets login azure-mcp")), lines.join("\n"));
+    assert.ok(!lines.some((l) => l.startsWith("FAIL")), lines.join("\n"));
+});
+
+test("doctorReport: an identity change is named, not reported as a first sign-in", () => {
+    // Same remedy, different cause: a developer who signed in yesterday and is asked again needs to
+    // know the DECLARATION moved under them, or the tool looks like it lost their token.
+    const lines = oauthDoctorLines({ oauthStatus: { "azure-mcp": "identity-changed" } });
+    const line = lines.find((l) => l.includes("azure-mcp"));
+    assert.match(line, /declaration|tenant|client|scope/i);
+    assert.ok(line.includes("vc-secrets login azure-mcp"));
+    assert.ok(!lines.some((l) => l.startsWith("FAIL")), lines.join("\n"));
+});
+
+test("doctorReport: a stale access token with a live refresh token is not a finding", () => {
+    // doctor must not exchange, so "the next launch will renew this" is the honest report. Calling it
+    // a problem would push the developer to log in again for a state that needs nothing.
+    const lines = oauthDoctorLines({ oauthStatus: { "azure-mcp": "needs-refresh" } });
+    assert.ok(!lines.some((l) => l.startsWith("FAIL") || l.includes("vc-secrets login")), lines.join("\n"));
+    assert.ok(lines.some((l) => l.startsWith("OK") && /renew/i.test(l)), lines.join("\n"));
+});
+
+test("doctorReport: a cache that cannot be read at all is a FAIL naming the entry", () => {
+    const lines = oauthDoctorLines({ oauthStatus: { "azure-mcp": "keychain refused: -25308" } });
+    assert.ok(lines.some((l) => l.startsWith("FAIL") && l.includes("azure-mcp") && l.includes("-25308")),
+        lines.join("\n"));
+});
+
+test("doctorReport: a raw cache verdict handed in by mistake still prints no token", () => {
+    // Passing oauthStatusFrom's OUTPUT here proves nothing -- it is the string "ok", so the assertion
+    // holds for every possible implementation. The shape that could actually leak is the verdict
+    // object itself, which is what a future caller would reach for.
+    const lines = oauthDoctorLines({
+        oauthStatus: { "azure-mcp": { state: "valid", accessToken: "SENTINEL-DO-NOT-PRINT" } } });
+    assert.ok(!lines.some((l) => l.includes("SENTINEL-DO-NOT-PRINT")), lines.join("\n"));
+});
+
+test("oauthStatusFrom: a cache verdict becomes a bare status, never the object holding the token", () => {
+    // The one place a token could reach the report: cacheStatus returns the access token beside its
+    // verdict, so passing the verdict through would print it. AC-29 is enforced by the mapping having
+    // no way to carry it, not by remembering to redact.
+    assert.equal(m.oauthStatusFrom({ state: "valid", accessToken: "SENTINEL-DO-NOT-PRINT" }), "ok");
+    assert.equal(m.oauthStatusFrom({ state: "needs-refresh", refreshToken: "SENTINEL" }), "needs-refresh");
+    assert.equal(m.oauthStatusFrom({ state: "absent" }), "signin-required");
+    assert.equal(m.oauthStatusFrom({ state: "identity-mismatch" }), "identity-changed");
+});
+
+test("oauthStatusFrom: a cache state it does not know is loud, not the quietest verdict", () => {
+    // The old catch-all returned "signin-required", which doctor reports as INFO. A state added to
+    // cacheStatus later would then arrive as the most reassuring line the report can print.
+    assert.throws(() => m.oauthStatusFrom({ state: "something-new" }), m.VcSecretsError);
+});
+
+test("doctorReport: a tenant mismatch is a FAIL naming the entry, the organisation and both tenants", () => {
+    const lines = oauthDoctorLines({ oauthStatus: { "azure-mcp": "ok" },
+        tenantChecks: [{ name: "azure-mcp", org: "org-a", declared: "aaa", bound: "bbb" }] });
+    const line = lines.find((l) => /tenant/i.test(l));
+    assert.ok(line.startsWith("FAIL"), line);
+    for (const part of ["azure-mcp", "org-a", "aaa", "bbb"]) {
+        assert.ok(line.includes(part), `${part} missing from: ${line}`);
+    }
+});
+
+test("doctorReport: an unresolved org tenant is unknown, and names the organisation it asked about", () => {
+    // Silence would read as a pass. And the organisation has to appear, because a MISTYPED one answers
+    // with no binding header at all -- measured -- which is otherwise indistinguishable from a network
+    // outage, so the config defect would never be noticed.
+    const lines = oauthDoctorLines({
+        tenantChecks: [{ name: "azure-mcp", org: "typo-org", declared: "aaa", bound: null }] });
+    const line = lines.find((l) => /could not determine/i.test(l));
+    assert.ok(line.startsWith("WARN"), line);
+    assert.ok(line.includes("typo-org"), line);
+    assert.ok(!lines.some((l) => l.startsWith("OK") && /tenant/i.test(l)),
+        "an OK line about the tenant would claim a check that never completed");
+});
+
+test("doctorReport: two oauth entries both get their own tenant finding", () => {
+    // A single overwritten verdict reports only the last, and says nothing about which entry it
+    // belonged to.
+    const lines = oauthDoctorLines({ tenantChecks: [
+        { name: "one", org: "o1", declared: "aaa", bound: "zzz" },
+        { name: "two", org: "o2", declared: "bbb", bound: null },
+    ] });
+    assert.ok(lines.some((l) => l.startsWith("FAIL") && l.includes("one")), lines.join("\n"));
+    assert.ok(lines.some((l) => l.startsWith("WARN") && l.includes("two")), lines.join("\n"));
+});
+
+test("doctorReport: a tenant check with no consumer at all is not applicable, not a WARN that can never pass", () => {
+    // org===null has more than one cause, and only this one is "nothing to check" -- a consumer that
+    // exists but whose argv could not be read is a real misconfiguration (the next test), and folding
+    // both into one WARN would either silence that or turn this one into a WARN that can never clear,
+    // since nothing bound to an organisation exists to satisfy it.
+    const lines = oauthDoctorLines({
+        tenantChecks: [{ name: "azure-mcp", org: null, declared: "aaa", bound: null, applicable: false, reason: "no-consumer" }] });
+    assert.match(lines.join("\n"), /INFO oauth "azure-mcp": nothing launches it -- the tenant check is not applicable/);
+    assert.doesNotMatch(lines.join("\n"), /WARN oauth "azure-mcp"/);
+});
+
+test("doctorReport: a consumer whose argv could not be read still warns, and is not folded into not applicable", () => {
+    // The other half of the org===null distinction: a consumer exists (applicable), organisationFromArgs
+    // simply could not read it. Silence here -- or reporting it the same as "nothing launches it" --
+    // would hide the one case doctor exists to catch: a tenant binding nobody can verify.
+    const lines = oauthDoctorLines({
+        tenantChecks: [{ name: "azure-mcp", org: null, declared: "aaa", bound: null, applicable: true }] });
+    assert.match(lines.join("\n"), /WARN oauth "azure-mcp": could not determine/);
+    assert.doesNotMatch(lines.join("\n"), /not applicable/);
+});
+
+test("doctorReport: a declaration outside Azure DevOps scope is not applicable, with its own line", () => {
+    // Its own line, not the same one "no consumer at all" prints: the two are different facts (a
+    // consumer exists here), and folding them together is the same defect as folding the WARN below
+    // into either of them.
+    const lines = oauthDoctorLines({
+        tenantChecks: [{ name: "azure-mcp", org: null, declared: "aaa", bound: null, applicable: false, reason: "not-ado-scope" }] });
+    assert.match(lines.join("\n"), /INFO oauth "azure-mcp": its scopes are not for Azure DevOps -- the tenant check is not applicable/);
+    assert.doesNotMatch(lines.join("\n"), /nothing launches it/);
+});
+
+test("doctorReport: a not-applicable entry with no reason, or an unknown one, is a FAIL naming the check itself", () => {
+    // The branch is over the two reasons oauthTenantChecks actually produces, not defaulted -- a third
+    // reason added later, or a producer that forgets to set one, must not silently fall into whichever
+    // wording a default happened to pick. That silent fallback is exactly the collapse this whole
+    // not-applicable/reason split exists to prevent, re-entered through a default instead of a branch.
+    for (const reason of [undefined, "some-future-reason"]) {
+        const lines = oauthDoctorLines({
+            tenantChecks: [{ name: "azure-mcp", org: null, declared: "aaa", bound: null, applicable: false, reason }] });
+        assert.match(lines.join("\n"), /FAIL oauth "azure-mcp": not applicable for an unrecognised reason/,
+            `reason=${reason}: ${lines.join("\n")}`);
+    }
+});
+
+test("doctorReport: an oauth verdict names its declaration's winning home", () => {
+    // loadConfig's merge overwrites whole oauth entries rather than accumulating them, so
+    // cfg.oauth["azure-mcp"] is a single object -- with the scope that won the merge -- by the time
+    // doctor sees it, and the verdict line names that scope.
+    const cfg = m.loadConfig(scopedPaths({
+        project: { projectId: "proj-x", oauth: { "azure-mcp": OAUTH_DECL } },
+        local: { oauth: { "azure-mcp": OAUTH_DECL } },
+    }));
+    assert.equal(cfg.oauth["azure-mcp"].home, "local", "local is later in SCOPE_ORDER and wins the merge");
+    const lines = m.doctorReport(cfg, {
+        env: {}, platform: "linux", enableLists: { enabled: [], disabled: [], envKeys: [] },
+        resolvable: {}, skipped: [], toolsMissing: [], wired: new Set(),
+        oauthStatus: { "azure-mcp": "ok" },
+    });
+    const verdict = lines.find((l) => l.startsWith("OK") && l.includes("azure-mcp"));
+    assert.ok(verdict, `expected a verdict line, got:\n${lines.join("\n")}`);
+    assert.match(verdict, /\(local\)/);
+});
+
+test("oauthReferences: a reference inside a task is found, not only inside servers", () => {
+    // This package validates tasks alongside servers everywhere else doctor looks (the "declared"
+    // loop, consumedSecrets), so a task-only reference is exactly the site a servers-only scan would
+    // have missed.
+    const cfg = { servers: {}, tasks: {
+        loadtest: { command: "npx", args: ["-y"], env: { T: "oauth:azure-mcp" } },
+    } };
+    assert.deepEqual(m.oauthReferences(cfg),
+        [{ kind: "tasks", launchableName: "loadtest", envVar: "T", name: "azure-mcp" }]);
+});
+
+// ── oauthTenantChecks: which consumer answers for an entry, and whether it is even worth asking ────
+//
+// A real Azure DevOps MCP scope: the App ID GUID (a public Microsoft resource identifier, not a
+// client identifier -- see the constant's own comment in vc-secrets.mjs) plus offline_access, which
+// a REAL declaration needs to get a refresh token at all (README.md) -- loadConfig itself does not
+// check for it, so its absence here would not make this fixture invalid, only unrealistic.
+const ADO_SCOPES = ["499b84ac-1321-427f-aa17-267ca6975798/.default", "offline_access"];
+
+test("oauthTenantChecks: a task-only consumer's organisation is read from its own args", async () => {
+    const cfg = { secrets: {}, servers: {}, tasks: {
+        loadtest: { command: "npx", args: ["-y", "@azure-devops/mcp@2.9.0", "org-a"], env: { T: "oauth:azure-mcp" } },
+    }, oauth: { "azure-mcp": { tenantId: "aaa", scopes: ADO_SCOPES } } };
+    const checks = await m.oauthTenantChecks(cfg, m.oauthReferences(cfg), { resolveOrgTenant: async () => "aaa" });
+    assert.deepEqual(checks, [{ name: "azure-mcp", org: "org-a", declared: "aaa", applicable: true, bound: "aaa" }]);
+});
+
+test("oauthTenantChecks: a server matched by name whose argv cannot be read is applicable, with no organisation", async () => {
+    const cfg = { secrets: {}, tasks: {},
+        servers: { "azure-mcp": { command: "npx", args: ["-y"], env: {} } },
+        oauth: { "azure-mcp": { tenantId: "aaa", scopes: ADO_SCOPES } } };
+    let called = false;
+    const checks = await m.oauthTenantChecks(cfg, m.oauthReferences(cfg),
+        { resolveOrgTenant: async () => { called = true; return "zzz"; } });
+    assert.deepEqual(checks, [{ name: "azure-mcp", org: null, declared: "aaa", applicable: true, bound: null }]);
+    assert.equal(called, false, "resolveOrgTenant must not be called when there is no organisation to ask about");
+});
+
+test("oauthTenantChecks: no consumer at all is not applicable, and says so as its own reason", async () => {
+    const cfg = { secrets: {}, servers: {}, tasks: {}, oauth: { "azure-mcp": { tenantId: "aaa", scopes: ADO_SCOPES } } };
+    const checks = await m.oauthTenantChecks(cfg, m.oauthReferences(cfg),
+        { resolveOrgTenant: async () => { throw new Error("must not be called"); } });
+    assert.deepEqual(checks, [{ name: "azure-mcp", org: null, declared: "aaa", applicable: false, reason: "no-consumer", bound: null }]);
+});
+
+test("oauthTenantChecks: a reference to the entry wins over a same-named server", async () => {
+    // The by-name fallback exists for the pre-switch phase, when nothing references the entry yet.
+    // Once a reference exists it is authoritative -- an unrelated server that merely shares the
+    // entry's name must not out-vote it.
+    const cfg = { secrets: {}, tasks: {},
+        servers: {
+            "azure-mcp": { command: "npx", args: ["-y", "wrong-org"], env: {} },
+            other: { command: "npx", args: ["-y", "right-org"], env: { T: "oauth:azure-mcp" } },
+        },
+        oauth: { "azure-mcp": { tenantId: "aaa", scopes: ADO_SCOPES } } };
+    const checks = await m.oauthTenantChecks(cfg, m.oauthReferences(cfg),
+        { resolveOrgTenant: async (org) => (org === "right-org" ? "aaa" : "zzz") });
+    assert.equal(checks[0].org, "right-org", "the reference's own launchable must win over the same-named server");
+});
+
+test("oauthTenantChecks: a consumer exists but its scopes are not for Azure DevOps -- not applicable, its own reason", async () => {
+    const cfg = { secrets: {}, tasks: {},
+        servers: { "azure-mcp": { command: "npx", args: ["-y", "org-a"], env: {} } },
+        oauth: { "azure-mcp": { tenantId: "aaa", scopes: ["https://graph.microsoft.com/.default"] } } };
+    const checks = await m.oauthTenantChecks(cfg, m.oauthReferences(cfg),
+        { resolveOrgTenant: async () => { throw new Error("must not be called"); } });
+    assert.deepEqual(checks, [{ name: "azure-mcp", org: null, declared: "aaa", applicable: false, reason: "not-ado-scope", bound: null }]);
+});
+
+test("oauthTenantChecks: the Azure DevOps resource match is case-insensitive and tolerates a /.default or /user_impersonation suffix", async () => {
+    const consumer = { command: "npx", args: ["-y", "org-a"], env: {} };
+    for (const scope of [
+        "499B84AC-1321-427F-AA17-267CA6975798/.default",
+        "https://app.vssps.visualstudio.com/user_impersonation",
+        "APP.VSSPS.VISUALSTUDIO.COM/.default",
+    ]) {
+        const cfg = { secrets: {}, tasks: {}, servers: { "azure-mcp": consumer },
+            oauth: { "azure-mcp": { tenantId: "aaa", scopes: [scope] } } };
+        const checks = await m.oauthTenantChecks(cfg, m.oauthReferences(cfg), { resolveOrgTenant: async () => "aaa" });
+        assert.equal(checks[0].applicable, true, `${scope} should be recognised as Azure DevOps`);
+    }
+});
+
+test("organisationFromArgs: the organisation is the first positional the server takes", () => {
+    // Derived rather than declared a second time: the argv is where the organisation already lives,
+    // and a copy in the oauth block could disagree with it silently.
+    assert.equal(m.organisationFromArgs(["-y", "@azure-devops/mcp@2.9.0", "org-a", "-a", "envvar"]), "org-a");
+    assert.equal(m.organisationFromArgs(["-y", "@azure-devops/mcp@2.9.0", "org-a", "-t", "a-tenant"]), "org-a");
+});
+
+test("organisationFromArgs: an argv it cannot read yields null rather than a guess", () => {
+    // null routes to "could not determine", which is a reported state. A guess would let doctor
+    // compare the declared tenant against the wrong organisation and report agreement.
+    assert.equal(m.organisationFromArgs(["-y", "@azure-devops/mcp@2.9.0"]), null);
+    assert.equal(m.organisationFromArgs([]), null);
+    assert.equal(m.organisationFromArgs(["-a", "envvar"]), null);
+});
+
+test("organisationFromArgs: a valueless flag before the organisation does not swallow it", () => {
+    // The generic "every flag takes a value" rule ate the organisation whenever an unknown valueless
+    // flag preceded it, and the result was the same WARN a network outage produces.
+    assert.equal(m.organisationFromArgs(["-y", "@azure-devops/mcp@2.9.0", "--silent", "org-a"]), "org-a");
+    assert.equal(m.organisationFromArgs(["-y", "@azure-devops/mcp@2.9.0", "-a", "envvar", "org-a"]), "org-a",
+        "a flag that does take a value still consumes it");
+});
+
+test("resolveOrgTenant: reads the binding header, and answers null when it cannot", async () => {
+    const withHeader = await m.resolveOrgTenant("org-a", { request: async () => ({ headers: new Map([["x-vss-resourcetenant", "t-1"]]) }) });
+    assert.equal(withHeader, "t-1");
+    const noHeader = await m.resolveOrgTenant("org-a", { request: async () => ({ headers: new Map() }) });
+    assert.equal(noHeader, null);
+    const offline = await m.resolveOrgTenant("org-a", { request: async () => { throw new Error("ENOTFOUND"); } });
+    assert.equal(offline, null, "an unreachable endpoint is unknown, never a match");
+});
+
+test("resolveOrgTenant: the organisation is encoded into the URL, not concatenated", async () => {
+    let seen = null;
+    await m.resolveOrgTenant("a org/../x", { request: async (url) => { seen = url; return { headers: new Map() }; } });
+    assert.ok(!seen.includes("../"), `path traversal reached the URL: ${seen}`);
+    assert.ok(seen.startsWith("https://vssps.dev.azure.com/"), seen);
+});
+
+test("resolveOrgTenant: the request is bounded, because doctor prints nothing until it returns", async () => {
+    // Measured: a host that completes the handshake and then says nothing left the promise pending
+    // past 73s -- undici waits out a 300s headers timeout, and cmdDoctor emits its whole report in one
+    // write after this await. A developer diagnosing a broken setup reads that as doctor hanging.
+    let opts = null;
+    await m.resolveOrgTenant("org-a", { request: async (url, o) => { opts = o; return { headers: new Map() }; } });
+    assert.equal(opts.method, "HEAD");
+    assert.ok(opts.signal instanceof AbortSignal, "an unbounded fetch is what makes doctor look hung");
+});
+
+test("resolveOrgTenant: an empty binding header is unknown, not a tenant of the empty string", async () => {
+    const empty = await m.resolveOrgTenant("org-a", { request: async () => ({ headers: new Map([["x-vss-resourcetenant", ""]]) }) });
+    assert.equal(empty, null, '"" would be compared against the declared tenantId and reported as a mismatch');
+});
+
+test("doctorReport: a child node below the flag floor is a FAIL naming the floor", () => {
+    const lines = oauthDoctorLines({ childNode: "v18.17.1" });
+    assert.ok(lines.some((l) => l.startsWith("FAIL") && l.includes("18.18.0") && l.includes("v18.17.1")),
+        lines.join("\n"));
+});
+
+test("doctorReport: a child node AT the floor is not a finding", () => {
+    for (const version of ["v18.18.0", "v20.5.1", "v22.22.0"]) {
+        const lines = oauthDoctorLines({ childNode: version });
+        assert.ok(!lines.some((l) => l.startsWith("FAIL")), `${version}: ${lines.join("\n")}`);
+    }
+});
+
+test("doctorReport: a child node that could not be run at all still names what it saw", () => {
+    // childNodeVersionIo returns "" when spawnSync fails outright, and "" is not null, so the guard
+    // still fires -- but "" IS the bug: rendered bare it produces "reports , which predates", a blank
+    // slot where a version belongs. `childNode || "no version"` is what turns that blank into a word.
+    const lines = oauthDoctorLines({ childNode: "" });
+    const line = lines.find((l) => l.startsWith("FAIL"));
+    assert.match(line, /no version/);
+    assert.ok(!/reports , which/.test(line), line);
+});
+
+test("cmdDoctor: the oauth checks are wired to the report, not merely available", () => {
+    // Both halves tested and the seam between them not: computing oauthStatus and forgetting to pass
+    // it leaves every test above green while doctor reports nothing. Source-inspected because
+    // cmdDoctor performs real keystore io -- a behavioural test here would need a live backend.
+    const source = fs.readFileSync(LAUNCHER_PATH, "utf8");
+    const call = source.match(/const lines = doctorReport\(cfg, \{[\s\S]*?\}\);/);
+    assert.ok(call, "the doctorReport call site moved");
+    for (const key of ["oauthStatus", "tenantChecks", "childNode"]) {
+        assert.match(call[0], new RegExp(`\\b${key}\\b`), `${key} is computed but never passed`);
+    }
+});
+
+test("cmdDoctor: nothing on the doctor path can exchange a token", () => {
+    // AC-25 as a property of the code rather than of one run: proving a token is refreshable would
+    // rotate the refresh token as a side effect of a diagnostic, and the rotation is irreversible.
+    const source = fs.readFileSync(LAUNCHER_PATH, "utf8");
+    const bodyOf = (name) => {
+        const start = source.indexOf(name);
+        assert.notEqual(start, -1, `${name} moved`);
+
+        return source.slice(start, source.indexOf("\n}\n", start));
+    };
+    // Both halves of the path, because the risk lives in the half cmdDoctor CALLS: making readCache
+    // exchange on needs-refresh -- which is what ensureFreshToken does -- would leave a test that only
+    // reads cmdDoctor green. A call shape rather than the bare word, so a comment mentioning the
+    // exchange cannot fail it.
+    assert.ok(!/\bexchange\(/.test(bodyOf("async function cmdDoctor")), "cmdDoctor must not reach the exchange");
+    const readCacheStart = source.indexOf("readCache: async () => {");
+    assert.notEqual(readCacheStart, -1, "readCache moved");
+    const readCacheBody = source.slice(readCacheStart, source.indexOf("writeCache:", readCacheStart));
+    assert.ok(!/\bexchange\(/.test(readCacheBody),
+        "readCache is the half cmdDoctor CALLS -- an exchange added there would leave a cmdDoctor-only test green");
+    assert.ok(/readCache\(\)/.test(bodyOf("async function cmdDoctor")), "it reads the cache");
+});
+
+test("oauthTenantChecks: driven by the declaration, preferring the reference once one exists", () => {
+    // The reference appears only with the switch, and a tenant-binding mistake is worth catching at
+    // SETUP -- otherwise the one check that turns it into a named finding stays dormant through
+    // exactly the phase where someone would fix it cheaply. Source-inspected for the property that a
+    // behavioural test cannot pin on its own: THIS is the loop cmdDoctor calls, not a lookalike.
+    const source = fs.readFileSync(LAUNCHER_PATH, "utf8");
+    const start = source.indexOf("async function oauthTenantChecks");
+    const body = source.slice(start, source.indexOf("\n}\n", start));
+    assert.notEqual(body, "", "oauthTenantChecks moved");
+    assert.match(body, /Object\.entries\(cfg\.oauth/, "the tenant loop must be driven by the declaration");
+    assert.match(body, /references\.find/, "and still prefer the reference once one exists");
+    assert.match(source, /const tenantChecks = await oauthTenantChecks\(cfg, references\)/,
+        "cmdDoctor must call this function, not a private copy of its loop");
+});
+
+test("cmdDoctor: the oauth status read passes cfg through to oauthLaunchDeps, not a two-argument call", () => {
+    // A two-argument call is legal here too (cfg is a plain positional with no runtime
+    // default), so a copy of the source's single-project call would compile and run for a user-scope
+    // entry and throw for a project-scope one -- caught by cmdDoctor's own try/catch, but reported as
+    // an opaque "Cannot read properties of undefined" instead of the sign-in state a developer could
+    // act on.
+    const source = fs.readFileSync(LAUNCHER_PATH, "utf8");
+    const start = source.indexOf("async function cmdDoctor");
+    const body = source.slice(start, source.indexOf("\n}\n", start));
+    assert.match(body, /oauthLaunchDeps\(name, decl, cfg\)/,
+        "the oauth status loop must pass cfg -- oauthEntryKeys needs it to build the namespaced key");
+});
+
 test("readEnableLists: the two arrays plus env key NAMES; missing file tolerated", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-lists-"));
     tmpDirs.push(dir);

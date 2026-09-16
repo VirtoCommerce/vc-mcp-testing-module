@@ -788,6 +788,12 @@ async function resolveEnvEntries(name, cfg, resolveSecret, kind = "servers") {
 
 const TIMEOUT_LOCAL_MS = 10_000;
 const TIMEOUT_AZ_MS = 20_000;
+// Bounded, because a host that completes the handshake and then says nothing -- captive portal,
+// half-up VPN, intercepting proxy -- is not a connect failure: undici waits out its 300s headers
+// timeout, and doctor prints NOTHING until every check has finished. Measured against a server that
+// accepts and never answers: the request was still pending past 73s. A diagnostic that looks hung is
+// worse than one that reports "unknown".
+const TIMEOUT_TENANT_MS = 5_000;
 const LOCAL_BACKENDS = ["wcm", "keychain", "gpg"];
 const VALUE_ON_STDIN = "<VALUE_ON_STDIN>";
 // The whole command goes on stdin, not just the value: `security` has no stdin path for a password, but
@@ -2735,7 +2741,152 @@ function readWiredElsewhere(paths, seen = [], problems = []) {
     return names;
 }
 
-function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, toolsMissing, wired, configDirOverride, legacyOnly = [], shimContract = null, wiringProblems = [], clientConfigsSeen = [] }) {
+// A verdict, never the object carrying it. cacheStatus returns the access token beside its state, so
+// handing that object to the report is the one path by which a token could reach a printed line --
+// the mapping simply has no way to carry it, which is stronger than remembering to redact.
+function oauthStatusFrom(status) {
+    if (status.state === "valid") {
+        return "ok";
+    }
+    if (status.state === "needs-refresh") {
+        return "needs-refresh";
+    }
+    if (status.state === "identity-mismatch") {
+        // Same remedy as a first sign-in, different cause. A developer who signed in yesterday and is
+        // asked again needs to know the DECLARATION moved, or the tool looks like it lost the token it
+        // was trusted with.
+        return "identity-changed";
+    }
+    if (status.state === "absent") {
+        return "signin-required";
+    }
+    // Not a catch-all: a state added to cacheStatus later would otherwise arrive here as the QUIETEST
+    // verdict this function can return, and a new failure mode would report as INFO.
+    throw new VcSecretsError(`unknown cache state "${status.state}"`);
+}
+
+// Every oauth reference in the config, with the launchable kind and name that carry it, and the env
+// var. Pure, because two callers need it -- the tenant check and the node-floor check -- and neither
+// should resolve a secret to find out. Servers AND tasks: a task carries the same env references a
+// server does, and doctor's own "declared" loop already checks both for the identical reason.
+function oauthReferences(cfg) {
+    const found = [];
+    for (const [kind, map] of [["servers", cfg.servers], ["tasks", cfg.tasks ?? {}]]) {
+        for (const [launchableName, launchable] of Object.entries(map)) {
+            for (const [envVar, value] of Object.entries(launchable.env)) {
+                let ref = null;
+                try {
+                    ref = parseReference(value);
+                } catch {
+                    continue;   // a malformed reference is already its own finding
+                }
+                if (ref?.kind === "oauth") {
+                    found.push({ kind, launchableName, envVar, name: ref.name });
+                }
+            }
+        }
+    }
+
+    return found;
+}
+
+// The organisation the launchable is run against, read from the argv that already carries it.
+// Declaring it a second time in the oauth block would be the same fact in two places with nothing
+// keeping them in agreement -- and the divergence would make doctor compare the declared tenant
+// against the wrong organisation and report agreement.
+const ORG_FLAGS_WITH_VALUE = ["-a", "--auth", "-t", "--tenant", "-d", "--domains"];
+
+function organisationFromArgs(args) {
+    for (let i = 0; i < args.length; i += 1) {
+        const arg = args[i];
+        if (ORG_FLAGS_WITH_VALUE.includes(arg)) {
+            i += 1;   // named rather than assumed: a generic "every flag takes a value" rule
+            continue;  // swallows the organisation whenever a valueless flag precedes it
+        }
+        if (arg.startsWith("-")) {
+            continue;
+        }
+        if (arg.includes("@") || arg.includes("/") || arg.includes("\\")) {
+            continue;   // the package spec, or a path
+        }
+
+        return arg;
+    }
+
+    return null;   // unreadable: reported as "could not determine", never guessed
+}
+
+// One unauthenticated HEAD, with no fallback to any previously-resolved value on failure: caching the
+// last answer across calls would let doctor report agreement from a stale tenant on a network hiccup
+// -- the diagnostic passing while the very mismatch it exists to catch stays invisible.
+async function resolveOrgTenant(org, { request = fetch } = {}) {
+    try {
+        const res = await request(`https://vssps.dev.azure.com/${encodeURIComponent(org)}`,
+            { method: "HEAD", signal: AbortSignal.timeout(TIMEOUT_TENANT_MS) });
+
+        // `|| null` rather than `??`: an EMPTY header is not an answer either, and letting "" through
+        // renders a mismatch against a blank organisation tenant.
+        return res.headers.get("x-vss-resourcetenant") || null;
+    } catch {
+        return null;   // unreachable, or too slow to be worth waiting for: "unknown", never a match
+    }
+}
+
+// resolveOrgTenant reads an Azure DevOps endpoint's binding header, so the tenant check means
+// something only for a token issued against that resource -- for any other resource there is no
+// organisation tenant to compare against, and running the check anyway would either print a WARN
+// that can never clear or, on a coincidental match, FAIL a correctly-configured entry. The App ID
+// GUID and the URL form are both Microsoft's own public identifiers for the Azure DevOps resource
+// (documented at learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/
+// service-principal-managed-identity), not a client identifier or app registration -- carrying it
+// here does not violate the "no tenant id, client id, organisation or app-registration name
+// hardcoded" constraint.
+//
+// Lowercase, matching the .toLowerCase() comparison below: a marker added here in mixed case would
+// silently never match, so keep every entry already lowercase rather than relying on the call site.
+const AZURE_DEVOPS_RESOURCE_MARKERS = ["499b84ac-1321-427f-aa17-267ca6975798", "app.vssps.visualstudio.com"];
+
+function isAzureDevOpsScoped(scopes) {
+    return scopes.some((scope) => AZURE_DEVOPS_RESOURCE_MARKERS.some((marker) => scope.toLowerCase().includes(marker)));
+}
+
+// Extracted from cmdDoctor so applicability -- which consumer answers for an oauth entry, if any,
+// whether its declaration is even for the right resource, and whether its argv could be read -- has a
+// test surface that needs no keystore access. cmdDoctor calls this with no third argument, so the
+// real resolveOrgTenant comes from the parameter's own default; a test passes a stub instead, to
+// avoid a network call.
+async function oauthTenantChecks(cfg, references, { resolveOrgTenant: resolve = resolveOrgTenant } = {}) {
+    const checks = [];
+    for (const [name, decl] of Object.entries(cfg.oauth ?? {})) {
+        // Driven by the DECLARATION, not by the reference: the reference only appears with the
+        // switch, and a tenant-binding mistake is worth catching at setup, before the switch lands.
+        // The reference wins when one exists (it is authoritative); otherwise the consuming
+        // launchable is found by the "vc-secrets login <name>" convention -- a SERVER whose name
+        // equals the entry's, never a task, since nothing launches a task by that convention.
+        const ref = references.find((r) => r.name === name);
+        const consumerKind = ref ? ref.kind : (Object.hasOwn(cfg.servers, name) ? "servers" : null);
+        const consumerName = ref ? ref.launchableName : (consumerKind === "servers" ? name : null);
+        const hasConsumer = consumerKind !== null;
+        const adoScoped = isAzureDevOpsScoped(decl.scopes);
+        // Not applicable, not a WARN that can never pass -- and the causes must not collapse into one
+        // line: "nothing launches it" (no consumer at all -- there is no argv to read in the first
+        // place) is a different fact from "a consumer exists but its token is not for Azure DevOps"
+        // (nothing for resolveOrgTenant to check), and both differ again from "a consumer exists, is
+        // ADO-scoped, and its argv could not be read" (the WARN doctorReport prints below).
+        const applicable = hasConsumer && adoScoped;
+        const org = applicable ? organisationFromArgs(cfg[consumerKind][consumerName].args) : null;
+        const check = { name, org, declared: decl.tenantId, applicable,
+            bound: org === null ? null : await resolve(org) };
+        if (!applicable) {
+            check.reason = hasConsumer ? "not-ado-scope" : "no-consumer";
+        }
+        checks.push(check);
+    }
+
+    return checks;
+}
+
+function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, toolsMissing, wired, configDirOverride, legacyOnly = [], shimContract = null, wiringProblems = [], clientConfigsSeen = [], oauthStatus = {}, tenantChecks = [], childNode = null }) {
     const lines = [];
     const loadedFiles = Object.entries(cfg.files ?? {}).map(([scope, file]) => `${scope}=${file}`).join(", ");
     if (loadedFiles) {
@@ -2813,6 +2964,68 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
     }
     for (const name of skipped) {
         lines.push(`SKIP secret "${name}" (keyvault) -- no enabled server consumes it; use --all to force`);
+    }
+    for (const [name, status] of Object.entries(oauthStatus)) {
+        // The home is part of the verdict, not decoration: cfg.oauth merges config scopes (user,
+        // project, local) into one entry per name -- loadConfig overwrites, it does not accumulate --
+        // so there is exactly one verdict to print per name, and it is printed the way the crossing
+        // lines below already print a home.
+        const home = cfg.oauth?.[name]?.home;
+        if (status === "ok") {
+            lines.push(`OK oauth "${name}" (${home}) signed in`);
+        } else if (status === "needs-refresh") {
+            // Not a finding: doctor does not exchange, so the honest report is that the next launch
+            // will. Calling it a problem sends a developer to log in again for a state that needs
+            // nothing from them.
+            lines.push(`OK oauth "${name}" (${home}) signed in -- the access token is stale and the next launch will renew it`);
+        } else if (status === "signin-required") {
+            lines.push(`INFO oauth "${name}" (${home}) not signed in -- run "vc-secrets login ${name}"`);
+        } else if (status === "identity-changed") {
+            lines.push(`INFO oauth "${name}" (${home}): the declaration changed since sign-in (tenant, client or scopes) -- run "vc-secrets login ${name}"`);
+        } else {
+            lines.push(`FAIL oauth "${name}" (${home}) cache could not be read -- ${status}`);
+        }
+    }
+    // A list rather than one verdict: with two oauth entries a single variable reports only the last,
+    // and the line would not say which entry it belonged to.
+    for (const { name, org, declared, bound, applicable = true, reason } of tenantChecks) {
+        if (!applicable) {
+            // Reported, not silently skipped over: silence here reads as "checked, nothing to say".
+            // Two distinct lines, not one -- "nothing launches it" and "not scoped for Azure DevOps"
+            // are different facts about why there is nothing to check, and collapsing them into one
+            // wording would also collapse them with the WARN below (a consumer that DOES apply, but
+            // whose argv could not be read), which is the one case that must stay a visible finding.
+            // Branched over the known reasons rather than defaulted, so a third reason added later --
+            // or a producer that forgets to set one -- reports itself as unrecognised instead of
+            // silently printing whichever wording the default happened to pick.
+            if (reason === "no-consumer") {
+                lines.push(`INFO oauth "${name}": nothing launches it -- the tenant check is not applicable`);
+            } else if (reason === "not-ado-scope") {
+                lines.push(`INFO oauth "${name}": its scopes are not for Azure DevOps -- the tenant check is not applicable`);
+            } else {
+                lines.push(`FAIL oauth "${name}": not applicable for an unrecognised reason "${reason}" -- this is a bug in the check itself`);
+            }
+            continue;
+        }
+        if (bound === null) {
+            // Reported rather than skipped: silence here reads as a pass, and the whole value of the
+            // check is turning a tenant-binding mistake into a named finding at setup instead of an
+            // opaque authorization failure weeks later.
+            //
+            // The ORGANISATION is named because it is the value that separates the two causes: a
+            // mistyped organisation answers with no binding header at all, which is otherwise
+            // indistinguishable from a network outage -- measured, an organisation that does not exist
+            // returns 404 with the header absent, exactly as an unreachable host does.
+            lines.push(`WARN oauth "${name}": could not determine the tenant of organisation `
+                + `"${org ?? "(its consumer's argv did not name one)"}" -- the declared tenantId is unverified`);
+        } else if (bound.toLowerCase() !== declared.toLowerCase()) {
+            lines.push(`FAIL oauth "${name}": declared tenantId ${declared} is not the tenant organisation `
+                + `"${org}" is bound to (${bound}) -- delegated tokens only work where the two agree`);
+        }
+    }
+    if (childNode !== null && !childNodeSupportsImport(childNode)) {
+        lines.push(`FAIL the node that will run the oauth server reports ${childNode || "no version"}, which predates `
+            + `--import (${NODE_IMPORT_FLOOR.join(".")}) -- a renewed token could not be delivered to it`);
     }
     // Tasks carry the same env references as servers, so an unchecked task would be the one place a
     // typo'd or undeclared reference survives until someone actually runs it.
@@ -2995,10 +3208,34 @@ async function cmdDoctor(cfg, flags = []) {
         && (checkAll || [...consumed].some((n) => cfg.secrets[n]?.backend === "keyvault"));
     const toolsMissing = [...backendTools, ...(needsAz ? ["az"] : [])].filter((t) => !commandOnPath(t));
 
+    // Read, never exchanged: proving a token is refreshable would rotate the refresh token as a side
+    // effect of a diagnostic -- and Entra rotates on use, which signs out every session but one.
+    const oauthStatus = {};
+    for (const [name, decl] of Object.entries(cfg.oauth ?? {})) {
+        try {
+            // cfg passed through (unlike the source's two-argument call): oauthEntryKeys needs it to
+            // build a project-scope key -- keyFor reads cfg.projectId whenever decl.scope is not
+            // "user". Drop it and a project-scope entry throws before the read ever reaches the
+            // keystore; caught below, but reported as an opaque "Cannot read properties of undefined"
+            // instead of the sign-in state a developer could act on.
+            oauthStatus[name] = oauthStatusFrom(await oauthLaunchDeps(name, decl, cfg).readCache());
+        } catch (e) {
+            oauthStatus[name] = e?.message ?? "unreadable";
+        }
+    }
+
+    const references = oauthReferences(cfg);
+    const tenantChecks = await oauthTenantChecks(cfg, references);
+
+    // Only where an oauth reference exists: before the switch no child needs --import at all, and a
+    // FAIL about a flag nothing uses would be a diagnostic inventing its own problem.
+    const childNode = references.length > 0 ? childNodeVersionIo() : null;
+
     const lines = doctorReport(cfg, {
         env: process.env, platform: process.platform, enableLists, resolvable, skipped,
         toolsMissing, wired, configDirOverride: Boolean(process.env.VC_SECRETS_CONFIG_DIR), legacyOnly,
         shimContract: activeShimContract, wiringProblems, clientConfigsSeen,
+        oauthStatus, tenantChecks, childNode,
     });
     // sync write: stderr is an async pipe on Windows, and process.exit abandons pending writes
     fs.writeSync(2, lines.join("\n") + "\n");
@@ -3386,7 +3623,8 @@ export {
     runCli, REQUIRED_SHIM_CONTRACT,
     VcSecretsError, REF_RE, parseReference, parseLiteral, LITERAL_PREFIX, CONFIG_NAME, LOCAL_CONFIG_NAME, KEY_PREFIX,
     SCHEMA_VERSION, SCOPE_ORDER, configPaths, parseConfigFile, loadConfig, keyFor, keyToPath, legacyKeyToPath,
-    oauthEntryKeys, oauthKeyClashes,
+    oauthEntryKeys, oauthKeyClashes, oauthStatusFrom, oauthReferences, oauthTenantChecks,
+    ORG_FLAGS_WITH_VALUE, organisationFromArgs, resolveOrgTenant, TIMEOUT_TENANT_MS,
     resolveEnvEntries, detectLocalBackend, redactSecrets, secretsDir, psEncode, psCommand, PS_CRED_READ, PS_CRED_WRITE,
     PS_CRED_DELETE, decodeCredBlobHex, buildLocalRead, buildLocalWrite, buildLocalDelete, deleteEntryIo,
     buildKeyvaultRead, TIMEOUT_LOCAL_MS, TIMEOUT_AZ_MS, VALUE_ON_STDIN,
