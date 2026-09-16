@@ -67,32 +67,64 @@ pool.
 
 ---
 
-## 2. `1a` — resolve the change, by a ladder
+## 2. `1a` — resolve the change, by a ladder, then READ THE DIFF
 
-The classifier reads the change and nothing else (`ticket-routing.md` §5d), so `1a` must end holding real
-evidence of what moved. **A linked PR is not the only source and is often not an available one**: on
-VCST-4717 the four pull requests exist only inside Jira's `development` custom field, as an escaped-JSON
-summary carrying a *count* and no URLs, reachable only through an all-fields fetch that returns ~76,000
-characters. A run that checks `issuelinks`, finds no PR and stops has established nothing.
+**The ticket is not evidence. The diff is.** A title states what someone intended; only the file list states
+what changed, and on the one ticket where the two were compared they disagreed enough to matter — §7a.
+Every signal in `ticket-routing.md` §5d is evaluated against the **file list**, never against the summary.
+
+### 2.1 Find the change
+
+The classifier reads the change and nothing else, so `1a` must end holding real file paths. **A linked PR is
+not the only source and is often not an available one**: on VCST-4717 the pull requests exist inside Jira's
+`development` custom field as an escaped-JSON summary carrying a *count* and no URLs, reachable only through
+an all-fields fetch returning ~76,000 characters. A run that checks `issuelinks`, finds no PR and stops has
+established nothing.
 
 **Work the ladder in order; stop at the first rung that yields file paths.**
 
 | # | Rung | How |
 |---|---|---|
-| 1 | an explicit PR URL in `issuelinks`, the description, or the comments | read it, then `gh pr diff <n> --name-only` |
-| 2 | the product repo's own history, by ticket key | `git log --all --oneline --grep=<TICKET>` in the routed checkout, then `git show --name-only` |
-| 3 | an open or merged PR searched by key | `gh pr list --repo <routed repo> --search <TICKET> --state all` |
-| 4 | the paths the **ticket itself names** | VCST-4386's description names the frontend modules directory and the module being moved; that is a path, and it is evidence |
+| 1 | an explicit PR URL in `issuelinks`, the **description**, or the **comments** | read it, then `gh pr diff <n> --repo <r> --name-only` |
+| 2 | **an org-wide PR search by ticket key** — the rung that works when you do not know the repo | `gh search prs --owner VirtoCommerce "<TICKET>" --limit 10 --json number,title,state,repository` |
+| 3 | the product repo's own history, by ticket key | `git log --all --oneline --grep=<TICKET>` in the routed checkout, then `git show --name-only` |
+| 4 | the paths the **ticket itself names** | a description naming a module directory is a path, and it is evidence — but the weakest rung, so say you are standing on it |
+
+**Rung 2 is second because a technical change is routinely multi-repo and you cannot guess the repos.**
+Measured 2026-09-16: `gh pr list --repo <guess> --search VCST-5662` returned `[]` against four plausible
+repos in a row, while the org-wide search returned the three real PRs (`x-api#85`, `x-order#51`,
+`x-cart#142`) immediately. The same search found VCST-4717's five across four repos. A repo-scoped search
+that returns nothing is evidence about your guess, **not** about the ticket.
 
 **If every rung fails, the classifier is unresolved** — §5d's *no change to read ⇒ NOT this flow* — so route
 by type and run the feature test. The ladder makes that conclusion earned rather than incidental; it does
 not soften it.
 
-**The classifier needs the change; the REGRESSION does not.** These are separate resolutions, and conflating
-them is what breaks a run. `regression:select` refuses a PR reference outright
-([`regression-selection.md`](../../knowledge/execution/regression-selection.md) — *"a PR reference, a
-changelog version and a ticket key return `null`"*), and `tc:scope` scopes off the **manifest's own
-vocabulary**, not off paths at all. §4 and §5 resolve their own scope; neither is ever handed a ticket key.
+### 2.2 Read the diff — two things the file list is checked for
+
+**A. Net-new runtime surface, which refuses the class.** A page, route, component, extension point or
+GraphQL/REST operation that did not exist before is new capability however technical the ticket sounds. It
+is the *mechanically checkable* signal — it either appears in the file list or it does not — so check it
+first, before the judgment-shaped "is the contract unchanged?" question. §7a is the case that earns this
+paragraph.
+
+**B. Size, not just filename — a touched path is not a changed contract.** A filename says which
+*subsystem* moved; only the line counts say whether its *contract* did. Measured on VCST-5662: its PRs touch
+`Schemas/OrderLineItemType.cs`, `Schemas/PaymentType.cs` and `Schemas/ShipmentType.cs`, which read as
+GraphQL schema definitions and would refuse the class on filename alone. At **+6/−9 across 5 files** they
+are constructor injection — the field definitions are untouched and the contract is intact. Open the diff
+body whenever a filename suggests a contract and the line count does not.
+
+The inverse holds too, and is the more dangerous direction: VCST-4386's `+ pages/saved-credit-cards.vue` is
+a single added file that refuses the class outright. **One new page outweighs sixty moved ones.**
+
+### 2.3 The classifier needs the change; the REGRESSION does not
+
+These are separate resolutions, and conflating them is what breaks a run. `regression:select` refuses a PR
+reference outright ([`regression-selection.md`](../../knowledge/execution/regression-selection.md) — *"a PR
+reference, a changelog version and a ticket key return `null`"*), and `tc:scope` scopes off the **manifest's
+own vocabulary**, not off paths at all. §4 and §5 resolve their own scope; neither is ever handed a ticket
+key.
 
 ---
 
