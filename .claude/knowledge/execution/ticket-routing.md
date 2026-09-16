@@ -370,6 +370,14 @@ exactly this shape and still not be runnable yet:
   dependency removal — runs **per repo**, each with its own blast radius, or **STOPs and says so**. It does
   not silently pick one.
 
+**A deferral says which flow NOT to take; the type rows still say which one to run.** Fall through to §4 by
+type as if the class had never resolved — a deferral is not a STOP and never leaves a run without a route.
+Where the deferral was *the change is not in the environment*, `1b` item 2 then reaches the same conclusion
+from the other side: the artifact is not deployed, so the run is **BLOCKED-on-deploy** and offers
+`/qa-deploy-pr`. That is the correct end state, and the redundancy is deliberate — `1a` avoids committing a
+regression to a build that cannot contain the change, and `1b` catches every other reason a change is not
+live.
+
 **Worked deferral — VCST-5662** *"Replacing AutoMapper - Wave 4"* (`Task`, **High**). The signals are as
 clean as this class gets: one mechanical pattern (one mapper facade per module, with the naming and null
 semantics prescribed in the ticket), no new user capability, an unchanged GraphQL contract, and a blast
