@@ -2315,5 +2315,50 @@
     "pass_rate": 40,
     "duration_minutes": 20.55,
     "mode": "interactive"
+  },
+  {
+    "runId": "REG-2026-09-11-1510",
+    "date": "2026-09-11",
+    "suiteId": "075b",
+    "suiteName": "Loyalty Mixed Cart Order",
+    "environment": "vcst",
+    "total": 1,
+    "passed": 0,
+    "failed": 0,
+    "blocked": 1,
+    "skipped": 0,
+    "pass_rate": 0,
+    "duration_minutes": 0.66,
+    "mode": "interactive"
+  },
+  {
+    "runId": "REG-2026-09-11-1510",
+    "date": "2026-09-11",
+    "suiteId": "075c",
+    "suiteName": "Loyalty Product Points Earning",
+    "environment": "vcst",
+    "total": 1,
+    "passed": 0,
+    "failed": 1,
+    "blocked": 0,
+    "skipped": 0,
+    "pass_rate": 0,
+    "duration_minutes": 0.33,
+    "mode": "interactive"
+  },
+  {
+    "runId": "REG-2026-09-11-1510",
+    "date": "2026-09-11",
+    "suiteId": "075d",
+    "suiteName": "Loyalty Missions",
+    "environment": "vcst",
+    "total": 6,
+    "passed": 3,
+    "failed": 1,
+    "blocked": 0,
+    "skipped": 2,
+    "pass_rate": 75,
+    "duration_minutes": 1.14,
+    "mode": "interactive"
   }
 ]
