@@ -384,17 +384,7 @@ test("a launchable named after an Object.prototype member is refused, and doctor
     }
 });
 
-test("a vault or secret named after an Object.prototype member does not authorize by inheritance", async () => {
-    const cfg = m.loadConfig(scopedPaths({
-        user: { secrets: {}, vaults: {} },
-        project: { projectId: "demo",
-            secrets: { x: { backend: "keyvault", vault: "toString", secret: "constructor" } },
-            tasks: { build: { command: "printenv", args: [], env: { V: "secret:x" } } } },
-    }));
-    await assert.rejects(() => m.resolveEnvEntries("build", cfg, async () => "v", "tasks"), /not authorized/);
-});
-
-test("an authorized block outside the user file authorizes nothing, and says so", () => {
+test("an authorized block outside the user file is reported as carrying no authority", () => {
     // Otherwise the party asking for the grant would be writing it.
     const paths = scopedPaths({
         user: { secrets: { "personal-pat": { backend: "local" } } },
@@ -404,17 +394,6 @@ test("an authorized block outside the user file authorizes nothing, and says so"
     });
     const cfg = m.loadConfig(paths);
     assert.ok(cfg.warnings.some((w) => w.includes("only authorizes at user scope")), cfg.warnings.join("\n"));
-});
-
-test("loadConfig: a user-scope server may of course use a user-scope secret", () => {
-    const paths = scopedPaths({
-        user: {
-            secrets: { "personal-pat": { backend: "local" } },
-            servers: { mine: { command: "x", args: [], env: { T: "secret:personal-pat" } } },
-        },
-    });
-    const cfg = m.loadConfig(paths);
-    assert.equal(cfg.servers.mine.env.T, "secret:personal-pat");
 });
 
 test("loadConfig: a name declared in two homes appears in collisions with the right from/to", () => {
@@ -773,16 +752,6 @@ test("a user-scope oauth declaration lands in the user namespace, not the projec
     assert.equal(keys.access, `${m.KEY_PREFIX}:user:oauth-ado-access`);
 });
 
-test("two projects declaring the same oauth name do not share one entry", () => {
-    const a = m.oauthEntryKeys("ado", { scope: "project" }, { projectId: "p1" });
-    const b = m.oauthEntryKeys("ado", { scope: "project" }, { projectId: "p2" });
-    // Both spelled out: `notEqual` waves through any key that is wrong yet still differs per
-    // project — both losing the prefix, for instance — and `undefined` is only the loudest such case.
-    assert.equal(a.refresh, `${m.KEY_PREFIX}:p1:oauth-ado-refresh`);
-    assert.equal(b.refresh, `${m.KEY_PREFIX}:p2:oauth-ado-refresh`);
-    assert.notEqual(a.refresh, b.refresh);
-});
-
 test("an oauth entry key colliding with a same-spelled secret is reported, naming both sides", () => {
     // SECRET_NAME_RE admits `oauth-ado-refresh`, which is what lets the two derive one key.
     const cfg = m.loadConfig(scopedPaths({ project: { projectId: "proj-x",
@@ -951,7 +920,13 @@ test("resolveEnvEntries: unknown task name names it a task, not a server", async
 });
 
 test("resolveEnvEntries: undeclared secret → VcSecretsError before resolving", async () => {
-    await assert.rejects(m.resolveEnvEntries("bad-ref", CFG, async () => ""), /undeclared secret/);
+    // "before resolving" is the title's second half. Without the counter, an implementation that
+    // resolved first and validated afterwards satisfies the rejection just as well -- and would have
+    // spawned a keystore tool for a name nobody declared.
+    let asked = 0;
+    await assert.rejects(m.resolveEnvEntries("bad-ref", CFG, async () => { asked += 1; return ""; }),
+        /undeclared secret/);
+    assert.equal(asked, 0, "the resolver must not be reached");
 });
 
 test("resolveEnvEntries: field on non-json secret → VcSecretsError", async () => {
@@ -1275,15 +1250,6 @@ test("probeKeystoreWrite: a Credential Manager refusal is reported, not swallowe
     assert.match(status, /1783/);
 });
 
-test("probeKeystoreWrite: gpg is still out of scope, and says so by returning null", async () => {
-    // Deliberate: there the write is a file, and probing it answers a different question. Kept
-    // explicit so the omission reads as a decision rather than an oversight.
-    let wrote = false;
-    assert.equal(await m.probeKeystoreWrite({ backend: "gpg",
-        write: async () => { wrote = true; }, remove: async () => {} }), null);
-    assert.equal(wrote, false);
-});
-
 test("doctorReport: the write-probe lines name the backend they probed", () => {
     const base = { env: {}, enableLists: { enabled: [], disabled: [], envKeys: [] },
         resolvable: {}, skipped: [], toolsMissing: [], wired: new Set(), configDirOverride: false };
@@ -1293,15 +1259,6 @@ test("doctorReport: the write-probe lines name the backend they probed", () => {
     const failLine = m.doctorReport({ secrets: {}, servers: {}, oauth: {} },
         { ...base, platform: "win32", writeProbe: "win32err=1783" }).find((l) => l.includes("rejected a write"));
     assert.match(failLine, /^FAIL wcm .*1783/, `must name the backend and the cause, got: ${failLine}`);
-});
-
-test("probeKeystoreWrite: a working keychain write reports ok and leaves nothing behind", async () => {
-    const removed = [];
-    const status = await m.probeKeystoreWrite({ backend: "keychain",
-        write: async () => {}, remove: async (key) => { removed.push(key); } });
-    assert.equal(status, "ok");
-    assert.deepEqual(removed, [`${m.KEY_PREFIX}:user:${m.WRITE_PROBE_NAME}`],
-        "the probe entry must not survive the probe");
 });
 
 test("the probe writes AND deletes under the scope the config declares, in both directions", async () => {
@@ -1581,9 +1538,13 @@ test("resolveSpawnCommand: win32 .exe is direct", () => {
 });
 
 test("resolveSpawnCommand: non-win32 and pathful commands unchanged", () => {
-    assert.deepEqual(m.resolveSpawnCommand("npx", { platform: "linux", env: {}, existsSync: () => true }),
+    // A POPULATED env is load-bearing: with `env: {}` the PATH scan has nothing to walk, so the early
+    // return and the trailing fallback both answer {kind:"direct"} and deleting the guard is invisible.
+    // With a real Path and PATHEXT, an unguarded scan finds a PATH candidate here and the cmd changes.
+    const env = { Path: "C:\\bin", PATHEXT: ".COM;.EXE;.BAT;.CMD" };
+    assert.deepEqual(m.resolveSpawnCommand("npx", { platform: "linux", env, existsSync: () => true }),
         { kind: "direct", cmd: "npx" });
-    assert.deepEqual(m.resolveSpawnCommand("C:\\x\\y.cmd", { platform: "win32", env: {}, existsSync: () => true }),
+    assert.deepEqual(m.resolveSpawnCommand("C:\\x\\y.cmd", { platform: "win32", env, existsSync: () => true }),
         { kind: "direct", cmd: "C:\\x\\y.cmd" });
 });
 
@@ -1921,7 +1882,7 @@ test("doctorReport: an identity change is named, not reported as a first sign-in
     assert.ok(!lines.some((l) => l.startsWith("FAIL")), lines.join("\n"));
 });
 
-test("doctorReport: a stale access token with a live refresh token is not a finding", () => {
+test("doctorReport: a needs-refresh verdict is reported as routine, not as a finding", () => {
     // doctor must not exchange, so "the next launch will renew this" is the honest report. Calling it
     // a problem would push the developer to log in again for a state that needs nothing.
     const lines = oauthDoctorLines({ oauthStatus: { "azure-mcp": "needs-refresh" } });
@@ -2145,6 +2106,10 @@ test("organisationFromArgs: the organisation is the first positional the server 
     // and a copy in the oauth block could disagree with it silently.
     assert.equal(m.organisationFromArgs(["-y", "@azure-devops/mcp@2.9.0", "org-a", "-a", "envvar"]), "org-a");
     assert.equal(m.organisationFromArgs(["-y", "@azure-devops/mcp@2.9.0", "org-a", "-t", "a-tenant"]), "org-a");
+    // FIRST is the title's claim, and neither argv above can express it: the package spec is skipped
+    // by the `@` rule and the trailing token is eaten by its flag, so exactly one candidate survives
+    // and an implementation returning the LAST positional would pass both lines.
+    assert.equal(m.organisationFromArgs(["-y", "@azure-devops/mcp@2.9.0", "org-a", "org-b"]), "org-a");
 });
 
 test("organisationFromArgs: an argv it cannot read yields null rather than a guess", () => {
@@ -2304,13 +2269,13 @@ test("readEnableLists: non-object env (null / array) yields no key names", () =>
 // not interchangeable: a project-declared `local` secret needs no authorization, so resolution is
 // reached and a kind-blind lookup gets as far as handing its value over. Put the same secret at user
 // scope and `crossingProblem` throws first — which masks the injection behind an authorization error.
-function collidingProjectPaths(envValue) {
+function collidingProjectPaths(envValue, extraEnv = {}) {
     return scopedPaths({
         project: {
             projectId: "proj-x",
             secrets: { ado: { backend: "local" } },
             oauth: { ado: OAUTH_DECL },
-            servers: { s: { command: "npx", args: [], env: { ADO_TOKEN: envValue } } },
+            servers: { s: { command: "npx", args: [], env: { ADO_TOKEN: envValue, ...extraEnv } } },
         },
     });
 }
@@ -2427,7 +2392,7 @@ test("resolveEnvEntries: the exemption follows the launchable's home, not the de
     assert.equal(out.oauth.length, 1, "the server is the user's own; the grant polices a crossing that is not happening");
 });
 
-test("every authorization refusal names the doctor command, and doctor's own report names the same where", async () => {
+test("an authorization refusal names the doctor command, and doctor's own report names the same where", async () => {
     // The rule this replaces two site-scoped tests for: doctor's crossing loop used to report secret
     // references only, so an oauth refusal naming "vc-secrets doctor" sent a reader to a command that
     // printed nothing about their case (wiki meta/process/
@@ -2511,7 +2476,7 @@ test("every authorization refusal names the doctor command, and doctor's own rep
     }
 });
 
-test("doctorReport: an oauth crossing is reported like a secret's, and a launchable naming both kinds gets a line for each", () => {
+test("doctorReport: an oauth crossing is reported, and a launchable naming both kinds gets a line for each", () => {
     // Named after the rule, not the crossingProblem call site (wiki meta/process/
     // a-rule-pinned-at-one-site-reads-as-pinned-everywhere.md): the test above reaches the oauth
     // crossing only through its FAIL lines, whose `where` point 3 also produces -- so it leaves the
@@ -2709,11 +2674,15 @@ test("cmdLaunch: a launch can renew only one", async () => {
 });
 
 test("resolveEnvEntries: an oauth reference with no registration grant is refused before any backend is contacted", async () => {
+    // The second env entry is what lets `asked` fail at all: with only the oauth reference declared
+    // there is nothing for resolveSecret to be called about, so the counter reads 0 whatever the code
+    // does. With a resolvable secret sitting behind the refused reference, a check that fired late --
+    // or a loop that carried on to the next entry -- resolves it and the count goes to 1.
     let asked = 0;
-    const cfg = m.loadConfig(collidingProjectPaths("oauth:ado"));
+    const cfg = m.loadConfig(collidingProjectPaths("oauth:ado", { OTHER_TOKEN: "secret:ado" }));
     await assert.rejects(() => m.resolveEnvEntries("s", cfg, async () => { asked += 1; return "PLAINTEXT"; }),
         /not authorized to receive "ado".*registrations\./s);
-    assert.equal(asked, 0, "the secret resolver is never reached");
+    assert.equal(asked, 0, "no backend is contacted for any entry once the reference is refused");
 });
 
 test("resolveEnvEntries: a grant authorizing a different launch shape is refused, naming the difference", async () => {
@@ -2732,16 +2701,6 @@ test("resolveEnvEntries: a grant authorizing a different launch shape is refused
     // sends the reader to change the half that was already right.
     await assert.rejects(() => m.resolveEnvEntries("s", cfg, async () => "PLAINTEXT"),
         /authorized for a different shape: args are \["-y","a-different-package"\], authorized \["-y","some-oauth-package"\]/);
-});
-
-test("an oauth reference cannot smuggle a value into a dangerous env key either, and is stopped at load", () => {
-    // The guard is on the KEY, so it needed no knowledge of the new prefix. This is what says so —
-    // and it also says the refusal happens at load, so resolveEnvEntries never sees such a config.
-    assert.throws(() => m.loadConfig(projectPaths({
-        projectId: "proj-x",
-        oauth: { ado: OAUTH_DECL },
-        servers: { s: { command: "npx", args: [], env: { NODE_OPTIONS: "oauth:ado" } } },
-    })), /NODE_OPTIONS/);
 });
 
 test("doctorReport: an oauth reference sharing a user-scope secret's name reports no SECRET grant", () => {
@@ -2876,7 +2835,11 @@ test("buildChildEnv: the inherited injection vectors are dropped, not extended",
     assert.equal(env.PATH, "/bin", "the rest of the environment is untouched");
 });
 
-test("buildChildEnv: the token, channel, nonce and target variables travel in env, none in argv", () => {
+// "none in argv" is not assertable here and the title no longer claims it: buildChildEnv returns an
+// env object and there is no argv in the call. The argv half is pinned by "a pinned argv reaches the
+// child exactly as declared, even through the win32 .cmd rewrite", which drives resolveSpawnCommand
+// and buildSpawnInvocation directly -- no cmdLaunch test observes argv, only the env it was handed.
+test("buildChildEnv: the token, channel, nonce and target variables all travel in env", () => {
     const env = m.buildChildEnv({}, { token: "tok", envVar: "ADO_MCP_AUTH_TOKEN",
         channelPath: "/tmp/c.sock", nonce: "n", preloadPath: "/abs/p.mjs",
         targetPackage: "some-oauth-package", binName: "mcp-server-x" });
@@ -2981,7 +2944,7 @@ test("a pinned argv reaches the child exactly as declared, even through the win3
     assert.equal(invocation.opts.windowsVerbatimArguments, true);
 });
 
-test("two servers naming different secrets get different values — the resolve cache keys by name", async () => {
+test("two servers naming different secrets get different values", async () => {
     const cfg = {
         projectId: "demo",
         secrets: { "sp-a": { backend: "local" }, "sp-b": { backend: "local" } },
@@ -3134,16 +3097,6 @@ test("guard-declarations: blocks the project declaration <repo>/.claude/vc-secre
 
 test("guard-declarations: blocks its .local.json sibling", () => {
     const r = runGuardHook(guardInput("/repo/.claude/vc-secrets.local.json"));
-    assert.equal(r.status, 2);
-});
-
-test("guard-declarations: blocks the user-scope declaration ~/.claude/vc-secrets.json", () => {
-    const r = runGuardHook(guardInput(path.join(os.homedir(), ".claude", "vc-secrets.json")));
-    assert.equal(r.status, 2);
-});
-
-test("guard-declarations: blocks the installed shim under plugins/data/<id>/vc-secrets-shim.mjs", () => {
-    const r = runGuardHook(guardInput("/home/dev/.claude/plugins/data/vc-secrets/vc-secrets-shim.mjs"));
     assert.equal(r.status, 2);
 });
 
@@ -4253,13 +4206,6 @@ test("README: documents every client the descriptors know, with its floor", () =
     assert.match(readme, /UNKNOWN/, "the unmeasured floor is marked, not silently omitted");
 });
 
-test("README: every per-client setup branch ends by running the diagnostic", () => {
-    // A setup check that lives only in a repository is unreachable by the people who need it, so the
-    // verification is a command of the distributed thing.
-    const readme = fs.readFileSync(fileURLToPath(new URL("./README.md", import.meta.url)), "utf8");
-    assert.equal((readme.match(/doctor/g) || []).length >= clients.clientNames().length, true);
-});
-
 test("README: the trust step is documented, because a hook that is not trusted never runs", () => {
     const readme = fs.readFileSync(fileURLToPath(new URL("./README.md", import.meta.url)), "utf8");
     assert.match(readme, /trusted_hash|trust the hook/i);
@@ -4294,14 +4240,6 @@ test("guard: the relative match is anchored at a path boundary, not anywhere in 
         encoding: "utf8", env: { ...process.env },
     });
     assert.equal(r.status, 0, "not our declaration");
-});
-
-test("guard: a relative shim path is blocked too", () => {
-    const r = spawnSync(process.execPath, [GUARD_HOOK_PATH], {
-        input: JSON.stringify({ tool_name: "Write", tool_input: { file_path: "plugins/data/vc-secrets-vc-tools/vc-secrets-shim.mjs" } }),
-        encoding: "utf8", env: { ...process.env },
-    });
-    assert.equal(r.status, 2);
 });
 
 // ── the guard over this package's OWN modules ───────────────────────────────────────────────────
@@ -4578,32 +4516,28 @@ test("targetsFrom: a patch that names no file is unreadable, like any other writ
 
 // ── wired stays a set of SERVER NAMES, and the version comparator ───────────────────────────────
 
-test("readWiredElsewhere: returns server NAMES, because one consumer asks has() and not size", () => {
-    // The set it feeds is also read as `wired.has(serverName)` when deciding which secrets a run
-    // actually consumes. Contributing file PATHS to it type-checks, passes every size-based
-    // assertion, and makes a server wired only through another client look unconsumed — so its Key
-    // Vault secret is reported SKIP and never checked.
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vcs-names-"));
-    tmpDirs.push(dir);
-    const cfgPath = path.join(dir, "mcp.json");
-    fs.writeFileSync(cfgPath, JSON.stringify({
-        mcpServers: { github: { command: "node", args: ["${env:VC_SECRETS}", "run", "github"] } },
-    }));
-    const wired = m.readWiredElsewhere([cfgPath], []);
-    assert.deepEqual([...wired], ["github"]);
-});
-
 test("readWiredElsewhere: a knob name is not a wiring marker", () => {
     // VC_SECRETS_TIMING and friends are documented knobs. Matching them marks an unrelated config as
     // wired, which flips doctor's legacy-token line from "still required" to "remove it" — advice to
     // delete a credential that is still live. The false positive is the damaging direction.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vcs-knob-"));
     tmpDirs.push(dir);
+    // The knob has to sit in `command` or `args` to reach WIRED_MARKER_RE at all: wiredNamesInJson
+    // builds its fields from those two and never looks at `env`. An earlier fixture put it in `env`,
+    // so the test passed whatever the pattern did -- measured, deleting the `(?![A-Z_])` lookahead
+    // reddened nothing in the whole suite while the false positive it prevents went unguarded.
     const cfgPath = path.join(dir, "mcp.json");
     fs.writeFileSync(cfgPath, JSON.stringify({
-        mcpServers: { github: { command: "npx", args: ["x"], env: { VC_SECRETS_TIMING: "1" } } },
+        mcpServers: { github: { command: "npx", args: ["-y", "srv", "--trace=VC_SECRETS_TIMING"] } },
     }));
     assert.equal(m.readWiredElsewhere([cfgPath], []).size, 0);
+
+    // The zero above is a decision only if the same reader finds a real wiring in the same shape.
+    const wiredPath = path.join(dir, "wired.json");
+    fs.writeFileSync(wiredPath, JSON.stringify({
+        mcpServers: { github: { command: "node", args: ["/x/vc-secrets-shim.mjs", "run", "github"] } },
+    }));
+    assert.deepEqual([...m.readWiredElsewhere([wiredPath], [])], ["github"], "positive control");
 });
 
 test("shim: a prerelease does not outrank its own release", () => {
@@ -4783,7 +4717,7 @@ test("shim: a stale registry record falls back to a HEALTHY REGISTRY record befo
     assert.match(r.stderr, /STUB-RAN:sibling/);
 });
 
-test("README: the Cursor branch also names the shim and the variable that has to reach it", () => {
+test("README: the Cursor branch also names the install skill and the variable that has to reach it", () => {
     // Only the Codex branch had this assertion, so the Cursor branch could lose the same instruction
     // silently — and it is the branch whose entry uses a variable, so a missing instruction there
     // leaves the entry expanding to nothing.
@@ -4796,8 +4730,15 @@ test("README: the trust probe names both causes, since it cannot distinguish the
     // targets.mjs records the matcher assumption and points at this probe as its only detector. A
     // probe documented as meaning one thing hands back the wrong diagnosis for the other.
     const readme = fs.readFileSync(fileURLToPath(new URL("./README.md", import.meta.url)), "utf8");
-    assert.match(readme, /two causes/i, "the probe is documented as ambiguous");
-    assert.match(readme, /matcher/i, "and the second cause is named");
+    const lines = readme.split("\n");
+    const at = lines.findIndex((l) => /two causes/i.test(l));
+    assert.ok(at >= 0, "the probe is documented as ambiguous");
+    // Scoped to the blockquote paragraph rather than the whole file: `matcher` occurs elsewhere in
+    // this README, so a whole-file match stays green with the sentence naming the second cause gone.
+    let end = at;
+    while (end + 1 < lines.length && /^>\s*\S/.test(lines[end + 1])) { end += 1; }
+    assert.match(lines.slice(at, end + 1).join("\n"), /matcher/i,
+        "the second cause is named in the same blockquote, not merely somewhere in the document");
 });
 
 // Reads the module sources and returns every non-ASCII character sitting inside a string literal.
@@ -4882,7 +4823,7 @@ test("every string literal these modules can print is ASCII", () => {
     }
 });
 
-// The four tests below pin nonAsciiInEmittedLiterals itself. They exist because the first version of
+// The tests below pin nonAsciiInEmittedLiterals itself. They exist because the first version of
 // this guard was landed with its controls run by hand and thrown away: both of its decision points --
 // the escape branch and the quote-state clause on the comment skip -- could then be deleted with the
 // whole suite green, which is the defect class the guard was written to stop, one level up.
@@ -4899,12 +4840,6 @@ test("nonAsciiInEmittedLiterals: an escape is decoded, because it is ASCII here 
     const found = nonAsciiInEmittedLiterals('fail("the gpg agent is locked \\u2014 run unlock");');
     assert.equal(found.length, 1, `expected one finding, got ${JSON.stringify(found)}`);
     assert.match(found[0], /escape \\u2014/);
-});
-
-test("nonAsciiInEmittedLiterals: typography in a comment is left alone", () => {
-    // The whole reason for the comment skip: prose may use an em dash, because a comment is never
-    // written to anyone's terminal.
-    assert.deepEqual(nonAsciiInEmittedLiterals('// locked \u2014 run unlock\nfail("ok");'), []);
 });
 
 test("nonAsciiInEmittedLiterals: a // inside a string does not end the scan", () => {

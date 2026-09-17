@@ -315,8 +315,8 @@ function authorizationFor(cfg, decl) {
 // first time, while the secret refusal stayed covered -- but a single predicate does not by itself
 // stop that from recurring: restoring one kind filter inside the crossing loop reproduces the drift
 // with this function untouched. What stops it is two tests in vc-secrets.test.mjs, not the shape of
-// this function: "every authorization refusal names the doctor command, and doctor's own report
-// names the same where", and "doctorReport: an oauth crossing is reported like a secret's, and a
+// this function: "an authorization refusal names the doctor command, and doctor's own report
+// names the same where", and "doctorReport: an oauth crossing is reported, and a
 // launchable naming both kinds gets a line for each" -- restoring the kind filter reddens both
 // (wiki: a-rule-pinned-at-one-site-reads-as-pinned-everywhere).
 // refKind defaults to "secret" so every pre-existing call naming only a secret keeps working
@@ -706,7 +706,7 @@ function oauthKeyClashes(cfg) {
 // The remedy is appended unconditionally, for both kinds: doctor's crossing loop reports an oauth
 // reference exactly as it reports a secret's (crossingProblem is the one predicate behind both), so
 // every refusal this constructs can truthfully send the reader to "vc-secrets doctor" for the block
-// to paste. Enforced by "every authorization refusal names the doctor command, and doctor's own
+// to paste. Enforced by "an authorization refusal names the doctor command, and doctor's own
 // report names the same where" in vc-secrets.test.mjs.
 function authorizationRefusal(envVar, kind, refName, { reason, where }) {
     return new VcSecretsError(`env ${envVar}: this ${kind === "tasks" ? "task" : "server"} is `
@@ -714,7 +714,7 @@ function authorizationRefusal(envVar, kind, refName, { reason, where }) {
         + `${where} in ${path.join("~", ".claude", CONFIG_NAME)}${DOCTOR_REMEDY}`);
 }
 
-// Enforced by "every authorization refusal names the doctor command, and doctor's own report names
+// Enforced by "an authorization refusal names the doctor command, and doctor's own report names
 // the same where" in vc-secrets.test.mjs -- see the rule above authorizationRefusal for why this is
 // unconditional.
 const DOCTOR_REMEDY = '; run "vc-secrets doctor" for the block to add';

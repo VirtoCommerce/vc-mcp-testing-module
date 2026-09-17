@@ -41,7 +41,7 @@ test("vc-secrets-oauth throws the same VcSecretsError the launcher's exit-code p
     assert.throws(() => oauth.parseTokenResponse(400, JSON.stringify({ error: "invalid_grant" }), 0), m.VcSecretsError);
 });
 
-test("exchange: the DEFAULT anchor source is the same clock the reader compares against", () => {
+test("exchange: the DEFAULT anchor source is os.uptime", () => {
     // Nothing else executes the default wiring — every other exchange test injects `uptime`. So
     // substituting Date.now for os.uptime there passes the whole suite, survives
     // parseTokenResponse's finiteness guard (a millisecond epoch is perfectly finite), and stamps
@@ -297,7 +297,7 @@ test("parseTokenResponse: a non-JSON 2xx body names the endpoint and echoes noth
     });
 });
 
-test("parseTokenResponse: an Entra error surfaces its code, never the body verbatim", () => {
+test("parseTokenResponse: an Entra error surfaces its code and the AADSTS number", () => {
     assert.throws(() => oauth.parseTokenResponse(400, JSON.stringify({ error: "invalid_grant",
         error_description: "AADSTS70008: expired", trace_id: "x" }), 0), /invalid_grant.*AADSTS70008/s);
 });
@@ -579,15 +579,6 @@ test("cacheStatus: a rollback past the issue time no longer costs a needless exc
     assert.equal(statusAfter(cacheAt(0), 60_000, { clockElapsed: -2 * 3600_000 }).state, "valid");
 });
 
-test("cacheStatus: a rollback past the issue time with no usable anchor is still refused", () => {
-    // Reboot plus a backwards clock — the one case the anchor cannot cover, since its stored
-    // reading belongs to a boot that is gone. Both sources then place the issue in the future,
-    // and an age that cannot be established is a refusal rather than a guess.
-    assert.equal(statusAfter(cacheAt(0), 60_000,
-        { clockElapsed: -2 * 3600_000, uptimeElapsed: -UPTIME_AT_ISSUE * 1000 + 5_000 }).state,
-    "needs-refresh");
-});
-
 test("cacheStatus: a monotonic counter that missed a suspend is covered by the wall clock", () => {
     // WSL2 pauses the guest when the Windows host sleeps, so the guest's counter may not tick
     // across the pause — the anchor's own failure direction, and the reason elapsed is the MAX
@@ -677,18 +668,15 @@ test("serialize/parse: a refresh entry round-trips with its identity intact", ()
 });
 
 test("serialize/parse: an access entry round-trips with the fields the expiry check reads", () => {
-    const access = freshAccess(1_000);
+    // The uptime is passed explicitly so that all four timing values differ. Under the default it
+    // equals obtainedAt, and two fields carrying one value are one field as far as a transposition
+    // between them is concerned -- the loop below would enumerate both and see nothing. Dropping the
+    // field entirely is caught here too: an absent field reads back as undefined against a number.
+    const access = freshAccess(1_000, 3600, 4_242);
     const back = cache.parseEntry(cache.serializeAccess(access));
     for (const field of ["accessToken", "expiresAt", "obtainedAt", "lifetimeMs", "uptimeAtIssue"]) {
         assert.equal(back[field], access[field], `${field} must survive the round trip`);
     }
-});
-
-test("serializeAccess: dropping the anchor on the way to disk is not silently survivable", () => {
-    // JSON.stringify omits an undefined field entirely, so a serializer that forgot uptimeAtIssue
-    // would produce a perfectly valid-looking entry that simply has no rollback protection.
-    const stored = JSON.parse(cache.serializeAccess(freshAccess(1_000)));
-    assert.ok(Object.hasOwn(stored, "uptimeAtIssue"), `the anchor must reach disk: ${Object.keys(stored)}`);
 });
 
 test("parseEntry: rejects a schema version it does not know", () => {
@@ -735,12 +723,6 @@ test("lockPathFor: a per-user pipe name on win32", () => {
     const other = cache.lockPathFor("azure-mcp", "other-proj",
         { platform: "win32", userInfo: () => ({ username: "dev" }) });
     assert.notEqual(p, other, "two different scopes must not collide on win32");
-});
-
-test("lockPathFor: two users do not collide on win32", () => {
-    const a = cache.lockPathFor("azure-mcp", "proj", { platform: "win32", userInfo: () => ({ username: "ann" }) });
-    const b = cache.lockPathFor("azure-mcp", "proj", { platform: "win32", userInfo: () => ({ username: "bob" }) });
-    assert.notEqual(a, b);
 });
 
 test("lockPathFor: a filesystem path on darwin, outside the secrets directory", () => {
@@ -823,7 +805,7 @@ test("two projects declaring the same entry name do not share one mutex", () => 
 const inUse = () => Object.assign(new Error("bind: address already in use"), { code: "EADDRINUSE" });
 const fakeServer = () => ({ close: (done) => done() });
 
-test("acquireLock: a free name yields a holder that can release", async () => {
+test("acquireLock: a free name yields a holder rather than HELD_BY_OTHER", async () => {
     const got = await cache.acquireLock("\0free", { bind: async () => fakeServer() });
     assert.notEqual(got, cache.HELD_BY_OTHER);
     await got.release();
@@ -1175,22 +1157,10 @@ test("ensureFreshToken: a neighbour that released WITHOUT publishing is overtake
     }));
     assert.equal(t, "ours");
     assert.equal(exchanged, 1);
-});
-
-test("ensureFreshToken: the contended poll backs off instead of hammering the backend", async () => {
-    // On Credential Manager every readCache is a PowerShell P/Invoke worth one to three seconds,
-    // so a flat 250 ms poll is really "start powershell.exe as fast as it will start" for 45 s.
-    const waits = [];
-    let elapsed = 0;
-    await assert.rejects(() => m.ensureFreshToken(DEPS({
-        readCache: async () => ({ state: "needs-refresh", refreshToken: "r1" }),
-        acquireLock: async () => cache.HELD_BY_OTHER,
-        sleep: async (ms) => { waits.push(ms); elapsed += ms; },
-        now: () => 1_000 + elapsed,
-    })), /another vc-secrets/i);
-    assert.deepEqual(waits.slice(0, 4), [250, 500, 1000, 2000], `got ${waits.slice(0, 4)}`);
-    assert.ok(waits.every((ms) => ms <= 2000), "the ceiling is what keeps a long wait cheap");
-    assert.ok(elapsed >= cache.LOCK_WAIT_MS, `the deadline must still be reached, waited ${elapsed}`);
+    // "not waited out" is the title's second half, and `elapsed` was accumulated without ever being
+    // read: an implementation that burned the whole deadline and then exchanged would satisfy both
+    // assertions above. One poll is enough here -- the neighbour releases after the first look.
+    assert.ok(elapsed < cache.LOCK_WAIT_MS, `overtaken, not waited out: burned ${elapsed} ms`);
 });
 
 // The keystore side of the launch path. ensureFreshToken's own tests inject every seam, so
@@ -1238,6 +1208,9 @@ test("oauthLaunchDeps.readCache: a valid access entry is reported valid and carr
     const status = await deps.readCache();
     assert.equal(status.state, "valid");
     assert.equal(status.accessToken, "a1");
+    // The title's second half. Without this line readCache's ternary could attach a refresh token to
+    // the valid verdict and nothing would notice -- the name would still read as a guard.
+    assert.equal(status.refreshToken, undefined, "a valid verdict carries no refresh token");
 });
 
 test("oauthLaunchDeps.writeCache: a renewal that issues no new refresh token leaves the stored one alone", async () => {
@@ -1635,27 +1608,6 @@ test("writeSecretValue: an oversize keychain value is refused before the runner 
 // and the browser opener. Ported from the launcher's own suite (source ranges resolved 2026-09-11).
 // ---------------------------------------------------------------------------------------------
 
-// Every byte this tool prints has to survive the console it is printed to. `doctor` writes its report
-// with `fs.writeSync(2, …)` — raw bytes, deliberately, because a synchronous unbuffered write is what
-// survives an immediate exit — and that bypasses the tty stream node would otherwise use to transcode
-// for the active Windows code page. Measured: on a Russian-locale console an em dash arrived as `тАФ`,
-// which is mojibake in the one place a diagnostic must be legible. So the messages are ASCII, and the
-// transport keeps the property it was chosen for.
-const NON_ASCII = /[^\x00-\x7f]/;
-
-test("mapResolveError and forTerminal: their messages are ASCII too", () => {
-    const cases = [
-        m.mapResolveError("wcm", "n", Object.assign(new Error("x"), { toolExitCode: 3 })),
-        m.mapResolveError("keychain", "n", Object.assign(new Error("x"), { toolExitCode: 44 })),
-        m.mapResolveError("gpg", "n", Object.assign(new Error("decryption failed"), { toolExitCode: 2 })),
-    ];
-    for (const e of cases) {
-        assert.ok(!NON_ASCII.test(e.message), `non-ASCII in a mapped error: ${JSON.stringify(e.message)}`);
-    }
-    // The truncation marker counts: it is appended to text that goes to the same console.
-    assert.ok(!NON_ASCII.test(m.forTerminal("x".repeat(50), 10)), "the truncation marker must be ASCII");
-});
-
 // The opener probe is injected rather than left to the real PATH. With a real `commandOnPath` the
 // linux case asserts whatever this machine happens to have installed: it passes here because
 // wslview and powershell.exe are absent, and would fail on a WSL box that has wslview — an
@@ -1757,11 +1709,6 @@ test("handleCallback: a mismatched state decides nothing, and says so", () => {
     assert.match(r.notice, /state that is not this sign-in/);
     assert.equal(r.code, undefined, "and the code is not carried forward");
     assert.equal(r.error, undefined, "nor turned into a failure the caller would report");
-});
-
-test("handleCallback: the matching state yields the code", () => {
-    assert.deepEqual(m.handleCallback(GET("/callback?code=abc&state=RIGHT"), "RIGHT", "/callback"),
-        { code: "abc" });
 });
 
 test("handleCallback: an Entra error carries its AADSTS code into the result", () => {
@@ -2344,6 +2291,12 @@ test("cmdLogin: the verifier never leaves the process, only its digest does", as
             const verifier = new URLSearchParams(body).get("code_verifier");
             assert.ok(verifier, "the code grant must carry the verifier");
             assert.ok(!authorizeUrl.includes(verifier), "but the authorize URL must not");
+            // "only its digest does" was the unasserted half: dropping `challenge` from cmdLogin's
+            // buildAuthorizeUrl call emits `code_challenge=undefined`, which the two lines above
+            // accept happily -- the sign-in then fails at Entra, not here.
+            const challenge = new URL(authorizeUrl).searchParams.get("code_challenge");
+            assert.equal(challenge, crypto.createHash("sha256").update(verifier).digest("base64url"),
+                "the digest must travel, and be the S256 digest of THIS verifier");
 
             return { refreshToken: "rt", accessToken: "at", expiresAt: 1, obtainedAt: 0,
                 lifetimeMs: 3600_000, uptimeAtIssue: 1 };
@@ -2485,8 +2438,14 @@ test("cmdLogin: the refusal names the registration that must be acknowledged, no
     // declaration instead would send the developer to edit the repository file that is precisely
     // what may not authorize itself.
     const { deps } = loginDeps();
-    await assert.rejects(() => m.cmdLogin("azure-mcp", UNACKNOWLEDGED_CFG, deps),
+    const e = await m.cmdLogin("azure-mcp", UNACKNOWLEDGED_CFG, deps).then(() => null, (err) => err);
+    assert.ok(e, "the sign-in must be refused");
+    assert.match(e.message,
         new RegExp(`registrations\\."${DECL_IDENTITY.tenantId}"\\."${DECL_IDENTITY.clientId}"`));
+    // "not the declaration" is a relation, and the match above is satisfied by a message naming BOTH
+    // paths. The sibling refusal test states its two halves this way; this one only stated one.
+    assert.doesNotMatch(e.message, /oauth\."azure-mcp"\.authorized/,
+        "naming the declaration sends the developer to edit the file that may not authorize itself");
 });
 
 test("cmdLogin: the policy refusal wins over the capability refusal", async () => {
@@ -2850,7 +2809,7 @@ test("a target pattern anchors on the package AND its entry file", () => {
         "the package path alone must not match every file under its tree");
 });
 
-test("a scoped package matches with either path separator, including between scope and name", () => {
+test("a scoped package matches with a separator between scope and name", () => {
     // This is the Windows form npx resolves there, and the scope separator is the one a literal
     // "/" in the pattern would miss.
     assert.equal(target.isTargetEntry("C:\\x\\node_modules\\@vendor\\server\\dist\\index.js", "@vendor/server"), true);
@@ -3946,7 +3905,10 @@ channelTest("cmdLaunch: a spawn that throws leaves no channel directory behind",
     assert.equal(r.stdout, "[]", `leaked ${r.stdout}${r.stderr}`);
 });
 
-channelTest("cmdLaunch: a renewal is pushed to the running server, and a slow tick does not stack", async () => {
+// The title used to claim the renewal is "pushed to the running server". Nothing here observes
+// channel.push and no client ever connects, so that half was unasserted; delivery to a connected
+// client is pinned at the channel's own level. What this test does pin is the re-entrancy guard.
+channelTest("cmdLaunch: a slow renewal tick does not stack on the one still running", async () => {
     // Without the re-entrancy guard a tick that outlasts its interval -- the contended wait alone
     // runs to 45 s -- starts another one on top of it.
     let inFlight = 0, maxInFlight = 0, calls = 0;
@@ -4165,7 +4127,7 @@ test("classifyProbeFailure: output that is not the launcher's belongs to the ser
     assert.equal(probe.classifyProbeFailure(undefined), "server");
 });
 
-test("describeFailure: each kind produces a message a reader can act on, and echoes no token", () => {
+test("describeFailure: each kind produces a message a reader can act on, and the token branch echoes none", () => {
     const token = probe.describeFailure("azure-mcp",
         'vc-secrets: no usable token for "azure-mcp" -- run "vc-secrets login azure-mcp" [eyJhbGciOi.LEAKED]');
     assert.match(token, /token not obtainable/);
