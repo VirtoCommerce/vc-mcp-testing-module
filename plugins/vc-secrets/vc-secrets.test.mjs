@@ -5,7 +5,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import * as m from "./vc-secrets.mjs";
 import * as target from "./vc-secrets-target.mjs";
 import * as clients from "./clients.mjs";
@@ -18,6 +18,85 @@ after(() => {
     for (const dir of tmpDirs) {
         fs.rmSync(dir, { recursive: true, force: true });
     }
+});
+
+// Capability probes, run once at load. Each asks a question about the MACHINE, not about the code, and
+// a test whose subject this machine cannot host carries `{ skip: !CAN_X && "<what is missing>" }` --
+// the same shape the socket, lock and channel wrappers use in vc-secrets-oauth.test.mjs. An absent
+// capability is not a failure; an absent capability that reports as one is, because it buries the real
+// regressions it is mixed in with. Each reason names the missing THING rather than the platform, so a
+// machine that later grows the capability starts running the test without anyone editing a condition.
+function probe(fn) {
+    try {
+        return fn();
+    } catch {
+        return false;
+    }
+}
+
+const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-probe-"));
+tmpDirs.push(probeDir);
+
+// Windows creates a symlink only in Developer Mode or elevated; otherwise fs.symlinkSync raises EPERM.
+const CAN_SYMLINK = probe(() => {
+    const dest = path.join(probeDir, "sym-dest");
+    fs.mkdirSync(dest, { recursive: true });
+    fs.symlinkSync(dest, path.join(probeDir, "sym-link"), "dir");
+
+    return true;
+});
+
+// NTFS ignores POSIX mode bits, so `chmod 000` denies nothing there. The probe checks that the denial
+// actually HAPPENS rather than that chmod returned -- a test built on the call alone asserts the
+// opposite of what it reads as, and passes by reading a file it claims is unreadable.
+const CAN_DENY_BY_MODE = probe(() => {
+    const f = path.join(probeDir, "denied");
+    fs.writeFileSync(f, "x");
+    fs.chmodSync(f, 0o000);
+    try {
+        fs.readFileSync(f);
+
+        return false;
+    } catch {
+        return true;
+    } finally {
+        fs.chmodSync(f, 0o600);
+    }
+});
+
+// Several tests stand a stub binary on PATH in place of gpg, security or powershell.exe. On win32
+// stubBinary writes a .sh body behind a .cmd launcher, so the stub runs only where a POSIX shell
+// exists. Note this one is true on POSIX by CONSTRUCTION -- the short-circuit -- while the three
+// around it are live measurements, which is what the probe self-test below is for.
+const CAN_RUN_POSIX_STUB = process.platform !== "win32"
+    || probe(() => spawnSync("sh", ["-c", "exit 0"]).status === 0);
+
+// One test reproduces a SHELL expansion, so it drives this node THROUGH a bash -- and the probe has to
+// ask that whole question, not half of it. Two weaker forms were measured and both are wrong. `node -e 0`
+// is false wherever node is merely off PATH, which costs the test on a POSIX machine for a reason the
+// test does not depend on. `exit 0` is false nowhere useful: it accepts a bash that cannot reach this
+// node at all, and on Windows the bash on PATH is WSL's -- a different filesystem namespace, where
+// `C:\...\node.exe` is not an executable path and the run dies at 127 having proved nothing. Naming
+// process.execPath here, exactly as the call site does, is the question that matches the usage.
+const CAN_RUN_BASH = probe(() =>
+    spawnSync("bash", ["-c", `${JSON.stringify(process.execPath)} -e 0`]).status === 0);
+
+// The probes' own control, and the reason it exists: `probe()` answers false for ANY exception, so a
+// broken probe -- a renamed local, a moved probeDir, a dropped import -- turns every test gated on it
+// into a skip while the run stays green. Nothing else in the suite would notice; the totals move and
+// no assertion fires. That is this file's own subject pointed at the instrument it just gained, since
+// a false from an unvalidated probe is indistinguishable from a capability the machine truly lacks.
+//
+// Only the two a POSIX machine cannot legitimately lack are asserted. CAN_RUN_POSIX_STUB is not: off
+// win32 it is true by short-circuit, so asserting it would pin nothing. CAN_RUN_BASH is not: a minimal
+// container has no bash, and that is a real answer rather than a broken instrument.
+test("capability probes: the ones a POSIX machine cannot lack answer true", {
+    skip: process.platform === "win32" && "these ask about the machine, and win32 may honestly lack both",
+}, () => {
+    assert.ok(CAN_SYMLINK,
+        "a POSIX machine creates a symlink in its own tmpdir -- a false here is a broken probe, not a platform");
+    assert.ok(CAN_DENY_BY_MODE || process.getuid?.() === 0,
+        "mode bits deny a read for everyone but root -- a false here as non-root is a broken probe");
 });
 
 // Writes a single project-scope declaration file and returns its containing directory — for tests
@@ -1387,7 +1466,7 @@ test("the probe's value composes to exactly the limit under the key it writes un
     }
 });
 
-test("cmdUnlock: must keep showing pinentry interactively — no --pinentry-mode reaches the gpg it runs", { skip: process.platform === "win32" && "gpg backend is not selected on win32" }, async () => {
+test("cmdUnlock: must keep showing pinentry interactively — no --pinentry-mode reaches the gpg it runs", { skip: m.detectLocalBackend(process.platform, process.env) !== "gpg" && "needs gpg to be the backend this machine selects -- the stub on PATH stands in for it" }, async () => {
     const secretsHome = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-unlock-"));
     tmpDirs.push(secretsHome);
     const savedXdg = process.env.XDG_CONFIG_HOME;
@@ -1437,7 +1516,7 @@ test("a keyvault secret is not an unlock target, since there is no local file to
     assert.deepEqual(m.unlockTargets(cfg, () => true), []);
 });
 
-test("unlock reports a count, since naming one entry reads as only that one being affected", async () => {
+test("unlock reports a count, since naming one entry reads as only that one being affected", { skip: !CAN_RUN_POSIX_STUB && "needs a POSIX shell, which the stub binary on PATH is written behind" }, async () => {
     const cfg = { secrets: { a: { backend: "local", scope: "user" }, b: { backend: "local", scope: "user" } },
         oauth: {}, projectId: "p", files: {} };
     const err = [];
@@ -2911,8 +2990,12 @@ test("PRELOAD_PATH is anchored beside the launcher module, never against argv[1]
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-argv-"));
     tmpDirs.push(dir);
     const entry = path.join(dir, "elsewhere.mjs");
+    // A file URL, not the path: an ESM specifier is a URL, so on Windows the drive letter reads as a
+    // protocol. The separators survive only because JSON.stringify escapes them -- say so, or the next
+    // reader concludes the escaping is the bug. On POSIX path and URL coincide, which is why the path
+    // form survived here unnoticed until the suite first ran on Windows.
     fs.writeFileSync(entry, `
-        import * as m from ${JSON.stringify(LAUNCHER_PATH)};
+        import * as m from ${JSON.stringify(pathToFileURL(LAUNCHER_PATH).href)};
         process.stdout.write(m.PRELOAD_PATH);
     `);
     const { stdout, stderr } = spawnSync(process.execPath, [entry], { encoding: "utf8" });
@@ -3022,7 +3105,7 @@ test("newKeyPresent: gpg — absence is the file not existing, not a failed read
     assert.equal(await m.newKeyPresent("gpg", key, env), true);
 });
 
-test("newKeyPresent: a read that fails for any reason OTHER than absence throws instead of reporting absent", async () => {
+test("newKeyPresent: a read that fails for any reason OTHER than absence throws instead of reporting absent", { skip: !CAN_RUN_POSIX_STUB && "needs a POSIX shell, which the stub binary on PATH is written behind" }, async () => {
     // The bug this pins destroyed credentials: migrate answered "already present?" through a bare catch,
     // so a cold agent or a timeout looked like absence and the stale legacy value was written over a
     // freshly rotated one — reported as "1 migrated, 0 failed".
@@ -3030,7 +3113,7 @@ test("newKeyPresent: a read that fails for any reason OTHER than absence throws 
         assert.rejects(() => m.newKeyPresent("keychain", `${m.KEY_PREFIX}:demo:tok`), /exited 1/));
 });
 
-test("newKeyPresent: keychain exit 44 IS absence", async () => {
+test("newKeyPresent: keychain exit 44 IS absence", { skip: !CAN_RUN_POSIX_STUB && "needs a POSIX shell, which the stub binary on PATH is written behind" }, async () => {
     await withStubOnPath("security", "#!/bin/sh\nexit 44\n", async () => {
         assert.equal(await m.newKeyPresent("keychain", `${m.KEY_PREFIX}:demo:tok`), false);
     });
@@ -3119,6 +3202,18 @@ test("guard-declarations: unparseable stdin is not grounds to block", () => {
 
 const SHIM_PATH = fileURLToPath(new URL("./vc-secrets-shim.mjs", import.meta.url));
 
+// Every spawn of the shim overrides the home the same way, and it has to override it TWICE. The shim
+// is the one module that resolves its roots through a bare `os.homedir()` -- everywhere else reads
+// `env.HOME || os.homedir()`, so HOME alone is enough -- and os.homedir() reads USERPROFILE on Windows.
+// Setting only one of the two is a SILENT no-op on the other platform: the shim then walks the
+// developer's real profile, finds no install, and the test fails on a message that is perfectly true,
+// which reads as a shim defect and is not one. Measured on Windows: nine tests at once.
+// A helper rather than a spread at each call site, because the first fix of this was applied to the
+// runShim wrapper alone, and the tests that spawn the shim directly kept failing.
+function shimEnv(home) {
+    return { ...process.env, HOME: home, USERPROFILE: home };
+}
+
 // Points installPath at a temp dir holding a stub launcher that just proves which install ran — real
 // launcher behaviour is already covered by the vc-secrets.mjs tests above; the shim's own job is
 // picking the RIGHT install and handing it argv, which is what these tests exercise.
@@ -3152,7 +3247,8 @@ function runShim(args, { registry, cwd, caches = [] } = {}) {
         }
     }
 
-    return spawnSync(process.execPath, [SHIM_PATH, ...args], { env: { ...process.env, HOME: home }, cwd: cwd ?? home, encoding: "utf8" });
+    return spawnSync(process.execPath, [SHIM_PATH, ...args],
+        { env: shimEnv(home), cwd: cwd ?? home, encoding: "utf8" });
 }
 
 test("shim: no registry file at all → names the plugin as not installed, exit 1", () => {
@@ -3199,7 +3295,7 @@ test("shim: cwd matching none of the installs picks the higher VERSION, not the 
 
 // ── regressions: fixes shipped without a pinning test ─────────────────────────────────────────────
 
-test("loadConfig: an aliased .claude (symlink) is loaded once, not read as two owners", () => {
+test("loadConfig: an aliased .claude (symlink) is loaded once, not read as two owners", { skip: !CAN_SYMLINK && "needs an environment that permits creating a symlink" }, () => {
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-alias-home-"));
     tmpDirs.push(homeDir);
     fs.mkdirSync(path.join(homeDir, ".claude"), { recursive: true });
@@ -3299,7 +3395,7 @@ test("doctorReport: duplicate-tool suppression matches gpg's real message shape 
         "exactly one gpg line — the missing-tool FAIL, not a second per-secret FAIL");
 });
 
-test("cmdMigrate: prints no advice about \"the other scope\" for a project/local secret collision", () => {
+test("cmdMigrate: prints no advice about \"the other scope\" for a project/local secret collision", { skip: !CAN_RUN_POSIX_STUB && "needs a POSIX shell, which the stub binary on PATH is written behind" }, () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-migrate-collision-"));
     tmpDirs.push(dir);
     // The only secret collision that can still occur: project and local declare the same name — they
@@ -3319,7 +3415,7 @@ test("cmdMigrate: prints no advice about \"the other scope\" for a project/local
     assert.ok(!/other scope|key was written/i.test(r.stderr), `unexpected scope-advice text in migrate output:\n${r.stderr}`);
 });
 
-test("cmdMigrate: refuses to touch a secret whose current state it cannot read", () => {
+test("cmdMigrate: refuses to touch a secret whose current state it cannot read", { skip: !CAN_RUN_POSIX_STUB && "needs a POSIX shell, which the stub binary on PATH is written behind" }, () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-migrate-unreadable-"));
     tmpDirs.push(dir);
     fs.writeFileSync(path.join(dir, m.CONFIG_NAME),
@@ -3356,7 +3452,7 @@ esac
         "must never write — the value already in the keystore has to survive an unreadable read");
 });
 
-test("migrating a legacy wcm entry stores the plaintext, not the hex it was read as", async () => {
+test("migrating a legacy wcm entry stores the plaintext, not the hex it was read as", { skip: !CAN_RUN_POSIX_STUB && "needs a POSIX shell, which the stub binary on PATH is written behind" }, async () => {
     // readLegacyLocalValue is the second consumer of PS_CRED_READ. Missing it makes cmdMigrate
     // write the hex string as the value — and the read-back compare is keychain-only, so on
     // Windows nothing catches it.
@@ -3511,8 +3607,8 @@ test("the probe runs at all — its own imports resolve", () => {
     // edit replaced process.stderr.write with fs.writeSync here and left `fs` unimported, so every
     // invocation threw ReferenceError while the file still checked clean. Spawning it is the only
     // assertion that would have caught that.
-    const probe = fileURLToPath(new URL("./vc-secrets-probe.mjs", import.meta.url));
-    const r = spawnSync(process.execPath, [probe], { encoding: "utf8" });
+    const probePath = fileURLToPath(new URL("./vc-secrets-probe.mjs", import.meta.url));
+    const r = spawnSync(process.execPath, [probePath], { encoding: "utf8" });
     assert.ok(!/ReferenceError|is not defined/.test(r.stderr), `probe failed to run:\n${r.stderr}`);
     assert.match(r.stderr + r.stdout, /usage: node vc-secrets-probe\.mjs/);
 });
@@ -3559,7 +3655,7 @@ test("quoting for security -i escapes what would end or reshape the command", ()
     assert.equal(q('x" \ndelete-generic-password -s y'), '"x\\" \ndelete-generic-password -s y"');
 });
 
-test("a gpg read preserves a trailing newline the stored value really contains", async () => {
+test("a gpg read preserves a trailing newline the stored value really contains", { skip: !CAN_RUN_POSIX_STUB && "needs a POSIX shell, which the stub binary on PATH is written behind" }, async () => {
     // gpg --decrypt emits the stored bytes. Stripping there rewrote the value during migrate, which
     // reads and then writes: "token\n" would be migrated as "token".
     const binDir = stubBinary("gpg", '#!/bin/sh\nprintf "token\\n"\n');
@@ -3641,7 +3737,7 @@ test("install-shim: --data-dir decides the location, in both spellings", () => {
     assert.match(typo.stderr, /unrecognised argument/);
 });
 
-test("install-shim: a --data-dir naming another plugin is ignored, with a warning", () => {
+test("install-shim: a --data-dir naming another plugin is ignored, with a warning", { skip: !CAN_RUN_BASH && "needs a bash that can run this node, since the case is a SHELL expansion" }, () => {
     // The regression this exists for: the documented line is a SHELL line, so where Claude Code does not
     // substitute `${CLAUDE_PLUGIN_DATA}` the shell expands it from the inherited environment — measured as
     // `…/data/codex-openai-codex`. That is an absolute path, so nothing syntactic rejects it, and a later
@@ -3653,7 +3749,7 @@ test("install-shim: a --data-dir naming another plugin is ignored, with a warnin
     const foreign = path.join(home, ".claude", "plugins", "data", "some-other-plugin");
     fs.mkdirSync(foreign, { recursive: true });
 
-    const r = spawnSync("bash", ["-c", `node ${JSON.stringify(script)} --data-dir "\${CLAUDE_PLUGIN_DATA}"`], {
+    const r = spawnSync("bash", ["-c", `${JSON.stringify(process.execPath)} ${JSON.stringify(script)} --data-dir "\${CLAUDE_PLUGIN_DATA}"`], {
         encoding: "utf8", env: { ...process.env, HOME: home, CLAUDE_PLUGIN_DATA: foreign },
     });
     // Without this the missing-bash case fails on `r.stderr` being undefined, which names nothing.
@@ -4551,7 +4647,7 @@ test("shim: a prerelease does not outrank its own release", () => {
     assert.doesNotMatch(r.stderr, /STUB-RAN:prerelease/);
 });
 
-test("shim: a symlinked version directory is a candidate, because a linked install is a real one", () => {
+test("shim: a symlinked version directory is a candidate, because a linked install is a real one", { skip: !CAN_SYMLINK && "needs an environment that permits creating a symlink" }, () => {
     // readdirSync does not follow links, so Dirent.isDirectory() is false for a symlink-to-directory —
     // measured. Skipping those silently picks an older real directory, or reports a plugin that IS
     // installed as missing. Loading a plugin from a local directory is a documented route.
@@ -4566,7 +4662,7 @@ test("shim: a symlinked version directory is a candidate, because a linked insta
     fs.symlinkSync(real, path.join(pluginDir, "2.0.0"), "dir");
 
     const r = spawnSync(process.execPath, [SHIM_PATH, "doctor"],
-        { env: { ...process.env, HOME: home }, cwd: home, encoding: "utf8" });
+        { env: shimEnv(home), cwd: home, encoding: "utf8" });
     assert.match(r.stderr, /STUB-RAN:linked/);
 });
 
@@ -4587,7 +4683,7 @@ test("shim: a registry record pointing at a vanished install falls back to a hea
         'export async function runCli() { process.stderr.write("STUB-RAN:cache-fallback\\n"); }\n');
 
     const r = spawnSync(process.execPath, [SHIM_PATH, "doctor"],
-        { env: { ...process.env, HOME: home }, cwd: home, encoding: "utf8" });
+        { env: shimEnv(home), cwd: home, encoding: "utf8" });
     assert.match(r.stderr, /STUB-RAN:cache-fallback/);
 });
 
@@ -4668,7 +4764,7 @@ test("readWiredElsewhere: a quoted TOML table name is read, since dots are legal
     assert.deepEqual([...m.readWiredElsewhere([toml], [])], ["azure.mcp"]);
 });
 
-test("readWiredElsewhere: an unreadable client config is reported, not counted as inspected-and-clean", () => {
+test("readWiredElsewhere: an unreadable client config is reported, not counted as inspected-and-clean", { skip: !CAN_DENY_BY_MODE && "needs a filesystem whose mode bits actually deny a read" }, () => {
     // The sibling reader pushes a problem for the identical condition. Swallowing it converts a crash
     // into a confident wrong claim: the file is recorded as inspected, contributes no wiring, and the
     // legacy-token advice then rests on a file nobody could read.
@@ -4713,7 +4809,7 @@ test("shim: a stale registry record falls back to a HEALTHY REGISTRY record befo
         ] },
     }));
     const r = spawnSync(process.execPath, [SHIM_PATH, "doctor"],
-        { env: { ...process.env, HOME: home }, cwd: home, encoding: "utf8" });
+        { env: shimEnv(home), cwd: home, encoding: "utf8" });
     assert.match(r.stderr, /STUB-RAN:sibling/);
 });
 

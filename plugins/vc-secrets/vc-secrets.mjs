@@ -19,6 +19,13 @@ import * as oauth from "./vc-secrets-oauth.mjs";     // the Entra protocol
 import { PACKAGE_NAME_RE, BIN_NAME_RE } from "./vc-secrets-target.mjs"; // the one copy of the target grammar
 
 const CONFIG_NAME = "vc-secrets.json";
+
+// The user file as a message names it -- a hint a human reads and acts on, never a path this code
+// opens, which is why it is a literal rather than a path.join. `~` is a POSIX shell convention with no
+// Windows spelling at all, so joining it with the platform separator produces `~\.claude\...`: half one
+// idiom and half the other, and different advice on different machines for the same mistake. Two of the
+// four sites below already spelled it literally; this makes the other two agree with them.
+const CONFIG_HINT_PATH = `~/.claude/${CONFIG_NAME}`;
 const LOCAL_CONFIG_NAME = "vc-secrets.local.json";
 const KEY_PREFIX = "vc-secrets";
 const LEGACY_KEY_PREFIX = "mcpw";
@@ -711,7 +718,7 @@ function oauthKeyClashes(cfg) {
 function authorizationRefusal(envVar, kind, refName, { reason, where }) {
     return new VcSecretsError(`env ${envVar}: this ${kind === "tasks" ? "task" : "server"} is `
         + `${reason} to receive "${refName}" -- the authorization for it lives at `
-        + `${where} in ${path.join("~", ".claude", CONFIG_NAME)}${DOCTOR_REMEDY}`);
+        + `${where} in ${CONFIG_HINT_PATH}${DOCTOR_REMEDY}`);
 }
 
 // Enforced by "an authorization refusal names the doctor command, and doctor's own report names
@@ -2102,7 +2109,7 @@ async function cmdLogin(serverName, cfg, {
             // vc-secrets.test.mjs.
             throw new VcSecretsError(`"vc-secrets login ${serverName}" is not authorized -- the app`
                 + ` registration it names must be acknowledged at ${source.where} in`
-                + ` ${path.join("~", ".claude", CONFIG_NAME)}${DOCTOR_REMEDY}`);
+                + ` ${CONFIG_HINT_PATH}${DOCTOR_REMEDY}`);
         }
     }
     if (!LOCAL_BACKENDS.includes(backend)) {
@@ -3123,7 +3130,7 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
                 // byte-identical apart from the where on the continuation line.
                 lines.push(`FAIL ${label} "${name}" (${decl.home}) wants ${ref.kind} "${ref.name}" and is ${problem.reason}.`
                     + `\n     Read the command below; if you want it to have that, put this under`
-                    + ` ${problem.where}.${kind} in ~/.claude/${CONFIG_NAME}:\n${shape}`);
+                    + ` ${problem.where}.${kind} in ${CONFIG_HINT_PATH}:\n${shape}`);
             }
         }
     }
@@ -3141,7 +3148,7 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
             continue;
         }
         lines.push(`INFO oauth "${oauthName}" (${oauthDecl.home}): no registration block yet --`
-            + ` add {} under ${source.where} in ~/.claude/${CONFIG_NAME} so "vc-secrets login ${oauthName}" will run`);
+            + ` add {} under ${source.where} in ${CONFIG_HINT_PATH} so "vc-secrets login ${oauthName}" will run`);
     }
     if (typeof shimContract === "number" && shimContract < REQUIRED_SHIM_CONTRACT) {
         lines.push(`WARN the installed shim speaks contract ${shimContract}, this launcher expects ${REQUIRED_SHIM_CONTRACT} -- re-run the vc-secrets install skill`);

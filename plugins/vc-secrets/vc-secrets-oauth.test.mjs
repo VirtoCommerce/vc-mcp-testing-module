@@ -4022,6 +4022,14 @@ channelTest("cmdLaunch: an oauth reference and an ordinary secret both reach the
     // reference needs a real backend, so a stub "gpg" on PATH stands in for the actual tool
     // (gpg --decrypt just prints the plaintext), while the ciphertext file only has to EXIST for
     // makeSecretResolver's pre-check to proceed to it.
+    // The stub stands in for gpg, so it stands in for nothing where gpg is not the backend this machine
+    // selects: on win32 detectLocalBackend answers wcm, the stub on PATH is never consulted, and the
+    // resolver reaches the real Credential Manager for a secret nobody stored there.
+    if (m.detectLocalBackend(process.platform, process.env) !== "gpg") {
+        t.skip("needs gpg to be the backend this machine selects -- the stub on PATH stands in for it");
+
+        return;
+    }
     const secretsHome = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-both-"));
     tmpDirs.push(secretsHome);
     const secretPath = path.join(secretsHome, "vc-secrets", "secrets", "user", "plain.gpg");
