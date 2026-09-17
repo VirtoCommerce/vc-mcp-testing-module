@@ -28,7 +28,14 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { wikiMarkupRefusal } from "../lib/jira-body-format.mjs";
-import "../../config.js";
+
+// config.js loads the layered .env files — and process.exit(1)s when the repo's CORE
+// vars (ADMIN_PASSWORD, USER_PASSWORD, …) are missing. Only a real Jira call needs that
+// env, so it is imported LAZILY, at the first network call: the ledger guard, the
+// wiki-markup refusal and --dry-run must all work where no .env.local exists — which is
+// exactly where the unit suite runs in CI.
+let envLoaded;
+const loadEnv = () => (envLoaded ??= import("../../config.js"));
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
 const LEDGER = resolve(ROOT, ".tracker-comments.json");
@@ -85,7 +92,8 @@ function mirrorToSummary(ticket, commentId) {
 }
 
 // ---------- Jira ----------
-function jiraAuth() {
+async function jiraAuth() {
+  await loadEnv();
   const email = process.env.JIRA_EMAIL, token = process.env.JIRA_API_TOKEN;
   const base = (process.env.JIRA_BASE_URL ?? process.env.JIRA_BASE ?? "").replace(/\/+$/, "");
   if (!email || !token) {
@@ -98,7 +106,7 @@ function jiraAuth() {
 }
 
 async function jira(method, path, body) {
-  const { base, hdr } = jiraAuth();
+  const { base, hdr } = await jiraAuth();
   const r = await fetch(`${base}${path}`, { method, headers: hdr, body: body ? JSON.stringify(body) : undefined });
   const text = await r.text();
   let json = null; try { json = JSON.parse(text); } catch { /* DELETE returns empty */ }
@@ -112,7 +120,7 @@ async function jira(method, path, body) {
  * broken output pipe duplicates every attachment.
  */
 async function attachFiles(ticket, paths) {
-  const { base, hdr } = jiraAuth();
+  const { base, hdr } = await jiraAuth();
   const issue = await jira("GET", `/rest/api/3/issue/${ticket}?fields=attachment`);
   const already = new Map((issue?.fields?.attachment ?? []).map(x => [x.filename, x]));
   const out = [];
