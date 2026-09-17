@@ -423,9 +423,61 @@ binary is broken. `doctor` covers the separate question of whether the secret re
 
 ## Why an edit to a declaration gets blocked
 
-The plugin ships a `PreToolUse` hook that denies agent writes to a declaration file and to the shim. A
-declaration decides which command receives which secret, so it changes through a human PR; the shim
-sits on the path of every launch and no plugin update overwrites it.
+The plugin ships a `PreToolUse` hook that denies agent writes to three things: a declaration file, the
+installed shim, and this package's own code. A declaration decides which command receives which secret,
+so it changes through a human PR; the shim sits on the path of every launch and no plugin update
+overwrites it; and the package's modules are what handle the token once a declaration has named it.
+
+The criterion for that third group is not "does this file touch a token". It has three prongs and a
+file needs one of them: **loaded into a process that holds a token**, **relaxing what an agent may do
+without a human** — switching this guard off is the extreme of that, a skill's invocation policy the
+ordinary case — or **deciding the content of a file that does either**.
+
+The first prong is an `import`, which runs its target when the importing module is evaluated — so
+everything the launcher imports executes in the process that reads the keystore, and everything the
+preload imports executes inside the MCP server process, which holds the token in its environment.
+`vc-secrets-error.mjs` is in both — directly in the launcher, and in the server process by way of
+`vc-secrets-target.mjs` — while reading like the most
+harmless file in the package. The second prong covers the hook itself, its payload reader, the two hook
+registration files, the three client manifests, and the skill files — the manifests are the cheapest
+entry of all, since `.cursor-plugin/plugin.json` is the only thing that points a client at
+`hooks/hooks-cursor.json`, so repointing one key makes a guarded registration inert without editing it —
+a test pins that value, so the repointing is not silent, but the detector is a suite somebody has to run.
+The third covers `scripts/install-shim.mjs`, which nothing on the token path imports and decides what the installed
+shim contains on the next install, together with `vc-secrets-shim.mjs`, whose bytes are what it copies.
+
+Two things stay writable: the package's own test files, and `README.md`. A guard that freezes the files
+the package is worked on is a guard somebody switches off wholesale, which costs more than what it was
+protecting; and this file grants nothing — no frontmatter, no permission grant, no key any client reads,
+and nothing executes it.
+
+`vc-secrets-probe.mjs` was writable too, on the grounds that nothing on the run path imports it. That is
+true and it answers the wrong question. What decides the risk is who **runs** the probe — the `doctor`
+skill's own text tells an agent to — and what the probe may import: it already imports the launcher, so
+every export the launcher has is one line away. It is guarded.
+
+The skill files are **not** in that writable group, though they look like it, and the three are guarded for two
+different reasons. `install` and `migrate` carry `disable-model-invocation: true`, which is what keeps a
+verb that copies a file and a verb that rewrites keystore entries human-invoked; `install` also carries
+`allowed-tools`, a standing permission grant. `skills/install/agents/openai.yaml` and
+`skills/migrate/agents/openai.yaml` say the invocation half of the same thing to another client
+(`allow_implicit_invocation: false` — a restriction, not a grant); `doctor` has no such file on purpose.
+`doctor` carries neither key — it is the one skill a model may invoke unprompted, and its body is the
+command that then runs. An edit to any of them changes what an agent may do; an edit to `README.md`
+misinforms a reader.
+
+Some guarded names are guarded **only inside the package directory**: `clients.mjs`, `clients.json`,
+`hooks/targets.mjs`, the hook registrations, the client manifests and the skill files. Those names
+belong to half the repositories on any machine and this hook runs in all of them, so claiming them
+outright would refuse edits in projects that have never heard of vc-secrets. The cost is a workspace
+rooted at the package itself, where they arrive with no directory in front of them — and it is worth
+being plain about which half that leaves open: `hooks/targets.mjs` and the registrations, the off
+switches. The launcher and the hook itself stay covered there, being matched by file.
+
+One off switch **inside this repository** is knowingly out of reach: `.claude-plugin/marketplace.json`
+at the repo root — not in this package — is what makes the package a plugin at all, and its name is not
+the package's to claim. Outside the repository there are two more, both already described above: the
+client's own enable flag, and, on Codex, a hook that stays untrusted until you trust it.
 
 What the hook actually sees differs per client, and the guard reads each shape rather than assuming
 one: on Claude Code the matcher selects `Edit`, `Write` and `NotebookEdit`; on Cursor the hook
@@ -437,6 +489,49 @@ could not tell".
 In all three it stays a speed bump: the same change made through a shell command goes past it. It
 surfaces an unexpected edit; it is not a boundary. Editing those files in your own editor is the
 intended path.
+
+### Checking it by hand
+
+Five payloads, fed to the hook directly. The two that must exit **0** are the ones worth running: a
+guard is easy to check when it refuses and impossible to check when it stays silent, so the probes
+that pin the silence are the ones worth the keystrokes.
+
+They answer one question — whether this hook reads payloads correctly, or has gone quiet on a shape it
+cannot parse. They say nothing about whether your client invokes it at all: they pipe JSON straight
+into `node` and never involve the client, so they pass unchanged on a machine where the hook is
+untrusted, or where the matcher never selects it for that client's write tool. For that question the
+in-client edit attempt described under **Codex** above is still the only detector.
+
+`printf`, not `echo`: `sh`'s `echo` expands `\n`, which turns probe 2's JSON into a broken document
+that the guard declines at exit 0 — a probe that reports success by failing to parse.
+
+```bash
+H=./hooks/guard-declarations.mjs     # the copy you mean to check, named directly -- CLAUDE_PLUGIN_ROOT
+                                     # is not reliably set in a shell, and unset it becomes /hooks/...
+p() { printf '%s' "$2" | node "$H"; echo "  -> exit $?  ($1)"; }
+
+# 1. a relative path from a write tool                         BLOCK, exit 2
+p "declaration, relative" '{"tool_name":"Write","tool_input":{"file_path":".claude/vc-secrets.json"}}'
+
+# 2. the same file named inside a patch, not in a path field   BLOCK, exit 2
+p "declaration, in a patch" '{"tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch\n*** Update File: .claude/vc-secrets.json\n*** End Patch"}}'
+
+# 3. one of this package's own modules, at any path            BLOCK, exit 2
+#    (deliberately OUTSIDE a vc-secrets/ directory: inside one, a directory-scoped
+#     pattern would pass this too, and the point here is that it matches by file)
+p "module" '{"tool_name":"Edit","tool_input":{"file_path":"some-other-checkout/src/vc-secrets-cache.mjs"}}'
+
+# 4. somebody else's directory that merely ENDS in .claude     ALLOW, exit 0
+p "not our declaration" '{"tool_name":"Write","tool_input":{"file_path":"vendor.claude/vc-secrets.json"}}'
+
+# 5. a write whose payload this guard cannot read              ALLOW, exit 0, and it says so
+p "unreadable payload" '{"tool_name":"Write","tool_input":{"filePath":".claude/vc-secrets.json"}}'
+```
+
+Probes 4 and 5 both exit 0, and the difference is the line probe 5 prints:
+`vc-secrets guard: unrecognised Write payload -- not inspected`. That sentence is the whole point of
+the pair — without it, a client whose payload shape this guard has never seen is indistinguishable
+from a client with nothing to block, and the guard is inert while reading as clean.
 
 ## Scope of the protection
 

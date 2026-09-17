@@ -4304,6 +4304,270 @@ test("guard: a relative shim path is blocked too", () => {
     assert.equal(r.status, 2);
 });
 
+// ── the guard over this package's OWN modules ───────────────────────────────────────────────────
+
+// Every file an edit could use to reach a token, by the criterion the hook states, which has three
+// prongs and needs only one: loaded into a process that holds a token, relaxing what an agent may do
+// without a human (switching this guard off is the extreme of that; a skill's invocation policy is the
+// ordinary case), or deciding the content of a file that does either. Not "does this file touch a
+// token", and not "is it code" or "is it prose": each of those readings certified files harmless on
+// their appearance, and each was wrong. The question is what an edit to the file can DO.
+//
+// `vc-secrets-error.mjs` is the sharpest case of the first prong: an ESM import runs its target at
+// module-evaluation time, so it executes both in the process that reads the keystore and, by way of
+// `vc-secrets-target.mjs`, inside the MCP server process that holds the token in its environment.
+// `install-shim.mjs` is here on the third prong, not the first -- nothing on the token path imports it,
+// and it writes the shim -- and `vc-secrets-shim.mjs` joins it there, being what gets written. These
+// names are distinctive enough to match anywhere.
+const GUARDED_ANYWHERE = [
+    "vc-secrets.mjs",
+    "vc-secrets-oauth.mjs",
+    "vc-secrets-cache.mjs",
+    "vc-secrets-preload.mjs",
+    "vc-secrets-target.mjs",
+    "vc-secrets-shim.mjs",
+    "vc-secrets-error.mjs",
+    // Here, not in the unguarded list, and the move is the point: its exclusion used to rest on "nothing
+    // on the run path imports it", which is true and answers who IMPORTS the probe. What decides its risk
+    // is who RUNS it -- `skills/doctor/SKILL.md`, guarded, names the command -- and what it may import:
+    // it already imports the launcher, so every export the launcher has is one line away.
+    "vc-secrets-probe.mjs",
+    "hooks/guard-declarations.mjs",
+    "scripts/install-shim.mjs",
+    "scripts/shim-path.mjs",
+];
+
+// The same criterion, with a shorter reach. These names belong to half the repositories on this machine
+// and the hook runs in all of them, so the guard scopes them to the package directory instead of
+// claiming the names. What that gives up has a test of its own below rather than a footnote here.
+//
+// A hook registration switches this guard off with one key, where editing `guard-declarations.mjs` does
+// it the hard way -- and a client manifest is cheaper still, since one of them is the only thing
+// pointing a client at a registration file. `clients.json` is read by the guarded `clients.mjs` at
+// module-evaluation time, so it reaches the launcher's process as data that module acts on. The skill
+// files are invocation policy wearing documentation's clothes: `disable-model-invocation: true` is what
+// keeps `install` and `migrate` -- a verb that copies a file and a verb that rewrites keystore entries
+// -- human-invoked, and `doctor` carries neither key, being here for the opposite reason: it is the one
+// skill a model may invoke unprompted, and its body is the command that then runs.
+const GUARDED_IN_PACKAGE = [
+    "clients.mjs",
+    "clients.json",
+    "hooks/targets.mjs",
+    "hooks/hooks.json",
+    "hooks/hooks-cursor.json",
+    // The manifests are the cheapest entry on prong 2, not an afterthought on it: the cursor one carries
+    // `"hooks": "./hooks/hooks-cursor.json"` and is the only thing pointing a client at that file, so
+    // repointing one key makes a guarded registration inert without editing it. Each manifest is also
+    // what makes this plugin exist for its client, so deleting one takes the hook with it.
+    ".claude-plugin/plugin.json",
+    ".codex-plugin/plugin.json",
+    ".cursor-plugin/plugin.json",
+    "skills/doctor/SKILL.md",
+    "skills/install/SKILL.md",
+    "skills/migrate/SKILL.md",
+    "skills/install/agents/openai.yaml",
+    "skills/migrate/agents/openai.yaml",
+];
+
+// Outside the set, and down to one. `README.md` is prose for people: no frontmatter, no permission
+// grant, no key any client reads, and nothing executes it. That is what separates it from the skill
+// files, which an earlier version of this list put under the same heading and was wrong about; and from
+// `vc-secrets-probe.mjs`, which was the last entry here until the question changed from "who imports
+// this file" to "what can an edit to it do".
+const UNGUARDED_FILES = ["README.md"];
+
+// Neither guarded nor unguarded-by-decision: they are the subject's own instrument. Listed so the
+// classification below accounts for every tracked file rather than filtering some out of view.
+const TEST_FILES = ["vc-secrets.test.mjs", "vc-secrets-oauth.test.mjs"];
+
+function runGuardOn(filePath, toolName = "Write") {
+    return spawnSync(process.execPath, [GUARD_HOOK_PATH], {
+        input: JSON.stringify({ tool_name: toolName, tool_input: { file_path: filePath } }),
+        encoding: "utf8", env: { ...process.env },
+    });
+}
+
+test("guard: every vc-secrets module that can reach a token is blocked, in every payload shape", () => {
+    // Named for the rule and not for a module: a title naming one file reads as a pin on the rule and
+    // is not one, so the module added next year arrives outside every test's subject.
+    for (const module of GUARDED_ANYWHERE) {
+        for (const [label, payload] of [
+            ["absolute", { tool_name: "Write", tool_input: { file_path: `/home/dev/vc-tools/plugins/vc-secrets/${module}` } }],
+            ["relative", { tool_name: "Edit", tool_input: { file_path: `plugins/vc-secrets/${module}` } }],
+            ["dot-slash", { tool_name: "Write", tool_input: { file_path: `./${module}` } }],
+            // The module's own separators are converted too, or the three entries carrying a directory
+            // send a mixed path that matches WITHOUT the hook's backslash normalisation -- so the
+            // fixture would go on passing for them if that normalisation ever became conditional.
+            ["windows", { tool_name: "Write", tool_input: { file_path: `plugins\\vc-secrets\\${module.replace(/\//g, "\\")}` } }],
+            // The version segment is not decoration here either, even though `MODULE_RE` matches by file
+            // and would pass without it: a fixture labelled "plugin-cache" that does not carry the
+            // installed layout documents a path that does not exist, and would keep passing if this
+            // pattern were ever scoped the way the other one is.
+            ["plugin-cache", { tool_name: "Edit", tool_input: { file_path: `/home/dev/.claude/plugins/cache/vc-tools/vc-secrets/0.1.0/${module}` } }],
+            ["apply_patch", { tool_name: "apply_patch", tool_input: { command: `*** Begin Patch\n*** Update File: plugins/vc-secrets/${module}\n*** End Patch` } }],
+            // The two shapes a workspace rooted AT the package produces, which is the ordinary way to
+            // work on it. They are also the only ones that exercise the `^` half of the anchor:
+            // `./x` matches through the slash in `./`, never through `^`. Measured before they were
+            // added -- removing `^` alone left the whole suite green, so the half of the anchor whose
+            // absence is this file's recorded historical bug was pinned by nothing.
+            ["bare", { tool_name: "Write", tool_input: { file_path: module } }],
+            ["bare-in-patch", { tool_name: "apply_patch", tool_input: { command: `*** Begin Patch\n*** Update File: ${module}\n*** End Patch` } }],
+        ]) {
+            const r = spawnSync(process.execPath, [GUARD_HOOK_PATH], {
+                input: JSON.stringify(payload), encoding: "utf8", env: { ...process.env },
+            });
+            assert.equal(r.status, 2, `${module} via ${label}: exit 2`);
+            assert.ok(r.stderr.trim().length > 0, `${module} via ${label}: a non-empty reason`);
+        }
+    }
+});
+
+test("guard: a module match is anchored at a path boundary and at the .mjs extension", () => {
+    // Four fixtures, and the mutations that reach them are not one mutation. Drop the boundary and
+    // `my-vc-secrets.mjs` -- somebody else's file -- is refused, and a guard that refuses unrelated
+    // edits is the guard people switch off; fixtures 1 and 2 pin that. Drop the `$` and a backup file
+    // beside the module becomes unwritable; fixtures 3 and 4 pin that, and it is the smaller and more
+    // likely edit of the two. Deleting `\.mjs$` outright is a THIRD mutation and reaches further than
+    // either: it reddens fixtures 3 and 4 here AND takes the package's own test files read-only, which
+    // the next test holds. `$` alone does not reach that second effect, because `.test.mjs` cannot
+    // match `(-…)?\.mjs` however the tail is anchored -- which is why the two mutations are not
+    // interchangeable even though both touch the same four characters.
+    for (const notOurs of [
+        "my-vc-secrets.mjs",
+        "vendor/notvc-secrets-oauth.mjs",
+        "plugins/vc-secrets/vc-secrets.mjs.bak",
+        "plugins/vc-secrets/vc-secrets-oauth.mjs.orig",
+    ]) {
+        assert.equal(runGuardOn(notOurs).status, 0, `${notOurs}: not one of ours`);
+    }
+});
+
+test("guard: the package's own test files stay writable", () => {
+    // Checked against the three prongs rather than on sight, because "a test file holds no token" is
+    // the discredited reading and this is the last code exclusion anyone will reuse as a precedent: a
+    // test file is loaded into no process that holds a token, is read as policy by no client, and
+    // decides the content of no file that does either. And freezing it stops all work on the package,
+    // which is the fastest route to the guard being switched off wholesale.
+    for (const testFile of [
+        "plugins/vc-secrets/vc-secrets.test.mjs",
+        "plugins/vc-secrets/vc-secrets-oauth.test.mjs",
+        "/home/dev/vc-tools/plugins/vc-secrets/vc-secrets.test.mjs",
+    ]) {
+        assert.equal(runGuardOn(testFile, "Edit").status, 0, `${testFile}: tests are how this package is worked on`);
+    }
+});
+
+test("guard: a name this package does not own is guarded inside the package and nowhere else", () => {
+    // `clients.mjs`, `clients.json`, `targets.mjs`, `hooks.json` -- ordinary filenames, every one. This
+    // hook is registered by an enabled plugin, so it runs in every repository on the machine, and
+    // claiming those names would refuse edits in repositories that have never heard of us, which is how
+    // a guard gets switched off. Both halves are asserted, because only the pair expresses "scoped":
+    // blocked under the package directory, allowed without it. The cost is real and it does not land on
+    // the harmless half: a workspace rooted AT this package sends these bare, and the ones it then stops
+    // covering are `hooks/targets.mjs` and the registrations -- the off switches. The launcher and the
+    // hook itself stay covered there, being file-matched, so the gap is exactly the scoped list.
+    // Stated as the list rather than as a count, because a count written in prose goes stale the next
+    // time the list grows and reads exactly as right as it did before.
+    for (const scoped of GUARDED_IN_PACKAGE) {
+        assert.equal(runGuardOn(`plugins/vc-secrets/${scoped}`).status, 2, `${scoped}: inside the package`);
+        // The installed copy, in the layout `vc-secrets-shim.mjs` measured and encodes --
+        // `<root>/<marketplace>/<plugin>/<VERSION>/` -- and not a hand-written path that merely looks
+        // like one. This fixture used to omit the version segment, so it asserted coverage of a shape
+        // that never occurs while every real installed copy went unguarded, and no mutation could find
+        // it: mutations perturb the pattern, never the fixture.
+        assert.equal(runGuardOn(`/home/dev/.claude/plugins/cache/vc-tools/vc-secrets/0.1.0/${scoped}`).status, 2,
+            `${scoped}: the installed copy, under its version directory`);
+        assert.equal(runGuardOn(`/home/dev/.claude/plugins/cache/vc-tools/vc-secrets/34040c9c5685/${scoped}`).status, 2,
+            `${scoped}: the installed copy, where the version directory is a hash`);
+        assert.equal(runGuardOn(scoped).status, 0, `${scoped}: bare -- the stated gap, not an oversight`);
+        assert.equal(runGuardOn(`some-other-project/${scoped}`).status, 0, `${scoped}: somebody else's`);
+    }
+});
+
+test("guard: the pattern is machine-wide, and a same-named file in an unrelated repo is refused", () => {
+    // Accepted behaviour, pinned so it stops being nobody's decision. Matching by file rather than by
+    // directory is what reaches every home this module has -- a checkout, the plugin cache, another
+    // marketplace's directory -- and no prefix reaches all three. The cost arrives with it: this hook
+    // is registered by an enabled plugin, so it runs in every repository on the machine, and somebody
+    // else's `vc-secrets.mjs` gets a refusal whose remedy does not apply to them.
+    assert.equal(runGuardOn("some-other-project/src/vc-secrets.mjs").status, 2,
+        "a cost of file-matching, not an oversight -- change this test deliberately or not at all");
+});
+
+test("guard: every file deliberately outside the set stays writable", () => {
+    // What this pins is one decision: `README.md` grants nothing, so it stays writable. The isolating
+    // mutation is a pattern that reaches it -- adding `README\.md` to the scoped alternation reddens
+    // this test and no other.
+    //
+    // One obvious mutation does NOT pin it, and the green it produces means nothing: widening the module
+    // alternation to `vc-secrets(-[a-z]+)?\.mjs$` swallows no file, because no `vc-secrets-*` file is
+    // outside the guarded set -- a prefix sweep and the explicit list are behaviourally identical here.
+    // Written down because that green looks like coverage and is the absence of a subject.
+    for (const outside of UNGUARDED_FILES) {
+        assert.equal(runGuardOn(`plugins/vc-secrets/${outside}`).status, 0, `${outside}: outside the set on purpose`);
+    }
+});
+
+test("guard: the installed shim keeps its reinstall remedy, and the source copy gets the PR one", () => {
+    // Order-dependent, and nothing else notices if the order is undone: the module pattern also matches
+    // the installed path, so checking it first would answer an installed-copy edit with "open a PR",
+    // where the fix is a reinstall. Both remedies are correct and each is useless in the other place.
+    const installed = runGuardOn("plugins/data/vc-secrets-vc-tools/vc-secrets-shim.mjs");
+    assert.equal(installed.status, 2);
+    assert.match(installed.stderr, /reinstall it with the vc-secrets install skill/);
+
+    const source = runGuardOn("plugins/vc-secrets/vc-secrets-shim.mjs");
+    assert.equal(source.status, 2);
+    assert.doesNotMatch(source.stderr, /reinstall it with the vc-secrets install skill/);
+    assert.match(source.stderr, /human PR/);
+});
+
+// There is deliberately no test asserting that nothing on the run path imports `vc-secrets-probe.mjs`.
+// The claim is true and checkable, and it decides nothing: membership does not turn on the import graph
+// at all, so no edge appearing or disappearing can move a file in or out of the guarded set. A test for
+// it would pin a fact and read as pinning a policy.
+
+test("guard: every file this package ships is classified -- guarded or deliberately not", () => {
+    // The enumeration is every file in the package directory, walked from disk, and the absence of any
+    // filter on it is not a preference: three different filters have each hidden a file that belonged
+    // here, and each is named below. The rounds are not counted -- that would be one more number to go
+    // stale, which is the class this comment is about. A hand-kept list cannot report the file somebody
+    // adds beside it. A filtered walk is worse: it reports a confident,
+    // complete-looking answer about the part it can see. This test has twice been that walk -- first
+    // filtering to `.mjs`, which hid `hooks/hooks.json`, an off switch one key wide; then skipping
+    // dot-directories as "manifests rather than package code", which hid `.cursor-plugin/plugin.json`,
+    // the file that POINTS at a guarded registration and is cheaper to repoint than the registration
+    // is to edit. Then the same question in its "is it prose?" form put five skill files under "the
+    // documentation", and every one of those clauses was false for them. Each filter answered "what
+    // KIND of file is this?" where the criterion asks what an edit to it can DO -- and the next filter
+    // of that shape would hide the next one.
+    //
+    // If this ever fails on a file nobody added, read it as the package having grown untracked scratch
+    // beside its own code, and say so -- do not answer it by filtering the file out, which is how both
+    // of the misses above were introduced.
+    //
+    // So this walk has no filter of any kind: every directory is descended and every FILE is reported,
+    // dot-directories included. The two test files are a list of their own rather than an exclusion,
+    // because an exclusion is a filter and this test is about not having one.
+    //
+    // `git ls-files` would be a better subject still -- it names what the package ships -- and it is
+    // deliberately not used: the mutation control runs the suite from a copied directory that is not a
+    // git repository, so the check would fail there for a reason having nothing to do with the mutation
+    // under test, and every mutation would redden two tests instead of one.
+    const root = fileURLToPath(new URL("./", import.meta.url));
+    const walk = (dir, prefix = "") => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+        (e.isDirectory() ? walk(path.join(dir, e.name), `${prefix}${e.name}/`) : [`${prefix}${e.name}`]));
+    const shipped = walk(root).sort();
+    assert.ok(shipped.length > 20, `expected the package's files, got ${shipped.length}`);
+
+    assert.deepEqual(shipped,
+        [...GUARDED_ANYWHERE, ...GUARDED_IN_PACKAGE, ...UNGUARDED_FILES, ...TEST_FILES].sort(),
+        "a shipped file is in none of the four lists -- decide whether it is loaded into a token-holding "
+        + "process, relaxes what an agent may do without a human, or decides the content of a file "
+        + "that does either, "
+        + "then add it to one");
+});
+
 test("targetsFrom: a patch that names no file is unreadable, like any other write that yields no path", () => {
     // fromPathFields already calls this case unreadable; fromPatch returned readable:true
     // unconditionally, so an upstream header-spelling change would degrade to silence rather than to
