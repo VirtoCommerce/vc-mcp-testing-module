@@ -27,7 +27,16 @@ The 6 servers in the table above are configured in `.mcp.json` (project-level). 
 - Default to `chromium` (not `chrome`) for Playwright MCP browser launches. WebKit is NOT supported on Windows — fall back to Edge or Chrome immediately without attempting installation.
 - Always verify MCP server config uses correct browser engine names: `chromium`, `firefox`, `webkit` (not `chrome`, `edge`).
 - After any MCP config change, remind the user that a server restart is required before the new config takes effect.
-- Browser configs set viewport to 1920x1080, HAR capture enabled, isolated contexts, and **video capture that records ALWAYS** (`recordVideo` is a context option; `retain-on-failure` is a test-runner setting and does not exist here). Videos land in `test-results/<lane>/video/*.webm` (gitignored) and are **flushed on `browser_close`, not continuously** — an empty `video/` mid-session is not evidence that capture is off (verified 2026-09-14). The three desktop lanes record at 1280×720; `playwright-mobile` (registered 2026-09-14) at 390×844 portrait. **`.mcp.json` is gitignored and per-machine** — a checkout missing the `playwright-mobile` entry loads that config not at all, and the tell is that `test-results/mobile/` never appears. When a recording is evidence: `reports-policy.md` §5.2.
+- **`deviceScaleFactor` does NOTHING for MCP screenshots — the VIEWPORT is the only pixel lever.**
+  Measured 2026-09-17: `@playwright/mcp` hardcodes `page.screenshot({ scale: "css" })`, which discards
+  the device scale and emits exactly viewport-many pixels. A 1440×900 viewport at `deviceScaleFactor: 2`
+  still produced a 1440×900 / 57 KB PNG; resizing to 1920×1080 produced 1920×1080 / 523 KB. So do not
+  add `deviceScaleFactor` to a desktop lane expecting sharper evidence — it costs ~4× memory and changes
+  nothing in the file. Raise the viewport instead, or capture a single **element** (`element` + `ref` on
+  `browser_take_screenshot`), which is what actually makes a screenshot legible once Jira scales it to
+  `|width=700!`. `playwright-mobile` keeps `deviceScaleFactor: 3` because it emulates a real device, not
+  because it sharpens the capture.
+- Browser configs set viewport to 1920x1080, HAR capture enabled, isolated contexts, and **video capture that records ALWAYS** (`recordVideo` is a context option; `retain-on-failure` is a test-runner setting and does not exist here). Videos land in `test-results/<lane>/video/*.webm` (gitignored) and are **flushed on `browser_close`, not continuously** — an empty `video/` mid-session is not evidence that capture is off (verified 2026-09-14). The three desktop lanes record at 1920×1080; `playwright-mobile` (registered 2026-09-14) at 390×844 portrait. **`.mcp.json` is gitignored and per-machine** — a checkout missing the `playwright-mobile` entry loads that config not at all, and the tell is that `test-results/mobile/` never appears. When a recording is evidence: `reports-policy.md` §5.2.
 
 ## `.mcp.json` Setup
 
