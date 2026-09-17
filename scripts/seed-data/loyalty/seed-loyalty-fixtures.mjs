@@ -108,6 +108,43 @@ async function verifyLoyaltyCatalogVisibility(productId, pricelistId) {
   log(`  ✓ verified loyalty-catalog visibility: ${pts.list} ${PTS} (> 0) in ${pricelistId}`);
 }
 
+/**
+ * Resolve the product's STOREFRONT PATH from the platform, and never compose it from display names.
+ *
+ * Added 2026-09-16. Three suite cases (083e LOYORG-E2E-001/006/007) had the literal
+ * `/loyalty-catalog/loyalty-fixtures/loyalty-pts-unit-divisor` typed into their Steps. That is a
+ * transcribed constant in the GOLDEN RULE's exact sense: both slugs are produced by `loyaltySlug()`
+ * from a display NAME, so renaming the product or the category silently re-points every one of those
+ * cases at a dead URL — and a storefront soft-404 answers **HTTP 200**, so nothing errors and the
+ * case fails for a reason no one can see.
+ *
+ * MEASURED, so the shape of the path is not guesswork:
+ *   - `/loyalty-pts-unit-divisor` (bare product slug)                -> 404
+ *   - `/loyalty-catalog/loyalty-fixtures/loyalty-pts-unit-divisor`   -> the PDP, price `PTS1`
+ * so the leaf slug alone is NOT addressable and `url = '/' + slug` (the shape
+ * `seed-missions-e2e.mjs` uses for ordinary catalog products) would be wrong here.
+ *
+ * Both variable segments are READ BACK from the platform's own `seoInfos`, never slugified locally.
+ * `/loyalty-catalog` is the Loyalty module's fixed storefront route (VirtoOZ *Set Up Loyalty Catalog
+ * Browsing*: "browse a separate product grid at /loyalty-catalog"), so it is a documented route
+ * constant of the same class as `/cart` — not a value with a source of truth to read.
+ */
+const LOYALTY_CATALOG_ROUTE = '/loyalty-catalog';
+async function resolveStorefrontPath(productId, categoryId) {
+  const storeId = process.env.STORE_ID || 'B2B-store';
+  const pickSeo = (entity, what) => {
+    const seos = entity?.seoInfos || [];
+    const seo = seos.find((s) => s.semanticUrl && s.storeId === storeId) || seos.find((s) => s.semanticUrl);
+    if (!seo?.semanticUrl) throw new Error(`${what} has no seoInfos.semanticUrl — cannot resolve the storefront path without inventing one`);
+    return seo.semanticUrl;
+  };
+  const product = await api('GET', `/api/catalog/products/${productId}`, null, { expectStatus: [200] });
+  const category = await api('GET', `/api/catalog/categories/${categoryId}`, null, { expectStatus: [200] });
+  const slug = pickSeo(product, `product ${SKU}`);
+  const categorySlug = pickSeo(category, `category "${CATEGORY_PATH}"`);
+  return { slug, url: `${LOYALTY_CATALOG_ROUTE}/${categorySlug}/${slug}` };
+}
+
 async function findProductByCode(code, catalogId) {
   const r = await api('POST', '/api/catalog/listentries', { keyword: code, ...(catalogId ? { catalogId } : {}), take: 5 }, { expectStatus: [200, 201, 400, 404] });
   const found = (r?.listEntries || r?.results || []).find((p) => p.code === code && p.type === 'product');
@@ -168,9 +205,12 @@ async function seed() {
     const okProduct = await verifyCreated(api, 'product', product.id);
     log(okProduct ? `  ✓ verified product present (${product.id})` : `  ⚠ product NOT found on read-back (${product.id})`);
     await verifyLoyaltyCatalogVisibility(product.id, pl.id);
-    // Multi-env write-back: runtime GUIDs → aliases.<env>.json (base alias keeps only sku/price/currency).
-    writeEnvAliasOverride({ LOY_SKU_PTS_UNIT: { id: product.id, pricelistId: pl.id } });
-    log(`  ✓ aliases.${process.env.TEST_ENV || 'vcst'}.json: LOY_SKU_PTS_UNIT.id + .pricelistId`);
+    // Multi-env write-back: runtime GUIDs + the RESOLVED storefront path → aliases.<env>.json
+    // (base alias keeps only sku/price/currency). `url` is what suite cases navigate to via
+    // @td(LOY_SKU_PTS_UNIT.url) — see resolveStorefrontPath for why it is read back, not composed.
+    const { slug, url } = await resolveStorefrontPath(product.id, loc.categoryId);
+    writeEnvAliasOverride({ LOY_SKU_PTS_UNIT: { id: product.id, pricelistId: pl.id, slug, url } });
+    log(`  ✓ aliases.${process.env.TEST_ENV || 'vcst'}.json: LOY_SKU_PTS_UNIT.id + .pricelistId + .slug + .url (${url})`);
   }
   log('Done: LOY_SKU_PTS_UNIT fixture ensured.');
 }

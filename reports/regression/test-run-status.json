@@ -1,37 +1,57 @@
 {
- "runId": "REG-2026-09-16-1727",
- "status": "in_progress",
- "startedAt": "2026-09-16T15:29:16.634Z",
- "selection": "083e --ids LOYORG-E2E-006 --no-promote (scoped re-run after /qa-review-tests --fix)",
+ "runId": "REG-2026-09-16-1930",
+ "status": "completed",
+ "startedAt": "2026-09-16T17:31:14.441Z",
+ "selection": "083e --ids LOYORG-E2E-006,LOYORG-E2E-007 --no-promote",
  "env": "localhost",
  "scoped": true,
- "note": "Re-run of the ONE case repaired by /qa-review-tests 083e --fix. LOYORG-E2E-006 returned AMBIGUOUS in REG-2026-09-16-1624 because its Steps never added the cash line BL-LOY-010 requires, so the Place-Order-disabled state it observed could not discriminate the org-scope/fallback hypothesis. Fix added the cash line + [WAIT] and cited BL-LOY-010. Delegated-style scope, so NO PROMOTION. Note: PTS was removed from store.currencies by the owner between runs (config fix, not a product change); loyalty catalog verified still working (PDP renders PTS1, in stock).",
+ "purpose": "Resolve the two UNGROUNDED verdicts from the Dim-11 triangulation. Those assertions could not be decided read-only because deciding them REQUIRES placing orders that move real, irreversible loyalty pools. Operator explicitly authorised the mutation. E2E-006 assertion 4 (OUTCOME is an order confirmation) and E2E-007 assertions 2-6 (earn credits ORG_2, ORG_1 unmoved, ORDER_SPEND exists, ledger rows grow, no foreign rows) are what this run exists to decide.",
+ "preflightNote": "carts:check reported 2 competing carts on MULTI_ORG_TF_BR_ALT and was DELIBERATELY NOT SWEPT. The two carts carry DIFFERENT organizationIds (96f109a7=TechFlow created 12:56, 23525b44=BuildRight created 16:29) — they are PER-ORG carts, not competing ones. carts:check groups by (customerId,storeId,currency) and ignores organizationId, so it false-positives on every multi-org account and carts:sweep --apply would delete one company cart. Both are empty, so no stale-line risk. E2E-007 switches companies by design, so a second cart is expected product behaviour.",
  "storeMode": {
   "atRunStart": "Organization",
-  "mustRestoreTo": "Organization"
+  "mustRestoreTo": "Organization",
+  "atRunEnd": "Organization",
+  "restored": true
  },
  "baselines": {
-  "LOY_PERSONAL_NOORG balance": 95646,
-  "cheapest_pts_price": 1,
-  "store.currencies": "USD, CNY, GBP, CZK, GHS, XPT, EUR, AUD (PTS removed)"
+  "BuildRight (ORG_1) balance": 217836,
+  "BuildRight ledgerRows": 20,
+  "TechFlow (ORG_2) balance": 186097,
+  "TechFlow ledgerRows": 21,
+  "LOY_PERSONAL_NOORG user-scope": 96095,
+  "MULTI_ORG_TF_BR_ALT user-scope (fallback detector, must not move)": 63872
  },
  "suites": [
   {
    "id": "083e",
    "name": "Loyalty Organization Balance Storefront",
    "file": "regression/suites/Frontend/loyalty/083e-loyalty-organization-balance.csv",
-   "status": "running",
+   "status": "done",
    "browser": "playwright-chrome",
    "lane": "browser",
    "laneId": 1,
-   "cases": 1,
+   "cases": 2,
    "sourceCases": 8,
    "attempts": 1,
-   "startedAt": "2026-09-16T15:29:16.634Z",
-   "pass": 0,
+   "startedAt": "2026-09-16T17:31:14.442Z",
+   "pass": 2,
    "fail": 0,
    "blocked": 0,
-   "skipped": 0
+   "skipped": 0,
+   "outOfScope": 6
   }
- ]
+ ],
+ "finishedAt": "2026-09-16T17:41:24.567Z",
+ "crossLayerVerified": {
+  "BuildRight delta": 0,
+  "TechFlow delta": 30029,
+  "MULTI_ORG user-scope fallback delta": 0,
+  "LOY_PERSONAL_NOORG delta": 29,
+  "orders": [
+   "CO260916-00027",
+   "CO260916-00028",
+   "CO260916-00029"
+  ],
+  "token organization_id both checkouts": "TechFlow 96f109a7"
+ }
 }
