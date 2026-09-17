@@ -54,7 +54,10 @@ Exit code is 1 if any line is a `FAIL`, so it works as a gate in a script.
 ## Then, if a server still fails
 
 `doctor` answers "is the secret resolvable". It says nothing about the server binary. For that, run
-the probe, which completes a real `initialize` handshake through `run`:
+the probe, which completes a real `initialize` handshake through `run`. When nothing answers, it
+separates three cases rather than reporting one: no token could be obtained (routine — nobody has
+signed in yet), the launcher refused for some other reason, or the server binary exited without
+answering. Only the last is the binary's fault:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/vc-secrets-probe.mjs" <server>

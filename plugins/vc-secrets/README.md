@@ -399,7 +399,7 @@ Paste `emit-config codex` into `~/.codex/config.toml`, run `doctor`, and trust t
 | `VC_SECRETS_LOCAL_BACKEND` | Override the detected backend (`wcm` / `keychain` / `gpg`). WSL is **not** treated as Windows |
 | `VC_SECRETS_GPG_RECIPIENT` | Encrypt to a specific key instead of your default |
 | `VC_SECRETS_POWERSHELL` | Set to `pwsh` if Constrained Language Mode blocks the in-box PowerShell's `Add-Type` |
-| `VC_SECRETS_TIMING` | `1` prints the resolve-phase duration to stderr |
+| `VC_SECRETS_TIMING` | `1` prints the resolve-phase duration to stderr. The probe drops it from the launcher it spawns — that line would otherwise be the last one before a silent server death, and get read as a launcher refusal |
 | `VC_SECRETS_CONFIG_DIR` | Test support — read declarations from one directory. `doctor` warns whenever it is set |
 
 ## When something fails
@@ -414,8 +414,12 @@ Paste `emit-config codex` into `~/.codex/config.toml`, run `doctor`, and trust t
 | `Missing environment variables: VC_SECRETS` | The variable was never set on this machine — run the `install` skill |
 | A wrapped server shows failed in `/mcp` | `doctor` first (secret?), then the probe for the binary: take the `installPath` of `vc-secrets@vc-tools` from `~/.claude/plugins/installed_plugins.json`, then `node <installPath>/vc-secrets-probe.mjs <server>` |
 
-The probe separates "secret not resolvable" from "server binary broken": `doctor` covers the first,
-the probe the second by completing a real `initialize` handshake through `run`.
+The probe completes a real `initialize` handshake through `run`. When nothing answers it names which
+of three things happened instead of printing one message for all: the launcher could not obtain a
+token (routine — nobody has signed in yet; the probe repeats the launcher's own
+`vc-secrets login <entry>` remedy when the launcher printed one), the launcher refused for some other
+reason (quoted verbatim), or the server binary exited without answering. Only the last means the
+binary is broken. `doctor` covers the separate question of whether the secret resolves at all.
 
 ## Why an edit to a declaration gets blocked
 

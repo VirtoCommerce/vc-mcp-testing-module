@@ -4,6 +4,7 @@ import * as m from "./vc-secrets.mjs";              // the launcher
 import * as oauth from "./vc-secrets-oauth.mjs";     // the protocol
 import * as cache from "./vc-secrets-cache.mjs";     // entries, expiry, the lock
 import * as target from "./vc-secrets-target.mjs";   // the preload's target matcher
+import * as probe from "./vc-secrets-probe.mjs";     // the initialize-handshake verification aid
 import crypto from "node:crypto";
 import os from "node:os";
 import http from "node:http";
@@ -12,6 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { fileURLToPath } from "node:url";
 
 // Two of the acquireLock socket tests below spawn a real second process to race or kill, and each
 // writes its own throwaway script into a fresh tmp dir. Removed here rather than per-test so a
@@ -4118,5 +4120,221 @@ channelTest("cmdLaunch: an oauth reference and an ordinary secret both reach the
         } else {
             process.env.XDG_CONFIG_HOME = savedXdg;
         }
+    }
+});
+
+// ---------------------------------------------------------------------------------------------
+// vc-secrets-probe.mjs — the initialize-handshake verification aid. Ported from the upstream
+// launcher's mcpw-probe.js and its suite: `mcpw` becomes `vc-secrets` throughout, including inside
+// the LAUNCHER_LINE / TOKEN_REFUSAL patterns. Those were COPIED with the tool name substituted, then
+// checked against this package's own messages one alternative at a time -- which is how "not signed
+// in" came out, having no producer here that LAUNCHER_LINE can match.
+// ---------------------------------------------------------------------------------------------
+
+const PROBE_PATH = fileURLToPath(new URL("./vc-secrets-probe.mjs", import.meta.url));
+
+// Writes a single project-scope declaration file and returns its containing directory, exactly as
+// tmpConfigDir in vc-secrets.test.mjs does -- kept local (that file is off-limits to import from,
+// so it is not re-exported) but reusing this file's own tmpDirs/after() cleanup above rather than
+// growing a second one.
+function tmpProbeConfigDir(cfg) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-probe-"));
+    tmpDirs.push(dir);
+    fs.writeFileSync(path.join(dir, m.CONFIG_NAME), JSON.stringify(cfg));
+
+    return dir;
+}
+
+test("classifyProbeFailure: a launcher that could not get a token is not a broken server binary", () => {
+    // The distinction the probe exists to make. Under OAuth "nobody has signed in" is routine and
+    // "the server binary cannot start" is a regression; one message for both means the regression
+    // reads exactly like the routine case.
+    assert.equal(probe.classifyProbeFailure('vc-secrets: no usable token for "azure-mcp" -- run "vc-secrets login azure-mcp"'), "token");
+    assert.equal(probe.classifyProbeFailure('vc-secrets: another vc-secrets is still refreshing the token for "azure-mcp"'), "token");
+    assert.equal(probe.classifyProbeFailure("vc-secrets: token endpoint refused the request: invalid_grant"), "token");
+});
+
+test("classifyProbeFailure: any other launcher refusal is named, not blamed on the server", () => {
+    assert.equal(probe.classifyProbeFailure('vc-secrets: unknown server "ghost" -- not declared in vc-secrets.json'), "launcher");
+    assert.equal(probe.classifyProbeFailure("vc-secrets: failed to spawn npx: ENOENT"), "launcher");
+});
+
+test("classifyProbeFailure: output that is not the launcher's belongs to the server", () => {
+    assert.equal(probe.classifyProbeFailure("Error: Cannot find module '/x/dist/index.js'"), "server");
+    assert.equal(probe.classifyProbeFailure(""), "server");
+    assert.equal(probe.classifyProbeFailure(undefined), "server");
+});
+
+test("describeFailure: each kind produces a message a reader can act on, and echoes no token", () => {
+    const token = probe.describeFailure("azure-mcp",
+        'vc-secrets: no usable token for "azure-mcp" -- run "vc-secrets login azure-mcp" [eyJhbGciOi.LEAKED]');
+    assert.match(token, /token not obtainable/);
+    // The name's second half. The token branch SYNTHESISES its message from the server name; only the
+    // launcher branch echoes the launcher's line verbatim. Routing the token branch through that same
+    // echo would put whatever the launcher printed into the summary, and the three matches above would
+    // all still pass -- so the bound the name states needs its own assertion.
+    assert.doesNotMatch(token, /LEAKED/, "the token branch must not echo the launcher's line");
+    assert.match(probe.describeFailure("azure-mcp", 'vc-secrets: unknown server "ghost"'), /launcher refused: unknown server/);
+    assert.match(probe.describeFailure("azure-mcp", "Error: Cannot find module"), /server exited before responding/);
+});
+
+test("vc-secrets-probe: importing it spawns nothing -- the module is guarded", () => {
+    // It used to run on load: reading argv and spawning a child. That is why none of the logic
+    // above could have a test, and why the two failures went on being one message.
+    const source = stripComments(fs.readFileSync(PROBE_PATH, "utf8"));
+    assert.match(source, /if \(process\.argv\[1\] && fileURLToPath\(import\.meta\.url\) === path\.resolve\(process\.argv\[1\]\)\)/);
+    assert.equal(source.split("main(server);").length - 1, 1, "exactly one call site");
+    assert.ok(source.indexOf("if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]))")
+        < source.indexOf("main(server);"), "and it is inside the guard");
+});
+
+test("vc-secrets-probe: a launcher refusal is captured, classified, and still echoed to the developer", () => {
+    // The classifier tests above are pure, so they would not notice if the stderr plumbing broke --
+    // and the plumbing is the change: stderr used to be inherited, which let the developer read it
+    // but left the probe unable to tell its two failures apart. Both halves matter, so both are
+    // asserted through a real run.
+    const dir = tmpProbeConfigDir({ secrets: {}, servers: {} });
+    const r = spawnSync(process.execPath, [PROBE_PATH, "ghost"],
+        { env: { ...process.env, VC_SECRETS_CONFIG_DIR: dir }, encoding: "utf8" });
+    assert.match(r.stderr, /probe: ghost -> launcher refused: unknown server/);
+    assert.match(r.stderr, /^vc-secrets: unknown server/m, "the launcher's own line must still reach the developer");
+    assert.equal(r.stdout, "", "the probe writes nothing on fd 1");
+    assert.equal(r.status, 1);
+});
+
+test("classifyProbeFailure: a launcher line followed by a server death is the server's failure", () => {
+    // Both measured against the previous whole-stream scan. "channel client refused" can only be
+    // printed by a launcher whose server is already RUNNING, and the timing line is emitted on the
+    // success path -- so blaming either for a crash reintroduces the conflation, reversed.
+    // "Segmentation fault" is a SHELL's message and was unreachable here: the probe spawns the
+    // launcher directly and the launcher spawns the server with no shell, so nothing in this pipeline
+    // can print it. Replaced with a line the runtime really does emit on its way down.
+    assert.equal(probe.classifyProbeFailure("vc-secrets: channel client refused (nonce)\nFATAL ERROR: Reached heap limit Allocation failed"), "server");
+    assert.equal(probe.classifyProbeFailure("vc-secrets: resolve phase took 812 ms\nError: Cannot find module"), "server");
+});
+
+test("classifyProbeFailure: an exit code the launcher cannot produce itself is the server's, whatever the last line said", () => {
+    // Every launcher-fatal exit on the run path is 1 -- fail() uses a VcSecretsError's exitCode and
+    // every one in the package leaves it at the default -- and the launcher's only other exit relays
+    // the server's code. So a non-1 code proves the launcher did not refuse. Without it, a benign
+    // launcher line printed last swallowed a silent server death: measured, with the timing knob set,
+    // `probe: silent -> launcher refused: resolve phase took 0 ms`.
+    assert.equal(probe.classifyProbeFailure("vc-secrets: resolve phase took 0 ms", 3), "server");
+    assert.equal(probe.classifyProbeFailure('vc-secrets: no usable token for "ado" -- run "vc-secrets login ado"', 3), "server");
+
+    // Code 1 cannot separate a launcher failure from a server that also exited 1, so the text rule
+    // still decides there -- and so does an absent code, for a caller that has none. Both are
+    // asserted because either silently becoming "server" would disable the classifier outright.
+    assert.equal(probe.classifyProbeFailure('vc-secrets: no usable token for "ado" -- run "vc-secrets login ado"', 1), "token");
+    assert.equal(probe.classifyProbeFailure('vc-secrets: no usable token for "ado" -- run "vc-secrets login ado"'), "token");
+});
+
+test("vc-secrets-probe: a silent server death stays the server's even with the launcher's timing knob set", () => {
+    // The end-to-end shape both guards exist for, measured as a defect before either: a server that
+    // exits without printing, plus VC_SECRETS_TIMING=1, left the launcher's benign timing line last
+    // and the probe blamed the launcher. Two independent discriminators cover it -- the knob is
+    // dropped from the child's environment, and the relayed exit code is not 1 -- but this test pins
+    // only the FIRST: restoring the knob's inheritance reddens it. The exit-code half is pinned by
+    // the classifier test above, and measured -- deleting that branch leaves THIS test green, because
+    // with the knob dropped there is no benign line left for it to misread.
+    const dir = tmpProbeConfigDir({ projectId: "p", secrets: {},
+        servers: { silent: { command: process.execPath, args: ["-e", "setTimeout(()=>process.exit(3),80)"], env: {} } } });
+    const r = spawnSync(process.execPath, [PROBE_PATH, "silent"],
+        { env: { ...process.env, VC_SECRETS_CONFIG_DIR: dir, VC_SECRETS_TIMING: "1" }, encoding: "utf8" });
+    assert.match(r.stderr, /probe: silent -> server exited before responding/);
+    assert.doesNotMatch(r.stderr, /resolve phase took/, "the timing knob must not reach the launcher the probe spawns");
+});
+
+test("classifyProbeFailure: token wording from the SERVER is not the launcher's refusal", () => {
+    // The server is an auth-heavy process that emits its own credential-flavoured failures, and the
+    // message this used to produce -- "the server binary was never reached" -- was simply false.
+    assert.equal(probe.classifyProbeFailure("FATAL: token endpoint returned 500 while starting"), "server");
+    assert.equal(probe.classifyProbeFailure("could not sign in: not signed in to Azure"), "server");
+});
+
+test("vc-secrets-probe: every verdict is written synchronously, or a slow reader loses it", () => {
+    // Measured on the previous version: with 2 MB of child stderr and a reader that sleeps, exactly
+    // one pipe buffer arrived and the classification line -- the entire deliverable -- never did.
+    // process.exit abandons pending writes, which is why this file's neighbours use writeSync.
+    // The ABSENCE check reads raw source on purpose: stripping could only hide an occurrence, turning
+    // a doesNotMatch into a silent pass. The positive match reads stripped, so a comment quoting the
+    // line cannot satisfy it.
+    const source = fs.readFileSync(PROBE_PATH, "utf8");
+    assert.ok(!source.includes("process.stderr.write"), "an async write before process.exit can be dropped");
+    assert.match(stripComments(source), /fs\.writeSync\(2, `\$\{describeFailure/);
+});
+
+test("vc-secrets-probe kills the process TREE at every call site", () => {
+    // Two claims, and only the second is independent of how many sites there are: every termination
+    // goes through the shared helper, AND each path that terminates still has one. A count FLOOR
+    // cannot express the second -- this diff added a THIRD termination (the interrupt handler) while
+    // the floor stayed at 2, so deleting that handler, which is the whole of the orphan fix, passed
+    // green. Measured. Asserted per PATH instead, so a fourth fails loudly rather than riding a floor.
+    const source = stripComments(fs.readFileSync(PROBE_PATH, "utf8"));
+    for (const [where, pattern] of [
+        ["the 30 s timeout", /TIMEOUT \(30 s\)[\s\S]{0,140}?killProcessTree\(/],
+        ["the interrupt handler", /for \(const signal of \["SIGINT", "SIGTERM"\]\)[\s\S]{0,260}?killProcessTree\(/],
+        ["the answered-handshake path", /serverInfo\.name[\s\S]{0,240}?killProcessTree\(/],
+    ]) {
+        assert.match(source, pattern, `${where} must terminate the child through the shared tree kill`);
+    }
+    const kills = source.match(/\b\w+\.kill\(|killProcessTree\(/g) ?? [];
+    assert.deepEqual(kills.filter((k) => k !== "killProcessTree("), [],
+        "and no termination may bypass it");
+});
+
+test("a child killProcessTree signals is spawned detached, and its parent handles the signals that then miss it", () => {
+    // killProcessTree signals `-child.pid` -- the child's process GROUP, which is the child's own only
+    // if it was spawned detached. Sharing the parent's group instead makes the call name a group the
+    // child is not in: usually absent, so it throws and the fallback covers it, but a recycled pid
+    // makes it somebody ELSE's group, the group kill SUCCEEDS, the child is never signalled, and a
+    // stranger's group takes the SIGKILL five seconds later.
+    //
+    // Named for the rule rather than for either call site, because the rule has two sites and had no
+    // test at all -- a site-named test leaves the next site to repeat this. Asserted on source text
+    // because the pgid that decides it belongs to a grandchild no test here can reach; comments are
+    // stripped first, so restoring the option in prose cannot satisfy it.
+    // The second half is the PRICE of the first, and was missed once: detached also takes the child
+    // out of the terminal's foreground group, so Ctrl-C stops reaching it. Measured -- a detached
+    // child survives a SIGINT sent to its parent's group and a non-detached one does not -- so with
+    // no handler the parent dies and orphans the tree that detached was adopted to let it kill.
+    for (const file of ["vc-secrets-probe.mjs", "vc-secrets.mjs"]) {
+        const source = stripComments(fs.readFileSync(fileURLToPath(new URL(`./${file}`, import.meta.url)), "utf8"));
+        assert.match(source, /detached: process\.platform !== "win32"/, `${file} must spawn detached`);
+        // `process.on`, not merely the loop: cmdLaunch's dispose() REMOVES the same handlers with a
+        // loop spelled identically to the one that installs them, so a match on the loop alone is
+        // satisfied by the removal and says nothing about the install. Measured -- deleting the
+        // install loop left the looser pattern matching the dispose one, green.
+        assert.match(source, /for \(const signal of \["SIGINT", "SIGTERM"\]\)\s*\{\s*process\.on\(/,
+            `${file} must INSTALL handlers for the signals detached diverts away from its child`);
+    }
+});
+
+test("describeFailure: the token remedy is the launcher's own, naming the oauth entry and not the server", () => {
+    // Deviation from the ported source, which stopped at "token not obtainable". The remedy is lifted
+    // from the launcher's line rather than composed here, because `vc-secrets login` resolves
+    // cfg.oauth[name]: composed from the server name it names a command that exits "unknown oauth
+    // entry", contradicting the correct remedy printed one line above it. Measured end to end.
+    //
+    // The two names differ in this fixture ON PURPOSE. Every other fixture in this file uses one name
+    // for both slots, which cannot tell "reads its argument" from "reads the right identifier".
+    const message = probe.describeFailure("azure-devops",
+        'vc-secrets: no usable token for "ado" -- run "vc-secrets login ado"');
+    assert.match(message, /run "vc-secrets login ado"/);
+    assert.doesNotMatch(message, /login azure-devops/,
+        "a remedy composed from the server name sends the developer to a command that fails");
+});
+
+test("describeFailure: a token refusal that carries no remedy gets none invented for it", () => {
+    // The two token-class failures the launcher prints WITHOUT a remedy: a concurrent refresh, and a
+    // RETRYABLE endpoint failure. A refused endpoint is NOT one of them -- "invalid_grant" arrives at
+    // HTTP 400, which the launcher tags refused and does append a remedy to, so a fixture using it
+    // would encode a shape this pipeline does not produce. Inventing a remedy here would be the
+    // wrong-verb defect with an extra step.
+    for (const line of ['vc-secrets: another vc-secrets is still refreshing the token for "ado"',
+        "vc-secrets: token endpoint refused the request: HTTP 503 with an unrecognised body"]) {
+        const message = probe.describeFailure("azure-devops", line);
+        assert.match(message, /token not obtainable/);
+        assert.doesNotMatch(message, /vc-secrets login/, `no remedy may be invented for: ${line}`);
     }
 });

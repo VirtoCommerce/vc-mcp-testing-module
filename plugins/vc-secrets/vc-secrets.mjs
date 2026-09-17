@@ -3404,7 +3404,7 @@ async function cmdDoctor(cfg, flags = []) {
 //
 // The child must have been spawned DETACHED, or `-child.pid` names a group it is not in: usually
 // absent, but a recycled pid makes it someone else's, and that group takes the SIGKILL five seconds
-// later. cmdLaunch spawns detached; vc-secrets-probe.mjs does not.
+// later. cmdLaunch and vc-secrets-probe.mjs both spawn detached.
 function killProcessTree(child, signal, { platform = process.platform, spawnSyncProcess = spawnSync,
     killProcess = (pid, sig) => process.kill(pid, sig) } = {}) {
     if (platform === "win32") {
@@ -3415,7 +3415,7 @@ function killProcessTree(child, signal, { platform = process.platform, spawnSync
     }
     let group = true;
     try {
-        killProcess(-child.pid, signal);   // the group, which is why cmdLaunch spawns detached
+        killProcess(-child.pid, signal);   // the group, which is why both callers spawn detached
     } catch {
         // No group of its own, so escalating to the group below would signal a pgid this child is not
         // in -- and pids are recycled, so in principle somebody else's.
