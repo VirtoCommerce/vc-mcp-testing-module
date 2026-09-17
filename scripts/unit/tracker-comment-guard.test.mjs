@@ -214,3 +214,30 @@ test("format hook: fails OPEN on malformed input", (t) => {
   const dir = tempProject(t);
   assert.ok(!runHook(FORMAT_HOOK, "not json", dir).includes('"decision":"block"'));
 });
+
+// --- the run-identity gap, found by live-testing the rule 2026-09-17 -----------
+// The helper runs from a shell where CLAUDE_SESSION_ID is not exported, so it stores
+// run_id "local"; the hook sees the event's real session id. A naive equality check
+// allowed the exact incident sequence: post via the helper, then post again via MCP.
+test("PreToolUse: a helper-written 'local' entry still blocks an MCP post", (t) => {
+  const dir = tempProject(t);
+  seed(dir, { "VCST-1": { comment_id: "109833", run_id: "local", posted_at: "x" } });
+  const out = JSON.parse(runHook(PRE, commentEvent("VCST-1", "8bdbafab-real-session-id"), dir));
+  assert.equal(out.decision, "block");
+  assert.match(out.reason, /--amend 109833/);
+});
+
+test("PreToolUse: blocks when the event carries no session id at all", (t) => {
+  const dir = tempProject(t);
+  seed(dir, { "VCST-1": { comment_id: "1", run_id: "run-A", posted_at: "x" } });
+  const ev = commentEvent("VCST-1", undefined);
+  delete ev.session_id;
+  const out = runHook(PRE, ev, dir);
+  assert.match(out, /"decision":"block"/);
+});
+
+test("PreToolUse: still allows a PROVABLY different run", (t) => {
+  const dir = tempProject(t);
+  seed(dir, { "VCST-1": { comment_id: "1", run_id: "run-A", posted_at: "x" } });
+  assert.equal(runHook(PRE, commentEvent("VCST-1", "run-B"), dir).trim(), "");
+});

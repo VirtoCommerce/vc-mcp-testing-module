@@ -41,9 +41,18 @@ try {
   const entry = ledger[ticket];
   if (!entry) process.exit(0);
 
-  // "per run" = per Claude Code session. A genuinely new run gets its own comment.
+  // "per run" = per Claude Code session, so a genuinely NEW run gets its own comment.
+  //
+  // But the two writers disagree about identity: the helper script runs from a shell,
+  // where CLAUDE_SESSION_ID is not exported, so it stores run_id "local"; this hook sees
+  // the event's real session id. A naive equality check therefore ALLOWED the exact
+  // incident sequence — post via the helper, then post again through the MCP (measured
+  // 2026-09-17, before this guard). Treat "local" (and a missing session id) as "cannot
+  // prove it was a different run", and block: over-blocking costs one --force-new with a
+  // reason, under-blocking costs the notification storm this rule exists to stop.
   const thisRun = event.session_id ?? process.env.CLAUDE_SESSION_ID ?? null;
-  if (!thisRun || entry.run_id !== thisRun) process.exit(0);
+  const provablyDifferentRun = thisRun && entry.run_id && entry.run_id !== "local" && entry.run_id !== thisRun;
+  if (provablyDifferentRun) process.exit(0);
 
   const reason =
     `GOLDEN RULE (.claude/knowledge/execution/tracker-ops.md §0): ${ticket} already has a comment ` +
