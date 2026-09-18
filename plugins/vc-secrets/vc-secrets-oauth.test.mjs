@@ -29,15 +29,11 @@ test("vc-secrets-oauth throws the same VcSecretsError the launcher's exit-code p
     // The whole reason VcSecretsError lives in its own module. Two same-named classes would both
     // print fine, but fail() reads `instanceof VcSecretsError` to pick the exit code, so a second
     // class silently degrades every oauth failure to a bare 1. That silent degrade is what this
-    // pins. The source's comment also warned that a cyclic require would hand over `undefined`
-    // instead of a class; that half does not carry to ESM — but not because cycles became loud.
-    // There is no cycle here to begin with — vc-secrets-error.mjs imports nothing, which is the
-    // whole reason it exists. Measured on the arrangement it avoids (the class back in the
+    // pins. There is no cycle here to begin with — vc-secrets-error.mjs imports nothing, which is
+    // the whole reason it exists. Measured on the arrangement it avoids (the class back in the
     // launcher, used only inside a function): that cycle loads clean from either entry, and ESM
-    // throws only when the binding is dereferenced during module EVALUATION. So reintroducing one
-    // would be quiet until something validates at load, and fatal from then on — a warning, not a
-    // reassurance, which is the direction the source's sentence got backwards. Either way ESM has no
-    // `undefined` outcome, so that half needs no test; this one is for the silent degrade.
+    // throws only when the binding is dereferenced during module EVALUATION — so reintroducing one
+    // would be quiet until something validates at load, and fatal from then on.
     assert.throws(() => oauth.parseTokenResponse(400, JSON.stringify({ error: "invalid_grant" }), 0), m.VcSecretsError);
 });
 
@@ -116,24 +112,14 @@ test("buildAuthorizeUrl: the verifier is never in the URL, only its digest", () 
     assert.ok(!url.includes(verifier), "PKCE is worthless if the verifier travels with the request");
 });
 
-// FIVE tests below are NOT ported, and they are interleaved with ported ones rather than
-// contiguous, so they are named here rather than bounded by position: "the challenge itself
-// travels", "client_id, redirect_uri and state", "the refresh grant carries the token it is
-// refreshing", "both grants carry client_id and scope", and "the code grant carries no refresh
-// token". A name that no longer matches one below means this note went stale, not that you
-// miscounted. The source's suite leaves these fields unpinned
-// because there mcpw.js imports this module and a real `login` exercised most of them end to end.
-//
-// "Nothing imports this module yet" is no longer why these five stay unported: cmdLogin now calls
-// buildAuthorizeUrl and createPkcePair to build the code grant's authorize request, and
-// buildTokenBody with kind: "code" for the exchange -- which drives "the challenge itself
-// travels", "client_id, redirect_uri and state", and "the code grant carries no refresh token"
-// end to end through a real caller. What keeps these five here rather than deleted is that they
-// pin the FIELD-LEVEL contract a caller's happy path does not exercise on its own: cmdLogin's own
-// tests assert that a login succeeds, not that a dropped `code_challenge` or a leaked
-// refresh_token on the code grant would be caught before it reached Entra. The other two -- the
-// refresh grant's token and the client_id/scope shared by both grants -- are exercised by
-// oauthLaunchDeps's renewal path instead.
+// Five tests in this block are NOT ports, and they are interleaved with ported ones rather than
+// contiguous. They stay because they pin the FIELD-LEVEL contract a caller's happy path does not
+// exercise on its own: cmdLogin drives buildAuthorizeUrl, createPkcePair and buildTokenBody end to
+// end, but its own tests assert that a login SUCCEEDS -- not that a dropped `code_challenge` or a
+// leaked refresh_token on the code grant would be caught before it reached Entra. The refresh
+// grant's token and the client_id/scope shared by both grants are exercised by oauthLaunchDeps's
+// renewal path instead. The source's suite leaves all of these unpinned because there mcpw.js
+// imports this module and a real `login` exercised most of them end to end.
 
 test("buildAuthorizeUrl: the challenge itself travels, not only the method that advertises it", () => {
     // Measured: dropping `code_challenge` leaves the URL still advertising
@@ -146,10 +132,9 @@ test("buildAuthorizeUrl: the challenge itself travels, not only the method that 
 });
 
 test("buildAuthorizeUrl: client_id, redirect_uri and state reach the request unaltered", () => {
-    // The callback layer IS ported: listenForCallback (vc-secrets.mjs:1665) and handleCallback
-    // (vc-secrets.mjs:1769) exist, and handleCallback compares the returned `state` against
-    // `expectedState` at vc-secrets.mjs:1800 -- the consumer that would notice a missing `state`
-    // is real now. This test still earns its place regardless: it pins the builder's OWN contract
+    // The callback layer IS ported: listenForCallback and handleCallback exist, and handleCallback
+    // compares the returned `state` against `expectedState` -- the consumer that would notice a
+    // missing `state` is real now. This test still earns its place regardless: it pins the builder's OWN contract
     // independently of that consumer, the same way the other field-level tests in this block do.
     const u = new URL(oauth.buildAuthorizeUrl({ tenantId: "t", clientId: "the-client", scopes: ["a"],
         redirectUri: "http://localhost:1/", state: "the-state", challenge: "ch" }));
@@ -469,11 +454,9 @@ function cacheAt(issuedAt, identity = DECL_IDENTITY) {
 // Reads the cache `elapsed` ms after issue. The two clocks agree unless a case deliberately
 // separates them: `clockElapsed` is what the wall clock believes, `uptimeElapsed` is what the
 // monotonic counter believes, and every interesting case is a disagreement between the two.
-// (Parameter named `entryCache`, not `cache` — the module is imported as `cache` above, and
-// shadowing it here would turn every `cache.cacheStatus` call inside this function into a call on
-// whatever cache entry the caller passed in. Not a silent hazard, though: measured, the shadowed
-// form reddens 18 tests with `cache.cacheStatus is not a function`. The naming stands because the
-// failure is confusing, not because it would be quiet.)
+// (Parameter named `entryCache`, not `cache`: the module is imported as `cache` above, and
+// shadowing it would turn every `cache.cacheStatus` call in this function into a call on whatever
+// entry the caller passed -- loudly, but confusingly.)
 function statusAfter(entryCache, elapsed, { clockElapsed = elapsed, uptimeElapsed = elapsed,
     issuedAt = 0, uptimeAtIssue = UPTIME_AT_ISSUE } = {}) {
     return cache.cacheStatus(entryCache, DECL, issuedAt + clockElapsed, uptimeAtIssue + uptimeElapsed / 1000);
@@ -600,7 +583,7 @@ test("cacheStatus: after a reboot the anchor is ignored rather than believed", (
 test("cacheStatus: a caller that omits the monotonic reading is stopped, not quietly downgraded", () => {
     // Omitting it makes byUptime NaN, NaN >= 0 is false, and the function falls back to exactly
     // the wall-clock-only rule the anchor replaced — no throw, no needs-refresh, nothing red.
-    // oauthLaunchDeps' readCache (vc-secrets.mjs:1556) is the production caller, so this is live
+    // oauthLaunchDeps' readCache is the production caller, so this is live
     // rather than latent. Not ensureFreshToken, which reaches this only through the injected seam.
     assert.throws(() => cache.cacheStatus(cacheAt(0), DECL, 60_000), /uptime/i);
     assert.throws(() => cache.cacheStatus(cacheAt(0), DECL, 60_000, NaN), /uptime/i);
@@ -915,8 +898,7 @@ test("the margin covers the tick, the exchange, the skew allowance and both keys
 // a regression rather than a sandbox restriction — a probe of the wrong privilege answers
 // confidently either way. This exact defect has already been fixed once in this file, in the
 // OTHER direction: socketTest's own probe was adapted FROM a unix-domain-socket probe TO a TCP
-// one, because at the time this file had no lock-file tests to gate at all. This commit adds
-// them, with their own probe of the privilege they actually use.
+// one, because at the time this file had no lock-file tests to gate at all.
 let lockBindProbe = null;
 function canBindLocks() {
     lockBindProbe ??= new Promise((resolve) => {
@@ -1042,7 +1024,7 @@ lockTest("acquireLock: exactly one of two racing processes holds it", async () =
 });
 
 // ---------------------------------------------------------------------------------------------
-// ensureFreshToken / acquireTokenLock / oauthLaunchDeps / tokenLockFor — Task 13's port of the
+// ensureFreshToken / acquireTokenLock / oauthLaunchDeps / tokenLockFor — the port of the
 // launcher's single locked read→exchange→write refresh path. Ported from the upstream launcher
 // (mcpw.js) and its suite: `m.McpwError` becomes `m.VcSecretsError`, and "mcpw"/"mcpw login" in
 // every user-facing string becomes "vc-secrets"/"vc-secrets login". tokenLockFor and
@@ -1204,7 +1186,7 @@ test("ensureFreshToken: a neighbour that released WITHOUT publishing is overtake
 //
 // LAUNCH_DECL carries scope: "project" and LAUNCH_CFG a projectId, which the source's bare
 // LAUNCH_DECL/entryName never needed: oauthEntryKeys resolves the keystore key from decl.scope
-// and cfg.projectId (see keyFor, vc-secrets.mjs:648), and a decl with no scope would produce a
+// and cfg.projectId (see keyFor), and a decl with no scope would produce a
 // key with the literal segment "undefined" long before any of these tests reached the assertion
 // they are named for.
 const LAUNCH_DECL = { ...DECL_IDENTITY, scope: "project" };
@@ -1342,7 +1324,7 @@ test("acquireTokenLock: a clean acquisition returns the lock, without waiting or
 });
 
 test("acquireTokenLock: a holder that never clears is reported busy, bounded by the poll cap", async () => {
-    // Mirrors the source's frozen-clock regression (mcpw.test.js:2356): with now() frozen the
+    // Mirrors the source's frozen-clock regression (mcpw.test.js): with now() frozen the
     // deadline never advances, and only MAX_LOCK_POLLS stops the loop from spinning forever.
     // Verified here directly rather than through cmdLogin: acquireTokenLock is exported and
     // callable on its own, so no vehicle was ever needed -- driving it through cmdLogin would pin
@@ -1369,7 +1351,7 @@ test("acquireTokenLock: an error that is not a refused bind is not laundered int
     // `e.code !== "EPERM" && e.code !== "EACCES"` to `e.code && e.code !== "EPERM" && e.code !==
     // "EACCES"` reads the TypeError's undefined `code` as "falsy, so don't rethrow" and launders
     // it into {lock: null, reason: "unbindable"} — leaving the suite green on the first case alone
-    // (mirrors the source's mcpw.test.js:3029, which loops over the same two shapes).
+    // (mirrors the source's mcpw.test.js, which loops over the same two shapes).
     for (const boom of [Object.assign(new Error("too many open files"), { code: "EMFILE" }),
         new TypeError("acquireLock is not a function")]) {
         await assert.rejects(() => m.acquireTokenLock({
@@ -1478,8 +1460,8 @@ test("ensureFreshToken: the contended wait's backoff and ceiling bound the deadl
     // name satisfies that just as well as the real reference does, and it stays green with the
     // constant deleted from the loop. This instead DRIVES the loop and pins the numbers it must
     // actually produce: the backoff seed, the doubling, the ceiling, and the window the deadline
-    // falls in — the same shape as the source's own pinned-copy test (mcpw.test.js:2934), driven
-    // through ensureFreshToken rather than cmdLogout: cmdLogout is ported now (Task 15) and pins
+    // falls in — the same shape as the source's own pinned-copy test (mcpw.test.js), driven
+    // through ensureFreshToken rather than cmdLogout: cmdLogout is ported now and pins
     // the same numbers on its own call to acquireTokenLock (see the cmdLogout tests below), but
     // this one is kept because it is the one that drives ensureFreshToken's OWN call to the loop —
     // a change that broke only that call site would go unnoticed without it.
@@ -1507,9 +1489,9 @@ test("ensureFreshToken: the contended wait's backoff and ceiling bound the deadl
 lockTest("tokenLockFor: project scope keys the lock exactly the way keyFor keys the keystore entry", async () => {
     // tokenLockFor has no return value carrying the scope key it computed, and cache.acquireLock/
     // cache.lockPathFor are read-only ES module exports — this file cannot substitute them the way
-    // the source's CJS test does (mcpw.test.js:2894, `c.acquireLock = ...`). Proven instead by
+    // the source's CJS test does (mcpw.test.js, `c.acquireLock = ...`). Proven instead by
     // PRE-occupying the exact path keyFor's own rule predicts (decl.scope === USER_SCOPE ?
-    // USER_SCOPE : cfg.projectId — vc-secrets.mjs:648) and observing tokenLockFor collide with it:
+    // USER_SCOPE : cfg.projectId) and observing tokenLockFor collide with it:
     // if tokenLockFor computed its scope key some other way, this would either fail to collide (the
     // pre-occupied path is not the one it binds) or collide with the WRONG project below.
     const decl = { scope: "project" };
@@ -1639,7 +1621,7 @@ test("writeSecretValue: an oversize keychain value is refused before the runner 
 });
 
 // ---------------------------------------------------------------------------------------------
-// Task 14a: the callback surface -- the loopback listener, handleCallback, the two HTML pages,
+// The callback surface -- the loopback listener, handleCallback, the two HTML pages,
 // and the browser opener. Ported from the launcher's own suite (source ranges resolved 2026-09-11).
 // ---------------------------------------------------------------------------------------------
 
@@ -2038,7 +2020,7 @@ socketTest("a teardown does not wait on a peer that only connected -- the sign-i
 });
 
 // ---------------------------------------------------------------------------------------------
-// cmdLogin — Task 14b's port of the interactive sign-in verb. Ported from the upstream launcher's
+// cmdLogin — the port of the interactive sign-in verb. Ported from the upstream launcher's
 // suite (mcpw.test.js): `m.McpwError` becomes `m.VcSecretsError`, and every "mcpw"/"mcpw login" in
 // a user-facing string becomes "vc-secrets"/"vc-secrets login". `cache.entryNames(serverName)`
 // becomes `oauthEntryKeys(serverName, decl, cfg)` — both return { refresh, access }, but the
@@ -2057,7 +2039,7 @@ socketTest("a teardown does not wait on a peer that only connected -- the sign-i
 // discriminator authorizationFor branches on -- and `declaredName` names the key it was found
 // under. A hand-built declaration omitting either is not one this package can ever see, and the
 // two consumers of authorizationFor disagree about what its `null` means: cmdLogin reads `.block`
-// off it and dies with a TypeError, while resolveEnvEntries (vc-secrets.mjs:728) tests
+// off it and dies with a TypeError, while resolveEnvEntries tests
 // `source !== null` and takes it as "needs no authorization". Fail-closed at one site and
 // permissive at the other is the reason to match the merge rather than to guard the null.
 const LOGIN_DECL = { ...DECL_IDENTITY, kind: "oauth", scope: "project", home: "project", declaredName: "azure-mcp" };
@@ -2134,7 +2116,7 @@ function seamsOf(source) {
 
     // The name, whether or not a default follows it. Requiring the `=` was the same hole in a
     // second costume: a seam added WITHOUT a default vanished from the list, so the deepEqual below
-    // passed and the one production call site -- main (vc-secrets.mjs:2952), which calls
+    // passed and the one production call site -- main, which calls
     // cmdLogin(arg, cfg) with no deps object at all -- would hand it `undefined`.
     return parts.map((part) => (/^\s*(\w+)/.exec(part) ?? [])[1]).filter(Boolean);
 }
@@ -2557,7 +2539,7 @@ test("cmdLogin: a user-scope entry needs no registrations block, because its own
 });
 
 // ---------------------------------------------------------------------------------------------
-// cmdLogout -- Task 15's port of the sign-out verb. Ported from the upstream launcher's suite
+// cmdLogout -- the port of the sign-out verb. Ported from the upstream launcher's suite
 // (mcpw.test.js): `m.McpwError` becomes `m.VcSecretsError`, `cache.entryNames(serverName)`
 // becomes `oauthEntryKeys(serverName, decl, cfg)` (both return { refresh, access }, but the
 // values here are the full three-segment keystore keys keyFor produces -- an assertion on a
@@ -2565,13 +2547,13 @@ test("cmdLogin: a user-scope entry needs no registrations block, because its own
 // "oauth-azure-mcp-*" string), and every "mcpw"/"mcpw run" in a user-facing string becomes
 // "vc-secrets"/"vc-secrets run".
 //
-// Decision A: cmdLogout resolves its own lock internally, the same way cmdLogin does --
+// cmdLogout resolves its own lock internally, the same way cmdLogin does --
 // `acquireLock` defaults to null in the parameter list and falls through to
 // `tokenLockFor(serverName, decl, cfg)`. Two source tests are dropped for it, having lost their
 // referent: "a call site that forgets the lock is refused rather than left unserialised"
-// (mcpw.test.js:2784) checked a wiring seam that no longer exists once the lock is resolved
+// (mcpw.test.js) checked a wiring seam that no longer exists once the lock is resolved
 // inside the verb; "main hands logout the shared lock builder rather than one of its own"
-// (mcpw.test.js:2916) source-inspected a `main` wiring this package's `main` never performs --
+// (mcpw.test.js) source-inspected a `main` wiring this package's `main` never performs --
 // it calls `cmdLogout(arg, cfg)` with no deps object, exactly like the `login` branch. The
 // "three writers, one lock name" test near the end of this section replaces both: it proves the
 // default actually reaches the real tokenLockFor, driven directly, for all three writers.
@@ -2589,7 +2571,7 @@ const FREE_LOCK = async () => ({ release: async () => {} });
 
 test("cmdLogout: removes both entries, refresh before access", async () => {
     // The ORDER is asserted rather than sorted away, and the partial-failure test below is why.
-    // The source sorts both sides here (mcpw.test.js:2732), which makes the order invisible:
+    // The source sorts both sides here (mcpw.test.js), which makes the order invisible:
     // measured, reversing `names` in the production loop left the whole suite green.
     const deleted = [];
     await m.cmdLogout("azure-mcp", LOGOUT_CFG, { deleteEntry: async (n) => { deleted.push(n); },
@@ -2794,7 +2776,7 @@ test("cmdLogout: an unserialised removal is announced, and a serialised one is q
 });
 
 test("cmdLogout: an error from the lock reaches the caller, and nothing is deleted on the way past", async () => {
-    // The half of the source's mcpw.test.js:3029 that lost its referent. That test drives the
+    // The half of the source's mcpw.test.js that lost its referent. That test drives the
     // error THROUGH cmdLogout and asserts twice -- it propagates, AND nothing was attempted. This
     // package pinned acquireTokenLock directly instead (vc-secrets-oauth.test.mjs, the
     // "not laundered into one" test), which was right while cmdLogout did not exist, but only the
@@ -2827,7 +2809,7 @@ test("cmdLogout: an error from the lock reaches the caller, and nothing is delet
 });
 
 lockTest("the renewal, a login and a logout all lock on ONE name -- pre-occupied, not read off the source", async () => {
-    // The source captures this by monkeypatching c.acquireLock (mcpw.test.js:2894) -- unavailable
+    // The source captures this by monkeypatching c.acquireLock (mcpw.test.js) -- unavailable
     // here for the same reason tokenLockFor's own test gives (this file, "tokenLockFor: project
     // scope keys the lock exactly the way keyFor keys the keystore entry"): cache.acquireLock is
     // a read-only ES module export. Proven instead by PRE-occupying the exact path keyFor's own
@@ -2835,8 +2817,8 @@ lockTest("the renewal, a login and a logout all lock on ONE name -- pre-occupied
     // its lock name some other way, it would bind its OWN, unoccupied lock instead of contending
     // on this one.
     //
-    // An improvement on the source: login and logout are now both real, ported verbs (Decision A
-    // makes logout resolve its own lock internally, the same way login always has), so both are
+    // An improvement on the source: login and logout are now both real, ported verbs (logout
+    // resolves its own lock internally, the same way login always has), so both are
     // driven directly with `acquireLock: undefined` -- reaching the destructuring default is the
     // point, not omitting the key (the source's own comment on this test makes the same
     // distinction). The source could drive only the renewal's builder and the login verb this
@@ -3020,10 +3002,10 @@ const channelTest = (name, fn) => test(name, async (t) => {
     await fn(t);
 });
 
-// ---- The token channel itself (Task 17): createChannel, channelPipeName, CHANNEL_GREETING_MAX ----
+// ---- The token channel itself: createChannel, channelPipeName, CHANNEL_GREETING_MAX ----
 //
 // These drive the real channel directly, at the wire protocol -- no spawned process, no
-// preload -- because that is the layer Task 17 owns. The preload-level tests below (against
+// preload -- because that is the layer this block owns. The preload-level tests below (against
 // startRawSocketFixture, and the five re-pointed at the real channel) are the integration half.
 
 // Strips comments from a function's toString() before a source-text assertion matches it, so a
@@ -3220,7 +3202,7 @@ function connectAndAwaitAuth(channelPath, { nonce }) {
 }
 
 channelTest("a client presenting no nonce or a wrong one is refused and gets no token", async () => {
-    // AC 13. The channel is reachable by any same-user process; the nonce is mandatory rather
+    // The channel is reachable by any same-user process; the nonce is mandatory rather
     // than defence in depth. Covers BOTH halves of the title -- a greeting with no `nonce` field
     // at all, and one with a wrong value -- because the source reads `JSON.parse(...).nonce`, so
     // a missing field and a wrong value reach the same comparison but are not the same input, and
@@ -3229,7 +3211,7 @@ channelTest("a client presenting no nonce or a wrong one is refused and gets no 
     // two causes (refused, or simply never served). A leak is then observable either way --
     // `received` carries it if the connection still closes, and connectAndGreet's own timeout
     // names it if a wrongly-accepted client is instead left open. The wrong-nonce half is also
-    // ported, faithfully, at the process level: mcpw.test.js:3589 below.
+    // ported, faithfully, at the process level: mcpw.test.js below.
     const refusals = [];
     const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "right",
         onRefusal: (w) => refusals.push(w) });
@@ -3277,7 +3259,7 @@ channelTest("a client that authenticates AFTER a push still receives the latest 
     // A push reaching only the sockets connected AT THAT INSTANT is lost with no error anywhere
     // when the server has not finished starting -- and the session then runs to the expiry of
     // its env token, which is the failure the channel exists to prevent. Ported from
-    // mcpw.test.js:3621, at the channel's own level rather than through a spawned preload.
+    // mcpw.test.js, at the channel's own level rather than through a spawned preload.
     const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "n" });
     try {
         assert.equal(ch.push("t1"), 0);
@@ -3288,7 +3270,7 @@ channelTest("a client that authenticates AFTER a push still receives the latest 
 });
 
 channelTest("the socket is private to this uid, and its directory goes on close", async () => {
-    // Ported from mcpw.test.js:3638.
+    // Ported from mcpw.test.js.
     const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "n" });
     const dir = path.dirname(ch.path);
     if (process.platform !== "win32") {
@@ -3310,7 +3292,7 @@ channelTest("the socket is private to this uid, and its directory goes on close"
 });
 
 channelTest("close() releases the endpoint, not merely the directory", async (t) => {
-    // Ported from mcpw.test.js:3659. The connect assertion in the test above cannot fail on
+    // Ported from mcpw.test.js. The connect assertion in the test above cannot fail on
     // POSIX: close() removes the whole directory, so a connect answers ENOENT whether or not the
     // listener was ever released. Suppressing only the directory teardown makes the guarantee
     // falsifiable: node unlinks a unix socket exactly when the server closes and not before, so
@@ -3379,7 +3361,7 @@ channelTest("the channel path is a filesystem socket, never the lock's abstract 
 });
 
 test("channelPipeName: two users, two scopes, two servers and two launches never share a pipe", () => {
-    // Ported from mcpw.test.js:3687, extended with two scopes -- the property scopeKey adds and
+    // Ported from mcpw.test.js, extended with two scopes -- the property scopeKey adds and
     // the source could not have had. The Windows channel has no mode bits, so the NAME is the
     // whole of what separates one developer's, one project's, or one launch's token stream from
     // another's.
@@ -3437,7 +3419,7 @@ test("a channel that cannot accept a client degrades to no renewal, never to a d
 });
 
 channelTest("a failure after the directory exists takes the directory with it", async (t) => {
-    // Ported from mcpw.test.js:4044. mkdtemp runs before the bind, and the launcher's own exit
+    // Ported from mcpw.test.js. mkdtemp runs before the bind, and the launcher's own exit
     // handler is not registered yet -- so a throw here leaves the directory (and a live
     // listener) behind with nothing to remove it.
     if (process.platform === "win32") {
@@ -3571,7 +3553,7 @@ function pollingBody(varName, waitMs) {
 }
 
 // Runs one entry script as a real child process. The preload path is routed through
-// buildChildEnv (Task 18), exactly as mcpw.test.js's runWithPreload routes its own: the quoted
+// buildChildEnv, exactly as mcpw.test.js's runWithPreload routes its own: the quoted
 // file: URL node has to parse back out of NODE_OPTIONS is the delivery path's last mile, and
 // composing it here by hand would never exercise the function a real launch actually uses.
 function runEntry(entry, env, { preload = true, timeoutMs = 10000 } = {}) {
@@ -3649,7 +3631,7 @@ function preloadEnv(stub, overrides = {}) {
 const TARGET_ENTRY = "node_modules/@vendor/server/dist/index.js";
 
 channelTest("a target process receives the token into the variable its own environment names, and writes nothing on fd 1", async () => {
-    // Moved from a stub to the real createChannel (Decision 9): pushed before the child starts,
+    // Moved from a stub to the real createChannel: pushed before the child starts,
     // so `latest` serves it once the preload authenticates -- the delivery itself is now the
     // proof of the handshake that `stub.greetings` used to stand for.
     const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "right-nonce" });
@@ -3665,7 +3647,7 @@ channelTest("a target process receives the token into the variable its own envir
 });
 
 channelTest("preload: a wrong nonce is refused and nothing is assigned", async () => {
-    // Faithful port of mcpw.test.js:3589-3604, against the real createChannel: a push BEFORE the
+    // Faithful port of mcpw.test.js, against the real createChannel: a push BEFORE the
     // wrong-nonce child runs is what makes "nothing is assigned" a claim about the refusal rather
     // than about a token that was simply never sent. The channel-level test above pins the same
     // refusal at the channel's own API; this one pins it at the process boundary the preload
@@ -3774,7 +3756,7 @@ channelTest("an unreachable channel is reported on fd 2 and costs the renewal, n
 });
 
 channelTest("the token receiver does not keep the server process alive", async () => {
-    // Moved from a stub to the real createChannel (Decision 9): pushed before the child starts.
+    // Moved from a stub to the real createChannel: pushed before the child starts.
     // The old positive control (`stub.greetings.length === 1`) is replaced by the delivery
     // itself -- the entry now also polls and reports the variable, without exiting on it, so the
     // "MAIN DONE" / timedOut assertions this test is actually named for still run on their own
@@ -3807,7 +3789,7 @@ channelTest("the token receiver does not keep the server process alive", async (
 channelTest("a missing or malformed target package costs the renewal, never the process", async () => {
     // A throw in a module loaded through --import exits 1 before the entry script runs (measured on
     // node 22), so a throwing matcher would end this process before "MAIN RAN" is ever written.
-    // Moved from a stub to the real createChannel (Decision 9): `stub.connections === 0` is
+    // Moved from a stub to the real createChannel: `stub.connections === 0` is
     // replaced by the delivery itself -- the entry polls too. VAR=<unset> shows no token reached
     // the process; it does NOT distinguish "no connection was attempted" from "a connection
     // attempted but never authenticated", which the real channel exposes to no caller.
@@ -3829,7 +3811,7 @@ channelTest("a missing or malformed target package costs the renewal, never the 
 
 channelTest("importing the target module wakes no receiver; importing the preload does", async () => {
     // Both halves, because "wakes nothing" alone passes for a fixture that cannot observe a
-    // receiver at all. Moved from a stub to the real createChannel (Decision 9): both
+    // receiver at all. Moved from a stub to the real createChannel: both
     // `stub.connections` assertions are dropped -- the VAR=<unset> / VAR=delivered-token
     // assertions already below them are the delivery itself, and the real channel exposes no
     // connection count to replace them with.
@@ -3851,7 +3833,7 @@ channelTest("importing the target module wakes no receiver; importing the preloa
 });
 
 // ---------------------------------------------------------------------------------------------
-// cmdLaunch (Task 20) — the oauth-branch tests that need a REAL bound channel, so they run under
+// cmdLaunch — the oauth-branch tests that need a REAL bound channel, so they run under
 // channelTest rather than plain `test` (see the comment above channelTest, and the sandbox note
 // above lockTest: a unix-domain-socket / filesystem-socket bind is refused here, and skipping is
 // the expected outcome, not a signal). The tests that never reach createChannel at all live in
@@ -3990,9 +3972,8 @@ channelTest("cmdLaunch: a spawn that throws leaves no channel directory behind",
     assert.equal(r.stdout, "[]", `leaked ${r.stdout}${r.stderr}`);
 });
 
-// The title used to claim the renewal is "pushed to the running server". Nothing here observes
-// channel.push and no client ever connects, so that half was unasserted; delivery to a connected
-// client is pinned at the channel's own level. What this test does pin is the re-entrancy guard.
+// Nothing here observes channel.push and no client ever connects, so delivery is NOT what this
+// pins -- that is pinned at the channel's own level. What it pins is the re-entrancy guard.
 channelTest("cmdLaunch: a slow renewal tick does not stack on the one still running", async () => {
     // Without the re-entrancy guard a tick that outlasts its interval -- the contended wait alone
     // runs to 45 s -- starts another one on top of it.

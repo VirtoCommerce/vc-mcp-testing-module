@@ -540,8 +540,9 @@ test("an oauth declaration is stamped with the scope, the home and its kind", ()
     assert.equal(cfg.oauth.ado.home, "project");
     assert.equal(cfg.oauth.ado.scope, "project");
     assert.equal(cfg.oauth.ado.kind, "oauth");
-    // Stamped here rather than added by a call site, unlike a secret's. Dropping it breaks
-    // authorizationFor's pointer, and nothing else in the suite would notice.
+    // Stamped here rather than added by a call site, unlike a secret's. Dropping it makes
+    // authorizationFor's pointer read `oauth."undefined"` -- measured, that reddens this test and
+    // the user-scope authorization test below, and nothing else.
     assert.equal(cfg.oauth.ado.declaredName, "ado");
 });
 
@@ -1234,10 +1235,10 @@ test("deleteEntryIo: a malformed gpg key is refused, not read as already-absent"
     // comes back as ENOENT -> toolExitCode 3, the exact shape cmdLogout reads as "already absent".
     // A logout would then report a credential removed that was never even looked for. Path
     // traversal is not the live hazard here: oauth entry names and projectId are both validated
-    // against SECRET_NAME_RE at config load (vc-secrets.mjs:448, :539), so a key built from a
+    // against SECRET_NAME_RE at config load, so a key built from a
     // loaded config cannot carry a traversal segment. The hazard is this exit-code collision, so
     // the assertion is on the MESSAGE and on the absence of the already-absent shape, not on path
-    // traversal -- mirroring the source's analog (mcpw.test.js:2701), which asserts
+    // traversal -- mirroring the source's analog (mcpw.test.js), which asserts
     // /invalid secret name/ and specifically NOT /no stored entry/ for the same reason.
     const del = m.deleteEntryIo("gpg", { HOME: "/nonexistent-for-this-test" });
     await assert.rejects(() => del("vc-secrets:user:Not_Valid"), (e) => {
@@ -1266,12 +1267,9 @@ test("deleteEntryIo: a malformed gpg key is refused, not read as already-absent"
 // overhead moves byte for byte with the length of USER, of cfg.projectId and of the name segment, so
 // there is no correct constant and it is computed per call.
 //
-// An earlier round sized the padding from the longest REAL oauth key instead, reasoning that the
-// probe should rehearse the largest real entry. That is wrong: the limit bounds the composed LINE,
-// not the key, so sizing from the written-under key already puts every key at the same rehearsal --
-// and where the real key is the shorter one the value overflows the probe's own budget and doctor
-// reports FAIL on a healthy machine. Pinned by "the probe's value composes to exactly the limit
-// under the key it writes under, for any cfg".
+// Why the padding is sized from the key the probe writes under, rather than from the longest real
+// oauth key, is argued where it is pinned: "the probe's value composes to exactly the limit under
+// the key it writes under, for any cfg".
 
 test("probeKeystoreWrite: gpg is not rehearsed, and that is a decision rather than an omission", async () => {
     let wrote = false;
@@ -1390,8 +1388,8 @@ test("cmdDoctor: the write probe is actually wired to the report, not merely ava
     // STRIP_COMMENTS first, and it is load-bearing rather than tidiness: `.match` takes the FIRST
     // textual hit, so `// const writeProbe = await probeKeystoreWrite(...)` left above a live
     // `const writeProbe = null;` satisfies every assertion below while the probe is unwired -- a
-    // mutant measured byte-identical to the green baseline. The rule is the one already stated where
-    // STRIP_COMMENTS is declared; this site is the third, and it was added without it.
+    // mutant measured byte-identical to the green baseline. Same rule as where STRIP_COMMENTS is
+    // declared.
     const source = fs.readFileSync(LAUNCHER_PATH, "utf8").replace(STRIP_COMMENTS, "");
     const call = source.match(/const writeProbe = [\s\S]*?;/);
     assert.ok(call, "cmdDoctor must compute writeProbe");
@@ -1800,7 +1798,7 @@ test("applyKeystrokes: typing, backspace, control chars, paste with terminator",
 test("doctorReport: legacy env var phase-aware, names only", () => {
     // clientConfigsSeen names the phase this test is about. "Nothing wired" alone no longer implies a
     // pending switch — it also covers "nothing was inspected", where no claim about a switch is
-    // available. The assertions below are unchanged; only the input now states which of the two it is.
+    // available, so the input has to state which of the two it is.
     const base = { platform: "linux", enableLists: { enabled: [], disabled: [] }, resolvable: {}, skipped: [], toolsMissing: [], configDirOverride: false, clientConfigsSeen: ["/repo/.mcp.json"] };
     const pre = m.doctorReport({ secrets: {}, servers: {} },
         { ...base, env: { ADO_MCP_AUTH_TOKEN: "SENTINEL-DO-NOT-PRINT" }, wired: new Set() });
@@ -1986,8 +1984,8 @@ test("doctorReport: a raw cache verdict handed in by mistake still prints no tok
 
 test("oauthStatusFrom: a cache verdict becomes a bare status, never the object holding the token", () => {
     // The one place a token could reach the report: cacheStatus returns the access token beside its
-    // verdict, so passing the verdict through would print it. AC-29 is enforced by the mapping having
-    // no way to carry it, not by remembering to redact.
+    // verdict, so passing the verdict through would print it. The exclusion is enforced by the
+    // mapping having no way to carry it, not by remembering to redact.
     assert.equal(m.oauthStatusFrom({ state: "valid", accessToken: "SENTINEL-DO-NOT-PRINT" }), "ok");
     assert.equal(m.oauthStatusFrom({ state: "needs-refresh", refreshToken: "SENTINEL" }), "needs-refresh");
     assert.equal(m.oauthStatusFrom({ state: "absent" }), "signin-required");
@@ -2274,7 +2272,7 @@ test("cmdDoctor: the oauth checks are wired to the report, not merely available"
 });
 
 test("cmdDoctor: nothing on the doctor path can exchange a token", () => {
-    // AC-25 as a property of the code rather than of one run: proving a token is refreshable would
+    // Pinned as a property of the code rather than of one run: proving a token is refreshable would
     // rotate the refresh token as a side effect of a diagnostic, and the rotation is irreversible.
     const source = fs.readFileSync(LAUNCHER_PATH, "utf8");
     const bodyOf = (name) => {
@@ -2474,8 +2472,7 @@ test("resolveEnvEntries: the exemption follows the launchable's home, not the de
 test("an authorization refusal names the doctor command, and doctor's own report names the same where", async () => {
     // The rule this replaces two site-scoped tests for: doctor's crossing loop used to report secret
     // references only, so an oauth refusal naming "vc-secrets doctor" sent a reader to a command that
-    // printed nothing about their case (wiki meta/process/
-    // a-rule-pinned-at-one-site-reads-as-pinned-everywhere.md). crossingProblem is now the one predicate
+    // printed nothing about their case. crossingProblem is now the one predicate
     // behind both the refusal and the report, so the refusal's promise is checkable: pull the `where` it
     // names out of the message and confirm doctor's own output names that same string, for every shape
     // of refusal this package has -- both kinds, both reasons, and the one that is not resolveEnvEntries
@@ -2556,8 +2553,7 @@ test("an authorization refusal names the doctor command, and doctor's own report
 });
 
 test("doctorReport: an oauth crossing is reported, and a launchable naming both kinds gets a line for each", () => {
-    // Named after the rule, not the crossingProblem call site (wiki meta/process/
-    // a-rule-pinned-at-one-site-reads-as-pinned-everywhere.md): the test above reaches the oauth
+    // Named after the rule, not the crossingProblem call site: the test above reaches the oauth
     // crossing only through its FAIL lines, whose `where` point 3 also produces -- so it leaves the
     // authorized `INFO` line and the kind-keyed dedup unpinned. Both are honest value-mutants,
     // injected as a value, never a throw, so the surrounding catch cannot absorb it -- each with its
@@ -2626,7 +2622,7 @@ test("resolveEnvEntries: an env entry declared after an oauth reference still re
 });
 
 // ---------------------------------------------------------------------------------------------
-// cmdLaunch (Task 20) — the real launch path: resolve, refuse a second oauth reference, acquire
+// cmdLaunch — the real launch path: resolve, refuse a second oauth reference, acquire
 // and deliver a token through the channel for the ones that carry one, spawn, and forward signals.
 // Ported from mcpw.js's cmdRun and mcpw.test.js's own cmdRun test block, with the naming map
 // applied: cmdRun(server, cfg, deps) -> cmdLaunch(kind, name, cfg, deps), McpwError ->
@@ -2914,8 +2910,8 @@ test("buildChildEnv: the inherited injection vectors are dropped, not extended",
     assert.equal(env.PATH, "/bin", "the rest of the environment is untouched");
 });
 
-// "none in argv" is not assertable here and the title no longer claims it: buildChildEnv returns an
-// env object and there is no argv in the call. The argv half is pinned by "a pinned argv reaches the
+// "none in argv" is not assertable here: buildChildEnv returns an env object and there is no argv
+// in the call. The argv half is pinned by "a pinned argv reaches the
 // child exactly as declared, even through the win32 .cmd rewrite", which drives resolveSpawnCommand
 // and buildSpawnInvocation directly -- no cmdLaunch test observes argv, only the env it was handed.
 test("buildChildEnv: the token, channel, nonce and target variables all travel in env", () => {
@@ -3228,9 +3224,8 @@ function writeStubInstall(label) {
 
 // A fresh HOME per call so ~/.claude/plugins/installed_plugins.json is exactly what the test wrote —
 // never the real machine's registry.
-// `caches` is additive: every existing caller omits it and behaves exactly as before. Each entry
-// materialises one <root>/<marketplace>/<plugin>/<version>/ directory the way a real client lays it
-// out, optionally without the launcher so a partial install can be exercised.
+// Each `caches` entry materialises one <root>/<marketplace>/<plugin>/<version>/ directory the way a
+// real client lays it out, optionally without the launcher so a partial install can be exercised.
 function runShim(args, { registry, cwd, caches = [] } = {}) {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-shim-home-"));
     tmpDirs.push(home);
@@ -3867,13 +3862,13 @@ test("targetsFrom: a payload with no tool_input at all is unreadable", () => {
 
 test("targetsFrom: apply_patch carries its patch under `command`, and every path-bearing header is read", () => {
     // The key is `command`, NOT `input`: `input` is the internal Rust field name, re-keyed for the hook
-    // at codex-rs/core/src/tools/handlers/apply_patch.rs:464-469
+    // at codex-rs/core/src/tools/handlers/apply_patch.rs
     //   tool_input: serde_json::json!({ "command": command })
-    // and corroborated where a block reason is composed, hook_runtime.rs:216-218. Reading the wrong key
+    // and corroborated where a block reason is composed, hook_runtime.rs. Reading the wrong key
     // returns readable:false, the guard exits 0, and EVERY apply_patch write to a declaration is
     // allowed — behind a notice that reads as harmless.
     //
-    // *** Move to: is a fourth path-bearing header (parser.rs:42). A rename ONTO a declaration path
+    // *** Move to: is a fourth path-bearing header (parser.rs). A rename ONTO a declaration path
     // writes it while a three-header regex reports success — the exact failure the list contract exists
     // to prevent, reached through a different header.
     const patch = [
@@ -3888,7 +3883,7 @@ test("targetsFrom: apply_patch carries its patch under `command`, and every path
 });
 
 test("targetsFrom: a context line is not mistaken for a header", () => {
-    // A context line is space-prefixed (grammar, parser.rs:21), and the upstream parser preserves that
+    // A context line is space-prefixed (grammar, parser.rs), and the upstream parser preserves that
     // leading space inside a hunk while trimming only at top-level dispatch. A guard that trims both
     // ends refuses edits to files that merely DOCUMENT the patch format — and a guard that fires on
     // unrelated edits is the guard people disable.
@@ -3911,7 +3906,7 @@ test("targetsFrom: a patch with CRLF line endings is read", () => {
 
 test("targetsFrom: an Environment ID header is not a path", () => {
     // It has a filename production in the grammar and names an environment. The upstream constant is
-    // `*** Environment ID:` with NO trailing space (streaming_parser.rs:19), so a regex demanding one
+    // `*** Environment ID:` with NO trailing space (streaming_parser.rs), so a regex demanding one
     // is stricter than the parser it models.
     const patch = "*** Begin Patch\n*** Environment ID:remote\n*** Add File: /repo/x\n*** End Patch";
     assert.deepEqual(t.targetsFrom({ tool_name: "apply_patch", tool_input: { command: patch } }).paths,
@@ -4245,8 +4240,7 @@ test("emitConfig: the TOML client gets a table per server", () => {
     const { body } = m.emitConfig({ secrets: {}, servers: { github: {} } }, "codex");
     assert.match(body, /^\[mcp_servers\.github\]$/m);
     assert.match(body, /^command = "node"$/m);
-    // JSON.stringify emits no space after the comma. Asserting the spaced form is how the previous
-    // version of this plan shipped a test that could not pass.
+    // JSON.stringify emits no space after the comma.
     assert.match(body, /^args = \["[^"]+","run","github"\]$/m);
 });
 
@@ -4408,9 +4402,8 @@ const GUARDED_IN_PACKAGE = [
 
 // Outside the set, and down to one. `README.md` is prose for people: no frontmatter, no permission
 // grant, no key any client reads, and nothing executes it. That is what separates it from the skill
-// files, which an earlier version of this list put under the same heading and was wrong about; and from
-// `vc-secrets-probe.mjs`, which was the last entry here until the question changed from "who imports
-// this file" to "what can an edit to it do".
+// files, and from `vc-secrets-probe.mjs`, which qualifies once the question is "what can an edit to
+// this file do" rather than "who imports it".
 const UNGUARDED_FILES = ["README.md"];
 
 // Neither guarded nor unguarded-by-decision: they are the subject's own instrument. Listed so the
