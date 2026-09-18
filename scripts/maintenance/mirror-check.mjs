@@ -67,7 +67,24 @@ export const PATH_REWRITES = [
   [/(?:\.\.\/)*(?:\.claude\/)?knowledge\/execution\/quality-gates\.md/g, "@QUALITY_GATES"],
   [/(?:\.\.\/)*(?:\.claude\/)?rules\/mcp-browsers\.md/g, "@BROWSERS"],
   [/(?:\.\.\/)*(?:\.claude\/)?knowledge\/execution\/browser-lanes\.md/g, "@BROWSERS"],
+  // Three self-diagnostics documents that exist ONLY under `plugins/vc-fix/knowledge/`. The plugin
+  // copy of `skill-expectations.md` reaches them as siblings; the root copy has to name them by
+  // their plugin path, because there is no twin in `.claude/` to link. Until 2026-09-17 the root
+  // copy simply carried the PLUGIN's relative strings — which resolved in neither tree, and read as
+  // parity only because nothing checked a link target. Tokenised here so the pair stays gated on
+  // its CONTENT, which is what matters in an oracle both surfaces are judged against.
+  [/(?:\.\.\/)*(?:knowledge\/)?execution\/plugin-root\.md/g, "@PLUGIN_ROOT_DOC"],
+  [/(?:\.\.\/)*(?:\.\/)?(?:knowledge\/diagnostics\/)?upstream-schema\.md/g, "@UPSTREAM_SCHEMA"],
+  [/(?:\.\.\/)*(?:\.\/)?(?:knowledge\/diagnostics\/)?adr-upstream-default-deny\.md/g, "@UPSTREAM_ADR"],
   [/(?:\.\.\/)*(?:\.claude\/)?rules\/([a-z-]+\.md)/g, "@RULES/$1"],
+  // THE SAME SENTENCE HAS TO SPELL THIS PREFIX DIFFERENTLY ON THE TWO SURFACES, and that is not a
+  // fork. In this repository a bare `knowledge/…` means the knowledge BASE, so a citation of OUR
+  // tree must say `.claude/knowledge/…` — DOC-007 now fails the build if it does not. Inside the
+  // plugin the bare form is correct and the prefixed one would be wrong: `plugins/vc-fix/knowledge/`
+  // is the plugin's own tree, it has no `.claude/` to reach, and its 14 files have no counterpart
+  // in the base. Normalising the PREFIX while keeping the tail leaves a genuine difference visible —
+  // two copies citing different files still differ, which is the whole point of the pair check.
+  [/(?:\.\.\/)*(?:\.claude\/)?knowledge\/([A-Za-z0-9._/-]+\.md)/g, "@KNOWLEDGE/$1"],
   [/(?:\.\.\/)*\.claude\//g, "@CLAUDE/"],
   // Strip the `../` prefix entirely rather than tokenising it. The two trees sit at different
   // depths, so `knowledge/foo.md` and `../../knowledge/foo.md` name the SAME target and must
@@ -112,18 +129,25 @@ export const FORKS = {
   "knowledge/agents/README.md": "plugin-scope",
   "knowledge/agents/developers/shared-instructions.md": "undecided",
   "knowledge/agents/qa/shared-instructions.md": "plugin-scope",
-  "knowledge/api/graphql-schema.md": "root-ahead",
+  // Eight more knowledge forks left this table on 2026-09-17 with the same reasoning as the
+  // BYTE_IDENTICAL block above: their `.claude/` copy moved into the knowledge base, so there is no
+  // longer a pair to declare a fork BETWEEN.
+  //
+  // THE FOUR BELOW ARE NOT WAITING FOR ANYTHING. This comment used to end "plugins/vc-fix/ keeps its
+  // copies until it can declare a dependency on vc-kb", which read as a temporary state with a
+  // trigger. The dependency was declared, and nothing followed — because these are not platform
+  // knowledge and the base is the wrong home for them. Measured 2026-09-18: of the 14 files under
+  // `plugins/vc-fix/knowledge/`, ZERO have a counterpart in the base, and 71 citations inside the
+  // shipped plugin point at them. They describe how the TOOLING works — the runner grammar, the
+  // module→suite map, tracker operations, how to pick a data layer — not how the platform behaves,
+  // and a client install has no `.claude/` to read them from. The duplication is the deliberate one
+  // CLAUDE.md §Project Overview explains (no reliable `${CLAUDE_PLUGIN_ROOT}` for relative paths),
+  // and it is permanent until that changes.
   "knowledge/api/graphql-test-cases-runner.md": "plugin-scope",
-  "knowledge/architecture/vc-frontend-architecture.md": "plugin-scope",
-  "knowledge/architecture/vc-module-architecture.md": "undecided",
-  "knowledge/automation/storefront-selectors.md": "plugin-scope",
-  "knowledge/domain/catalog.md": "plugin-scope",
-  "knowledge/domain/store-settings.md": "plugin-scope",
+
   "knowledge/execution/live-discovery.md": "plugin-scope",
   "knowledge/execution/module-suite-map.md": "plugin-scope",
   "knowledge/execution/tracker-ops.md": "undecided",
-  "knowledge/oracles/critical-ui-scope.md": "plugin-scope",
-  "knowledge/oracles/vc-bug-catalog.md": "plugin-scope",
   "skills/project-init/SKILL.md": "plugin-ahead",
   "skills/project-init/derive-context.mjs": "plugin-ahead",
   "skills/project-init/discover-repos.mjs": "plugin-ahead",
@@ -185,25 +209,29 @@ export const BYTE_IDENTICAL = [
   "hooks/expected.mjs",
   "hooks/redact.mjs",
   "hooks/session-telemetry.mjs",
-  "knowledge/api/api-auth.md",
-  "knowledge/api/graphiql-interaction.md",
-  "knowledge/api/order-creation-matrix.md",
-  "knowledge/api/platform-patterns.md",
-  "knowledge/automation/browser-quirks.md",
-  "knowledge/automation/storefront-config-flags.md",
-  "knowledge/domain/products.md",
-  "knowledge/domain/sitemap.md",
-  "knowledge/execution/debugging-signals.md",
-  "knowledge/execution/performance-thresholds.md",
-  "knowledge/oracles/business-logic.md",
-  "knowledge/oracles/e-commerce-edge-cases-library.md",
+  // TWELVE PLATFORM-KNOWLEDGE PAIRS LEFT THIS RATCHET on 2026-09-17, when their `.claude/` copy moved
+  // into the knowledge base (migration phase 4.1). They are not "deleted from both trees" and the
+  // entries are not being dropped to silence a failure — the root copy is now in
+  // VirtoCommerce/vc-knowledge, which is where a file whose truth depends on the PLATFORM belongs.
+  //
+  // `plugins/vc-fix/` KEEPS ITS COPIES, on purpose and for now. vc-fix is distributed, and it does
+  // not declare a dependency on vc-kb yet — that range would resolve against a `vc-kb--v0.1.0` tag
+  // which does not exist, and declaring it early strands every vc-fix installer. Until vc-fix can
+  // reach the base, deleting its knowledge would take that knowledge away from every client install
+  // and give them nothing back. So the duplication survives this phase KNOWINGLY, tracked here
+  // rather than forgotten, and closes when vc-fix declares the dependency.
   "skills/angular-admin/angular-patterns.md",
   "skills/angular-admin/css-layout-patterns.md",
   "skills/angular-admin/scratch-harness-patterns.md",
   "skills/dotnet-fix/dotnet10-best-practices.md",
   "skills/dotnet-fix/fix-patterns.md",
   "skills/dotnet-unit-test/xunit-patterns.md",
-  "skills/qa-risk/risk-prioritization-framework.md",
+  // `skills/qa-risk/risk-prioritization-framework.md` LEFT this list on 2026-09-18, and could not
+  // stay: it cites a `knowledge/…` file, and the two surfaces are now required to spell that prefix
+  // differently — `.claude/knowledge/…` here (DOC-007), the bare form inside the plugin, where it
+  // means the plugin's own tree. Byte identity is unreachable for any pair that cites one. The pair
+  // is still gated: PATH_REWRITES normalises the prefix, so it lands in `structural`, where any
+  // CONTENT drift fails exactly as before.
   "skills/vc-self-check/deliver.mjs",
   "skills/vc-self-check/upstream-reduce.mjs",
   "skills/vc-shell-fix/vc-shell-scratch-harness-patterns.md",

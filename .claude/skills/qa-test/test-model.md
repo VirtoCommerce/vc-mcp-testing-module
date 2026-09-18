@@ -177,7 +177,7 @@ names a way this feature can be *wrong*, and the case authored from it is the th
    interaction rule — cite it, never restate it); **`t=2` by default, `t=3` ceiling, `t=4` revenue-critical
    only.**
 7. **Archetype is one token** from the Defect archetypes table in
-   [`knowledge/oracles/vc-bug-catalog.md`](../../knowledge/oracles/vc-bug-catalog.md). It is what makes a
+   `knowledge/oracles/vc-bug-catalog.md`. It is what makes a
    blind spot visible *at design time* rather than in a later audit.
 8. **`Reduction` is the anti-vanity field.** Without it, "M scenarios" is unfalsifiable; with it a reader
    can attack the reduction ("do status and lock actually not interact?"), which is where real coverage
@@ -308,7 +308,7 @@ drive a browser. Steps, selectors and evidence paths belong to the authored case
 **A two-role scenario is expressible in ONE case today** — a `[PRE:*]` cluster opens an actor segment
 inside `Steps`, and 64 cases already use it. Worked shape, the three rules it carries, and when to prefer
 `[PRE:SWITCH_ORG]` (one account whose role differs per org — no second token, so the permission-claim
-change is directly assertable): [`knowledge/execution/test-execution-preflight.md`](../../knowledge/execution/test-execution-preflight.md)
+change is directly assertable): [`.claude/knowledge/execution/test-execution-preflight.md`](../../knowledge/execution/test-execution-preflight.md)
 §Example 4. Do not split a role boundary into two cases out of a belief that one case cannot hold two
 actors.
 
@@ -382,7 +382,7 @@ larger mechanism?* (clause 11), and nothing else stops a case asserting that a c
 does not (clause 11b). The measured runs behind both, and why naming the links you did not cover is
 contradictable while "the matrix is complete" is not:
 [`docs/decisions/qa-test-evolution.md`](../../../docs/decisions/qa-test-evolution.md) ·
-[`knowledge/domain/domain-map.md`](../../knowledge/domain/domain-map.md).
+`knowledge/domain/domain-map.md`.
 
 **Both read the `domain_map` token (2g); neither re-derives it** ([`axes.md`](axes.md)).
 `PRESENT`/`STALE` ⇒ both bind against the map's inventory, and on `STALE` a variant resolving only to a

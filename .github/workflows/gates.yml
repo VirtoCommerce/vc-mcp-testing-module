@@ -41,6 +41,16 @@ jobs:
           cache: 'npm'
       - name: Install
         run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+      # THE GATES BELOW READ THE KNOWLEDGE BASE. The oracles, domain maps and API references moved
+      # into VirtoCommerce/vc-knowledge (migration phase 4.1) — what makes them untrue is a change in
+      # the PLATFORM, not in this repository — so bl:lint, ecl:lint, domain:check and parts of
+      # `npm test` need it fetched first. The repository is public, so this needs no token.
+      #
+      # It is a REAL dependency, not a convenience: before the move these files were in the checkout
+      # and therefore always present. A runner that cannot reach the base fails HERE, loudly, rather
+      # than letting a downstream gate report an absent corpus as a clean one.
+      - name: kb sync — fetch the knowledge base the gates read
+        run: node plugins/vc-kb/bin/kb.mjs sync
       # The always-loaded instruction budget (CLAUDE.md + .claude/rules/) and the doc-integrity ratchet.
       # This is the gate that stops the 2026-09 re-tiering from growing back.
       - name: context:check — always-loaded budget + doc ratchet
@@ -73,10 +83,28 @@ jobs:
         run: npm run test:roi-check -- --base "origin/${{ github.base_ref }}"
       - name: bl:lint / ecl:lint — oracle citation integrity
         run: npm run bl:lint && npm run ecl:lint
+      # The BL oracle page is GENERATED from the 217 records in the base's normative plane. If it is
+      # not exactly what they render, either somebody hand-edited a generated file or the renderer
+      # changed — and a silent rewrite of 217 invariants is the one thing nobody reviews.
+      - name: bl:render:check — the oracle page is what the records render
+        run: npm run bl:render:check
+      # The base is read by installs that do NOT have this repository. A page there citing
+      # `regression/suites/…` or `/qa-exploratory` is pointing at something the reader cannot open,
+      # and they have no way to tell that from a pointer they have not found yet.
+      - name: knowledge:refs — base pages carry the internal-reference banner
+        run: npm run knowledge:refs
       - name: suites:executability:check — determinism ratchet
         run: npm run suites:executability:check
       - name: scope:validate — critical-ui-scope ↔ suite manifest
         run: npm run scope:validate
+      # vc-kb's own suite. It is the ONLY thing that says the port from vc-kb-lab broke nothing, and
+      # until it ran here it was a comment (see this file's header). One of its assertions needs a
+      # real corpus and SKIPS without one, which is what CI is: "nothing to measure against" and
+      # "retrieval regressed" must not be the same red.
+      - name: kb:test — the knowledge base tool
+        run: npm run kb:test
+      - name: kb:test:logger — the vendored question/tool logger
+        run: npm run kb:test:logger
 
   external:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

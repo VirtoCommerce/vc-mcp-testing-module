@@ -36,10 +36,10 @@ Checklist items are written to be testable; they assume readers will resolve tes
 | File | Use when |
 |------|----------|
 | `@td(ALIAS.field)` resolver | `skills/qa-postman/`, `test-data/` (full `vc-qa` plugin only, not shipped here). Resolve test data ad hoc (live-discover the entity, or ask the user) instead of inventing values |
-| [`knowledge/api/graphql-schema.md`](../../knowledge/api/graphql-schema.md) | Any GraphQL query/mutation/field name in a checklist item — verify it exists in the live schema before deriving a test case |
-| [`knowledge/api/graphql-test-cases-runner.md`](../../knowledge/api/graphql-test-cases-runner.md) | Authoring runner-native GraphQL test cases derived from `graphql-checklist.md` items (CSV format, `[GQL-OP]/[GQL-VARS]/[GQL-EXEC]/[GQL-CAPTURE]` grammar) |
-| [`knowledge/oracles/business-logic.md`](../../knowledge/oracles/business-logic.md) | **Mandatory input, not a cross-link** — see §Oracle Grounding below. A checklist item that states an expected outcome must cite the `BL-*` it restates |
-| [`knowledge/oracles/e-commerce-edge-cases-library.md`](../../knowledge/oracles/e-commerce-edge-cases-library.md) | **Mandatory input** — the `ECL-<n>.<m>` sections are where the domain's edge-case items come FROM (§Oracle Grounding). The library names checklists as one of its own consumers (§Using This Library) |
+| `knowledge/api/graphql-schema.md` | Any GraphQL query/mutation/field name in a checklist item — verify it exists in the live schema before deriving a test case |
+| `knowledge/api/graphql-test-cases-runner.md` | Authoring runner-native GraphQL test cases derived from `graphql-checklist.md` items (CSV format, `[GQL-OP]/[GQL-VARS]/[GQL-EXEC]/[GQL-CAPTURE]` grammar) |
+| `knowledge/oracles/business-logic.md` | **Mandatory input, not a cross-link** — see §Oracle Grounding below. A checklist item that states an expected outcome must cite the `BL-*` it restates |
+| `knowledge/oracles/e-commerce-edge-cases-library.md` | **Mandatory input** — the `ECL-<n>.<m>` sections are where the domain's edge-case items come FROM (§Oracle Grounding). The library names checklists as one of its own consumers (§Using This Library) |
 
 ## Oracle Grounding (mandatory)
 
@@ -48,8 +48,8 @@ already answer, and it must read them rather than re-derive them from the UI:
 
 | Oracle | Answers | How it lands in a checklist |
 |---|---|---|
-| [`knowledge/oracles/business-logic.md`](../../knowledge/oracles/business-logic.md) (204 `BL-*`) | *what the correct outcome IS* | Any item asserting an outcome cites the invariant it restates: `- [ ] … (BL-PRICE-001)` |
-| [`knowledge/oracles/e-commerce-edge-cases-library.md`](../../knowledge/oracles/e-commerce-edge-cases-library.md) (54 `ECL-<n>.<m>`) | *which boundary/failure shapes exist for this domain* | Edge-case and error-path items are derived FROM a section and cite it: `- [ ] … (ECL-1.3)` |
+| `knowledge/oracles/business-logic.md` (204 `BL-*`) | *what the correct outcome IS* | Any item asserting an outcome cites the invariant it restates: `- [ ] … (BL-PRICE-001)` |
+| `knowledge/oracles/e-commerce-edge-cases-library.md` (54 `ECL-<n>.<m>`) | *which boundary/failure shapes exist for this domain* | Edge-case and error-path items are derived FROM a section and cite it: `- [ ] … (ECL-1.3)` |
 
 **Why this is mandatory and not advisory.** An item written only from UI exploration encodes what the
 build currently does; an item grounded in a `BL-*` encodes what it is supposed to do — only the second
@@ -64,10 +64,11 @@ failure history and belongs to exploratory testing, whose job is discovery. The 
 what has bitten us; a session hunts what hasn't yet.
 
 **IDs are a citation contract.** Cite an ID that exists — never invent, renumber, or guess one; a
-dangling ref reads as coverage and is none. Verify by grepping the shipped `knowledge/oracles/` copies:
-the ID must appear there exactly as cited. Both oracles ship **read-only** with this plugin — an item
-needing an invariant or pattern they lack is feedback for VirtoCommerce (`/vc-feedback`), never a local
-edit.
+dangling ref reads as coverage and is none. **The oracles are NOT in this plugin** — they moved to
+the knowledge base, fetched once per machine. Verify with `kb show <ID>`, which opens `BL-*` and
+`ECL-*` alike; grepping for a shipped copy finds an empty directory and reports every ID as absent.
+An item needing an invariant or pattern they lack is feedback for VirtoCommerce (`/vc-feedback`),
+never a local edit.
 
 ## 63 Built-in Domain Checklists
 
@@ -247,7 +248,7 @@ Sections: xCatalog (4), xCart Lifecycle (9), xCart Configurable (2), xCart Wishl
 - Every checklist item must be specific enough to derive at least one test case from it
 - **Every outcome-asserting item cites its `BL-*`; every edge-case/error-path item cites its `ECL-<n>.<m>`** (§Oracle Grounding). Pure UI-presence items may omit both — the same carve-out the enriched-CSV `Business_Rule` column gives
 - **Only `[OBSERVED]` ECL patterns become checklist items.** A `[THEORETICAL]` pattern is an exploratory candidate — route it to exploratory testing, do not spend a release-walk slot on it
-- **Never invent, renumber, or guess an oracle ID.** A citation must resolve in the oracle as written; verify it against the shipped `knowledge/oracles/` copies. Both oracles ship read-only — gaps are `/vc-feedback` reports to VirtoCommerce, never local edits
+- **Never invent, renumber, or guess an oracle ID.** A citation must resolve as written; verify with `kb show <ID>` — the oracles are in the knowledge base, not in this plugin. Gaps are `/vc-feedback` reports to VirtoCommerce, never local edits
 - Use REAL UI labels discovered from exploration (not generic terms)
 - Keep items actionable — start with a verb or UI element name
 - 6-15 items per domain (fewer = incomplete, more = too granular)

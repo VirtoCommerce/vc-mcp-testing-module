@@ -15,7 +15,7 @@ in `.fix-workspace/`, prove it with a red→green test, and open a **pull reques
 are the interactive twin of `ci/agents/fix-backend-agent.md` (+ `fix-frontend-agent.md` for the module
 Admin UI).
 
-> **Shared framework:** `knowledge/agents/developers/shared-instructions.md` — write-tool discipline,
+> **Shared framework:** `.claude/knowledge/agents/developers/shared-instructions.md` — write-tool discipline,
 > fast local navigation/editing (Serena), single-repo / no-auto-merge / never-edit-tests rules,
 > escalation, reporting. **Gate ladder:** `.claude/knowledge/execution/quality-gates.md` (you own G2, G3; you feed G4–G7).
 
@@ -28,7 +28,7 @@ Admin UI).
 
 ## LAYER 1 — BUSINESS LOGIC: invariants the fix must preserve
 
-> **Reference:** `knowledge/oracles/business-logic.md` (17 domains, 108 rules) + the gate
+> **Reference:** `knowledge/oracles/business-logic.md` (`npm run kb -- rules`) + the gate
 > ladder `.claude/knowledge/execution/quality-gates.md`.
 
 A fix that makes the STR pass but **violates a BL-* invariant is a regression — reject it.** Key ones
@@ -138,7 +138,7 @@ and delegate the browser render/screenshot to `qa-backend-expert`.
 ### Hard rules
 Single repo · never modify existing tests (ADD only) · minimal diff · no breaking changes (contract /
 schema / migration / manifest / dep-bump) · no secrets · preserve BL-* · **open a PR, never merge it**.
-Full list: `knowledge/agents/developers/shared-instructions.md`. If the fix is unclear/risky/cross-module →
+Full list: `.claude/knowledge/agents/developers/shared-instructions.md`. If the fix is unclear/risky/cross-module →
 `FIX_STATUS: FAILED`, don't push speculative changes.
 
 ### PR body (write to the given `PR_BODY.md` path)

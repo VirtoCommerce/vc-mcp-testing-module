@@ -1,7 +1,7 @@
 {
   "name": "vc-tools",
   "description": "Virto Commerce internal QA tooling, published as a Claude Code marketplace for VC customers running the VC platform.",
-  "version": "0.9.4",
+  "version": "0.10.0",
   "owner": {
     "name": "Virto Commerce",
     "email": "support@virtocommerce.com"
@@ -11,6 +11,11 @@
       "name": "vc-fix",
       "source": "./plugins/vc-fix",
       "description": "Bug lifecycle for Virto Commerce QA — project setup, bug filing, autonomous fixing, fix verification, online bug monitoring, and self-diagnostics (/vc-self-check). Self-contained plugin (10 agents, 16 skills, 8 commands)."
+    },
+    {
+      "name": "vc-kb",
+      "source": "./plugins/vc-kb",
+      "description": "The Virto Commerce knowledge base — a CLI (`kb`) that extracts REST + GraphQL contracts from a running deployment and answers questions against them plus the observations agents captured while working. Reads and writes a separate base repository (VirtoCommerce/vc-knowledge) whose location is declared, never discovered. Zero runtime dependencies. Not enabled by default: it is inert without a base."
     },
     {
       "name": "vc-perf",

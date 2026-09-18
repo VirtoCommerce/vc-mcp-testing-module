@@ -1,15 +1,15 @@
 ---
-description: "Refresh the storefront sitemap (.claude/knowledge/domain/sitemap.md) from the live environment. Runs the deterministic xAPI crawler (scripts/maintenance/refresh-sitemap.mjs), diffs against the committed snapshot, and — only when something changed — rewrites the volatile sections, bumps the rev, appends a changelog row, and syncs the vc-fix plugin mirror. Diff-gated: no change ⇒ no write."
+description: "Refresh the storefront sitemap (knowledge/domain/sitemap.md) from the live environment. Runs the deterministic xAPI crawler (scripts/maintenance/refresh-sitemap.mjs), diffs against the committed snapshot, and — only when something changed — rewrites the volatile sections, bumps the rev, appends a changelog row, and syncs the vc-fix plugin mirror. Diff-gated: no change ⇒ no write."
 argument-hint: "[--check] [--no-browser]"
 disable-model-invocation: true
 ---
 
 # /qa-sitemap — Refresh the storefront sitemap
 
-Keeps `.claude/knowledge/domain/sitemap.md` current against the live storefront. Intended to run **once per sprint** (it is wired into `/qa-test-plan` Step 0), but safe to run anytime.
+Keeps `knowledge/domain/sitemap.md` current against the live storefront. Intended to run **once per sprint** (it is wired into `/qa-test-plan` Step 0), but safe to run anytime.
 
 Two halves:
-- **Deterministic core** — `scripts/maintenance/refresh-sitemap.mjs` (npm `sitemap:refresh`): pulls structure + versions over xAPI GraphQL + the Platform modules API. No browser, CI-safe. Writes a **per-environment** snapshot `.claude/knowledge/domain/sitemap-snapshot.<env>.json` (env = resolved `TEST_ENV`, or `--label`) and prints a diff vs the previous snapshot for that env.
+- **Deterministic core** — `scripts/maintenance/refresh-sitemap.mjs` (npm `sitemap:refresh`): pulls structure + versions over xAPI GraphQL + the Platform modules API. No browser, CI-safe. Writes a **per-environment** snapshot `knowledge/domain/sitemap-snapshot.<env>.json` (env = resolved `TEST_ENV`, or `--label`) and prints a diff vs the previous snapshot for that env.
 - **Route axis** — the same script reads the **`vc-frontend` router source** and inventories every declared route path (Step 1b). This exists because the xAPI axis is blind to storefront routes: they are SPA client-side records behind an auth guard, so **a story that ships a whole page produced an empty sitemap diff**. Measured 2026-09-04 — §2 had been carried forward from rev 4 (May 2026) and was missing `/account/missions` (VCST-5346) plus the entire `/company/*` Sales Rep hub (VCST-5730/5469/5308/5409).
 - **Write-up (this command)** — reads the diff and, only if it is non-empty, rewrites the affected sections of `sitemap.md` in prose, bumps the rev, appends a changelog row, and syncs the plugin mirror.
 
@@ -92,7 +92,7 @@ Use one browser session, close it when done.
 
 ### Step 3 — Rewrite the volatile sections (only if changed)
 
-Edit `.claude/knowledge/domain/sitemap.md`, touching **only** what the diff flagged. Section → snapshot-field map:
+Edit `knowledge/domain/sitemap.md`, touching **only** what the diff flagged. Section → snapshot-field map:
 
 | sitemap.md section | Source |
 |---|---|
@@ -110,16 +110,15 @@ Discipline (honor `.claude/rules/reports.md` brevity + `feedback_env_resilience`
 - Keep the **guest-crawl caveat** and the **"not re-verified this rev"** note honest — say which sections you actually touched.
 - Never assert exact prices/IDs; counts are "as of <date>" snapshots, flagged as drift candidates.
 
-### Step 4 — Sync the plugin mirror
+### Step 4 — Nothing to mirror
 
-`plugins/vc-fix/knowledge/domain/sitemap.md` is a maintained duplicate (self-contained plugin copy). Copy the updated file over it, then re-apply its **one** intentional divergence — Note #1 uses path-free wording (no `.claude/rules/...` reference):
+The sitemap lives in the knowledge base now, and there is exactly one copy. Until 2026-09-17 this
+step said to copy it into vc-fix's own knowledge tree and then hand-restore that copy's one
+intentional divergence — a maintained duplicate, kept in step by a person remembering to.
+The duplicate is gone: `knowledge/domain/sitemap.md` is in the base, which vc-fix reads through
+`npm run kb -- sync`, so a refresh reaches every consumer by being written once.
 
-```
-cp .claude/knowledge/domain/sitemap.md plugins/vc-fix/knowledge/domain/sitemap.md
-```
-then Edit the plugin copy's Note #1 back to: "Treat any hardcoded IDs/slugs/SKUs as drift candidates — resolve entities by querying the live system instead." Verify with `diff` that only that one line differs.
-
-> The `sitemap-snapshot.<env>.json` files live **only** under `.claude/` — QA-tooling artifacts, not plugin assets. Do not copy them into `plugins/vc-fix/`.
+`sitemap-snapshot.<env>.json` travels with it, in the base beside the page it snapshots.
 
 ### Step 5 — Report
 
@@ -129,7 +128,7 @@ Sitemap refresh — {CHANGED | already current}
 Env: {env} @ {FRONT_URL}
 Rev: {old} → {new}   (or: unchanged, rev N)
 Changes: {n categories added/removed/renamed, version bumps}
-Files: .claude/knowledge/domain/sitemap.md (+ snapshot), plugins/vc-fix/.../sitemap.md
+Files: knowledge/domain/sitemap.md (+ snapshot), plugins/vc-fix/.../sitemap.md
 ```
 
 The committed `sitemap-snapshot.<env>.json` is written by the script in Step 1 (when not `--check`/`--dry-run`) — it becomes the baseline for next sprint's diff for that environment.

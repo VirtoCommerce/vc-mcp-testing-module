@@ -12,6 +12,9 @@
 // default-deny closed-schema upstream path are what keep client data from leaving the machine.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   auditMirror,
   classify,
@@ -59,9 +62,17 @@ test("the mirror has not silently shrunk", () => {
   // Not a transcribed count of anything derived — a floor. Files may be added to either tree; a
   // shared path DISAPPEARING means one side was deleted, which is exactly the fork-by-omission the
   // registry cannot see (it only compares paths present in both).
-  assert.ok(audit.shared.length >= 92, `shared paths dropped to ${audit.shared.length}`);
+  //
+  // LOWERED 92 -> 72 AND 40 -> 28 on 2026-09-17, and this is the burn-down the floor exists to
+  // force. Twenty shared paths stopped being shared because their `.claude/` copy moved into the
+  // knowledge base (migration phase 4.1): a file whose truth depends on the PLATFORM belongs in the
+  // base, not in two copies of a working repository. That is a DECLARED disappearance — the
+  // corresponding entries left BYTE_IDENTICAL and FORKS in the same commit, each with its reason —
+  // and it is the only kind for which this number may move. Lowering it to make a red test green
+  // without a commit that says where the files went is the defect, not the number.
+  assert.ok(audit.shared.length >= 72, `shared paths dropped to ${audit.shared.length}`);
   assert.ok(
-    audit.identical.length + audit.structural.length >= 40,
+    audit.identical.length + audit.structural.length >= 28,
     `gated pairs dropped to ${audit.identical.length + audit.structural.length}`,
   );
 });
@@ -161,22 +172,56 @@ test("F4 — a line-ending flip on a shared path is a failure, not invisible", (
   assert.deepEqual(audit.eolDrift, [], "canonicalise folds CRLF, so nothing else here can see this");
 });
 
-test("F5 — the walk skips symlinks and vendor/worktree dirs", async () => {
-  const { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } = await import("node:fs");
-  const { tmpdir } = await import("node:os");
-  const { join: j } = await import("node:path");
-  const root = mkdtempSync(j(tmpdir(), "mirror-walk-"));
-  for (const side of [".claude", "plugins/vc-fix"]) {
-    mkdirSync(j(root, side, "knowledge"), { recursive: true });
-    writeFileSync(j(root, side, "knowledge/a.md"), "same\n");
-    mkdirSync(j(root, side, "node_modules/.bin"), { recursive: true });
-    writeFileSync(j(root, side, "node_modules/pkg.json"), "{}");
-    symlinkSync(j(root, "does-not-exist"), j(root, side, "node_modules/.bin/dangling.mjs"));
+// CAN THIS MACHINE MAKE A SYMLINK AT ALL? Windows refuses one with EPERM unless the account has
+// Developer Mode or elevation, which a developer checkout does not — so this was a hard red on every
+// Windows machine: a failure about the OS, reported as a failure about the code. That is the same
+// collapse the base's own answer contract exists to prevent: "could not run" and "ran and was wrong"
+// are different results and must not print the same.
+//
+// Probed rather than guessed from `process.platform`: what matters is whether the call works HERE,
+// and an elevated Windows shell can.
+const canSymlink = (() => {
+  try {
+    const dir = mkdtempSync(join(tmpdir(), "symlink-probe-"));
+    symlinkSync(join(dir, "nothing"), join(dir, "link"));
+    rmSync(dir, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
   }
-  const r = auditMirror(root);
-  assert.deepEqual(r.shared, ["knowledge/a.md"], "node_modules must not enter the mirror");
-  // The real point: a dangling symlink used to throw ENOENT out of statSync and kill the gate.
+})();
+
+// SPLIT FROM THE SYMLINK CASE ON PURPOSE. This half needs no privilege and is the half that fires in
+// ordinary use — a `node_modules` tree inside either mirror would make every pair in it "shared" and
+// the gate meaningless. It must never be skipped.
+test("F5a — node_modules never enters the mirror", () => {
+  const root = mkdtempSync(join(tmpdir(), "mirror-walk-"));
+  for (const side of [".claude", "plugins/vc-fix"]) {
+    mkdirSync(join(root, side, "knowledge"), { recursive: true });
+    writeFileSync(join(root, side, "knowledge/a.md"), "same\n");
+    mkdirSync(join(root, side, "node_modules/.bin"), { recursive: true });
+    writeFileSync(join(root, side, "node_modules/pkg.json"), "{}");
+  }
+  assert.deepEqual(auditMirror(root).shared, ["knowledge/a.md"]);
+  rmSync(root, { recursive: true, force: true });
 });
+
+test(
+  "F5b — a dangling symlink does not kill the walk",
+  { skip: canSymlink ? false : "this account cannot create symlinks (Windows without Developer Mode)" },
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "mirror-walk-"));
+    for (const side of [".claude", "plugins/vc-fix"]) {
+      mkdirSync(join(root, side, "knowledge"), { recursive: true });
+      writeFileSync(join(root, side, "knowledge/a.md"), "same\n");
+      mkdirSync(join(root, side, "node_modules/.bin"), { recursive: true });
+      symlinkSync(join(root, "does-not-exist"), join(root, side, "node_modules/.bin/dangling.mjs"));
+    }
+    // The real point: a dangling symlink used to throw ENOENT out of statSync and kill the gate.
+    assert.deepEqual(auditMirror(root).shared, ["knowledge/a.md"]);
+    rmSync(root, { recursive: true, force: true });
+  },
+);
 
 test("F6 — a reordered or re-duplicated fork does not report as zero drift", () => {
   assert.deepEqual(driftSize("a\nb\n", "b\na\n"), { rootOnly: 0, pluginOnly: 0, reordered: true });

@@ -1,8 +1,8 @@
 # Steps 5-report · 5-status · 5-docs · 5-docs-map — report, transition, publish, write back
 
-> **MANDATORY — screenshots go INLINE in the comment.** A UI claim posted without its image embedded is not delivered: Markdown `![](path)` and prose file paths both post `200 OK` and render nothing. Attach, then reference `!file.png|width=700!` via the **v2** comment API, then VERIFY from `?expand=renderedBody` (one `<img …/attachment/content/N>` per image, zero surviving `!….png!`, zero `<span class="error">`). Mechanism + the ADF dead ends: `knowledge/execution/tracker-ops.md` §5c. Policy + the verification gate: `.claude/rules/reports.md` §5.0. A non-visual claim says so explicitly rather than silently shipping no image.
+> **MANDATORY — screenshots go INLINE in the comment.** A UI claim posted without its image embedded is not delivered: Markdown `![](path)` and prose file paths both post `200 OK` and render nothing. Attach, then reference `!file.png|width=700!` via the **v2** comment API, then VERIFY from `?expand=renderedBody` (one `<img …/attachment/content/N>` per image, zero surviving `!….png!`, zero `<span class="error">`). Mechanism + the ADF dead ends: `.claude/knowledge/execution/tracker-ops.md` §5c. Policy + the verification gate: `.claude/rules/reports.md` §5.0. A non-visual claim says so explicitly rather than silently shipping no image.
 
-> **Before posting any tracker comment, read `knowledge/execution/tracker-ops.md` §0 — the GOLDEN RULE.**
+> **Before posting any tracker comment, read `.claude/knowledge/execution/tracker-ops.md` §0 — the GOLDEN RULE.**
 
 
 Split out of [`close-out.md`](close-out.md), which keeps the close-out spine (5-verdict · 5-file) and cites
@@ -26,7 +26,7 @@ Done **first**, because 5-report.2's comment carries a mandatory `Release note:`
 block — both of which need these values. The **layer itself is not decided here**: it was derived at `1b`
 item 2b and is read from `summary.json.layer`. What 5-report.0 resolves is everything downstream of it:
 
-- **`audience` is derived from the layer**, per `.claude/knowledge/ba/virto-doc-style.md` §9.1 — never a
+- **`audience` is derived from the layer**, per `knowledge/ba/virto-doc-style.md` §9.1 — never a
   choice made here.
 - **Versions come from `build.deployed`** (probed), never from `build.relevant_modules` (declared git
   state) and never from the release ledger, which records what shipped **upstream**. `UNKNOWN` is legal;
@@ -288,7 +288,7 @@ than `summary.json`, and a fix’s release story is the bundle/hotfix narrative 
 The release-note pointer above hands off a *what shipped* record. **This step delivers the ordinary
 product documentation** — the §3/§4/§5 guides for the surface this ticket moved — and **posts it as one
 comment on the ticket**, so the people who asked for the change read it where they are already looking.
-Shape, audience derivation, size caps and refusals: [`knowledge/ba/virto-doc-style.md`](../../knowledge/ba/virto-doc-style.md) §10.
+Shape, audience derivation, size caps and refusals: `knowledge/ba/virto-doc-style.md` §10.
 
 Runs **after 5-status**, on **both paths**. FAST is included deliberately and costs nothing: a P2 config tweak
 refuses `not-user-visible`, which is the correct outcome, not a skipped step.

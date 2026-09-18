@@ -35,6 +35,12 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// DOC-007 needs to know where the knowledge base is, and the tool that owns that question lives in
+// this repository. A static import rather than a copy of the resolution order: `--base` / `KB_BASE`
+// / the profile / the managed checkout is four rules with a measured incident behind each, and a
+// second implementation here would be the transcribed constant this gate exists to catch.
+import { resolveBase } from '../../plugins/vc-kb/src/base.mjs';
+
 export const BUDGET = { alwaysLoadedChars: 80_000, longestLineChars: 2_500, skillBodyWarnChars: 19_000, promptBodyChars: 19_000 };
 
 /**
@@ -66,12 +72,15 @@ export const PROMPT_BASELINE_PATH = 'scripts/maintenance/.prompt-size-baseline.j
 //                  it, so `§Effort routing records that the…` missed "## Effort routing, and why…".
 //                  9 were phantom, 9 were genuinely stale citations and were repointed.
 // 0 is the real number for all three, and a ratchet at 0 is the only one that catches the next one.
-export const BASELINE = { 'DOC-002': 0, 'DOC-003': 0, 'DOC-004': 0, 'DOC-006': 0 };
+export const BASELINE = { 'DOC-002': 0, 'DOC-003': 0, 'DOC-004': 0, 'DOC-006': 0, 'DOC-007': 0 };
 
 /** Codes reported for information but never ratcheted — see DOC-003E on `isEphemeralPath`. */
 export const INFORMATIONAL = new Set(['DOC-003E']);
 
 export const GENERIC_SCRIPTS = new Set(['build', 'dev', 'lint', 'test', 'start', 'typecheck', 'storybook', 'preview', 'format', 'install', 'serve', 'watch']);
+/** The distributed plugin tree, scanned for ONE rule — see the loop that uses it. */
+export const PLUGIN_ROOT = 'plugins/vc-fix';
+
 export const PLACEHOLDER_RE = /XX|YYYY|NNN|<[^>]*>|\*|\{|Sprint-current|\.\.\.|…/;
 
 export const posix = (p) => p.split(path.sep).join('/');
@@ -172,6 +181,36 @@ export function isTranscribedCount(line, matchIndex) {
 /** A markdown link target immediately following a backticked label: `` `label` ``](target). */
 const LINK_RE = /^\]\(([^)\s]*)\)/;
 
+/**
+ * ANY markdown link, with its target and whether it is an image — `[text](target)` / `![alt](path)`.
+ *
+ * The rule above reads a link only when the LABEL is a backticked repo path, which meant the
+ * strongest citation a document can make — the one a reader clicks — went unchecked whenever the
+ * text was prose. `[BL-UI-002](../../knowledge/oracles/business-logic.md)` was invisible to every
+ * code here. Measured 2026-09-17, while the platform knowledge moved into the knowledge base:
+ * 113 link targets under `.claude/` resolved to nothing, 92 of them into a tree that is no longer
+ * in any checkout, and DOC-003 reported 0 the whole time.
+ */
+const ANY_LINK_RE = /(!)?\[[^\]\n]*\]\(([^)\s]+)\)/g;
+
+/**
+ * Is this link target a citation of a path in THIS repository, i.e. something to check at all?
+ *
+ * Four things are not, and each would be a phantom finding on a ratchet pinned at zero:
+ *   - an image link — `![alt](path)` in a paragraph ABOUT markdown rendering is markup being
+ *     quoted, not a file being cited (five of them explain why Jira drops such an image)
+ *   - an external scheme or a bare `#anchor`, which names no path here
+ *   - a placeholder — `{date}`, `<ticket>`, `XX`
+ *   - a `knowledge/…` path: that is the knowledge BASE, a separate repository fetched by `kb sync`,
+ *     and it is deliberately cited rather than linked for exactly this reason
+ */
+export function isRepoLinkTarget(raw, isImage) {
+  if (isImage || !raw || EXTERNAL_RE.test(raw) || raw.startsWith('#')) return false;
+  const cited = raw.split('#')[0].replace(/\/$/, '');
+  if (!cited || cited.startsWith('knowledge/')) return false;
+  return !isPlaceholderPath(cited);
+}
+
 /** A link target that leaves the repository: any URI scheme (`https:`, `mailto:`, and a Windows
  *  `C:` drive too) or a protocol-relative `//host/…`. */
 const EXTERNAL_RE = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
@@ -234,7 +273,10 @@ export function isGitIgnored(p, root = '.') {
   // Output format is `<source>:<line>:<pattern>` then a TAB then `<pathname>`. An empty pattern field
   // is not a rule, so it is not a match.
   try {
-    const out = execFileSync('git', ['check-ignore', '-v', '--', p], { cwd: root, encoding: 'utf8' });
+    // stderr discarded: a citation that points OUTSIDE the repo makes git print `fatal: … is
+    // outside repository`, twice per finding, in the middle of the gate's own report — noise on
+    // the one path where the reader is trying to read a finding.
+    const out = execFileSync('git', ['check-ignore', '-v', '--', p], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
     return out.split(/\r?\n/).some((l) => {
       const m = /:\d+:([^\t]*)\t/.exec(l);
       return !!m && m[1].trim() !== '';
@@ -383,6 +425,32 @@ export function lint(root = '.') {
     const ignoredCache = new Map();
     const ignored = (p) => { if (!ignoredCache.has(p)) ignoredCache.set(p, isGitIgnored(p)); return ignoredCache.get(p); };
 
+    // DOC-007 — A BARE `knowledge/…` PATH NAMES THE BASE, AND NOTHING CHECKED THAT IT WAS THERE.
+    //
+    // CLAUDE.md gives the prefix a precise meaning: `knowledge/…` is the knowledge BASE, a separate
+    // repository; `.claude/knowledge/…` is this one. Neither existing rule could see the first
+    // form, for two independent reasons that were each sensible alone — `PATH_RE` does not list
+    // `knowledge` among its roots, and `isRepoLinkTarget` exempts the prefix outright, on the
+    // ground that the base is cited rather than linked. Between them, a citation that named the
+    // WRONG TREE passed, and so did one that named nothing at all.
+    //
+    // It matters more than a dangling path usually would, because both trees now carry the same
+    // subdirectory names (`knowledge/api/`, `knowledge/execution/`). No filename collides today —
+    // measured 2026-09-18, zero overlap — and the first one that does will resolve to the wrong
+    // repository with nothing to notice it.
+    const KB_PATH_RE = /`(knowledge\/[A-Za-z0-9._/-]+)`/g;
+    let kbBase = null;
+    try { kbBase = resolveBase(); } catch { kbBase = null; }
+    const checkKbPath = (cited, f, line) => {
+      // No base, no check. Reported as a SKIP beside the counts rather than as a zero: a green run
+      // that checked nothing is the failure every other rule here is shaped to avoid.
+      if (!kbBase || isPlaceholderPath(cited)) return;
+      if (fs.existsSync(path.join(kbBase, cited))) return;
+      add('DOC-007', f, line, fs.existsSync(path.join('.claude', cited))
+        ? `names the knowledge BASE but exists only here — write it \`.claude/${cited}\``
+        : `${cited} is in neither the knowledge base nor this repository`);
+    };
+
     for (const f of files) {
       const lines = fs.readFileSync(f, 'utf8').split(/\r?\n/);
       let sectionExempt = false;
@@ -409,6 +477,28 @@ export function lint(root = '.') {
           const detail = `cited path does not exist: ${cited === label ? label : `${label} → ${cited}`}`;
           add(isEphemeralPath(citedFromRoot(f, cited)) ? 'DOC-003E' : 'DOC-003', f, i + 1, detail);
         }
+        for (const m of l.matchAll(ANY_LINK_RE)) {
+          if (exempt) break;
+          if (!isRepoLinkTarget(m[2], m[1])) continue;
+          const cited = m[2].split('#')[0].replace(/\/$/, '');
+          if (pathResolves(f, cited) || ignored(cited) || ignored(cited + '/')) continue;
+          add(isEphemeralPath(citedFromRoot(f, cited)) ? 'DOC-003E' : 'DOC-003', f, i + 1, `link target does not exist: ${cited}`);
+        }
+        // Both forms a citation of the base takes: a backticked path, and a link target that
+        // `isRepoLinkTarget` deliberately let through. See DOC-007 above.
+        if (!exempt) {
+          for (const m of l.matchAll(KB_PATH_RE)) checkKbPath(m[1], f, i + 1);
+          for (const m of l.matchAll(ANY_LINK_RE)) {
+            if (m[1]) continue;                                   // an image is markup being quoted
+            const t = m[2].split('#')[0].replace(/\/$/, '');
+            // A LINK TARGET RESOLVES AGAINST ITS OWN FILE, and a backticked path against the root.
+            // Checking a link from the root reported `[x](knowledge/README.md)` inside
+            // `.claude/ROUTING.md` as naming the base, when it correctly names the sibling
+            // directory. Try the relative reading first; only a target that resolves NOWHERE here
+            // is a claim about the base.
+            if (t.startsWith('knowledge/') && !pathResolves(f, t)) checkKbPath(t, f, i + 1);
+          }
+        }
         for (const m of l.matchAll(SEC_RE)) {
           let t = m[1];
           if (!/^(\.claude|docs|scripts|ci|config)\//.test(t)) t = posix(path.normalize(path.join(path.dirname(f), t)));
@@ -417,6 +507,29 @@ export function lint(root = '.') {
           const q = norm(m[2]);
           if (q.length < 3 || /^\d/.test(q)) continue;            // numbered anchors (§1a, §5.0) are checked by doclint's stricter form
           if (!headingMatch(hs, m[2])) add('DOC-004', f, i + 1, `§${m[2].trim()} not found as a heading in ${t}`);
+        }
+      });
+    }
+
+    // THE DISTRIBUTED SURFACE GETS THE LINK RULE AND NOTHING ELSE.
+    //
+    // A broken link in `plugins/vc-fix/` is worse than one here: a client follows it, finds
+    // nothing, and nobody on this team ever sees it. Seven were shipping the day this was written —
+    // `[`knowledge/oracles/business-logic.md`](../../knowledge/oracles/business-logic.md)` in the
+    // checklist skill, pointing into a directory the plugin EMPTIED when the oracles moved to the
+    // base. The link form is invisible to every other rule here, which is how they survived.
+    //
+    // Only this rule runs over the plugin. DOC-002 would check its `npm run` names against the
+    // ROOT package.json, which is a different project's script list, and DOC-004's `§` rule would
+    // resolve plugin-relative paths against this tree. Both would report defects that are not.
+    for (const f of walkMd(PLUGIN_ROOT).filter((p) => !p.includes(`${path.sep}node_modules${path.sep}`))) {
+      fs.readFileSync(f, 'utf8').split(/\r?\n/).forEach((l, i) => {
+        if (l.includes(MAY_NOT_EXIST)) return;
+        for (const m of l.matchAll(ANY_LINK_RE)) {
+          if (!isRepoLinkTarget(m[2], m[1])) continue;
+          const cited = m[2].split('#')[0].replace(/\/$/, '');
+          if (pathResolves(f, cited) || ignored(cited) || ignored(cited + '/')) continue;
+          add(isEphemeralPath(citedFromRoot(f, cited)) ? 'DOC-003E' : 'DOC-003', f, i + 1, `link target does not exist: ${cited}`);
         }
       });
     }

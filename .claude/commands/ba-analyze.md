@@ -45,7 +45,7 @@ You coordinate three specialist subagents in sequence, then synthesize their fin
 ### Step 0 — Pre-Flight
 
 1. **VirtoOZ MCP first** — ground the target scope against the matching topic-scoped tool (`PlatformUserGuide` / `StorefrontUserGuide` / `PlatformDeveloperGuide` / `VirtoCommerce` for sales). Use Context7 (`/virtocommerce/vc-docs`, `tokens: 8000`) only as fallback. Build understanding of current module architecture and **Virto's published terminology/voice** before analyzing code.
-2. **If the run will produce docs** (scope `docs`, `full`, or anything that reaches `ba-doc-writer`): read `knowledge/ba/virto-doc-style.md` so you can verify each generated doc matches its audience skeleton. The BA team framework is `knowledge/agents/ba/shared-instructions.md`.
+2. **If the run will produce docs** (scope `docs`, `full`, or anything that reaches `ba-doc-writer`): read `knowledge/ba/virto-doc-style.md` so you can verify each generated doc matches its audience skeleton. The BA team framework is `.claude/knowledge/agents/ba/shared-instructions.md`.
 2a. **On `docs release`, read `summary.json` FIRST — before any MCP call.** If
    `release.refusal` is non-null, or `layer` is null, **stop and report the refusal**: there is no
    document to write, and grounding terminology for a note that will not exist is wasted work. A
@@ -104,7 +104,7 @@ Launch agents 1 and 2 **in parallel** (single message with 2 Task calls). Agent 
   `publish_target` when `--publish` was given. **Do not pass an `audience`** unless the operator named
   one — it is derived from the layer via §9.1, and an explicit one narrows rather than replaces.
   **`--publish` posts to the tracker, so ASK before posting**; the subagent composes the body and never
-  posts it itself. Mechanics are `knowledge/execution/tracker-ops.md`'s — **§2** for the endpoint, **§5d**
+  posts it itself. Mechanics are `.claude/knowledge/execution/tracker-ops.md`'s — **§2** for the endpoint, **§5d**
   for what a delivery is (the guides in full; split one comment per audience if they do not fit; never a
   repo path in place of content), **§5a** for the body dialect and **§5c** for the screenshot carve-out.
 - If scope is `docs`: run all agents (docs need full context), then `ba-doc-writer` with the requested `audience`. For `sales`, the system analysis is still required — Sales claims must map to observed features (see `ba-doc-writer` Truth guardrail).
@@ -129,7 +129,7 @@ After synthesis and before writing the final report:
 3. **Validate sources:** every remaining proposal MUST have a non-empty `source` field. Drop any unsourced entry and log the drop in the terminal summary.
 4. **Score each surviving proposal on both value axes** and fill the mandatory Value Summary table — derived, never estimated: `npm run oracles:rank -- --explain=<ID> --severity=<the tag you are proposing>` prints business value, product value and the promotion decision verbatim. A proposal that comes back `low` or `undeclared` still gets written down (it is evidence someone considered it), but it is filed under that label, not mixed in with the ones that clear both axes.
 5. If any proposals remain after steps 2–4, write `reports/ba/bl-proposals-{date}.md` using the template below, **ordered by value, highest first**. If both arrays are empty, skip the file.
-6. **`/ba-analyze` itself never writes to `knowledge/oracles/business-logic.md`.** Its BL candidates come from opportunistic, often single-axis observation during analysis — that is by definition **not confirmed**, so it only ever stages drafts to `bl-proposals-{date}.md`. Do not bulk-promote, do not promote "all approved," do not infer approval from silence from a `/ba-analyze` run. **Auto-apply to the oracle happens only through `/qa-review-bl`** — the dedicated triangulation flow that confirms each candidate against **docs + live + source** (all three) before a body-only edit, and routes anything unconfirmed back to this same `bl-proposals-{date}.md`. So: `/ba-analyze` → drafts; `/qa-review-bl` → confirmed auto-apply + drafts for the rest. To act on this run's drafts, hand them to `/qa-review-bl` (or promote a specific approved entry by hand).
+6. **`/ba-analyze` itself never writes to the oracle.** Its BL candidates come from opportunistic, often single-axis observation — by definition **not confirmed** — so it only ever stages drafts to `bl-proposals-{date}.md`. Do not bulk-promote, do not promote "all approved," do not infer approval from silence. **Auto-apply happens only through `/qa-review-bl`**, which confirms each candidate against **docs + live + source** (all three) before a body-only edit and routes anything unconfirmed back to this same file. To act on this run's drafts, hand them to `/qa-review-bl` (or promote a specific approved entry by hand).
 
 **`bl-proposals-{date}.md` template** (identical to the format `/qa-test-lifecycle` Phase 4c and `/qa-review-bl` use for unconfirmed items, so a human sees a consistent shape regardless of source):
 
@@ -204,9 +204,9 @@ decision at one date, which is exactly the artifact a computed column belongs in
 ## Application Notes
 
 1. **Promote by value, highest first — and only what clears both axes.** A `low` or `undeclared` proposal is not a queue item for later; it is a proposal that does not belong in the oracle as written. Either raise it (declare the severity, or show the product leans on it) or leave it here.
-2. Assign final IDs by reading `knowledge/oracles/business-logic.md` for the next available `BL-<DOMAIN>-NNN` sequence.
+2. Assign final IDs from what the domain already holds — `npm run kb -- rules <domain>` — taking the next free `BL-<DOMAIN>-NNN`.
 3. Replace `PROPOSED-` prefix with final ID.
-4. Paste the edited entry into the correct domain section of `business-logic.md`.
+4. Capture it as a RULE RECORD (`npm run kb -- capture --rule …`), then `npm run bl:render`. **Never paste it into `business-logic.md`** — that page is generated from the records, so a paste is lost at the next render. Procedure: `/qa-review-oracles`'s `bl-audit-criteria.md` §4.
 5. After the entry lands, re-run any related `/qa-review-tests suite <ID> --verify` so test cases gain their `Business_Rule` mapping.
 ```
 

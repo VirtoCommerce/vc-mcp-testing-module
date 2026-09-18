@@ -7,7 +7,7 @@ argument-hint: "[sprint|sprint:XX-YY|ticket <KEY>|checkout|catalog|B2B|mobile|ne
 
 **Primary purpose: find scenarios our existing coverage misses.** The CSV suites in [`regression/suites/`](../../regression/suites) cover what we know to test; this command exists to discover what we *don't* know to test. Confirming known coverage works is valuable but is **re-validation**, not exploration — log it accordingly.
 
-Every session must end with at least one **net-new scenario** (not in any regression suite, not in [vc-bug-catalog.md](../knowledge/oracles/vc-bug-catalog.md), not predictable from the charter alone). If no net-new scenario emerges, the session is `[VAL]` re-validation, not `[EXP]` exploration. See [`scenario-discovery.md`](../skills/qa-sbtm/scenario-discovery.md) for the discovery techniques.
+Every session must end with at least one **net-new scenario** (not in any regression suite, not in `knowledge/oracles/vc-bug-catalog.md`, not predictable from the charter alone). If no net-new scenario emerges, the session is `[VAL]` re-validation, not `[EXP]` exploration. See [`scenario-discovery.md`](../skills/qa-sbtm/scenario-discovery.md) for the discovery techniques.
 
 ## Usage
 ```
@@ -92,7 +92,7 @@ Rationale, the charter derivation table and the record: [`exploratory-lane.md`](
    - Use GitHub MCP to read `backend/packages.json` and `theme/artifact.json` from `VirtoCommerce/vc-deploy-dev` (branch `vcst-qa` by default; use the branch matching `TEST_ENV` for other envs)
    - Record platform version and theme version — include in the session report header
 3. **Duplicate check** — scan `reports/exploratory/` for an `SBTM-*` session on the same domain in the last 24 hours. If found, warn user and show previous findings.
-3a. **What shipped recently** — read `.claude/knowledge/domain/release-ledger.md` §1–§2 for the components in scope (map domain → component via [module-suite-map.md](../knowledge/execution/module-suite-map.md)). Carry the newest 1–2 months' features into Step 5's coverage map.
+3a. **What shipped recently** — read `knowledge/domain/release-ledger.md` §1–§2 for the components in scope (map domain → component via [module-suite-map.md](../knowledge/execution/module-suite-map.md)). Carry the newest 1–2 months' features into Step 5's coverage map.
 
    **This is the strongest C1 signal this pre-flight can compute.** A feature that shipped last month is in *neither* of Step 5's subtract-lists **by construction**: no suite asserts it (nobody has authored one yet) and `vc-bug-catalog.md` has never recorded a failure in it (nobody has run it here). It is not *probably* uncovered — it is **provably** uncovered. A **⚠ BREAKING** row is stronger still: it names a surface whose contract moved, i.e. C4 latent blast radius with a date on it.
 
@@ -103,7 +103,7 @@ Rationale, the charter derivation table and the record: [`exploratory-lane.md`](
    **VirtoOZ answers "how is it meant to work", never "what is new".** Its release corpus stops at Platform 3.917.1 while production is past 3.1050, so for a feature from item 3a it will typically return the *pre-existing* page for that area and nothing about the change. That is not a miss to retry — it is the division of labour: 3a supplies what is new, this step supplies the intended behaviour where docs exist, and where they do not the session is on the `{OBSERVED}` axis (see `agents/qa/shared-instructions.md` §Live-Verification).
 5. **Coverage map** — for the target domain, identify what's *already covered*:
    - Open the CSV suite(s) for the domain (via [module-suite-map.md](../knowledge/execution/module-suite-map.md) → [`regression/suites/`](../../regression/suites)) — list the scenarios already tested
-   - Open [vc-bug-catalog.md](../knowledge/oracles/vc-bug-catalog.md) and read the section(s) for the domain (VC-CHECKOUT-*, VC-CART-*, VC-B2B-*, etc.) — list the known failure patterns
+   - Open `knowledge/oracles/vc-bug-catalog.md` and read the section(s) for the domain (VC-CHECKOUT-*, VC-CART-*, VC-B2B-*, etc.) — list the known failure patterns
    - These two lists are what NOT to spend session time re-validating. The discovery target is everything *else*.
 
 5a. **Oracles — and they are read in two OPPOSITE directions.** Step 5 reads its two sources to
@@ -113,10 +113,10 @@ Rationale, the charter derivation table and the record: [`exploratory-lane.md`](
    | Source | Direction | What it gives the session |
    |---|---|---|
    | CSV suites | subtract | already asserted — don't re-validate |
-   | [`vc-bug-catalog.md`](../knowledge/oracles/vc-bug-catalog.md) | subtract | already discovered here — don't re-discover |
-   | [`e-commerce-edge-cases-library.md`](../knowledge/oracles/e-commerce-edge-cases-library.md) | **supply** | boundary/failure shapes to go hunting for — **`[THEORETICAL]` first** |
-   | [`business-logic.md`](../knowledge/oracles/business-logic.md) | **supply** | the oracle of expected behaviour: what makes an observation a *bug* rather than a *"huh"* |
-   | [`release-ledger.md`](../knowledge/domain/release-ledger.md) (Step 3a) | **supply** | *surfaces* that are provably uncovered — shipped upstream, asserted by no suite, never failed here |
+   | `knowledge/oracles/vc-bug-catalog.md` | subtract | already discovered here — don't re-discover |
+   | `knowledge/oracles/e-commerce-edge-cases-library.md` | **supply** | boundary/failure shapes to go hunting for — **`[THEORETICAL]` first** |
+   | `knowledge/oracles/business-logic.md` | **supply** | the oracle of expected behaviour: what makes an observation a *bug* rather than a *"huh"* |
+   | `knowledge/domain/release-ledger.md` (Step 3a) | **supply** | *surfaces* that are provably uncovered — shipped upstream, asserted by no suite, never failed here |
 
    - **ECL — `[THEORETICAL]` is the session's half of the library.** Its 175 `[OBSERVED]` patterns are
      confirmed on this platform, so they belong to `/qa-checklist` and the suites; its 36
@@ -185,7 +185,7 @@ For each session, the agent should:
 | `catalog` | Filters + sort combinations, pagination, empty categories, long product names, variant selection | Tourist | Garbage Collector + Bad Neighborhood |
 | `B2B` | Multi-org switching, quote lifecycle, approval workflow, role permissions, bulk order | B2B Procurement Officer | Scenario Tour + Soap Opera |
 | `mobile` | Touch targets, scroll behavior, hamburger menu, form usability, viewport overflow | Impatient Buyer | Supermodel + Couch Potato |
-| `new` | Read the newest 1–2 months of `.claude/knowledge/domain/release-ledger.md` §2, drop anything `NOT_DEPLOYED` against the live probe, and focus exploration on what remains — **⚠ BREAKING** rows first | (depends on component) | Bad Neighborhood + Saboteur |
+| `new` | Read the newest 1–2 months of `knowledge/domain/release-ledger.md` §2, drop anything `NOT_DEPLOYED` against the live probe, and focus exploration on what remains — **⚠ BREAKING** rows first | (depends on component) | Bad Neighborhood + Saboteur |
 
 Personas live in `skills/qa-sbtm/personas.md`. Tours live in `skills/qa-sbtm/adversarial-heuristics.md`.
 
@@ -283,9 +283,9 @@ Write a session report to `reports/exploratory/SBTM-{charter}-YYYY-MM-DD.md`:
 - [scenario-discovery.md](../skills/qa-sbtm/scenario-discovery.md) — **Primary reference.** 10 techniques for finding scenarios our coverage misses
 - [sprint-charter-selection.md](../skills/qa-sbtm/sprint-charter-selection.md) — how a sprint plan's §3/§5.2 becomes the §5.3 charter set (C1–C4 signals, D1–D3 disqualifiers, budget, lane, capture-back)
 - `/qa-sbtm` skill — Full SBTM methodology: scenario discovery (primary), core framework, charter templates, CRISP/SFDPOT, adversarial heuristics, personas, modern web attack surface, charter library, debrief format
-- [knowledge/oracles/vc-bug-catalog.md](../knowledge/oracles/vc-bug-catalog.md) — VC-specific historical bug patterns (read to AVOID re-discovery)
-- [knowledge/oracles/e-commerce-edge-cases-library.md](../knowledge/oracles/e-commerce-edge-cases-library.md) — 54 `ECL-<n>.<m>` boundary/failure shapes (read to SUPPLY candidates — `[THEORETICAL]` first; a session is also the only source of `[OBSERVED]` promotions and new patterns)
-- [knowledge/oracles/business-logic.md](../knowledge/oracles/business-logic.md) — 204 `BL-*` invariants (read as the correctness oracle, so a deviation is recognised as a bug during the session, not after)
+- `knowledge/oracles/vc-bug-catalog.md` — VC-specific historical bug patterns (read to AVOID re-discovery)
+- `knowledge/oracles/e-commerce-edge-cases-library.md` — 54 `ECL-<n>.<m>` boundary/failure shapes (read to SUPPLY candidates — `[THEORETICAL]` first; a session is also the only source of `[OBSERVED]` promotions and new patterns)
+- `knowledge/oracles/business-logic.md` — 204 `BL-*` invariants (read as the correctness oracle, so a deviation is recognised as a bug during the session, not after)
 - `/qa-review-oracles` — where a session's oracle proposals go (`ecl` / `bl` axes); the only writer of either file
 - [knowledge/execution/live-discovery.md](../knowledge/execution/live-discovery.md) — Runtime test-data resolution (`live-discover` / `random-data` / `@td()`); use when a session needs to pick "any product / any address" and when a discovered gap becomes a follow-up test case
 - `/qa-coverage-gap` skill — Programmatic coverage-gap analysis (complementary to manual exploratory discovery)

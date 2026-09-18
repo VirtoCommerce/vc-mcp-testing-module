@@ -11,7 +11,7 @@ Tier-0 collector ([`hooks/session-telemetry.mjs`](../../hooks/session-telemetry.
 VCST-5475/5509) records *what happened* as **spans** and the Tier-1 classifier tags
 each with an **outcome**; this skill *reasons* about the flagged spans on demand and
 produces a verdict per span, judged against the oracle
-([`knowledge/diagnostics/skill-expectations.md`](../../knowledge/diagnostics/skill-expectations.md),
+([`.claude/knowledge/diagnostics/skill-expectations.md`](../../knowledge/diagnostics/skill-expectations.md),
 VCST-5476).
 
 **Capture is decoupled from JUDGEMENT (VCST-5509, made real by VCST-5582 H).** Capture is
@@ -88,7 +88,7 @@ asking once. **Sending still needs an explicit "Send".**
   so treat the run as one continuous session (don't read it as "the plugin didn't run").
 
 ### Step 1 — Load the oracle
-Read [`knowledge/diagnostics/skill-expectations.md`](../../knowledge/diagnostics/skill-expectations.md)
+Read [`.claude/knowledge/diagnostics/skill-expectations.md`](../../knowledge/diagnostics/skill-expectations.md)
 — the outcome taxonomy (§1a), the expected-output markers (§1c), the struggle
 sub-signals (§1d), the S0–S3 rubric (§2), the per-skill expectations (§3), and the
 cross-cutting anti-patterns (§4).
@@ -342,8 +342,8 @@ instructions**.
 **Containment (§2a) — default-deny closed schema, not scrubbing.** The outbound artifact is
 built ONLY from a validated `UpstreamSignal` struct
 ([`upstream-reduce.mjs`](./upstream-reduce.mjs), spec in
-[`../../knowledge/diagnostics/upstream-schema.md`](../../knowledge/diagnostics/upstream-schema.md),
-rationale in [`../../knowledge/diagnostics/adr-upstream-default-deny.md`](../../knowledge/diagnostics/adr-upstream-default-deny.md)):
+`plugins/vc-fix/knowledge/diagnostics/upstream-schema.md`,
+rationale in `plugins/vc-fix/knowledge/diagnostics/adr-upstream-default-deny.md`):
 every field is a closed-vocabulary enum or a number (skill, verdict, severity, outcome,
 signal-class, struggle, an error **taxonomy code**, tool-family, repo-**kind**, counts). It
 carries **NO free text** — `reduce()` reads ONLY the structured collector jsonl (span

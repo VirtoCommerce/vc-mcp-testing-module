@@ -152,16 +152,23 @@ live counts; they are never transcribed here — `CLAUDE.md` §Where the rules l
 
 Browser lane assignments and the firefox click-capability prerequisites (the lane is click-capable since 2026-09-08; the historical "firefox cannot click" rule is retired): `.claude/rules/agents.md`.
 
-### Knowledge Base (shared agent references in `.claude/knowledge/`)
-- **`api/`** — `api-auth.md`, `graphiql-interaction.md`, `graphql-schema.md`, `graphql-test-cases-runner.md`, `order-creation-matrix.md`, `platform-patterns.md`
-- **`architecture/`** — `vc-frontend-architecture.md`, `vc-module-architecture.md`
-- **`automation/`** — `browser-quirks.md`, `storefront-config-flags.md`, `storefront-selectors.md`
-- **`ba/`** — `virto-doc-style.md`
-- **`diagnostics/`** — `skill-expectations.md`
-- **`domain/`** — `catalog.md`, `mobile-navigation.md`, `products.md`, `sitemap.md`, `store-settings.md`, `white-labeling.md`
-- **`execution/`** — `debugging-signals.md`, `es-call-ab-method.md`, `live-discovery.md`, `module-suite-map.md`, `performance-thresholds.md`, `test-data-authoring.md`, `test-execution-preflight.md`, `test-runner-tags.md`, `ticket-routing.md`, `tracker-ops.md`
-- **`oracles/`** — `business-logic.md` (BL-*), `critical-ui-scope.md`, `e-commerce-edge-cases-library.md` (ECL-*), `vc-bug-catalog.md` (VC-* archetypes)
+### Knowledge — TWO trees, and the prefix says which
+
+**`.claude/knowledge/…` is THIS repository: how WE run.** `ls` it for the roster rather than reading
+one here — the list this section used to carry named eight folders, five of which no longer exist,
+and it survived the migration by being prose that no gate reads. What is there now:
+
 - **`agents/`** — per-team `shared-instructions.md` + `README.md` (a plain reference dir, not scanned as components)
+- **`api/`** — the GraphQL test-case runner grammar
+- **`diagnostics/`** — `skill-expectations.md`, the self-check oracle
+- **`execution/`** — the largest, and the one most steps read: routing, gates, regression, reports, test data
+
+**`knowledge/…` with no prefix is the KNOWLEDGE BASE** — a different repository
+(`VirtoCommerce/vc-knowledge`), fetched with `npm run kb -- sync`. The oracles (`BL-*`, `ECL-*`,
+`VC-*`), the domain maps and the API/architecture references moved there in the 2026-09-17
+migration, because what makes them untrue is a change in the PLATFORM, not in this repo. Open one by
+id — `npm run kb -- show BL-CART-003` — rather than by path; `npm run kb -- rules` lists the domains.
+Full convention, with the table: [`.claude/knowledge/README.md`](knowledge/README.md).
 
 Also: `.claude/architecture/TIER.md` (A/B/C/D classification — read before any standardization or
 cross-product-reuse change) and `.claude/templates/` (`test-model.md`, `qa-test-summary.schema.json`,
@@ -209,23 +216,29 @@ cross-product-reuse change) and `.claude/templates/` (`test-model.md`, `qa-test-
 | `/qa-coverage-gap` | `/qa-test-cases-generator` | Coverage generation uses gap analysis + the case generator |
 | `/qa-seed-data` | `/qa-generate-data`, `/qa-test`, `/qa-regression` | Design combinations → seed → run |
 | `/qa-review-oracles` | `/qa-review-tests --fix`, `/qa-checklist`, `/qa-exploratory` | The oracle skill never edits a CSV — citation remaps go to `/qa-review-tests`; exploratory feeds it `[THEORETICAL]`→`[OBSERVED]` proposals |
-| `/qa-sitemap` | `/qa-test-plan` | Refreshes `.claude/knowledge/domain/sitemap.md`; wired into `/qa-test-plan` Step 0 at per-sprint cadence |
+| `/qa-sitemap` | `/qa-test-plan` | Refreshes `knowledge/domain/sitemap.md`; wired into `/qa-test-plan` Step 0 at per-sprint cadence |
 
 ## Knowledge bases — inventory and read-before-you-write rules
 
 > Moved verbatim from `.claude/rules/agents.md` on 2026-09-08 (PR 2 of the agentic-system audit): these rules bind only when a task touches the named file, so they load on demand.
 
-**Shared knowledge bases** — `ls .claude/knowledge/` for the current inventory; each file opens with its own scope. Grouped by directory: `api/` (api-auth, graphiql-interaction, graphql-schema, graphql-test-cases-runner, order-creation-matrix, platform-patterns) · `architecture/` (vc-frontend-architecture, vc-module-architecture) · `automation/` (browser-quirks, storefront-config-flags, storefront-selectors) · `ba/` (virto-doc-style) · `diagnostics/` (skill-expectations) · `domain/` (catalog, mobile-navigation, products, release-ledger, sitemap, store-settings, white-labeling) · `execution/` (debugging-signals, live-discovery, module-suite-map, performance-thresholds, test-data-authoring, test-execution-preflight, test-runner-tags, ticket-routing, tracker-ops) · `oracles/` (business-logic, critical-ui-scope, e-commerce-edge-cases-library, vc-bug-catalog).
+**Shared knowledge bases** — `ls .claude/knowledge/` for the current inventory; each file opens with
+its own scope. **Do not read an inventory out of this paragraph.** The list that stood here named
+eight directories and about thirty files; after the 2026-09-17 migration five of those directories
+were gone and twenty-two of the files had moved to the knowledge base, and nothing failed — a list in
+prose is not a path, so `DOC-003` never saw it. The two trees and which prefix means which are in
+[`.claude/knowledge/README.md`](knowledge/README.md); `npm run kb -- rules` and `npm run kb -- stat` report
+what the base holds.
 
 **Non-obvious read-before-you-write rules** (these do NOT follow from the filenames):
 - `api/graphql-schema.md` — MUST be consulted before writing or reviewing any GraphQL query/mutation (field names drift; verify against live introspection). **Refreshing it is the CALLER's step, never the reading agent's judgment** — `/qa-test` `1b` item 2d and `/qa-test-lifecycle` Pre-Flight 4 run `npm run schema:refresh` and pass the rev into the brief; an agent handed no rev must treat the snapshot as UNKNOWN age rather than deciding whether it "looks stale", which the file gives it no basis to do. **`schema:refresh` writes this doc ONLY** — the runner's `scripts/.graphql-schema.cache.json` is refreshed by `npm run graphql:fixtures:validate:refresh`, and because `loadSchemaCache` has no age check, the plain `graphql:fixtures:validate` passes clean against an arbitrarily old (and possibly other-env) cache. Single source of truth: `.claude/skills/qa-test/contract-refresh.md`.
 - `api/graphql-test-cases-runner.md` — the **canonical authoring contract** for runner-native GraphQL test cases (`scripts/graphql/graphql-runner.ts`): full tag grammar, predicate shapes, `@td()` resolver, capture chaining. Every agent that writes/reviews/migrates GraphQL cases MUST read it first; gold-standard reference suite: `regression/suites/Backend/graphql/050i-graphql-configurations.csv`.
 - `execution/live-discovery.md` — read before authoring any test naming a product / address / cart / coupon entity that may drift between seeds.
 - **`domain/<domain>.md` — the DOMAIN MAP. Read it FIRST** when analysing or designing against a surface: actors, value chain, surface inventory per layer, where the layers disagree, and the shape of existing coverage. Feature-scoped and persistent, unlike a per-ticket model. **It never grounds an assertion as `{DOC}`** — pointer index plus surface inventory only. Absent for most domains; build one with `/qa-domain-map <slug>`.
-- **Prior art per ticket** — read the sources directly after the map: `reports/ba/<domain folder>/` (prior BA analysis), `reports/ba/test-models/` (prior test models — the same ticket's is amended, another ticket's has its Part 0 carried forward into a new file, never re-derived), `.claude/knowledge/domain/<domain>.md`, and `reports/tickets/**/summary.json` (tickets already tested). Prior art is a **hypothesis** to triangulate against the release ledger + live, never a baseline; it carries no behaviour and can never ground a `{DOC}` claim. (The generated `functionality-map.md` index that fronted these was removed 2026-09-08.)
+- **Prior art per ticket** — read the sources directly after the map: `reports/ba/<domain folder>/` (prior BA analysis), `reports/ba/test-models/` (prior test models — the same ticket's is amended, another ticket's has its Part 0 carried forward into a new file, never re-derived), `knowledge/domain/<domain>.md`, and `reports/tickets/**/summary.json` (tickets already tested). Prior art is a **hypothesis** to triangulate against the release ledger + live, never a baseline; it carries no behaviour and can never ground a `{DOC}` claim. (The generated `functionality-map.md` index that fronted these was removed 2026-09-08.)
 - `domain/release-ledger.md` — MUST be consulted before **designing a test for**, or **triaging a failure in**, a component the ledger records a release for since the env's deployed version. It is the only source in the repo that answers "what shipped recently": VirtoOZ's release corpus stops at Platform 3.917.1 while production is past 3.1050, so the docs MCP cannot see roughly nine months of releases. Generated — `npm run releases:refresh`; never hand-edit. **Three rules travel with it, and skipping any one of them produces a confidently wrong verdict:** (1) it says what is **released upstream**, never what is **deployed on the env under test** — a capability it records that the live `/api/platform/modules` probe does not carry is `NOT_DEPLOYED`, never a `FAIL` and never a bug; (2) it is an editorial monthly digest that **declares itself non-exhaustive**, so presence is evidence but absence is not — a miss never licenses "nothing changed"; (3) it carries **no behaviour** (no ACs, field lists, or expected-value literals), so it can raise a *hypothesis* about a failure but can never settle a verdict, and it can never ground an assertion as `{DOC}`.
 - `oracles/critical-ui-scope.md` — **currently UNCOVERED** (its only covering suite `048b` was removed 2026-07-25, so every applicable cell is `GAP`); it is the scope definition + `/qa-design` audit reference, not a regression gate.
-- `oracles/business-logic.md` — **do not hand an agent this path when you know the domain.** `npm run bl:extract -- --domain <cart|pricing|auth|…>` slices the invariants verbatim (ids, bodies and severity tags unchanged) so a brief can carry them as DATA: measured, `--domain cart` is 15 of 216 invariants, 7.5% of the file, ~7.2K tokens against ~96K. `npm run bl:extract:list` shows the domains; `--id`, `--severity` and `--json` narrow further. An agent that receives an extract must not re-read the oracle (`knowledge/agents/qa/shared-instructions.md` §Business Logic Reference), and an extract declares itself a subset so a filtered-out domain is never read as "no rule applies".
+- `oracles/business-logic.md` — **do not hand an agent this path when you know the domain.** `npm run bl:extract -- --domain <cart|pricing|auth|…>` slices the invariants verbatim (ids, bodies and severity tags unchanged) so a brief can carry them as DATA: measured, `--domain cart` is 15 of 216 invariants, 7.5% of the file, ~7.2K tokens against ~96K. `npm run bl:extract:list` shows the domains; `--id`, `--severity` and `--json` narrow further. An agent that receives an extract must not re-read the oracle (`.claude/knowledge/agents/qa/shared-instructions.md` §Business Logic Reference), and an extract declares itself a subset so a filtered-out domain is never read as "no rule applies".
 - `oracles/e-commerce-edge-cases-library.md` — **same rule as `business-logic.md` above.** `npm run ecl:extract -- --domain <d>` (or `--chapter <n>`) slices the `ECL-N.M` sections verbatim, whole pattern table included; `npm run ecl:extract:list` shows the chapters. `--domain` matches chapter AND section titles deliberately, so a payment brief still carries chapter 14's VC-specific payment section. When you are packing a brief, extract BOTH oracles or neither — one extract beside one path makes "the brief already carries it" ambiguous ([`skills/qa-test/dispatch-pack.md`](skills/qa-test/dispatch-pack.md)).
 - `oracles/vc-bug-catalog.md` — the "Familiar Problems" oracle (HICCUPPS-F) for exploratory sessions + Bad Neighborhood Tours.
 - Note: `test-case-template.md` (enriched CSV column spec) lives in `skills/qa-test-cases-generator/`, NOT in `knowledge/`.
