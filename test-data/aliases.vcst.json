@@ -1605,5 +1605,11 @@
   "SR_I18N_SINGULAR_CART": {
     "id": "e37c4c44-23fb-406f-a16f-f8d05a23f408",
     "name": "AGENT-TEST-SR-CART-I18N-ACME3"
+  },
+  "B2B_STORE_MEMBERSHIP_ROLES": {
+    "pre_state": "[\"Organization employee\"]",
+    "captured_at": "2026-09-18T18:54:32.537Z",
+    "seeded_values": "Organization employee;Purchasing agent;Organization maintainer;Sales Representative;Advanced Sales Representative",
+    "sales_rep_roles": "Sales Representative;Advanced Sales Representative"
   }
 }
