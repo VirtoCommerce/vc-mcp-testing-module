@@ -24,8 +24,7 @@ const CONFIG_NAME = "vc-secrets.json";
 // The user file as a message names it -- a hint a human reads and acts on, never a path this code
 // opens, which is why it is a literal rather than a path.join. `~` is a POSIX shell convention with no
 // Windows spelling at all, so joining it with the platform separator produces `~\.claude\...`: half one
-// idiom and half the other, and different advice on different machines for the same mistake. Two of the
-// four sites below already spelled it literally; this makes the other two agree with them.
+// idiom and half the other, and different advice on different machines for the same mistake.
 const CONFIG_HINT_PATH = `~/.claude/${CONFIG_NAME}`;
 const LOCAL_CONFIG_NAME = "vc-secrets.local.json";
 const KEY_PREFIX = "vc-secrets";
@@ -325,10 +324,8 @@ function authorizationFor(cfg, decl) {
 // with this function untouched. What stops it is two tests in vc-secrets.test.mjs, not the shape of
 // this function: "an authorization refusal names the doctor command, and doctor's own report
 // names the same where", and "doctorReport: an oauth crossing is reported, and a
-// launchable naming both kinds gets a line for each" -- restoring the kind filter reddens both
-// (wiki: a-rule-pinned-at-one-site-reads-as-pinned-everywhere).
-// refKind defaults to "secret" so every pre-existing call naming only a secret keeps working
-// unchanged; an oauth reference passes "oauth" explicitly.
+// launchable naming both kinds gets a line for each" -- restoring the kind filter reddens both.
+// `refKind` defaults to "secret"; an oauth reference passes "oauth" explicitly.
 function crossingProblem(cfg, kind, name, refName, refKind = "secret") {
     const launchable = own(cfg[kind], name);
     const decl = refKind === "oauth" ? own(cfg.oauth, refName) : own(cfg.secrets, refName);
@@ -582,7 +579,7 @@ function loadConfig(paths = configPaths()) {
                 vaults = cfg.vaults;
             } else {
                 // A repository authorizing the vault reads it asks for would be the grant written by the
-                // party requesting it — the same reason `authorized` is user-scope only.
+                // party requesting it. The same rule governs `registrations` and `authorized` below.
                 warnings.push(`${file}: "vaults" only authorizes at user scope -- ignored`);
             }
         }
@@ -599,8 +596,7 @@ function loadConfig(paths = configPaths()) {
                     registrations[tenantId.toLowerCase()] = clients;
                 }
             } else {
-                // A repository authorizing the app registration it names would be the grant written by the
-                // party requesting it — the same reason `authorized` and `vaults` are user-scope only.
+                // Same rule as `vaults` above, applied to the app registration this names.
                 warnings.push(`${file}: "registrations" only authorizes at user scope -- ignored`);
             }
         }
@@ -612,8 +608,8 @@ function loadConfig(paths = configPaths()) {
             // declared it. They differ for a local declaration, which is what keyFor and the crossing
             // report each need to read.
             if (decl.authorized !== undefined && scope !== USER_SCOPE) {
-                // The point of the block is that its author owns the secret. A project authorizing its own
-                // access would be the grant it is meant to require, written by the party asking for it.
+                // Same rule as `vaults` above: the block's point is that its author owns the secret, so a
+                // project authorizing its own access writes the very grant it is meant to require.
                 warnings.push(`${file}: secret "${name}": "authorized" only authorizes at user scope -- ignored`);
             }
             secrets[name] = { ...decl, scope: scope === "local" ? "project" : scope, home: scope };
@@ -722,9 +718,7 @@ function authorizationRefusal(envVar, kind, refName, { reason, where }) {
         + `${where} in ${CONFIG_HINT_PATH}${DOCTOR_REMEDY}`);
 }
 
-// Enforced by "an authorization refusal names the doctor command, and doctor's own report names
-// the same where" in vc-secrets.test.mjs -- see the rule above authorizationRefusal for why this is
-// unconditional.
+// Unconditional for the reason stated above authorizationRefusal.
 const DOCTOR_REMEDY = '; run "vc-secrets doctor" for the block to add';
 
 // `kind` is "servers" or "tasks". Both are launchables with the same declaration shape; the only
@@ -1354,9 +1348,8 @@ const MAX_LOCK_POLLS = 64;
 
 // The one place the mutex name is built. Three writers share the same pair of keystore entries —
 // a renewal, a login and a logout — and a lock any of them takes on a different name serialises
-// against nothing while every one of the three still reads as correct. Only the renewal is ported
-// so far; the two sign-in verbs land later, which is why the name is built here once rather than
-// at each call site as it is needed.
+// against nothing while every one of the three still reads as correct. Built here once rather than
+// at each call site for that reason.
 //
 // scopeKey MUST be the same scope notion keyFor uses (decl.scope === USER_SCOPE ? USER_SCOPE :
 // cfg.projectId, see keyFor above) — this is load-bearing, not a convenience: the lock and the
@@ -1364,8 +1357,7 @@ const MAX_LOCK_POLLS = 64;
 // project-scope AND a local-scope declaration into ONE keystore namespace (cfg.projectId), on the
 // premise that a local declaration is the same project under a different home. A lock computed
 // from a different notion of scope — the raw `decl.scope` string, say, which is "project" for both
-// but was normalised from "local" — would still serialise correctly by accident here, but the
-// general failure this guards against is real: whatever this function uses to key the lock has to
+// but was normalised from "local" — breaks that: whatever this function uses to key the lock has to
 // be EXACTLY what keyFor uses to key the entries, or two projects that keyFor treats as separate
 // (different projectId, both scope "project") would collide on a lock computed some other way — or
 // worse, two declarations keyFor treats as the SAME project would fail to serialise against each
@@ -1450,10 +1442,9 @@ async function acquireTokenLock({ acquireLock, now, sleep, log }) {
     return { lock: null, reason: "busy" };
 }
 
-// The single path the pre-spawn launch and the mid-session renewal will both go through; the
-// launcher wiring that reaches it lands with the launch verb. Every dependency is injected for the
-// same reason resolveEnvEntries takes its resolver: what is worth testing here is the ORDER — who
-// exchanges, who waits, and what is released when it throws.
+// The single path the pre-spawn launch and the mid-session renewal both go through. Every
+// dependency is injected for the same reason resolveEnvEntries takes its resolver: what is worth
+// testing here is the ORDER — who exchanges, who waits, and what is released when it throws.
 async function ensureFreshToken({ serverName, readCache, writeCache, exchange, acquireLock,
     now = Date.now, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
     if (typeof serverName !== "string" || serverName === "") {
@@ -1622,8 +1613,7 @@ function oauthLaunchDeps(entryName, decl, cfg, { backend = detectLocalBackend(),
 
 // The per-launch delivery channel a mid-session renewal uses to hand a fresh token into the
 // server process it is already running -- the launcher's other half of ensureFreshToken's
-// contract. Nothing here decides WHEN to renew; cmdLaunch (Task 20) owns the timer and calls
-// push() on it.
+// contract. Nothing here decides WHEN to renew; cmdLaunch owns the timer and calls push() on it.
 const CHANNEL_GREETING_MAX = 4096;
 
 // NOT the lock's namespace, and the asymmetry is deliberate: the lock binds an abstract socket
@@ -1647,8 +1637,7 @@ async function createChannel({ name, scopeKey, nonce, onRefusal = () => {}, chmo
     // refusing it -- so where the cut lands decides what happens next: measured here, the chmod
     // below can throw ENOENT because nothing exists at the full path, or the bind can land on a
     // path already in use (EADDRINUSE), or truncation can place the socket outside this
-    // directory entirely. lockPathFor's own darwin comment (vc-secrets-cache.mjs:192) makes the
-    // same call for the same reason: "Short and outside secretsDir(): sun_path is ~104 bytes here."
+    // directory entirely. lockPathFor's own darwin branch makes the same call for the same reason.
     const dir = process.platform === "win32" ? null : fs.mkdtempSync(path.join("/tmp", "vc-secrets-ch-"));
     const channelPath = process.platform === "win32" ? channelPipeName(name, scopeKey) : path.join(dir, "c.sock");
     const nonceDigest = crypto.createHash("sha256").update(String(nonce)).digest();
@@ -1848,7 +1837,7 @@ function closeTabPage(entryName = null) {
 }
 // The browser is where the developer is looking. Telling them "Signed in" after Entra refused
 // them sends them away from the terminal that holds the AADSTS code naming what went wrong —
-// which is the very thing the error-before-state ordering in handleCallback exists to surface.
+// which is the very thing handleCallback's error branch exists to surface.
 
 // Everything Entra put in the redirect is in THIS request, so asking the developer to read their own
 // address bar was asking them to fetch what we already hold. `access_denied` measured with no
@@ -1879,8 +1868,8 @@ function failedPage({ error, description, extras = [] }, entryName = null) {
     const rows = [["error", error]].concat(description ? [["error_description", description]] : [], extras)
         .map(([k, v]) => `<tr><td>${escapeHtml(k)}<td>${escapeHtml(v)}`).join("");
 
-    // "Sign-in failed", never "signed in": a tab title is read at a glance, and a test pins that this
-    // page cannot be mistaken for the success one.
+    // "Sign-in failed", never "signed in" -- in the title here and in the body below alike: either is
+    // read at a glance, and a test pins that this page cannot be mistaken for the success one.
     const who = entryName ? `Sign-in failed - ${escapeHtml(entryName)}` : "Sign-in failed";
 
     return `<!doctype html><meta charset=utf-8><title>${who}</title>`
@@ -1889,8 +1878,6 @@ function failedPage({ error, description, extras = [] }, entryName = null) {
         + "<p><strong>Sign-in failed.</strong> The same reason is printed in the terminal where you ran"
         + " <code>vc-secrets login</code>."
         + `<table>${rows}</table>`
-        // Deliberately avoids the words "signed in": a page about a failure that contains them reads
-        // as a success at a glance, and a test pins that.
         + "<p>An <code>access_denied</code> with no description usually means the browser carried no work"
         + " account, and its sign-in page asked for one to be added to the browser profile instead."
         + " The other two causes are a declined consent prompt and an account not assigned to this"
@@ -2099,9 +2086,8 @@ async function cmdLogin(serverName, cfg, {
             // an absent registration block through TWO paths: the crossing loop, when a project- or
             // local-scope launchable already names the entry (crossingProblem's own comment); and the
             // loop below it otherwise, for a declaration nothing references or that only a user-scope
-            // launchable does. Either way naming the command here is true. Enforced by "every authorization
-            // refusal names the doctor command, and doctor's own report names the same where" in
-            // vc-secrets.test.mjs.
+            // launchable does. Either way naming the command here is true. Enforced by the rule
+            // stated above authorizationRefusal.
             throw new VcSecretsError(`"vc-secrets login ${serverName}" is not authorized -- the app`
                 + ` registration it names must be acknowledged at ${source.where} in`
                 + ` ${CONFIG_HINT_PATH}${DOCTOR_REMEDY}`);
@@ -2175,8 +2161,6 @@ async function cmdLogin(serverName, cfg, {
         // Past this line the authorization code is SPENT: an exception here stores nothing, clears
         // nothing, and leaves the previous login's entries in exactly the lying state the fatal
         // write branch below exists to prevent — and the developer cannot retry with the same code.
-        // Before this change the step could not fail at all, so refusing here would be a
-        // regression introduced by the lock rather than a hazard the lock found.
         const { lock, reason, error } = await acquireTokenLock({ acquireLock: acquire, now, sleep, log })
             .catch((e) => ({ lock: null, reason: "unbindable", error: e }));
         if (reason === "busy") {
@@ -2235,7 +2219,7 @@ async function cmdLogin(serverName, cfg, {
     }
 }
 
-// Ported from the source's cmdLogout (mcpw.js:1233-1293). Unlike cmdLogin, this verb carries NO
+// Ported from the source's cmdLogout (mcpw.js). Unlike cmdLogin, this verb carries NO
 // authorization/policy gate: minting a credential is the privileged act, removing one is not, and
 // refusing a removal would leave the refresh token on disk — the one outcome logout exists to
 // prevent.
@@ -2253,14 +2237,13 @@ async function cmdLogout(serverName, cfg, { deleteEntry = null,
     // Resolved here rather than defaulted in the parameter list, for the same reason cmdLogin
     // resolves its own lock here: tokenLockFor needs `decl` and `cfg` (this package's keystore
     // keys are scoped per project), neither of which exists until the guard above has run. The
-    // source's `main` wires this verb's lock itself (mcpw.js:2545-2546) and refuses a missing one
-    // at the call site (mcpw.js:1236-1241) — that does not port here, because it would force this
+    // source's `main` wires this verb's lock itself and refuses a missing one at the call
+    // site — that does not port here, because it would force this
     // package's `main` to resolve `decl` itself, duplicating the guard above AND running it before
     // it, inverting the ordering this guard guarantees. The parameter list still carries a bare
     // `acquireLock = null` -- NOT in the source's position, since `backend` precedes it here -- so
     // that cmdLogoutSeams' parse of this function's text keeps finding it as a seam. That parse is
-    // cmdLogout's own: cmdLoginSeams reads cmdLogin and nothing else, and an earlier draft of this
-    // comment named it, which made a bogus seam added here invisible to the whole suite.
+    // cmdLogout's own: cmdLoginSeams reads cmdLogin and nothing else.
     const acquire = acquireLock ?? tokenLockFor(serverName, decl, cfg);
     const remove = deleteEntry ?? deleteEntryIo(backend);
     const names = Object.values(oauthEntryKeys(serverName, decl, cfg));
@@ -3132,8 +3115,7 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
     // A non-user-scope oauth declaration the loop above never named: either nothing references it,
     // or only a user-scope launchable does (exempt above -- you wrote both sides). Its own
     // authorization is still worth reporting when the block is absent, because that is the report
-    // cmdLogin's refusal promises exists -- see "every authorization refusal names the doctor
-    // command, and doctor's own report names the same where" in vc-secrets.test.mjs.
+    // cmdLogin's refusal promises exists -- see the rule stated above authorizationRefusal.
     for (const [oauthName, oauthDecl] of Object.entries(cfg.oauth ?? {})) {
         if (oauthDecl.home === USER_SCOPE) {
             continue;
@@ -3168,9 +3150,6 @@ function writeProbeKey(cfg) {
         : `${KEY_PREFIX}:${USER_SCOPE}:${WRITE_PROBE_NAME}`;
 }
 
-// The probe writes the LARGEST value the keychain path will ever be asked to store, not a token
-// literal. A short probe passes on exactly the machine where a real refresh token would overflow
-// security(1)'s line buffer, so it would certify the one write it exists to catch.
 // Rehearses at the LIMIT, not with a token-shaped string, and the two backends fail at different
 // places. On macOS/keychain the constraint is the length of the command line `security` receives, so
 // the value is sized to put that line exactly at its limit. On Windows the constraint is the blob

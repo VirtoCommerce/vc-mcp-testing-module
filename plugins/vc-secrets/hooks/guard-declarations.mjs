@@ -157,9 +157,7 @@ for (const raw of targets.paths) {
     //
     // The launcher is the reason this block exists at all -- it holds the keystore io and the login
     // verb, so an edit here changes what READS a token, where a declaration only names one. The rest
-    // of the package is here because it is loaded INTO that process or into the server's, because
-    // editing it turns this guard off, or because it decides the content of a file that does one of
-    // those.
+    // of the package qualifies through the three ways stated where MODULE_RE is defined.
     if (MODULE_RE.test(filePath) || PACKAGE_FILE_RE.test(filePath)) {
         fs.writeSync(2,
             "BLOCK: this is vc-secrets' own code on the path that handles a token -- change it through a human PR, not an in-session edit. "

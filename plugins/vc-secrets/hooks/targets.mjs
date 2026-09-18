@@ -3,7 +3,7 @@
 // therefore has one command string to say it with.
 //
 // This module imports nothing on purpose. It is loaded by a process spawned once per edit; the launcher
-// is 82 KB and clients.json costs a file read, and neither is needed to answer the question above.
+// is ~200 KB and clients.json costs a file read, and neither is needed to answer the question above.
 
 // Four headers name a path. `*** Environment ID:` also has a filename production in the upstream
 // grammar but names an environment, so it is excluded deliberately rather than by omission — and the
@@ -13,7 +13,9 @@ const PATCH_PATH_HEADER_RE = /^\*\*\* (?:Add File|Delete File|Update File|Move t
 // The tools that write a file, across all three clients. Claude Code sends Edit / Write / NotebookEdit;
 // Cursor documents the same tool_input shape and spells its write tools the same way; Codex sends the
 // canonical `apply_patch` (Write and Edit exist there only as MATCHER aliases and never reach a
-// payload, which is what makes dispatching on this field safe).
+// payload, which is what makes dispatching on this field safe). `MultiEdit` is in the set but in no
+// client's list and not in the shared matcher below, so nothing reaches here under that name today --
+// kept because widening the matcher must not also require remembering to widen this.
 const PATH_FIELD_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 const PATCH_TOOL = "apply_patch";
 
@@ -62,8 +64,7 @@ function targetsFrom(payload) {
     const name = typeof p.tool_name === "string" ? p.tool_name : "";
 
     if (name === PATCH_TOOL) {
-        // The patch text arrives under `command`. `input` is the internal field name on the Rust side
-        // and is re-keyed before the payload is handed to a hook.
+        // The patch text arrives under `command`, not under `input`.
         const text = input && typeof input.command === "string" ? input.command : null;
 
         return text === null ? { paths: [], readable: false } : fromPatch(text);

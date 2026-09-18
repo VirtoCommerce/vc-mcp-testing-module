@@ -80,8 +80,7 @@ function cacheStatus(cache, decl, now, uptime) {
     // both of its clocks together, so between resume and the wall clock resyncing, both terms
     // understate by the same suspend and max() returns the same wrong number. Separating that
     // needs a third source — a server-supplied time, or observing the 401 the launcher is
-    // deliberately positioned never to see. Not a regression: the wall-clock-only rule was
-    // equally blind there. It is the boundary of what this check can promise.
+    // deliberately positioned never to see. It is the boundary of what this check can promise.
     const byClock = now - access.obtainedAt;
     const byUptime = (uptime - access.uptimeAtIssue) * 1000;
     // A negative uptime difference means the stored reading belongs to a boot that no longer
@@ -212,9 +211,9 @@ function probeAlive(lockPath) {
 }
 
 function holderFor(server) {
-    // The third server in this package, and the last to get the shared teardown. A neighbour that
-    // connected to this lock and is waiting its turn is a connection that never completes a request,
-    // so releasing with `server.close()` alone waited on the very peer the release exists to let in.
+    // A neighbour that connected to this lock and is waiting its turn is a connection that never
+    // completes a request, so releasing with `server.close()` alone waited on the very peer the
+    // release exists to let in.
     return { release: severingClose(server) };
 }
 

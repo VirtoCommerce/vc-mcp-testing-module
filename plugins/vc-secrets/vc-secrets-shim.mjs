@@ -95,8 +95,10 @@ try {
 // This file is owned by the client, so a schema change arrives with a Claude Code upgrade — no user
 // action at all. Refusing to launch would take every wrapped server down at once, and the message lands
 // on a server's stderr, which surfaces only as "server failed to start" — pointing away from here. So
-// warn and continue: the single field consumed below is `plugins[key][].installPath`, and if that has
-// moved, the checks after this fail with their own legible message.
+// warn and continue. Only `installPath` fails legibly if it moves: no launcher is found and the failure
+// at the end names every root tried. The three ranking fields below degrade SILENTLY -- a moved
+// `projectPath` empties the nearest-project match and falls back to every record, and a moved `version`
+// ties them all at the bottom so `lastUpdated` decides, which is the staleness this shim exists to stop.
 if (registry && registry.version !== REGISTRY_SCHEMA) {
     fs.writeSync(2, `vc-secrets: ${registryPath} is schema version ${registry.version}, this shim was written for ${REGISTRY_SCHEMA} -- continuing, but update the plugin\n`);
 }

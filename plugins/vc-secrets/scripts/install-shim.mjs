@@ -76,8 +76,9 @@ if (!fs.existsSync(source)) {
 // directory, which would take this plugin's shim with it, long after the developer pasted the path into
 // settings.json.
 //
-// With no usable value the id is computed rather than searched for: `<plugin>@<marketplace>` with
-// non-alphanumerics dashed, both names from manifests this repo ships.
+// With no usable value the id is the baked `CANONICAL_DATA_ID`, derived by rule rather than searched
+// for: `<plugin>@<marketplace>` with non-alphanumerics dashed, both names from manifests this repo
+// ships. The rule is written down because the constant alone cannot say how to rebuild it.
 const dataHome = defaultDataHome();
 const declared = flag("--data-dir");
 if (declared !== null && declared !== "" && !path.isAbsolute(declared)) {
