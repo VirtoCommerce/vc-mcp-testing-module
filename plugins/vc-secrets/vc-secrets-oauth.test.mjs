@@ -803,7 +803,12 @@ test("two projects declaring the same entry name do not share one mutex", () => 
 // evidence. These drive the same decisions through the injection seam, so every branch —
 // including the two macOS-only ones nobody here can reach — is settled by an assertion.
 const inUse = () => Object.assign(new Error("bind: address already in use"), { code: "EADDRINUSE" });
-const fakeServer = () => ({ close: (done) => done() });
+// A server is `close` AND `on("connection")`. A fake carrying only close() is a server that can
+// never have accepted anything -- so a release driven through it stays green whether or not the
+// teardown severs, which is part of why the lock's own teardown went unnoticed until a real peer
+// held it. These cases are about acquire and reclaim, so the listener is a no-op; what matters is
+// that the fake no longer denies the seam a method the real one has.
+const fakeServer = () => ({ close: (done) => done(), on: () => {} });
 
 test("acquireLock: a free name yields a holder rather than HELD_BY_OTHER", async () => {
     const got = await cache.acquireLock("\0free", { bind: async () => fakeServer() });
@@ -949,6 +954,36 @@ lockTest("acquireLock: a second acquisition while held reports the holder, not n
     assert.notEqual(first, cache.HELD_BY_OTHER);
     assert.equal(await cache.acquireLock(p), cache.HELD_BY_OTHER);
     await first.release();
+});
+
+// The same rule at the package's third server. It was found by a review pass reading the fix for the
+// second one, and it hung under measurement before the shared teardown reached it -- which is the
+// whole argument for one teardown rather than three: with this site defective the suite was fully
+// green, because a test named for a rule still only observes the server its body constructs.
+lockTest("a teardown does not wait on a peer that only connected -- the refresh lock", async () => {
+    const p = cache.lockPathFor("teardown-" + process.pid, "proj", { platform: process.platform, env: process.env });
+    const held = await cache.acquireLock(p);
+    assert.notEqual(held, cache.HELD_BY_OTHER);
+
+    // Two, for the reason the sign-in listener's twin states: one peer pins the sever at a single
+    // element and a loop that stops there passes.
+    const peers = [];
+    for (let i = 0; i < 2; i++) {
+        const sock = net.connect({ path: p, allowHalfOpen: true });
+        await new Promise((resolve) => sock.once("connect", resolve));
+        peers.push(sock);
+    }
+    try {
+        const outcome = await Promise.race([
+            held.release().then(() => "released"),
+            new Promise((resolve) => setTimeout(() => resolve("waited on the peer"), 1000)),
+        ]);
+        assert.equal(outcome, "released", "release() must not wait on a peer that sent no request");
+    } finally {
+        for (const sock of peers) {
+            sock.destroy();
+        }
+    }
 });
 
 lockTest("acquireLock: succeeds again after release", async () => {
@@ -1949,6 +1984,56 @@ socketTest("listenForCallback: a stray request is answered and waited past, the 
         assert.deepEqual(await waiting, { code: "abc" });
     } finally {
         await server.close();
+    }
+});
+
+// A browser opens speculative connections to the redirect URI and can leave one carrying no request
+// at all. `server.close()` severs an IDLE connection but not that one -- a connection that never
+// completed a request is not idle, so close() waits on it for as long as the browser holds it, and
+// cmdLogin's `finally` never returns although the tokens are already stored. Measured on Windows: the
+// verb hung past 88 s with one accepted socket alive, and closing the browser tab did not release it.
+//
+// The connection is opened deliberately here rather than driven through a browser, because whether a
+// browser leaves such a socket is the browser's business: on Linux it does not, and a test that waited
+// for one would be green on the platform where the defect is invisible.
+//
+// Named for the rule rather than for listenForCallback: createChannel already severs its sockets
+// before closing and says why in its own comment, so this is the second site of one rule, and a third
+// listener must be in scope without anyone remembering to widen a test.
+socketTest("a teardown does not wait on a peer that only connected -- the sign-in listener", async () => {
+    const server = await m.listenForCallback("STATE");
+    const arrived = server.next();
+
+    // TWO lingering peers, and allowHalfOpen on each. Both details are what let this test fail for
+    // the right reason, and each was measured: with one peer, a sever loop that stops after its first
+    // element passes and the production hang returns; without allowHalfOpen, the client closes on FIN
+    // so a teardown weakened from destroy() to end() also passes. Plural is what the field produced
+    // too -- the Windows capture that started this showed two accepted sockets.
+    const lingering = [];
+    for (let i = 0; i < 2; i++) {
+        const sock = net.connect({ port: server.port, host: "127.0.0.1", allowHalfOpen: true });
+        await new Promise((resolve) => sock.once("connect", resolve));
+        lingering.push(sock);
+    }
+
+    const callback = net.connect(server.port, "127.0.0.1");
+    await new Promise((resolve) => callback.once("connect", resolve));
+    callback.write(`GET ${m.REDIRECT_PATH}?code=abc&state=STATE HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n`);
+    assert.deepEqual(await arrived, { code: "abc" });
+
+    try {
+        const outcome = await Promise.race([
+            server.close().then(() => "closed"),
+            new Promise((resolve) => setTimeout(() => resolve("waited on the preconnect"), 1000)),
+        ]);
+        assert.equal(outcome, "closed", "close() must not wait on a connection that sent no request");
+    } finally {
+        // In a finally, not after the race: an assertion above throws on a wiring regression and
+        // would otherwise leak this listener and its sockets into the rest of the run.
+        for (const sock of lingering) {
+            sock.destroy();
+        }
+        callback.destroy();
     }
 });
 

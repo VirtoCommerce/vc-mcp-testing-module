@@ -17,6 +17,7 @@ import { defaultDataHome, defaultShimDir, defaultShimPath } from "./scripts/shim
 import * as cache from "./vc-secrets-cache.mjs";     // entries, expiry, the cross-process refresh lock
 import * as oauth from "./vc-secrets-oauth.mjs";     // the Entra protocol
 import { PACKAGE_NAME_RE, BIN_NAME_RE } from "./vc-secrets-target.mjs"; // the one copy of the target grammar
+import { severingClose } from "./vc-secrets-teardown.mjs"; // the one teardown, for all three servers
 
 const CONFIG_NAME = "vc-secrets.json";
 
@@ -1700,6 +1701,10 @@ async function createChannel({ name, scopeKey, nonce, onRefusal = () => {}, chmo
         sock.on("close", () => clients.delete(sock));
         sock.on("error", () => { clients.delete(sock); sock.destroy(); });
     });
+    // `clients` above is the PUSH set -- who gets the next token -- and is not the teardown's
+    // bookkeeping. Keeping them separate is deliberate: a teardown that depended on the push set
+    // would silently weaken whenever that set's membership rules changed.
+    const severedClose = severingClose(server);
     try {
         await new Promise((resolve, reject) => {
             server.once("error", reject);
@@ -1752,18 +1757,7 @@ async function createChannel({ name, scopeKey, nonce, onRefusal = () => {}, chmo
             return delivered;
         },
         removeSync,
-        close: () => new Promise((resolve) => {
-            // Destroyed rather than left to drain: server.close() waits for open connections, so
-            // a live server child would turn teardown into a hang.
-            for (const sock of clients) {
-                sock.destroy();
-            }
-            clients.clear();
-            server.close(() => {
-                removeSync();
-                resolve();
-            });
-        }),
+        close: () => severedClose().then(removeSync),
     };
 }
 
@@ -1928,6 +1922,7 @@ function listenForCallback(expectedState, { entryName = null,
                 .end(verdict.error ? failedPage(verdict, entryName) : closeTabPage(entryName));
             settle(verdict);
         });
+        const severedClose = severingClose(server);
         // `reject` rejects the BIND, and is inert once listen has resolved -- after that a server
         // error would vanish while next() waited forever. Settling as well makes a listener that dies
         // mid-sign-in end the wait with a reason instead of hanging. createChannel's own
@@ -1943,7 +1938,7 @@ function listenForCallback(expectedState, { entryName = null,
         server.listen(0, "127.0.0.1", () => resolve({
             port: server.address().port,
             next: () => arrived,
-            close: () => new Promise((done) => server.close(done)),
+            close: severedClose,
         }));
     });
 }

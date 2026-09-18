@@ -12,6 +12,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import { VcSecretsError } from "./vc-secrets-error.mjs";
+import { severingClose } from "./vc-secrets-teardown.mjs";
 
 const CACHE_SCHEMA = 1;
 // Both of the renewal's keystore writes + one exchange + a clock-skew allowance + the renewal
@@ -211,7 +212,10 @@ function probeAlive(lockPath) {
 }
 
 function holderFor(server) {
-    return { release: () => new Promise((done) => server.close(done)) };
+    // The third server in this package, and the last to get the shared teardown. A neighbour that
+    // connected to this lock and is waiting its turn is a connection that never completes a request,
+    // so releasing with `server.close()` alone waited on the very peer the release exists to let in.
+    return { release: severingClose(server) };
 }
 
 // bind/probe/remove are injected for the same reason resolveEnvEntries takes its resolver: the

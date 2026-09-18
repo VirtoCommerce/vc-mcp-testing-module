@@ -62,7 +62,7 @@ const SHIM_RE = /(^|\/)plugins\/data\/[^/]+\/vc-secrets-shim\.mjs$/i;
 // with no directory at all. The `$` keeps `vc-secrets.mjs.bak` out. The test files are out for a
 // different reason -- `.test.mjs` cannot match `(-…)?\.mjs` -- and freezing them would stop all work on
 // this package, the fastest way to get a guard switched off wholesale.
-const MODULE_RE = /(^|\/)(vc-secrets(-(oauth|cache|preload|target|shim|error|probe))?|guard-declarations|install-shim|shim-path)\.mjs$/i;
+const MODULE_RE = /(^|\/)(vc-secrets(-(oauth|cache|preload|target|shim|error|probe|teardown))?|guard-declarations|install-shim|shim-path)\.mjs$/i;
 // The same package, scoped to its directory rather than matched by file. `clients.*`, `targets.mjs`,
 // `hooks.json`, `plugin.json`, `SKILL.md` and `openai.yaml` are names half the repositories on this
 // machine also use, and this hook runs in all of them, so matching those by file would refuse edits that

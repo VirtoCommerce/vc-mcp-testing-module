@@ -4361,6 +4361,9 @@ const GUARDED_ANYWHERE = [
     "vc-secrets-target.mjs",
     "vc-secrets-shim.mjs",
     "vc-secrets-error.mjs",
+    // Imported by the launcher AND by the cache module, so it is loaded wherever either is --
+    // which is every token-holding process this package starts.
+    "vc-secrets-teardown.mjs",
     // Here, not in the unguarded list, and the move is the point: its exclusion used to rest on "nothing
     // on the run path imports it", which is true and answers who IMPORTS the probe. What decides its risk
     // is who RUNS it -- `skills/doctor/SKILL.md`, guarded, names the command -- and what it may import:
@@ -4913,6 +4916,10 @@ test("every string literal these modules can print is ASCII", () => {
     for (const name of ["vc-secrets.mjs", "vc-secrets-oauth.mjs", "vc-secrets-cache.mjs",
         "vc-secrets-error.mjs", "vc-secrets-probe.mjs", "clients.mjs", "vc-secrets-shim.mjs",
         "vc-secrets-target.mjs", "vc-secrets-preload.mjs", "scripts/install-shim.mjs",
+        // Carries no printable literal today. Listed anyway, so membership means "a module of
+        // this package" and not "a module somebody remembered prints" -- the first message added
+        // to it is then already covered.
+        "vc-secrets-teardown.mjs",
         "hooks/guard-declarations.mjs"]) {
         const source = fs.readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), "utf8");
         assert.deepEqual(nonAsciiInEmittedLiterals(source), [], `non-ASCII in a printable literal of ${name}`);
