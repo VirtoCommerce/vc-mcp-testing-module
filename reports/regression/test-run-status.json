@@ -1,57 +1,40 @@
 {
- "runId": "REG-2026-09-16-1930",
- "status": "completed",
- "startedAt": "2026-09-16T17:31:14.441Z",
- "selection": "083e --ids LOYORG-E2E-006,LOYORG-E2E-007 --no-promote",
- "env": "localhost",
- "scoped": true,
- "purpose": "Resolve the two UNGROUNDED verdicts from the Dim-11 triangulation. Those assertions could not be decided read-only because deciding them REQUIRES placing orders that move real, irreversible loyalty pools. Operator explicitly authorised the mutation. E2E-006 assertion 4 (OUTCOME is an order confirmation) and E2E-007 assertions 2-6 (earn credits ORG_2, ORG_1 unmoved, ORDER_SPEND exists, ledger rows grow, no foreign rows) are what this run exists to decide.",
- "preflightNote": "carts:check reported 2 competing carts on MULTI_ORG_TF_BR_ALT and was DELIBERATELY NOT SWEPT. The two carts carry DIFFERENT organizationIds (96f109a7=TechFlow created 12:56, 23525b44=BuildRight created 16:29) — they are PER-ORG carts, not competing ones. carts:check groups by (customerId,storeId,currency) and ignores organizationId, so it false-positives on every multi-org account and carts:sweep --apply would delete one company cart. Both are empty, so no stale-line risk. E2E-007 switches companies by design, so a second cart is expected product behaviour.",
- "storeMode": {
-  "atRunStart": "Organization",
-  "mustRestoreTo": "Organization",
-  "atRunEnd": "Organization",
-  "restored": true
- },
- "baselines": {
-  "BuildRight (ORG_1) balance": 217836,
-  "BuildRight ledgerRows": 20,
-  "TechFlow (ORG_2) balance": 186097,
-  "TechFlow ledgerRows": 21,
-  "LOY_PERSONAL_NOORG user-scope": 96095,
-  "MULTI_ORG_TF_BR_ALT user-scope (fallback detector, must not move)": 63872
- },
- "suites": [
-  {
-   "id": "083e",
-   "name": "Loyalty Organization Balance Storefront",
-   "file": "regression/suites/Frontend/loyalty/083e-loyalty-organization-balance.csv",
-   "status": "done",
-   "browser": "playwright-chrome",
-   "lane": "browser",
-   "laneId": 1,
-   "cases": 2,
-   "sourceCases": 8,
-   "attempts": 1,
-   "startedAt": "2026-09-16T17:31:14.442Z",
-   "pass": 2,
-   "fail": 0,
-   "blocked": 0,
-   "skipped": 0,
-   "outOfScope": 6
-  }
- ],
- "finishedAt": "2026-09-16T17:41:24.567Z",
- "crossLayerVerified": {
-  "BuildRight delta": 0,
-  "TechFlow delta": 30029,
-  "MULTI_ORG user-scope fallback delta": 0,
-  "LOY_PERSONAL_NOORG delta": 29,
-  "orders": [
-   "CO260916-00027",
-   "CO260916-00028",
-   "CO260916-00029"
-  ],
-  "token organization_id both checkouts": "TechFlow 96f109a7"
- }
+  "runId": "REG-2026-09-17-0137",
+  "status": "completed",
+  "startedAt": "2026-09-17T01:37:00.000Z",
+  "finishedAt": "2026-09-16T22:52:40.000Z",
+  "selection": "ticket-scoped (VCST-5097 C1)",
+  "env": "vcptcore_qa1",
+  "noPromote": true,
+  "note": "C1 ticket-scoped regression for VCST-5097 /qa-test run. Exactly 6 cases across 2 suites, both 100% browser lane. Serialized (not concurrent): 014b (buyer account) runs first, then 097 (sales-rep account), each on its own browser slot. --no-promote: all cases stay Draft.",
+  "suites": [
+    {
+      "id": "014b",
+      "name": "Orders Frontend — Returns, Documents & Date Filtering",
+      "file": "regression/suites/Frontend/orders/014b-orders-frontend-returns-filtering.csv",
+      "scopedCsv": "reports/regression/REG-2026-09-17-0137/suite-014b-resolved.browser.csv",
+      "scopeIds": ["ORD-075", "ORD-081", "ORD-101", "ORD-102", "ORD-103"],
+      "sourceCases": 50,
+      "status": "done",
+      "browser": "playwright-chrome",
+      "lane": "browser",
+      "cases": 5,
+      "attempts": 1,
+      "summary": { "total": 5, "pass": 3, "fail": 2, "blocked": 0, "skipped": 0 }
+    },
+    {
+      "id": "097",
+      "name": "Sales Rep — Customer Orders (storefront)",
+      "file": "regression/suites/Frontend/sales-rep/097-sales-rep-customer-orders-storefront.csv",
+      "scopedCsv": "reports/regression/REG-2026-09-17-0137/suite-097-resolved.browser.csv",
+      "scopeIds": ["SR-CO-038"],
+      "sourceCases": 38,
+      "status": "done",
+      "browser": "playwright-edge",
+      "lane": "browser",
+      "cases": 1,
+      "attempts": 1,
+      "summary": { "total": 1, "pass": 0, "fail": 0, "blocked": 1, "skipped": 0 }
+    }
+  ]
 }
