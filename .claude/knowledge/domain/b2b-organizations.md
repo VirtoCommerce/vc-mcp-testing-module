@@ -27,7 +27,8 @@ sources:
   - .claude/knowledge/automation/storefront-config-flags.md (quote_statuses[] — 8-entry runtime dictionary)
   - .claude/knowledge/domain/sitemap.md — the GraphQL xAPI module table (xCatalog/xCart/xOrder/xProfile/xCMS/Quote rows) under heading "9. GraphQL xAPI Endpoints"; its **Quote** row found stale this pass, see §8
   - .claude/knowledge/oracles/business-logic.md — BL-B2B-003/004/005, BL-CROSS-006/008 read for orientation, cited not restated
-excludes: Sales Rep (deliberate — a separate later pass, now its own domain map
+excludes: >-
+  Sales Rep (deliberate — a separate later pass, now its own domain map
   `.claude/knowledge/domain/sales-rep.md`; see the §6 note. **Cited by path, never by rev** — a rev
   pinned in prose here goes stale every time the sibling map is refreshed, which is exactly how this
   line broke: it named rev 2 after that map had moved to rev 3)
