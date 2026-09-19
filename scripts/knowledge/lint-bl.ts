@@ -111,8 +111,13 @@ export const BLC_002_BASELINE: Record<string, number> = {
   "BL-CMS-011": 1, "BL-CR-002": 3, "BL-CR-003": 2, "BL-CR-004": 3, "BL-CR-005": 2,
   "BL-CR-006": 1, "BL-CR-007": 2, "BL-CR-011": 1, "BL-CR-014": 1, "BL-CR-015": 1,
   "BL-CROSS-013": 1, "BL-GA4-001": 10, "BL-GA4-002": 5, "BL-GA4-003": 14, "BL-GA4-004": 4,
-  "BL-PAY-002": 4, "BL-PAY-005": 6, "BL-PAY-006": 1, "BL-SEC-001": 6, "BL-SEC-002": 3,
-  "BL-SEC-003": 8, "BL-SEC-004": 6, "BL-SEC-005": 2, "BL-STORE-002": 1, "BL-STORE-003": 3,
+  // BL-PAY-005 removed 2026-09-19: it never existed in the oracle, and all 6 citations were
+  // purged from 041 (REG-2026-09-19-1035 triage) — every one of them already co-cited the real
+  // BL-PAY-003, so nothing lost traceability. BL-SEC-004 6→5: one citation cleared on
+  // SEC-AUTH-002, whose row was rebuilt in the same pass. Ratchet shrinks, per BLC-002's
+  // "fix + de-baseline" rule — never widen these numbers to make a build green.
+  "BL-PAY-002": 4, "BL-PAY-006": 1, "BL-SEC-001": 6, "BL-SEC-002": 3,
+  "BL-SEC-003": 8, "BL-SEC-004": 5, "BL-SEC-005": 2, "BL-STORE-002": 1, "BL-STORE-003": 3,
   "BL-STORE-004": 9,
 };
 

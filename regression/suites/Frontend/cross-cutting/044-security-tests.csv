@@ -19,12 +19,14 @@
 "SEC-AUTH-001","Session Token Security","Authentication > Tokens","High","BL-SEC-004",,"[PRE:SIGNIN_AS:USER_DEFAULT]
 - User logged in
 - DevTools open",,,,,,,,
-"SEC-AUTH-002","Logout Token Revocation","Authentication > Logout","High","BL-SEC-004",,"[PRE:SIGNIN_AS:USER_DEFAULT]
-- User logged in
+"SEC-AUTH-002","Logout Token Revocation","Authentication > Logout","High","","","[PRE:SIGNIN_AS:USER_DEFAULT]
+User is logged in to the storefront","front_url={{FRONT_URL}}","[ACT] Log out from the storefront
 [WAIT] Wait for logout to complete and redirect to home or /sign-in
-[ASSERT] Verify a token revocation request was sent to {{BACK_URL}}/connect/revocation or equivalent
-[ACT] Attempt to use the captured old token in a direct API request to {{BACK_URL}}
-[ASSERT] Verify old token is rejected (401 Unauthorized)""",,,,,,,,
+[KEY] Capture the token-revocation request fired on logout and the now-revoked storefront access token
+[ACT] Reuse the captured (revoked) storefront token as the Authorization header on an authenticated storefront GraphQL query against {{FRONT_URL}}/graphql
+[WAIT] Receive the GraphQL response","[NETWORK] a token-revocation request is sent on logout
+[STATUS] the reused (revoked) storefront token is rejected by the GraphQL endpoint (401, or a GraphQL errors[] entry carrying an authentication code) rather than returning the authenticated payload","[CONSOLE] no TypeError or JS errors
+[NETWORK] no unexpected 5xx","Revoked token still returns authenticated GraphQL data; no revocation request observed on logout; 500 instead of 401/errors[]","none","Row re-split 2026-09-19 (REG-2026-09-19-1035): a stray trailing quote had swallowed Steps/Assertions into Preconditions, leaving 0 assertions and 0 Failure_Signals. Retargeted at {{FRONT_URL}}/graphql because the captured token is storefront-issued (iss=...-storefront, role=__customer), so asserting it against the platform BACK_URL endpoint was the wrong audience. Business_Rule cleared: BL-SEC-004 does not exist (there are no BL-SEC-* entries at all) and no promoted invariant covers storefront logout revocation - oracle gap, candidate for /qa-review-oracles.",""
 "SEC-AUTH-003","Account Lockout Protection","Authentication > Brute Force","High","BL-SEC-004","ECL-3.1","[PRE:SIGNIN_AS:USER_DEFAULT]
 - Dedicated lockout-test user exists (LOCKOUT_TEST_EMAIL) isolated from agent pool slot accounts",,,,,,,,
 "SEC-INPUT-001","XSS Prevention - Search","Input Validation > XSS","High","BL-SEC-003","ECL-5.1","[PRE:SIGNIN_AS:USER_DEFAULT]
@@ -90,31 +92,36 @@
 [BODY] Response contains id and login fields matching the authenticated user","[API] No 4xx/5xx on either request
 [CONSOLE] No server errors","POST /connect/token returns non-200; access_token absent; GET /api/platform/security/currentuser returns 401 for valid active token","none","VCST-4576","Draft"
 "SEC-PAT-002","Persistent Access Token — Revoked Token Returns 401 (State Transition: Active → Revoked)","Security > Token Validation > State: Revoked","Critical","BL-AUTH-005, BL-AUTH-006","ECL-3.1, ECL-4.3","[PRE:CLEAR_SESSION]
-- Platform has Authorization__EnablePersistentStorageTokenValidation=true configured
 - Admin credentials available
-- Two contexts/tokens can be obtained independently","back_url={{BACK_URL}}, admin_email={{ADMIN_EMAIL}}, admin_password={{ADMIN_PASSWORD}}","[HTTP] POST {{BACK_URL}}/connect/token credentials to obtain Token A (access_token + refresh_token)
+- Two contexts/tokens can be obtained independently
+- The actual value of Authorization__EnablePersistentStorageTokenValidation is VERIFIED LIVE in Steps, never assumed","back_url={{BACK_URL}}, admin_email={{ADMIN_EMAIL}}, admin_password={{ADMIN_PASSWORD}}","[HTTP] GET {{BACK_URL}}/api/platform/settings?names=Authorization.EnablePersistentStorageTokenValidation and record PERSISTENT_VALIDATION_ENABLED
+[HTTP] POST {{BACK_URL}}/connect/token credentials to obtain Token A (access_token + refresh_token)
 [WAIT] Receive Token A
 [HTTP] POST {{BACK_URL}}/connect/token again with same credentials to obtain Token B
 [WAIT] Receive Token B (separate authorization entry)
-[HTTP] POST {{BACK_URL}}/connect/revocation with token=<Token A refresh_token>, token_type_hint=refresh_token, Authorization: Bearer <Token A access_token>
+[HTTP] POST {{BACK_URL}}/revoke/token with token=<Token A refresh_token>, token_type_hint=refresh_token, Authorization: Bearer <Token A access_token>
 [WAIT] Revocation completes (HTTP 200)
-[HTTP] GET {{BACK_URL}}/api/platform/security/currentuser with Authorization: Bearer <Token A access_token>
-[WAIT] Receive response (expect 401)
-[HTTP] GET {{BACK_URL}}/api/platform/security/currentuser with Authorization: Bearer <Token B access_token>
-[WAIT] Receive response (expect 200)","[STATUS] POST /connect/revocation returns HTTP 200
-[STATUS] GET /api/platform/security/currentuser with revoked Token A returns HTTP 401 (not 200)
-[BODY] 401 response does not leak user data or internal paths
-[STATUS] GET /api/platform/security/currentuser with active Token B returns HTTP 200 (revocation is scoped)","[API] Token A rejected after revocation; Token B unaffected
-[NETWORK] No 5xx errors on any request","POST /connect/revocation returns non-200; revoked Token A still returns 200 (bug: persistent validation not active); Token B also rejected after Token A revocation (over-broad invalidation); 500 errors","Obtain new token and use to clean up any test state","VCST-4576","Draft"
+[HTTP] GET {{BACK_URL}}/api/platform/security/users with Authorization: Bearer <Token A access_token>
+[WAIT] Receive response
+[HTTP] GET {{BACK_URL}}/api/platform/security/users with Authorization: Bearer <Token B access_token>
+[WAIT] Receive response (expect 200)","[STATUS] POST /revoke/token returns HTTP 200
+[STATUS] IF PERSISTENT_VALIDATION_ENABLED=true: GET /api/platform/security/users with revoked Token A returns HTTP 401; IF false: Token A remains valid until its documented TTL elapses - assert that TTL behaviour, NOT a 401
+[BODY] the 401 response (when asserted) does not leak user data or internal paths
+[STATUS] GET /api/platform/security/users with active Token B returns HTTP 200 (revocation is scoped to Token A only)","[API] Token A rejected after revocation; Token B unaffected
+[NETWORK] No 5xx errors on any request","POST /revoke/token returns non-200; PERSISTENT_VALIDATION_ENABLED=true but revoked Token A still authorizes (real defect); PERSISTENT_VALIDATION_ENABLED=false but Token A is rejected before its TTL elapses (real defect); Token B also rejected after Token A revocation (over-broad invalidation); 500 errors","Obtain new token and use to clean up any test state","VCST-4576; Corrected 2026-09-19 (REG-2026-09-19-1035): /connect/revocation does not exist - its 404 is a non-endpoint, not a defect - replaced with /revoke/token. The 401 check also moved off /currentuser, which is [Authorize]+[AllowAnonymous] and can never 401. The precondition required EnablePersistentStorageTokenValidation=true but never verified it; it is now read live and the assertion branches on it (platform default is false - see BUG_032_057, config-gated by design).","Draft"
 "SEC-PAT-003","Persistent Access Token — Never-Issued Token Returns 401","Security > Token Validation > Boundary: Never-Issued","High","BL-AUTH-005, BL-AUTH-006","ECL-4.3","[PRE:CLEAR_SESSION]
 - Platform accessible
-- Authorization__EnablePersistentStorageTokenValidation=true configured","back_url={{BACK_URL}}","[HTTP] GET {{BACK_URL}}/api/platform/security/currentuser with Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmYWtlIn0.invalidsignature
+- Authorization__EnablePersistentStorageTokenValidation=true configured","back_url={{BACK_URL}}","[HTTP] GET {{BACK_URL}}/api/platform/security/users with Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmYWtlIn0.invalidsignature
 [WAIT] Receive response (expect 401)
-[HTTP] GET {{BACK_URL}}/api/platform/security/currentuser with Authorization: Bearer AAAA.BBBB.CCCC
-[WAIT] Receive response (expect 401)","[STATUS] Both requests return HTTP 401
-[BODY] No user data in either response
-[BODY] No internal paths or stack traces in error response","[API] No 500 returned for malformed tokens
-[NETWORK] Both requests fail with 401, not 200","200 returned for a fabricated/unsigned token; 500 Internal Server Error instead of 401; user data visible in error response body","none","VCST-4576","Draft"
+[HTTP] GET {{BACK_URL}}/api/platform/security/users with Authorization: Bearer AAAA.BBBB.CCCC
+[WAIT] Receive response (expect 401)
+[HTTP] GET {{BACK_URL}}/api/platform/security/currentuser with no Authorization header
+[WAIT] Receive response (expect 200, anonymous-allowed by design)","[STATUS] Both /api/platform/security/users requests (fabricated and malformed tokens) return HTTP 401
+[BODY] No user data in either 401 response
+[BODY] No internal paths or stack traces in either error response
+[STATUS] /api/platform/security/currentuser with no Authorization header returns HTTP 200 BY DESIGN ([Authorize]+[AllowAnonymous], vc-platform SecurityController.cs:259-263) - an anonymous-contract check, never a 401 expectation
+[BODY] the anonymous 200 response body is empty and leaks no user data","[API] No 500 returned for malformed tokens against /api/platform/security/users
+[NETWORK] Both /users requests fail with 401, not 200","200 returned by /api/platform/security/users for a fabricated/unsigned token; 500 Internal Server Error instead of 401; user data visible in error response body; the currentuser anonymous 200 response leaks user data (breaks the anonymous contract)","none","VCST-4576; Corrected 2026-09-19 (REG-2026-09-19-1035): the 401 assertions targeted /api/platform/security/currentuser, which is [Authorize]+[AllowAnonymous] in vc-platform source and therefore can NEVER return 401 for any input - an unfalsifiable oracle. Re-pointed at the permission-gated /users endpoint; the anonymous contract is now asserted separately.","Draft"
 "SEC-AUTH-004","Session Invalidation After Password Change — Other Devices Logged Out","Security > Session Management > Password Change","Critical","BL-AUTH-003","ECL-3.1, ECL-4.3","[PRE:CLEAR_SESSION]
 - Authorization__EnablePersistentStorageTokenValidation=true configured (enables OpenIddict DB-based revocation)
 - User account available (use agent pool slot 1 for Device A context, slot 2 for Device B context)

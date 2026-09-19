@@ -86,21 +86,21 @@
 [DOM] Each member row shows: full name; email address; role (Buyer/Admin); status (Active/Blocked)
 [STATE] Own account is visible in the list","[CONSOLE] no TypeError or JS errors
 [NETWORK] GET /company/members returns HTTP 200","Page returns 403 or 404; member list empty when members exist; member data columns missing; console TypeError","Logout after test","Coverage Gap Analysis","Automated"
-"AUTH-036","Invite Member - Buyer Role","Authentication > Company Members","Critical","BL-B2B-001","ECL-14.1","Logged in as company Admin; on Members page","url={{FRONT_URL}}/company/members;email={{ORG_USER_EMAIL}};password={{ORG_USER_PASSWORD}};inviteEmail=invite+buyer+{{timestamp}}@example.com","[NAV] Navigate to {{FRONT_URL}}/sign-in and log in as company Admin
+"AUTH-036","Invite Member - Organization employee Role","Authentication > Company Members","Critical","BL-B2B-001","ECL-14.1","Logged in as company Admin; on Members page","url={{FRONT_URL}}/company/members;email={{ORG_USER_EMAIL}};password={{ORG_USER_PASSWORD}};inviteEmail=invite+buyer+{{timestamp}}@example.com","[NAV] Navigate to {{FRONT_URL}}/sign-in and log in as company Admin
 [NAV] Navigate to {{FRONT_URL}}/company/members
 [ACT] Click 'Invite Member' button
 [ACT] Fill invitation form 'Email': invite+buyer+{{timestamp}}@example.com
-[ACT] Select role: 'Buyer'
+[ACT] Select role: 'Organization employee'
 [ACT] Submit the invitation form
 [WAIT] Wait for success confirmation
 [ASSERT] Success message shown
-[ASSERT] Invited email appears as pending in member list (if applicable)","[DOM] 'Invite Member' button visible for Admin users
+[ASSERT] Invited email appears as pending in member list (if applicable)","[DOM] 'Invite Member' button visible for Organization maintainer users
 [DOM] Invitation form accepts email and role selection
-[DOM] Role options include at minimum: Buyer; Admin
+[DOM] Role options include at minimum: Organization employee; Organization maintainer
 [DOM] Success message 'Invitation sent' or similar shown after submit
 [STATE] Pending invitation visible in member list","[API] mutation errors[] is empty
 [EMAIL] Invited email receives invitation email
-[CONSOLE] no TypeError or JS errors","Invite button missing for Admin; role options absent; mutation returns errors[]; no success message; console TypeError","Remove invited member after test","Coverage Gap Analysis","Automated"
+[CONSOLE] no TypeError or JS errors","Invite button missing for Organization maintainer; role options absent; mutation returns errors[]; no success message; console TypeError","Remove invited member after test","Coverage Gap Analysis","Automated"
 "AUTH-037","Invite Member - Admin Role","Authentication > Company Members","High","BL-B2B-001","ECL-14.1","Logged in as company Admin; on Members page","url={{FRONT_URL}}/company/members;email={{ORG_USER_EMAIL}};password={{ORG_USER_PASSWORD}};inviteEmail=invite+admin+{{timestamp}}@example.com","[NAV] Navigate to {{FRONT_URL}}/sign-in and log in as company Admin
 [NAV] Navigate to {{FRONT_URL}}/company/members
 [ACT] Click 'Invite Member'
@@ -115,19 +115,17 @@
 [STATE] New Admin cannot exceed own permission scope","[API] mutation errors[] is empty
 [EMAIL] Invited Admin email receives invitation
 [CONSOLE] no TypeError or JS errors","Admin role invitation blocked; mutation returns errors[]; new Admin lacks admin permissions after invite; console TypeError","Remove invited admin member after test","Coverage Gap Analysis","Automated"
-"AUTH-038","Edit Member Role","Authentication > Company Members","High","BL-B2B-001","ECL-14.1","Logged in as company Admin; at least one Buyer member exists","url={{FRONT_URL}}/company/members;email={{ORG_USER_EMAIL}};password={{ORG_USER_PASSWORD}}","[NAV] Navigate to {{FRONT_URL}}/sign-in and log in as company Admin
+"AUTH-038","Edit Member Role","Authentication > Company Members","High","BL-B2B-001","ECL-14.1","Logged in as company Admin; at least one Organization employee member exists","url={{FRONT_URL}}/company/members;email={{ORG_USER_EMAIL}};password={{ORG_USER_PASSWORD}}","[NAV] Navigate to {{FRONT_URL}}/sign-in and log in as company Admin
 [NAV] Navigate to {{FRONT_URL}}/company/members
-[ACT] Locate a member with 'Buyer' role
+[ACT] Locate a member with 'Organization employee' role
 [ACT] Click Edit or role change option next to that member
-[ACT] Change role from 'Buyer' to 'Admin'
+[ACT] Change role from 'Organization employee' to 'Organization maintainer'
 [ACT] Save the change
 [WAIT] Wait for member list to update
-[ASSERT] Member role shows 'Admin' in list
-[ASSERT] Affected member's permissions updated on next action","[DOM] Edit/role-change option available per member row
-[DOM] Role selector shows available roles (Buyer; Admin)
-[STATE] Saving updates the member's role in list immediately
-[STATE] Changed member gains Admin permissions","[API] mutation errors[] is empty
-[CONSOLE] no TypeError or JS errors","Role edit option missing; mutation returns errors[]; role not updated in list after save; permissions not updated; console TypeError","Revert member role to Buyer after test","Coverage Gap Analysis","Automated"
+[ASSERT] Member role shows 'Organization maintainer' in list","[DOM] Edit/role-change option available per member row
+[DOM] Role selector shows available roles (Organization employee; Organization maintainer)
+[STATE] Saving updates the member's role in list immediately","[API] mutation errors[] is empty
+[CONSOLE] no TypeError or JS errors","Role edit option missing; mutation returns errors[]; role not updated in list after save; console TypeError","Revert member role to Organization employee after test","Coverage Gap Analysis; permission-effect assertion removed 2026-09-19 (unverified - needs a second signed-in lane to confirm the changed member own session), see REG-2026-09-19-1035","Automated"
 "AUTH-039","Block Member","Authentication > Company Members","High","BL-B2B-001; BL-B2B-002","ECL-14.1","Logged in as company Admin; at least one active Buyer member exists","url={{FRONT_URL}}/company/members;email={{ORG_USER_EMAIL}};password={{ORG_USER_PASSWORD}}","[NAV] Navigate to {{FRONT_URL}}/sign-in and log in as company Admin
 [NAV] Navigate to {{FRONT_URL}}/company/members
 [ACT] Locate an active Buyer member
@@ -157,17 +155,17 @@
 [STATE] Member's data and history preserved after unblock","[API] mutation errors[] is empty
 [NETWORK] POST /connect/token returns HTTP 200 after unblock
 [CONSOLE] no TypeError or JS errors","Unblock option missing; mutation returns errors[]; status not updated after unblock; member still cannot log in after unblock; console TypeError","none","Coverage Gap Analysis","Automated"
-"AUTH-041","Filter Members by Role","Authentication > Company Members","Medium","BL-B2B-001","","Logged in as company Admin; member list has both Buyer and Admin members","url={{FRONT_URL}}/company/members;email={{ORG_USER_EMAIL}};password={{ORG_USER_PASSWORD}}","[NAV] Navigate to {{FRONT_URL}}/sign-in and log in as company Admin
+"AUTH-041","Filter Members by Role","Authentication > Company Members","Medium","BL-B2B-001","","Logged in as company Admin; member list has both Organization employee and Organization maintainer members","url={{FRONT_URL}}/company/members;email={{ORG_USER_EMAIL}};password={{ORG_USER_PASSWORD}}","[NAV] Navigate to {{FRONT_URL}}/sign-in and log in as company Admin
 [NAV] Navigate to {{FRONT_URL}}/company/members
 [ACT] Locate role filter control (dropdown; tabs; or checkbox)
-[ACT] Filter by role 'Buyer'
-[ASSERT] Only Buyer members shown
-[ACT] Filter by role 'Admin'
-[ASSERT] Only Admin members shown
+[ACT] Filter by role 'Organization employee'
+[ASSERT] Only Organization employee members shown
+[ACT] Filter by role 'Organization maintainer'
+[ASSERT] Only Organization maintainer members shown
 [ACT] Clear filter
 [ASSERT] All members shown","[DOM] Role filter control present on Members page
-[STATE] Filtering by 'Buyer' shows only Buyer members
-[STATE] Filtering by 'Admin' shows only Admin members
+[STATE] Filtering by 'Organization employee' shows only Organization employee members
+[STATE] Filtering by 'Organization maintainer' shows only Organization maintainer members
 [DOM] Member count updates to reflect applied filter
 [STATE] Clearing filter restores full member list","[CONSOLE] no TypeError or JS errors
 [NETWORK] Members endpoint returns filtered results","Filter control missing; filter has no effect on list; clearing filter fails to restore full list; console TypeError","none","Coverage Gap Analysis","Automated"
