@@ -48,9 +48,11 @@ import {
 import {
   findAliasProblems as findWhitelistAliasProblems,
   findDecidabilityProblems as findWhitelistDecidabilityProblems,
+  findOverlayProblems as findWhitelistOverlayProblems,
   ALIAS as WL_ALIAS, SETTING_NAME as WL_SETTING_NAME, ORG_ROLE_NAMES as WL_ORG_ROLE_NAMES,
   DESCRIPTOR_POOL as WL_DESCRIPTOR_POOL, DECLARED_GRANTING_ROLES as WL_DECLARED_GRANTING_ROLES,
-  SALES_REP_GRANT_PERMISSION as WL_GRANT_PERMISSION,
+  SALES_REP_GRANT_PERMISSION as WL_GRANT_PERMISSION, NARROWED_OMITTED_ROLE as WL_NARROWED_OMITTED_ROLE,
+  NARROWED_OMITTED_ROLE_EVIDENCE as WL_NARROWED_EVIDENCE,
 } from './membership-roles-whitelist-specs.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -425,13 +427,18 @@ console.log('\n[10] Store membership-roles whitelist (Customer.MembershipRolesWh
       if (!ov) continue;
       const seeded = String(ov.seeded_values || '').trim();
       const pre = String(ov.pre_state || '').trim();
-      console.log(`    · ${envFile}: seeded_values=${seeded ? `[${seeded}]` : '(none)'} pre_state=${pre || '(none)'}`);
+      const narrowed = String(ov.narrowed_values || '').trim();
+      console.log(`    · ${envFile}: seeded_values=${seeded ? `[${seeded}]` : '(none)'} narrowed_values=${narrowed || '(none)'} pre_state=${pre || '(none)'}`);
+      // The overlay's own contract: JSON-array shape, display/JSON agreement, and — the one nothing
+      // else can see — that narrowed_values has not drifted into equality with the seeded set.
+      for (const p of findWhitelistOverlayProblems(ov, envFile)) fail(p);
       if (seeded && !pre) {
         warn(`${envFile}: ${WL_ALIAS} has seeded_values but NO pre_state — \`npm run seed:membership-roles:teardown\` will REFUSE on that env (it will not guess, because an empty store value means "fall back to the GLOBAL whitelist", not "all roles"). Restore that store's original whitelist by hand.`);
       }
     }
     if (!problems.length) {
       ok(`${WL_ALIAS} registered: setting=${WL_SETTING_NAME}, tenant=Store, ${WL_ORG_ROLE_NAMES.length} authored org role(s) all inside the module pool; runtime fields empty in the committed base (sales-rep half is live-resolved by "${WL_GRANT_PERMISSION}" at seed time)`);
+      ok(`${WL_ALIAS} narrowed variant: omits "${WL_NARROWED_OMITTED_ROLE}" (a pool role, and one of the authored org roles). ${WL_NARROWED_EVIDENCE} The in-default-page property is re-checked LIVE by the seeder on every apply — a role that drifts out of the page turns the narrowing evidence into a paging artifact.`);
     }
   }
 }

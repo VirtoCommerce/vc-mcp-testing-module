@@ -59,9 +59,32 @@ export const TENANT_TYPE = 'Store';
  */
 export const ALIAS = 'B2B_STORE_MEMBERSHIP_ROLES';
 
-/** Fields the alias declares. `seeded_values`/`pre_state`/`captured_at` are overlay-only. */
-export const ALIAS_RUNTIME_FIELDS = Object.freeze(['seeded_values', 'sales_rep_roles', 'pre_state', 'captured_at']);
-export const ALIAS_STATIC_FIELDS = Object.freeze(['setting', 'tenant_type', 'org_roles']);
+/**
+ * Fields the alias declares.
+ *
+ * ── FIELD SHAPES, AND WHY TWO OF THEM ARE JSON-ARRAY-SHAPED STRINGS ────────────────────────────
+ * `@td(ALIAS.field)` substitutes a field's value as RAW TEXT (`scripts/lib/test-data-resolver.ts`),
+ * so the shape of the stored string decides what a case can do with it:
+ *
+ *   · `org_roles` / `seeded_values` / `sales_rep_roles` are SEMICOLON-JOINED DISPLAY strings
+ *     ("A;B;C"). They read well in a Steps cell and in a log line. They CANNOT be embedded in a
+ *     REST body as a JSON array — substituted unquoted they are a syntax error, quoted they are one
+ *     string containing semicolons. They are kept exactly as they are: the `[10]` guard, the unit
+ *     tests and the 027b cases all read them today.
+ *   · `pre_state`, `seeded_values_json` and `narrowed_values` are JSON-ARRAY-SHAPED strings
+ *     (`["A","B"]`). Substituted UNQUOTED into a request body they serialize as a real array, which
+ *     is what a `POST .../values` body and a Cleanup restore need. `pre_state` set this convention;
+ *     the two new fields follow it rather than inventing a second one.
+ *
+ * Every runtime field is EMPTY in the committed base and is supplied per env by `aliases.<env>.json`.
+ */
+export const ALIAS_RUNTIME_FIELDS = Object.freeze([
+  'seeded_values', 'seeded_values_json', 'sales_rep_roles', 'narrowed_values', 'pre_state', 'captured_at',
+]);
+export const ALIAS_STATIC_FIELDS = Object.freeze(['setting', 'tenant_type', 'org_roles', 'narrowed_omitted_role']);
+
+/** The alias fields whose value must parse as a JSON array of strings when non-empty. */
+export const ALIAS_JSON_ARRAY_FIELDS = Object.freeze(['pre_state', 'seeded_values_json', 'narrowed_values']);
 
 /* ────────────────────────────────────────────────────────────────────────────────────────────────
  * 2. THE VALUES — three authored org roles + a LIVE-RESOLVED sales-rep set
@@ -122,6 +145,60 @@ export const PICKER_SOURCE_REF =
  */
 export const REFRESH_REQUIREMENT =
   'Admin SPA: Settings -> Reset cache, then a FULL page reload. Without both, the picker serves the previous whitelist.';
+
+/* ────────────────────────────────────────────────────────────────────────────────────────────────
+ * 2b. THE NARROWED VARIANT — a DECLARED TARGET, never the steady state
+ * ────────────────────────────────────────────────────────────────────────────────────────────────
+ *
+ * ── WHAT IT IS FOR ──────────────────────────────────────────────────────────────────────────────
+ * FIXTURE_LIMITS records that the seeded set does NOT decide the NARROWING link — "a store override
+ * HIDES a role the picker would otherwise offer" — because all three pool roles are whitelisted, so
+ * the org half of a filtered picker and an unfiltered one look identical. Deciding that link needs a
+ * whitelist that OMITS a role which is otherwise visible.
+ *
+ * ── WHY IT IS DECLARED HERE RATHER THAN BORROWED FROM `pre_state` ───────────────────────────────
+ * The obvious shortcut is to reuse the captured pre-state, which on vcst happens to be
+ * `["Organization employee"]` and therefore happens to omit `Purchasing agent`. That is an ACCIDENT
+ * of this one environment: `pre_state` is whatever the store held before the first apply, and on
+ * another deployment it could be `[]`, or the full pool, or a set that omits nothing the picker
+ * shows. A case whose falsification rests on it then silently stops discriminating — it still
+ * PASSES, which is the direction that costs a reviewer rather than an author. The narrowing target
+ * is therefore DECLARED and DERIVED, not observed.
+ *
+ * ── WHY THE OMITTED ROLE MUST BE INSIDE THE PICKER'S DEFAULT PAGE ───────────────────────────────
+ * The picker fetches a fixed keyword-less page of `PICKER_PAGE_SIZE` and filters client-side
+ * (`PICKER_SOURCE_REF`). A role OUTSIDE that page is absent from the un-keyworded picker whether or
+ * not it is whitelisted, so its "disappearance" under a narrowed whitelist is a PAGING artifact and
+ * proves nothing. Measured live on vcst 2026-09-19 against `roles/search {keyword:'', take:20}`
+ * (60 roles total, descending by name): `Purchasing agent` is #19 of 20 — INSIDE the page — while
+ * `Organization employee` and `Organization maintainer` are both outside it. Of the three pool
+ * roles, `Purchasing agent` is the only admissible choice on this environment.
+ *
+ * #19 of 20 is a thin margin: two new roles sorting above it would push it out and quietly turn the
+ * narrowing evidence into a paging artifact. That is why `findNarrowingProblems()` re-checks the
+ * property against the LIVE ordered role list on every apply and ABORTS, rather than the property
+ * being asserted once here and assumed forever.
+ *
+ * ── WHAT THE SEEDER LEAVES BEHIND ───────────────────────────────────────────────────────────────
+ * Nothing narrowed. A plain apply leaves the store in the FULL seeded set and merely RECORDS the
+ * narrowed target in `narrowed_values` for a case to write during its own run and restore afterwards
+ * (from `seeded_values_json`). `--variant narrowed` exists for manual work only; it is never the
+ * default and never what `npm run seed:membership-roles` leaves behind.
+ */
+
+/**
+ * The one pool role the narrowed variant deliberately omits.
+ *
+ * STATIC declaration, committed: it is the fixture's contract with the case, not live state. Its
+ * admissibility conditions — inside `DESCRIPTOR_POOL`, inside `ORG_ROLE_NAMES`, present in the
+ * seeded set, and inside the picker's default page LIVE — are enforced by `findNarrowingProblems()`
+ * (live, per apply) and by the static half of `findAliasProblems()` (`td:validate:b2b` [10]).
+ */
+export const NARROWED_OMITTED_ROLE = 'Purchasing agent';
+
+export const NARROWED_OMITTED_ROLE_EVIDENCE =
+  'vcst 2026-09-19: POST /api/platform/security/roles/search {keyword:"", take:20} -> 20 of 60 roles, '
+  + '"Purchasing agent" at position 19; "Organization employee" and "Organization maintainer" both outside the page.';
 
 /* ────────────────────────────────────────────────────────────────────────────────────────────────
  * 3. PURE DERIVATION — the builders and transforms the unit tests own
@@ -266,6 +343,64 @@ export function entriesOutsideDefaultPage(orderedLiveRoleNames, whitelist, pageS
   return (whitelist || []).filter((v) => !window.has(norm(v)));
 }
 
+/**
+ * THE NARROWING DERIVATION — the seeded set MINUS the one declared omitted role.
+ *
+ * Throws rather than degrading, on every path where the result would not discriminate. The silent
+ * failure this exists to prevent: if the omitted role is simply absent from the seeded set, a
+ * filter-and-return would hand back a set IDENTICAL to the seeded one, and a case that writes it
+ * and then asserts "the role disappeared from the picker" would be asserting against a whitelist
+ * that still contains everything. The write succeeds, the picker is unchanged, and the case's
+ * falsification has evaporated with nothing reporting it.
+ *
+ * @param seededValues the full applied whitelist (the fixture's steady state)
+ * @param omittedRole  the pool role to drop
+ * @returns string[] — the narrowed target, first-spelling preserved
+ */
+export function buildNarrowedValues(seededValues, omittedRole = NARROWED_OMITTED_ROLE) {
+  const seeded = Array.isArray(seededValues) ? seededValues.filter((v) => norm(v)) : [];
+  const want = norm(omittedRole);
+  if (!want) throw new Error('buildNarrowedValues: omittedRole is required — a narrowed variant that omits nothing is the seeded set');
+  if (!seeded.length) {
+    throw new Error('buildNarrowedValues: the seeded set is EMPTY — there is nothing to narrow, and an empty store value is not a narrowing (the picker falls back to the GLOBAL whitelist)');
+  }
+  const out = seeded.filter((v) => norm(v) !== want).map((v) => String(v).trim());
+  if (out.length === seeded.length) {
+    throw new Error(
+      `buildNarrowedValues: "${omittedRole}" is NOT in the seeded set [${seeded.join(', ')}] — the narrowed variant would be IDENTICAL to the seeded set. `
+      + 'A case writing it would observe no change in the picker and still pass its "the role disappeared" assertion vacuously. Refusing to produce it.',
+    );
+  }
+  if (!out.length) {
+    throw new Error(
+      `buildNarrowedValues: narrowing by "${omittedRole}" removed EVERY entry. An empty store value is not "narrowest" — at store scope it makes the picker `
+      + 'SKIP the override and fall back to the GLOBAL whitelist, a different behavioural state entirely (see the header).',
+    );
+  }
+  return out;
+}
+
+/**
+ * Serialize a value list into the JSON-array-shaped alias-field convention `pre_state` established.
+ * `@td()` substitutes the raw string, so this is the only shape that embeds into a REST body.
+ */
+export function toJsonArrayField(values) {
+  if (!Array.isArray(values)) throw new Error('toJsonArrayField: values must be an array');
+  return JSON.stringify(values.map((v) => String(v)));
+}
+
+/** Read a JSON-array-shaped alias field back. Returns null for absent/blank; throws on malformed. */
+export function parseJsonArrayField(raw, fieldName = 'field') {
+  if (raw === null || raw === undefined || String(raw).trim() === '') return null;
+  if (Array.isArray(raw)) return raw;
+  let parsed;
+  try { parsed = JSON.parse(String(raw)); } catch {
+    throw new Error(`${fieldName} is not JSON-array-shaped ("${raw}") — @td() substitutes it verbatim, so a case embedding it in a REST body would send a syntax error`);
+  }
+  if (!Array.isArray(parsed)) throw new Error(`${fieldName} parsed to ${typeof parsed}, not an array ("${raw}")`);
+  return parsed;
+}
+
 /* ────────────────────────────────────────────────────────────────────────────────────────────────
  * 4. LIVE GUARDS — fail loud rather than seed something that proves nothing
  * ──────────────────────────────────────────────────────────────────────────────────────────────── */
@@ -353,14 +488,81 @@ export function findDecidabilityProblems({ orgRoleNames = ORG_ROLE_NAMES, salesR
 }
 
 /**
+ * NARROWED-VARIANT admissibility. Pure, so the runner, the drift guard and the tests share it.
+ *
+ * Fails loud on every way the variant could exist and decide nothing. The live half (`orderedLiveRoleNames`)
+ * is optional so the static `td:validate:b2b` guard can run the declaration-only checks with no network.
+ *
+ * @param seededValues         the full applied whitelist
+ * @param omittedRole          the declared role to drop
+ * @param orderedLiveRoleNames live role names in the order `roles/search` returns them; omit for static-only
+ * @param pageSize             the picker's keyword-less page size
+ * @param pool                 the module's hardcoded AllowedValues literal
+ */
+export function findNarrowingProblems({
+  seededValues = [], omittedRole = NARROWED_OMITTED_ROLE, orderedLiveRoleNames = null,
+  pageSize = PICKER_PAGE_SIZE, pool = DESCRIPTOR_POOL,
+} = {}) {
+  const problems = [];
+  const want = norm(omittedRole);
+
+  if (!want) {
+    problems.push('no narrowed_omitted_role is declared — the narrowed variant would equal the seeded set and decide nothing');
+    return problems;
+  }
+
+  // 1. It must be a POOL role. Narrowing is only observable for an option the picker would
+  //    otherwise offer; dropping a non-pool entry hides nothing an operator could have seen.
+  if (!toSet(pool).has(want)) {
+    problems.push(
+      `narrowed_omitted_role "${omittedRole}" is NOT in the module's hardcoded pool [${pool.join(', ')}] (${DESCRIPTOR_POOL_SOURCE_REF}). `
+      + 'The narrowing link is "the store override HIDES an option that would otherwise be offered" — omitting something never offered demonstrates nothing.',
+    );
+  }
+
+  // 2. It must actually be in the seeded set, or the "narrowed" set is the seeded set.
+  if (seededValues.length && !toSet(seededValues).has(want)) {
+    problems.push(
+      `narrowed_omitted_role "${omittedRole}" is not present in the seeded set [${seededValues.join(', ')}] — removing it changes nothing, `
+      + 'so the narrowed variant would be byte-identical to the steady state and a case asserting "the role disappeared" would pass vacuously.',
+    );
+  }
+
+  // 3. The result must be a real, non-empty narrowing.
+  if (seededValues.length) {
+    const narrowed = seededValues.filter((v) => norm(v) !== want);
+    if (!narrowed.length) {
+      problems.push(`narrowing by "${omittedRole}" empties the whitelist — an empty store value makes the picker fall back to the GLOBAL whitelist, which is a different state, not a narrower one`);
+    } else if (sameSet(narrowed, seededValues)) {
+      problems.push(`the narrowed set equals the seeded set — the divergence the variant exists to create has collapsed`);
+    }
+  }
+
+  // 4. LIVE: it must sit inside the picker's default keyword-less page, or its disappearance is paging.
+  if (Array.isArray(orderedLiveRoleNames)) {
+    if (!toSet(orderedLiveRoleNames).has(want)) {
+      problems.push(`narrowed_omitted_role "${omittedRole}" matches NO live role — it cannot disappear from a picker it never appears in`);
+    } else if (entriesOutsideDefaultPage(orderedLiveRoleNames, [omittedRole], pageSize).length) {
+      const pos = orderedLiveRoleNames.findIndex((n) => norm(n) === want) + 1;
+      problems.push(
+        `narrowed_omitted_role "${omittedRole}" sits at position ${pos} of the live roles list, OUTSIDE the picker's default keyword-less page of ${pageSize} `
+        + `(${PICKER_SOURCE_REF}). It is therefore absent from the un-keyworded picker whether or not it is whitelisted, so its disappearance under the narrowed `
+        + 'variant would be a PAGING artifact and not evidence of narrowing. Pick a pool role inside the page, or drive the case with a keyword.',
+      );
+    }
+  }
+  return problems;
+}
+
+/**
  * What this fixture does NOT decide — stated at the fixture, per the SECOND RULE's "state the
  * fixture's own limits", so a green case cannot imply an answer it never gave.
  */
 export const FIXTURE_LIMITS = Object.freeze([
-  'It does NOT decide the NARROWING link ("a whitelist hides an org role that would otherwise be offered"). '
+  'Its APPLIED state does NOT decide the NARROWING link ("a whitelist hides an org role that would otherwise be offered"). '
   + 'All three pool entries are whitelisted, so the org half of the picker looks identical to an unfiltered one. '
-  + 'Deciding that needs a variant that OMITS a pool role — which is exactly what this store\'s pre-state '
-  + '(["Organization employee"]) was, so capture it before overwriting and consider it a second variant.',
+  + `That link is decided by the DECLARED narrowed variant (\`narrowed_values\` = seeded minus "${NARROWED_OMITTED_ROLE}"), which a case WRITES during its own `
+  + 'run and restores from `seeded_values_json` afterwards. The seeder records the target and never leaves the store narrowed.',
   'It does NOT decide server-side ENFORCEMENT. Per BL-B2B-011 the whitelist constrains only the Admin UI '
   + 'picker\'s offered options; PUT /api/organizations and changeOrganizationContactRole still accept a '
   + 'non-whitelisted roleId (VCST-5239 EPIC-5239-03 is the planned gate).',
@@ -382,8 +584,26 @@ export function findAliasProblems(aliases = {}) {
   if (!def._inline) problems.push(`alias ${ALIAS} must be declared _inline: true (it names a setting, not a CSV row)`);
 
   const fields = def.fields || {};
-  for (const f of [...ALIAS_STATIC_FIELDS, ...ALIAS_RUNTIME_FIELDS]) {
+  const declared = new Set([...ALIAS_STATIC_FIELDS, ...ALIAS_RUNTIME_FIELDS]);
+  for (const f of declared) {
     if (!(f in fields)) problems.push(`alias ${ALIAS} does not declare field "${f}"`);
+  }
+  // …and nothing BEYOND them. An orphan field in the committed base is a field no seeder writes and
+  // no guard grades: it resolves to '' on every env, and a case using it fails in a way that reads
+  // as "the seeder did not run". Measured: dropping `narrowed_values` from ALIAS_RUNTIME_FIELDS was
+  // caught by nothing at all until this check existed.
+  for (const f of Object.keys(fields)) {
+    if (!declared.has(f)) {
+      problems.push(
+        `alias ${ALIAS} declares field "${f}", which is in neither ALIAS_STATIC_FIELDS nor ALIAS_RUNTIME_FIELDS — `
+        + 'no seeder writes it and no guard grades it, so it resolves empty on every env',
+      );
+    }
+  }
+  // Every JSON-array-shaped field must be a RUNTIME field: the shape exists so a case can embed live
+  // state in a request body, and a committed one would embed one env's state everywhere.
+  for (const f of ALIAS_JSON_ARRAY_FIELDS) {
+    if (!ALIAS_RUNTIME_FIELDS.includes(f)) problems.push(`"${f}" is JSON-array-shaped live state but is not listed in ALIAS_RUNTIME_FIELDS, so it would not be held to the empty-in-the-committed-base rule`);
   }
   // Runtime/observed fields must be EMPTY in the committed base — they are per-env overlay values.
   for (const f of ALIAS_RUNTIME_FIELDS) {
@@ -405,6 +625,88 @@ export function findAliasProblems(aliases = {}) {
   if (fields.org_roles !== undefined && fields.org_roles !== ORG_ROLE_NAMES.join(';')) {
     problems.push(`alias ${ALIAS}.org_roles is "${fields.org_roles}" but the spec declares "${ORG_ROLE_NAMES.join(';')}"`);
   }
+  if (fields.narrowed_omitted_role !== undefined && fields.narrowed_omitted_role !== NARROWED_OMITTED_ROLE) {
+    problems.push(`alias ${ALIAS}.narrowed_omitted_role is "${fields.narrowed_omitted_role}" but the spec declares "${NARROWED_OMITTED_ROLE}"`);
+  }
+  // The DECLARED omitted role must be admissible on its declaration-only axes — it is a literal, so
+  // this is the guard's business and not a unit test's (`.claude/rules/test-data.md` FOURTH RULE).
+  for (const p of findNarrowingProblems({ seededValues: [], omittedRole: NARROWED_OMITTED_ROLE, pool: DESCRIPTOR_POOL })) {
+    problems.push(`alias ${ALIAS}: ${p}`);
+  }
+  if (!toSet(ORG_ROLE_NAMES).has(String(NARROWED_OMITTED_ROLE).trim().toLowerCase())) {
+    problems.push(
+      `the spec's NARROWED_OMITTED_ROLE "${NARROWED_OMITTED_ROLE}" is not one of the authored org roles [${ORG_ROLE_NAMES.join(', ')}] — `
+      + 'the narrowed variant is derived from the SEEDED set, so a role the seeder never writes cannot be removed from it',
+    );
+  }
   if (!String(def._notes || '').trim()) problems.push(`alias ${ALIAS} carries no _notes — a fixture whose limits are unstated reads as deciding more than it does`);
+  return problems;
+}
+
+/**
+ * Grade one env OVERLAY's fields for this alias (`aliases.<env>.json`). Pure — the validator supplies
+ * the parsed object. Empty/absent fields are simply "not seeded yet" and are never an error here.
+ *
+ * What this catches that nothing else can: a `narrowed_values` that has drifted into equality with
+ * `seeded_values_json`. That is the exact collapse ORGROLE-019 depends on NOT happening, it is
+ * invisible in the seeder's own output (both writes succeed), and the case would keep passing.
+ *
+ * `omittedRole`/`pool` default to the module's declarations but are PARAMETERS, so the unit tests can
+ * exercise this arithmetic on synthetic inputs and stay silent about what the declared values are —
+ * that is `td:validate:b2b`'s job (`.claude/rules/test-data.md` FOURTH RULE).
+ *
+ * @param overlay the `aliases.<env>.json` object for this alias, or undefined
+ * @param label   the env file name, for the message
+ */
+export function findOverlayProblems(overlay, label = 'aliases.<env>.json', { omittedRole = NARROWED_OMITTED_ROLE, pool = DESCRIPTOR_POOL } = {}) {
+  const problems = [];
+  if (!overlay) return problems;
+
+  const parsed = {};
+  for (const f of ALIAS_JSON_ARRAY_FIELDS) {
+    try { parsed[f] = parseJsonArrayField(overlay[f], `${label}: ${ALIAS}.${f}`); } catch (e) { problems.push(e.message); parsed[f] = null; }
+  }
+
+  const seededJson = parsed.seeded_values_json;
+  const narrowed = parsed.narrowed_values;
+  const seededDisplay = String(overlay.seeded_values || '').trim();
+
+  // The display string and the JSON form are two renderings of ONE set. A drift between them means a
+  // case reading `seeded_values` and a Cleanup restoring `seeded_values_json` disagree about what the
+  // steady state is — and the Cleanup wins silently.
+  if (seededDisplay && seededJson && !sameSet(seededDisplay.split(';'), seededJson)) {
+    problems.push(
+      `${label}: ${ALIAS}.seeded_values ("${seededDisplay}") and .seeded_values_json (${JSON.stringify(seededJson)}) describe DIFFERENT sets. `
+      + 'They are two renderings of the same applied whitelist; a Cleanup restoring the JSON form would put the store into a state the display form never named.',
+    );
+  }
+  if (seededDisplay && !seededJson) {
+    problems.push(
+      `${label}: ${ALIAS} has seeded_values but no seeded_values_json — re-run \`npm run seed:membership-roles\` on that env. `
+      + 'Without it a case has no JSON-array-shaped handle to restore the full set with, and will hardcode a literal role array instead.',
+    );
+  }
+
+  if (seededJson && !narrowed) {
+    problems.push(`${label}: ${ALIAS} has seeded_values_json but no narrowed_values — the narrowing variant has no @td() handle on that env; re-run the seeder`);
+  }
+  if (seededJson && narrowed) {
+    for (const p of findNarrowingProblems({ seededValues: seededJson, omittedRole, pool })) {
+      problems.push(`${label}: ${p}`);
+    }
+    if (sameSet(narrowed, seededJson)) {
+      problems.push(
+        `${label}: ${ALIAS}.narrowed_values equals .seeded_values_json (${JSON.stringify(narrowed)}) — the narrowed variant omits NOTHING. `
+        + 'A case writing it would see an unchanged picker and still pass its "the role disappeared" assertion.',
+      );
+    }
+    const expected = seededJson.filter((v) => norm(v) !== norm(omittedRole));
+    if (!sameSet(narrowed, expected)) {
+      problems.push(
+        `${label}: ${ALIAS}.narrowed_values is ${JSON.stringify(narrowed)} but seeded minus "${omittedRole}" is ${JSON.stringify(expected)} — `
+        + 'the recorded variant is not the declared derivation, so the case and the fixture disagree about which role is supposed to vanish',
+      );
+    }
+  }
   return problems;
 }

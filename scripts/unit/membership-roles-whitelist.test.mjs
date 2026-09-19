@@ -17,12 +17,23 @@
 //      a third behavioural state (the picker falls back to the GLOBAL whitelist), not a clean slate.
 //   4. `selectSalesRepRoles` — the permission predicate. Name-matching over-collects badly on the
 //      real environment, so the predicate being permission-driven is the whole point.
+//   5. `buildNarrowedValues` + `findNarrowingProblems` + `findOverlayProblems` — the narrowed
+//      variant is the seeded set MINUS one declared role. If the omitted role is absent from the
+//      seeded set, a plain filter silently returns the seeded set unchanged, and a case asserting
+//      "the role disappeared from the picker" passes against a whitelist that still contains
+//      everything. Nothing downstream notices, so these must throw/flag instead of degrading.
+//      (The declared VALUE of NARROWED_OMITTED_ROLE is NOT asserted here — that is a declaration,
+//      and `td:validate:b2b` [10] owns it, live page-position evidence included.)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   tenantValuesPath, toSet, sameSet, selectSalesRepRoles, buildWhitelist, buildWriteBody,
   planWrite, capturePreState, planTeardown, entriesOutsideDefaultPage,
   findRoleProblems, findDecidabilityProblems, findAliasProblems,
+  buildNarrowedValues, toJsonArrayField, parseJsonArrayField, findNarrowingProblems, findOverlayProblems,
+  // Imported so the alias-shape fixture below can be DERIVED from the spec rather than re-typed —
+  // a re-typed literal here would restate a declaration `td:validate:b2b` already owns.
+  ALIAS, SETTING_NAME, TENANT_TYPE, ORG_ROLE_NAMES, NARROWED_OMITTED_ROLE,
 } from '../seed-data/b2b/membership-roles-whitelist-specs.mjs';
 
 /* ── 1. URL builder ───────────────────────────────────────────────────────────────────────────── */
@@ -259,28 +270,239 @@ test('findDecidabilityProblems is clean for a properly diverging set', () => {
 });
 
 test('findAliasProblems rejects a committed runtime field — that would leak one env state to all', () => {
+  // The static fields are DERIVED from the spec's own exports, never re-typed. Re-typing them would
+  // make this test fail whenever someone deliberately edits a declaration — which `td:validate:b2b`
+  // already owns, and which the FOURTH RULE says is not this file's business. Measured: with
+  // `narrowed_omitted_role` written as a literal here, mutating NARROWED_OMITTED_ROLE went RED in
+  // BOTH the unit test and the guard, i.e. the unit assertion added nothing.
   const base = {
-    B2B_STORE_MEMBERSHIP_ROLES: {
+    [ALIAS]: {
       _inline: true,
       fields: {
-        setting: 'Customer.MembershipRolesWhitelist', tenant_type: 'Store',
-        org_roles: 'Organization employee;Purchasing agent;Organization maintainer',
-        seeded_values: '', sales_rep_roles: '', pre_state: '', captured_at: '',
+        setting: SETTING_NAME, tenant_type: TENANT_TYPE,
+        org_roles: ORG_ROLE_NAMES.join(';'),
+        narrowed_omitted_role: NARROWED_OMITTED_ROLE,
+        seeded_values: '', seeded_values_json: '', sales_rep_roles: '', narrowed_values: '',
+        pre_state: '', captured_at: '',
       },
       _notes: 'x',
     },
   };
-  assert.deepEqual(findAliasProblems(base), [], 'a correctly-shaped registration is clean');
+  // Asserted as a DELTA, not as "the base is clean": `findAliasProblems` also grades the module's
+  // own declarations (pool membership of NARROWED_OMITTED_ROLE, and so on), so an absolute
+  // `deepEqual(…, [])` here would go red on any deliberate declaration edit — which `td:validate:b2b`
+  // already catches, and which makes this file duplication (measured: it did, in BOTH).
+  const baseProbs = findAliasProblems(base);
 
   const leaked = structuredClone(base);
-  leaked.B2B_STORE_MEMBERSHIP_ROLES.fields.pre_state = '["Organization employee"]';
-  const probs = findAliasProblems(leaked);
-  assert.equal(probs.length, 1);
-  assert.match(probs[0], /COMMITTED base/);
+  leaked[ALIAS].fields.pre_state = '["Organization employee"]';
+  const added = findAliasProblems(leaked).filter((p) => !baseProbs.includes(p));
+  assert.equal(added.length, 1, 'a committed runtime field must add exactly one problem');
+  assert.match(added[0], /COMMITTED base/);
 });
 
 test('findAliasProblems reports a missing alias rather than throwing', () => {
   const probs = findAliasProblems({});
   assert.equal(probs.length, 1);
   assert.match(probs[0], /not registered/);
+});
+
+/* ── 10. THE NARROWED VARIANT — the derivation ORGROLE-019's falsification rests on ───────────── */
+
+test('buildNarrowedValues removes exactly the omitted role and preserves the rest, in order', () => {
+  const seeded = ['Organization employee', 'Purchasing agent', 'Organization maintainer', 'Sales Representative'];
+  assert.deepEqual(
+    buildNarrowedValues(seeded, 'Purchasing agent'),
+    ['Organization employee', 'Organization maintainer', 'Sales Representative'],
+  );
+});
+
+test('buildNarrowedValues matches the omitted role case-insensitively and trims, like the picker', () => {
+  assert.deepEqual(buildNarrowedValues(['A', '  Purchasing Agent ', 'B'], 'purchasing agent'), ['A', 'B']);
+});
+
+test('buildNarrowedValues THROWS when the omitted role is absent — the silent-degradation case', () => {
+  // A plain filter would return the seeded set unchanged. The case then writes a whitelist that
+  // still contains everything, observes no change, and PASSES its "the role disappeared" assertion.
+  assert.throws(
+    () => buildNarrowedValues(['Organization employee', 'Sales Representative'], 'Purchasing agent'),
+    /is NOT in the seeded set/,
+  );
+  assert.throws(
+    () => buildNarrowedValues(['Organization employee'], 'Purchasing agent'),
+    /IDENTICAL to the seeded set/,
+  );
+});
+
+test('buildNarrowedValues THROWS rather than narrowing to empty — empty is a different state', () => {
+  // An empty store value makes the picker SKIP the override and fall back to the GLOBAL whitelist.
+  assert.throws(() => buildNarrowedValues(['Purchasing agent'], 'Purchasing agent'), /removed EVERY entry/);
+  assert.throws(() => buildNarrowedValues([], 'Purchasing agent'), /seeded set is EMPTY/);
+  assert.throws(() => buildNarrowedValues(['A'], ''), /omittedRole is required/);
+});
+
+/* ── 11. The JSON-array-shaped field convention ───────────────────────────────────────────────── */
+
+test('toJsonArrayField produces a string that embeds UNQUOTED into a REST body as a real array', () => {
+  const s = toJsonArrayField(['Organization employee', 'Sales Representative']);
+  assert.equal(s, '["Organization employee","Sales Representative"]');
+  // The whole point of the shape: substituted raw by @td(), it must parse back as an array.
+  assert.deepEqual(
+    JSON.parse(`{"Customer.MembershipRolesWhitelist": ${s}}`)['Customer.MembershipRolesWhitelist'],
+    ['Organization employee', 'Sales Representative'],
+  );
+  assert.equal(toJsonArrayField([]), '[]');
+  assert.throws(() => toJsonArrayField('A;B'), /must be an array/);
+});
+
+test('toJsonArrayField escapes a value that would otherwise break the embedded body', () => {
+  assert.equal(JSON.parse(toJsonArrayField(['a"b'])).length, 1);
+  assert.deepEqual(JSON.parse(toJsonArrayField(['a"b', 'c\\d'])), ['a"b', 'c\\d']);
+});
+
+test('parseJsonArrayField reads the shape back, treats blank as absent, and rejects the display form', () => {
+  assert.deepEqual(parseJsonArrayField('["A","B"]'), ['A', 'B']);
+  assert.equal(parseJsonArrayField(''), null);
+  assert.equal(parseJsonArrayField(null), null);
+  assert.equal(parseJsonArrayField(undefined), null);
+  assert.deepEqual(parseJsonArrayField(['A']), ['A'], 'an already-parsed array passes through');
+  // The semicolon display form is the exact mistake the two shapes exist to keep apart.
+  assert.throws(() => parseJsonArrayField('A;B', 'X.f'), /X\.f is not JSON-array-shaped/);
+  assert.throws(() => parseJsonArrayField('{"a":1}', 'X.f'), /not an array/);
+});
+
+/* ── 12. Narrowing admissibility — the guard that stops a paging artifact reading as evidence ─── */
+
+const PAGE = ['r01', 'r02', 'Purchasing agent', 'r04', 'Organization employee'];
+const SEEDED = ['Organization employee', 'Purchasing agent', 'Sales Representative'];
+
+test('findNarrowingProblems is clean for an in-page pool role that is in the seeded set', () => {
+  assert.deepEqual(findNarrowingProblems({
+    seededValues: SEEDED,
+    omittedRole: 'Purchasing agent',
+    orderedLiveRoleNames: PAGE,
+    pageSize: 4,
+    pool: ['Organization employee', 'Purchasing agent'],
+  }), []);
+});
+
+test('findNarrowingProblems FLAGS an omitted role outside the picker default page (paging artifact)', () => {
+  // 'Organization employee' is position 5 with pageSize 4 — absent from the un-keyworded picker
+  // whether or not it is whitelisted, so its disappearance would not be evidence of narrowing.
+  const probs = findNarrowingProblems({
+    seededValues: SEEDED,
+    omittedRole: 'Organization employee',
+    orderedLiveRoleNames: PAGE,
+    pageSize: 4,
+    pool: ['Organization employee', 'Purchasing agent'],
+  });
+  assert.equal(probs.length, 1);
+  assert.match(probs[0], /position 5/, 'the message must name the live position so a reader can re-check it');
+  assert.match(probs[0], /PAGING artifact/);
+});
+
+test('findNarrowingProblems FLAGS an omitted role that matches no live role', () => {
+  const probs = findNarrowingProblems({
+    seededValues: ['Ghost', 'A'],
+    omittedRole: 'Ghost',
+    orderedLiveRoleNames: PAGE,
+    pageSize: 4,
+    pool: ['Ghost'],
+  });
+  assert.ok(probs.some((p) => /matches NO live role/.test(p)));
+});
+
+test('findNarrowingProblems FLAGS an omitted role outside the module pool', () => {
+  // Narrowing is "the override HIDES an option otherwise offered"; a non-pool entry hides nothing.
+  const probs = findNarrowingProblems({
+    seededValues: SEEDED,
+    omittedRole: 'Sales Representative',
+    orderedLiveRoleNames: null,
+    pool: ['Organization employee', 'Purchasing agent'],
+  });
+  assert.equal(probs.length, 1);
+  assert.match(probs[0], /NOT in the module's hardcoded pool/);
+});
+
+test('findNarrowingProblems FLAGS an omitted role absent from the seeded set', () => {
+  const probs = findNarrowingProblems({
+    seededValues: ['Organization employee'],
+    omittedRole: 'Purchasing agent',
+    pool: ['Organization employee', 'Purchasing agent'],
+  });
+  assert.ok(probs.some((p) => /not present in the seeded set/.test(p)));
+});
+
+test('findNarrowingProblems FLAGS a narrowing that empties the whitelist', () => {
+  const probs = findNarrowingProblems({
+    seededValues: ['Purchasing agent'],
+    omittedRole: 'Purchasing agent',
+    pool: ['Purchasing agent'],
+  });
+  assert.ok(probs.some((p) => /GLOBAL whitelist/.test(p)), 'must say WHY empty is not "narrowest"');
+});
+
+test('findNarrowingProblems runs its declaration-only checks with no live list supplied', () => {
+  // The static td:validate:b2b guard has no network; it must still grade the pool membership.
+  assert.deepEqual(findNarrowingProblems({
+    seededValues: [],
+    omittedRole: 'Purchasing agent',
+    pool: ['Purchasing agent'],
+  }), []);
+  assert.equal(findNarrowingProblems({ omittedRole: '', pool: ['A'] }).length, 1);
+});
+
+/* ── 13. Overlay grading — the drift nothing else can see ─────────────────────────────────────── */
+
+// SYNTHETIC throughout. `findOverlayProblems` takes `omittedRole`/`pool` as parameters precisely so
+// these tests never mention what the spec DECLARES — a fixture built from the real constants went
+// red in BOTH the unit test and the guard when NARROWED_OMITTED_ROLE was mutated (measured), i.e.
+// the unit assertion was duplication. What is under test here is the guard's arithmetic.
+const OPTS = { omittedRole: 'P', pool: ['E', 'P', 'M'] };
+const OVERLAY_OK = {
+  seeded_values: 'E;P;M;S',
+  seeded_values_json: '["E","P","M","S"]',
+  narrowed_values: '["E","M","S"]',
+  pre_state: '["E"]',
+};
+
+test('findOverlayProblems is clean for a correctly seeded overlay, and silent on an unseeded one', () => {
+  assert.deepEqual(findOverlayProblems(OVERLAY_OK, 'aliases.test.json', OPTS), []);
+  assert.deepEqual(findOverlayProblems(undefined, 'aliases.test.json', OPTS), [], 'an env that has never been seeded is not a defect');
+  assert.deepEqual(findOverlayProblems({}, 'aliases.test.json', OPTS), []);
+});
+
+test('findOverlayProblems FAILS when narrowed_values has collapsed into the seeded set', () => {
+  // This is the exact silent degradation ORGROLE-019 depends on NOT happening: both writes succeed,
+  // the seeder reports success, and the case keeps passing while deciding nothing.
+  const ov = { ...OVERLAY_OK, narrowed_values: OVERLAY_OK.seeded_values_json };
+  const probs = findOverlayProblems(ov, 'aliases.test.json', OPTS);
+  assert.ok(probs.some((p) => /omits NOTHING/.test(p)));
+});
+
+test('findOverlayProblems FAILS when narrowed_values is not seeded minus the declared role', () => {
+  // Drops the WRONG entry: 'M' instead of 'P'. Same size, so only the derivation check catches it.
+  const ov = { ...OVERLAY_OK, narrowed_values: '["E","P","S"]' };
+  const probs = findOverlayProblems(ov, 'aliases.test.json', OPTS);
+  assert.ok(probs.some((p) => /is not the declared derivation/.test(p)));
+});
+
+test('findOverlayProblems FAILS when the display and JSON renderings of the seeded set disagree', () => {
+  const ov = { ...OVERLAY_OK, seeded_values: 'E;P' };
+  const probs = findOverlayProblems(ov, 'aliases.test.json', OPTS);
+  assert.ok(probs.some((p) => /describe DIFFERENT sets/.test(p)));
+});
+
+test('findOverlayProblems reports the missing JSON handles rather than letting a case hardcode', () => {
+  const noJson = { seeded_values: 'E;P', pre_state: '["E"]' };
+  const probs = findOverlayProblems(noJson, 'aliases.test.json', OPTS);
+  assert.ok(probs.some((p) => /no seeded_values_json/.test(p)));
+
+  const noNarrowed = { seeded_values: 'E;P', seeded_values_json: '["E","P"]' };
+  assert.ok(findOverlayProblems(noNarrowed, 'aliases.test.json', OPTS).some((p) => /no narrowed_values/.test(p)));
+});
+
+test('findOverlayProblems reports a malformed JSON field instead of throwing out of the validator', () => {
+  const probs = findOverlayProblems({ ...OVERLAY_OK, narrowed_values: 'A;B' }, 'aliases.test.json', OPTS);
+  assert.ok(probs.some((p) => /narrowed_values is not JSON-array-shaped/.test(p)));
 });

@@ -603,34 +603,89 @@ Testable business rules for the Virto Commerce B2B e-commerce platform. Use this
 
 ### BL-B2B-011: Org role whitelist scopes assignable roles; enforcement is a planned server-side gate `[P1-data]`
 - **Rule:** Two dictionary platform settings — `Customer.OrganizationRolesWhitelist` and `Customer.MembershipRolesWhitelist`
-  (`ValueType=ShortText`, `IsDictionary=true`; content lives in `allowedValues`, never `value`) — each hold a SELECTED
-  subset of the live platform roles list (`GET /api/platform/security/roles/search`), never free-text. The Organization
-  whitelist filters the org-level "Change roles" picker in Admin SPA (org-record `Organization.Roles`, `PUT /api/organizations`);
-  the Membership whitelist filters the per-member role editor in the Organization memberships widget
-  (`OrganizationMembership.Roles`, `changeOrganizationContactRole` / `PUT /api/customer/organization-memberships/{id}`).
-  Each picker's option set = (assignable roles ∩ its own whitelist) − roles already assigned to that org/membership —
-  the two whitelists are independent settings and must never cross-contaminate each other's picker. An EMPTY whitelist
-  means **NO restriction — the picker offers ALL platform roles** (source-grounded: `vc-module-customer`
-  `Scripts/services/rolesPickerService.js` applies the whitelist filter *only* inside `if (whitelist.length) { … }`, so an
-  empty `allowedValues` skips filtering; the org-level picker and the per-member editor share this one service).
-  "Empty = allow-all", NOT lock-out, is the **intended design** — confirmed at source + live 2026-07-15 during VCST-5441
-  (corrects the earlier assumption that empty must lock out to zero options). **Server-side
-  enforcement of the whitelist is a planned gate, not yet implemented** (VCST-5239 Story EPIC-5239-03): as of 2026-07,
-  `PUT /api/organizations` and `changeOrganizationContactRole` accept a non-whitelisted `roleId` with no rejection
-  (backend finding F1 — zero whitelist references in `profile-experience-api#137` or the REST organizations endpoint) —
-  the whitelist today constrains only the Admin UI picker's *offered* options, not what the API will *accept*.
-- **Verify:** Remove a currently-visible role from a NON-EMPTY whitelist → cache-reset + reload → picker no longer offers it.
-  Empty whitelist → picker shows **ALL** platform roles (filter skipped) — this is correct, NOT a fallback bug. Add-direction
-  persists round-trip after reload; clear-to-empty **persists** after reload as of Platform 3.1044.0 / vc-platform PR #3076
-  (VCST-5441 fixed 2026-07-15; previously silently reverted). Direct PUT/GraphQL bypass with a non-whitelisted role currently
-  succeeds — expected-post-fix it must be rejected (`errors[]` non-empty) without blocking a whitelisted role on the same path.
-- **Violation signal:** With a NON-EMPTY whitelist, the picker offers a role outside it after a genuine cache-reset+reload,
-  OR fails to narrow to the whitelist's entries; an EMPTY whitelist wrongly locks out / shows zero options (empty must show
-  ALL roles — the filter is skipped by design); one whitelist's picker reflects the other whitelist's roles; clear-to-empty
-  silently reverts (the pre-fix VCST-5441 signature — a re-appearance now means PR #3076 regressed); once server enforcement
-  ships — a non-whitelisted role is accepted by the API, OR a whitelisted role is rejected (over-blocking).
+  (`ValueType=ShortText`, `IsDictionary=true`) — each hold a SELECTED subset of the live platform roles list
+  (`GET /api/platform/security/roles/search`), never free-text. **Which field carries the SELECTED set is
+  API-VERSION-dependent — a claim true on one settings surface is inverted on the other** (measured live on vcst
+  2026-09-18 + source: `vc-module-customer` `ModuleConstants.cs` + `Scripts/services/rolesPickerService.js`):
+  - **Legacy v1** (`GET`/`POST /api/platform/settings`, the surface suite `027b`'s `[REST-OP]` steps use today):
+    the SELECTED set is reported/written in **`allowedValues`**; `value` carries nothing for a dictionary setting here.
+  - **v2 tenant API**: the POOL and the SELECTED value are two separate resources, and the field names are
+    **INVERTED** relative to v1 on the same underlying data. `GET /api/platform/settings/v2/tenant/{tenantType}/schema`
+    returns the POOL in `allowedValues` — for both whitelists this is the hardcoded C# literal
+    `["Organization employee","Purchasing agent","Organization maintainer"]` in `ModuleConstants.cs`, not per-tenant
+    state. `GET`/`POST /api/platform/settings/v2/tenant/{tenantType}/{tenantId}/values` returns/accepts a flat
+    `{settingName: value}` map (106 keys for `Store`/`B2B-store`) in which a dictionary setting's **`value` IS the
+    array of SELECTED entries**. `POST` to this path is a **partial MERGE** (only supplied keys move — measured: a
+    single-key POST left the other 105 keys intact) and does **NOT** validate the write against the pool (measured:
+    an out-of-pool role name was accepted and persisted).
+  The Organization whitelist filters the org-level "Change roles" picker in Admin SPA (org-record `Organization.Roles`,
+  `PUT /api/organizations`); the Membership whitelist filters the per-member role editor in the Organization
+  memberships widget (`OrganizationMembership.Roles`, `changeOrganizationContactRole` /
+  `PUT /api/customer/organization-memberships/{id}`). Each picker's option set = (assignable roles ∩ its own
+  whitelist) − roles already assigned to that org/membership — the two whitelists are independent settings and must
+  never cross-contaminate each other's picker.
+  **"Empty = NO restriction — the picker offers ALL platform roles" holds at GLOBAL scope only** (source-grounded:
+  `rolesPickerService.js` applies the whitelist filter *only* inside `if (whitelist.length) { … }`, so an empty
+  GLOBAL array skips filtering — confirmed at source + live 2026-07-15 during VCST-5441, corrects the earlier
+  assumption that empty must lock out to zero options). **At STORE tenant scope the same service gates differently,
+  and empty does NOT mean "all roles" directly** — `var storeValues = (values && values[options.whitelistSettingId])
+  || []; if (storeValues.length) { whitelist = storeValues; reapplyWhitelist(); }`: an empty/absent STORE value is
+  falsy-length, so the store override is **skipped** and the picker falls through to the **GLOBAL** whitelist — a
+  second hop, not "all roles" outright. Whether the picker ends up showing all roles then depends on the GLOBAL
+  whitelist's own state at that moment; on vcst the global value happens to be `[]` so the two coincide, but a
+  deployment with a non-empty global whitelist would show a narrowed set even with an empty store override.
+  **Clearing a store-scoped whitelist to empty is therefore a third behavioural state, not a neutral reset** — a
+  teardown must restore the captured pre-state, never write empty. The Admin SPA's documented editor
+  (`PlatformUserGuide` "Manage Organization-Scoped Roles" § Restrict role assignment — Settings → Customer → Roles)
+  edits the **GLOBAL** scope only; the store-scope override is API-only, and VirtoOZ's published guides (Platform
+  Developer Guide's settings/v2 coverage, Platform User Guide's whitelist article) name no such override or its
+  fallback — a released, in-use mechanism the docs do not cover (docs axis finding, not a defect in the mechanism
+  itself). **Server-side enforcement of the whitelist is a planned gate, not yet implemented** (VCST-5239 Story
+  EPIC-5239-03): as of 2026-07, `PUT /api/organizations` and `changeOrganizationContactRole` accept a
+  non-whitelisted `roleId` with no rejection (backend finding F1 — zero whitelist references in
+  `profile-experience-api#137` or the REST organizations endpoint) — the whitelist today constrains only the Admin
+  UI picker's *offered* options, not what the API will *accept*.
+- **Verify:** Remove a currently-visible role from a NON-EMPTY GLOBAL whitelist → cache-reset + reload → picker no
+  longer offers it. Empty GLOBAL whitelist → picker shows **ALL** platform roles (filter skipped) — this is correct,
+  NOT a fallback bug. For a STORE-scoped override: write a NON-EMPTY store value via
+  `POST /api/platform/settings/v2/tenant/Store/{storeId}/values` → picker narrows to the store set regardless of the
+  global value; clear the store value to empty/absent → picker falls back to whatever the GLOBAL whitelist currently
+  holds — verify that explicitly by reading the global value at the same time, rather than assuming "all roles".
+  When asserting the legacy v1 surface, read `allowedValues`; when asserting the v2 tenant surface, read `value` —
+  same content, inverted field name, not interchangeable across API versions. Add-direction persists round-trip
+  after reload; clear-to-empty **persists** after reload as of Platform 3.1044.0 / vc-platform PR #3076 (VCST-5441
+  fixed 2026-07-15; previously silently reverted). Direct PUT/GraphQL bypass with a non-whitelisted role currently
+  succeeds — expected-post-fix it must be rejected (`errors[]` non-empty) without blocking a whitelisted role on the
+  same path.
+- **Violation signal:** With a NON-EMPTY GLOBAL whitelist, the picker offers a role outside it after a genuine
+  cache-reset+reload, OR fails to narrow to the whitelist's entries; an EMPTY GLOBAL whitelist wrongly locks out /
+  shows zero options (empty must show ALL roles — the filter is skipped by design); a case asserts "empty STORE
+  value ⇒ all roles" without independently confirming the GLOBAL whitelist is also empty at read time (the two-hop
+  fallback makes that a coincidence, not a guaranteed outcome); a test reads/writes `value` against the legacy v1
+  `/api/platform/settings` endpoint or `allowedValues` against the v2 tenant `.../values` endpoint (the field-name
+  inversion — silently asserts against the wrong field and can pass vacuously); a write is attempted against the v2
+  `schema` endpoint's `allowedValues` (the pool is a hardcoded module constant, not a writable per-tenant resource);
+  one whitelist's picker reflects the other whitelist's roles; clear-to-empty silently reverts (the pre-fix VCST-5441
+  signature — a re-appearance now means PR #3076 regressed); once server enforcement ships — a non-whitelisted role
+  is accepted by the API, OR a whitelisted role is rejected (over-blocking).
 - **Related:** BL-B2B-005 (org-level role union/inheritance), BL-B2B-008 (org-scoped role-change isolation), VCST-5239, VCST-5441.
 - **Agents:** qa-backend-expert (Admin SPA picker, REST/GraphQL enforcement)
+- **Amended:** 2026-09-19 (targeted correction, triangulated — docs + source + live agree). Two clauses corrected:
+  (1) "content lives in `allowedValues`, never `value`" was stated unconditionally; it is true for the legacy v1
+  `/api/platform/settings` surface and INVERTED for the v2 tenant `.../values` surface, where a dictionary
+  setting's selected set is `value` and `allowedValues` is the (hardcoded, non-per-tenant) pool. (2) "EMPTY = NO
+  restriction → ALL roles" was stated unconditionally; confirmed true at GLOBAL scope only — at STORE scope an
+  empty value is skipped and the picker falls through to the GLOBAL whitelist (a second hop), which only reads as
+  "all roles" because the GLOBAL value happens to be empty on vcst. Docs axis: `PlatformDeveloperGuide`'s
+  module-manifest settings article corroborates the v2 pool/value split (`allowedValues` = "a fixed list of
+  `<value>` entries when the setting is a dictionary" at the schema/declaration level); `PlatformUserGuide`'s
+  "Manage Organization-Scoped Roles" article documents only the GLOBAL Settings → Customer → Roles editor and is
+  silent on any store-scope override or its fallback — a released, in-use mechanism neither guide documents
+  (finding, not a defect in the mechanism). Source: `scripts/seed-data/b2b/membership-roles-whitelist-specs.mjs`
+  header (measured live on vcst 2026-09-18) + `vc-module-customer` `ModuleConstants.cs` +
+  `Scripts/services/rolesPickerService.js`. See `.claude/knowledge/domain/b2b-organizations.md` §G7 for the fuller
+  mechanism write-up. The surviving invariant is unchanged: the whitelist constrains the Admin UI picker's offered
+  options only; server-side enforcement (VCST-5239 EPIC-5239-03) remains a planned gate.
 
 ### BL-B2B-012: Declining or revoking an invite changes a status — it never deletes the membership row `[P1-data]`
 - **Rule:** The membership lifecycle is **status transitions on a persistent row**, not row creation/deletion:
