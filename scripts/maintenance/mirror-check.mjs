@@ -149,7 +149,15 @@ export const FORKS = {
   "skills/qa-defect/defect-lifecycle-workflow.md": "undecided",
   "skills/qa-defect/defect-report-templates.md": "tracker-agnostic",
   "skills/qa-evidence/SKILL.md": "plugin-frontmatter",
-  "skills/qa-evidence/output-paths.md": "undecided",
+  // Adjudicated 2026-09-19 (was `undecided`). The ROOT copy is now a pointer at
+  // `knowledge/execution/reports-policy.md` — the ten-category SSOT — because it had drifted into a
+  // second, contradicting policy (0 mentions of the FAIL screenshot marker against that file's 24,
+  // and it claimed /qa-test persists only summary.json). vc-fix ships NO reports-policy.md: it
+  // carries its own two-category `.claude/rules/reports.md`, so the plugin copy must stay a
+  // standalone document — a pointer there would dangle for a client. The plugin copy is also ahead,
+  // owning the /qa-bug `_incoming/<browser>/` → `<bug-slug>/` capture chain that
+  // `scripts/unit/gen-mcp-evidence.test.mjs` asserts against. Never sync these two.
+  "skills/qa-evidence/output-paths.md": "plugin-scope",
   "skills/qa-evidence/sign-off-templates.md": "plugin-scope",
   "skills/qa-investigate/SKILL.md": "plugin-scope",
   "skills/qa-investigate/bug-investigation-flow.md": "undecided",

@@ -8,6 +8,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Semver 
 
 ---
 
+## `qa-evidence/output-paths.md` retired to a pointer — the second report policy is gone — 2026-09-19
+
+The 2026-09-07 component audit's only MERGE verdict, executed. `skills/qa-evidence/output-paths.md`
+was a **second, diverging copy** of the report policy — the exact failure its sibling
+`evidence-capture-policy.md` had already been converted to a pointer to prevent ("three places to
+update, three places to fall out of sync"). It was missed in that pass and drifted. Measured against
+`knowledge/execution/reports-policy.md`: **0** mentions of the `FAIL` screenshot marker (24 there),
+**0** of `testing-checklist.md` (6), **0** of `design-report.md` (3), **0** of the `--iterate` round
+suffix (2). It also contradicted the policy outright on what `/qa-test` persists — *"only
+`summary.json` persists"* against §6's `summary.json` + `testing-checklist.md` + `screenshots/` (+
+`design-report.md` when the visual lane ran). With 11 referrers, an agent reading it named failure
+screenshots without the `FAIL` marker and never wrote Artifact B — silently, in the direction that
+costs the reviewer.
+
+It is now a pointer at `reports-policy.md`, kept at its original path so all referrers resolve.
+
+**Promoted rather than deleted** (they existed nowhere else) into `reports-policy.md` §1: the
+`reports/` (tracked) vs `test-results/` (gitignored) separation, and the "never create
+`reports/<TICKET>/` at the repo root" guard.
+
+**Dropped as fiction**, each verified against the live tree rather than taken from the page:
+`reports/bugs/api-traces/` and `reports/checklists/` do not exist, and the documented
+`screenshots/desktop/` + `screenshots/mobile/` subfolders are used by **0 of 15** ticket screenshot
+directories — real runs write flat, descriptively-named files. Also dropped: its pointer to
+`reports/README.md`, which is a *fourth* copy of the tree (still open — see below).
+
+**`mirror:check` fork adjudicated.** `skills/qa-evidence/output-paths.md` had been sitting on the
+`undecided` burn-down list ("pick a side, record the real reason, and remove the entry"); it is now
+`plugin-scope`, burn-down **10 → 9**. The PLUGIN copy is deliberately NOT a pointer and must not be
+synced: `vc-fix` ships no `reports-policy.md` (it carries its own two-category
+`.claude/rules/reports.md`), so a client needs the standalone document — and the plugin copy is
+*ahead*, owning the `/qa-bug` `_incoming/<browser>/` → `<bug-slug>/` capture chain that
+`scripts/unit/gen-mcp-evidence.test.mjs` asserts against.
+
+**Still open.** `reports/README.md` (67 lines) is a fourth description of the same tree and still
+documents the nonexistent `api-traces/`. Not touched here — it is outside the audit's `qa-evidence`
+verdict and deserves its own pass.
+
+---
+
 ## `/qa-storybook` sweeps the derived viewport set; release-process driver path un-dangled — 2026-09-19
 
 **`responsive-component-testing.md` transcribed its breakpoints.** The file listed five widths
