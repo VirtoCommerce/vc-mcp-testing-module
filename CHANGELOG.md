@@ -35,6 +35,21 @@ redirect and every `ci:*` alias uses `cross-env`. Verified 2026-09-19: **no** sc
 `package.json` now contains a bash-ism. A file whose unique content is a warning about a
 fixed problem is worse than no file.
 
+**`INDEX.md` de-transcribed.** Removing the skill made its "**Authoritative** counts" block wrong —
+and checking it showed **five of the six figures already were**: 40 skills · 27 commands · 32
+knowledge files · 126 suites (4,155 cases) against an actual 39 · 23 · 56 · 143 (4,747). Only the
+agent count still held. "Authoritative" is the word that stops a reader verifying, which is what made
+it expensive. The block, the `.claude/` tree comments, the `_meta.totalSuites` note, the
+`Frontend/`+`Backend/` CSV tallies and the §Regression Suites opener now carry the commands that
+derive each number instead (`CLAUDE.md`: counts are never transcribed into prose). The same pass fixed
+two structural claims that described the pre-2026-09-08 layout: agents shown nested in `qa/` `ba/`
+`developers/` subdirectories (discovery is non-recursive — they are flat) and `knowledge/` shown
+under `agents/` (it is top-level).
+
+**Known, not fixed here.** `vc/shared/workshop/` and `vc/shared/docs/presentation/` carry their own
+stale tallies (99 suites, 97 suites, 18 skills, 20 skills, 14 agents). Those are dated workshop and
+slide artifacts, not the live index, and are a separate pass.
+
 **`TIER.md` updated.** Its rule against co-locating scripts inside a skill folder cited
 `run-vc-mcp-testing-module/driver.mjs` as "the lone precedent". That precedent no longer exists, and
 the rule now says so rather than pointing at a deleted path.
