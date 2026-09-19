@@ -8,6 +8,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Semver 
 
 ---
 
+## Removed the `run-vc-mcp-testing-module` skill; its checks are now named directly — 2026-09-19
+
+**Removed:** `.claude/skills/run-vc-mcp-testing-module/` (`SKILL.md` + `driver.mjs`). It was the one
+skill in the tree with **zero inbound consumers** — no command, no agent, no sibling skill, no
+script referenced it — and its only documented invocation, in `docs/release-process.md`, pointed at
+`skills/…` rather than `.claude/skills/…` and so had not been runnable since the `.claude/` move.
+
+**No capability lost.** `driver.mjs` was a pure aggregator: eight checks, each a wrapper around an
+existing `npm run` alias, with no logic of its own. `docs/release-process.md` Step 3 now names those
+aliases directly — `td:validate`, `scope:validate`, `td:validate:b2b`, `seed:dry-run`,
+`graphql:fixtures:validate`, `graphql:lint-labels` — alongside the `env:check` / `verify:multi-env`
+/ `suites:lint` it already ran. The duplicate `npm run env:check` that block carried is gone, and
+the stale `7/7 checks pass` (the driver ran 8) is not replaced by another transcribed count.
+
+**Two prerequisites promoted into the checklist**, because deleting the skill removed the only place
+they were written down: `env:check` / `seed:dry-run` need `ADMIN_PASSWORD` + `USER_PASSWORD` from
+the gitignored `.env.local`, and `graphql:fixtures:validate` needs
+`scripts/.graphql-schema.cache.json`, which is untracked — a fresh clone exits **2**
+(`Schema cache missing`), distinct from the exit **1** that means fixture drift.
+
+**Its other "gotchas" were stale and deliberately not carried over.** The skill warned that several
+`npm run` aliases were bash-only and broke on Windows cmd.exe (`> /dev/null` in `schema:check`,
+inline `VAR=val` in the `ci:*` family). Both have since been fixed — `schema:check` carries no
+redirect and every `ci:*` alias uses `cross-env`. Verified 2026-09-19: **no** script in
+`package.json` now contains a bash-ism. A file whose unique content is a warning about a
+fixed problem is worse than no file.
+
+**`TIER.md` updated.** Its rule against co-locating scripts inside a skill folder cited
+`run-vc-mcp-testing-module/driver.mjs` as "the lone precedent". That precedent no longer exists, and
+the rule now says so rather than pointing at a deleted path.
+
+---
+
 ## `qa-evidence/output-paths.md` retired to a pointer — the second report policy is gone — 2026-09-19
 
 The 2026-09-07 component audit's only MERGE verdict, executed. `skills/qa-evidence/output-paths.md`
