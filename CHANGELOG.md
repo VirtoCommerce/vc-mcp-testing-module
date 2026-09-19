@@ -8,6 +8,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Semver 
 
 ---
 
+## **BREAKING:** the `.claude/` ↔ `plugins/vc-fix/` mirror check is removed — 2026-09-19
+
+**Removed:** `scripts/maintenance/mirror-check.mjs`, `scripts/unit/mirror-parity.test.mjs`,
+`docs/decisions/mirror-parity.md`, the `mirror:check` npm script and its `gates.yml` CI step.
+
+**What this does and does not do.** It removes the *detection*, not the duplication.
+`plugins/vc-fix/` still ships its own copies of 92 shared paths — it has to, because a client
+installs the plugin into their own project where this repo's `.claude/` does not exist. What is gone
+is the ledger that recorded which of those had forked and why. From now on the two trees drift
+silently.
+
+**What stopped being enforced.** Three claims elsewhere in the repo asserted this gate; all three are
+now corrected rather than left lying:
+
+- `CLAUDE.md` called the self-diagnostics containment files "byte-identical … (CI-enforced)". They
+  must still be changed together — a one-sided drift there is a security regression, not a
+  documentation one — but that is now a **convention, not a gate**. (The count was wrong too:
+  `CLAUDE.md` said four, `unit-tests.yml` said five, the registry listed **six**.)
+- `hooks/enforce-real-user.mjs` (both copies) carried "`npm run mirror:check` holds them
+  byte-identical". Both copies are registered and hooks are AND-gated, so a stale one denies what
+  the fresh one allows — the exact 6-week drift its own MIRROR NOTE records
+  (`REG-2026-09-07-2225`). The note now says plainly that nothing enforces it.
+- `scripts/unit/session-telemetry.test.mjs` tested only the plugin copy *because* parity was
+  guaranteed. **That justification is void: the `.claude/` copy is now untested** and may drift
+  without anything noticing. Recorded in the file rather than quietly inherited.
+
+**Kept deliberately.** The `.gitattributes` `eol=lf` pins for both trees. They were introduced to
+stop a CRLF-vs-LF checkout drift that had diverged 29 pairs with no commit and no content change;
+that churn is real whether or not anything checks parity.
+
+**Left as history:** the 2026-09-07 audit documents and prior CHANGELOG entries still describe the
+gate, correctly, as of their dates.
+
+**Trade-off, stated once.** The removed test caught a real error in this very PR (an identical pair
+turned into a declared fork, tripping the gated-pairs floor) after `context:check`, `mirror:check`
+and `qa-test:doclint` had all passed on the broken change. That class of error is now undetectable.
+This was an explicit owner decision, not an oversight.
+
+---
+
 ## `qa-evidence/SKILL.md` was the THIRD copy of the report policy — trimmed to a router — 2026-09-19
 
 Follow-up to retiring `output-paths.md`: converting it revealed that the skill's own `SKILL.md` also
