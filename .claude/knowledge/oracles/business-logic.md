@@ -2035,6 +2035,53 @@ These invariants hold for any rendered customer-facing surface on the accessibil
 
 ---
 
+## Domain 26: Analytics & Tracking (BL-GA4)
+
+> **Added 2026-09-19 (BL-AUDIT-GA4-2026-09-19).** 33 test cases in suite `043-google-analytics.csv`
+> were citing `PROPOSED-BL-GA4-001..004` — a domain the oracle did not yet have (`bl:remap --propose`
+> had already converted the original dangling `BL-GA4-*` citations to hold the false traceability).
+> All four cleared the 3-axis bar and are added at the exact numbers the citing cases already used,
+> which retroactively makes every one of those 33 citations true. Full audit:
+> `reports/knowledge/BL-AUDIT-GA4-2026-09-19.md`.
+
+### BL-GA4-001: Catalog & discovery events carry the documented GA4 ecommerce item schema `[P1-data]`
+- **Rule:** Every catalog/discovery interaction — viewing a product list (`view_item_list`), viewing a product (`view_item`), selecting a product from a list (`select_item`), viewing search results (`view_search_results`), and adding to a wishlist (`add_to_wishlist`) — pushes a GA4 ecommerce event to `window.dataLayer` whose `items[]` array follows the documented Item Fields schema: `item_id` (SKU), `item_name`, brand, `affiliation`, `currency`, and up to 5 levels of `item_category*` breadcrumbs when available. The legacy `items_skus` CSV string is never sent alongside the `items[]` array.
+- **Verify:** Load a category/search/product page → inspect `window.dataLayer` for the matching event → `items` is a real array (not a string) with `item_id`, `item_name`, currency and category fields populated per visible product, and no top-level `items_skus` field.
+- **Violation signal:** `items` is a scalar/CSV string instead of an array; `item_id`/`item_name` missing or empty; category hierarchy absent when the product has breadcrumbs; legacy `items_skus` field present alongside or instead of `items[]`.
+- **Agents:** qa-frontend-expert (storefront events), qa-testing-expert (dataLayer inspection)
+- **Docs:** StorefrontDeveloperGuide → Integrations → Google Analytics Events — "Ecommerce event payloads" + "Item fields" table; "Events beyond the checkout funnel" (view_item_list / view_item / select_item / view_search_results / add_to_wishlist triggers).
+- **Source:** vc-frontend `client-app/modules/google-analytics/events.ts` (`viewItemList`, `selectItem`, `viewItem`, `viewSearchResults`, `addItemToWishList`) + `utils.ts` (`productToGtagItem`, `getCategories` — first 5 non-product breadcrumbs mapped to `item_category`/`item_category2..5`).
+- **Amended:** 2026-09-19 (auto-applied, triangulated — BL-AUDIT-GA4-2026-09-19; MISSING → new entry. Docs + Source + Live agree — `view_item_list` observed live on the deployed build with exactly this shape: non-string `items[]`, per-item brand/affiliation/currency/category hierarchy, no `items_skus`.)
+
+### BL-GA4-002: Cart mutation events report the cart's own line items and value, never a client-guessed total `[P1-data]`
+- **Rule:** Every cart mutation — `add_to_cart`, `view_cart`, `update_cart_item`, `remove_from_cart`, `clear_cart` — pushes a GA4 event whose `value`/`items[]` are read from the cart/line-item state the mutation itself returns, and whose `items[]` entries follow the same Item Fields schema as catalog events. `clear_cart` reports the value and contents of the cart AS IT WAS immediately before clearing — not zero/empty.
+- **Verify:** Add/update/remove/clear a cart line → inspect the matching dataLayer event → `value` equals the cart's own total/subtotal for that action, `items[]` reflects the affected line(s); for `clear_cart`, the event carries the pre-clear total and contents, not zero/empty.
+- **Violation signal:** `value` doesn't match the cart's own total; `items[]` empty or wrong product; `clear_cart` reports `value: 0` or `items: []` instead of what was cleared.
+- **Agents:** qa-frontend-expert (storefront events), qa-backend-expert (cart mutation response), qa-testing-expert (dataLayer inspection)
+- **Docs:** StorefrontDeveloperGuide → Integrations → Google Analytics Events — "Events beyond the checkout funnel" table (add_to_cart / view_cart / remove_from_cart / clear_cart / update_cart_item) + "Ecommerce event payloads".
+- **Source:** vc-frontend `client-app/modules/google-analytics/events.ts` (`addItemToCart`, `addItemsToCart`, `updateCartItem`, `removeItemsFromCart`, `viewCart`, `clearCart`).
+- **Amended:** 2026-09-19 (auto-applied, triangulated — BL-AUDIT-GA4-2026-09-19; MISSING → new entry. Docs + Source + Live agree — `add_to_cart` observed live on the deployed build carrying `currency`/`value`/`items[]` sourced from the cart's own post-mutation state, matching source exactly.)
+
+### BL-GA4-003: Checkout-funnel events fire once, in order; `place_order`/`purchase` report the order subtotal excluding tax/shipping with the order's own server id as `transaction_id` `[P1-data]`
+- **Rule:** The checkout funnel fires, in this order, exactly once per step: `begin_checkout` → `add_shipping_info` → `add_payment_info` → `place_order` → `purchase`. `place_order` and `purchase` both set `transaction_id` to the order's own server-assigned `id` — an opaque, non-empty identifier, **not necessarily the human-readable order number** — and `value` to the order subtotal, EXCLUDING tax and shipping (`shipping`/`tax` are reported as separate fields on the same event). A payment component that fires its own `purchase` call (e.g. a cart-embedded processor) and the shared checkout redirect-path call are mutually exclusive via an existing-order guard: re-paying an already-placed unpaid order never re-fires `purchase`.
+- **Verify:** Walk a checkout to completion → each funnel event fires once, in order → `purchase`/`place_order` fire exactly once in total → `transaction_id` is a non-empty identifier (assert non-empty/shape, not a specific order-number match) → `value` equals the order subtotal (compare against the event's own `shipping`/`tax` fields, not against the grand total) → re-paying an existing unpaid order fires no additional `purchase`.
+- **Violation signal:** A funnel step missing, duplicated, or out of order; `purchase`/`place_order` firing more than once for one order; `transaction_id` empty or null; `value` including tax/shipping (or, in the other direction, a test asserting it should — that contradicts this documented/coded contract); `shipping`/`tax` missing as separate fields.
+- **Agents:** qa-frontend-expert (checkout events), qa-backend-expert (order id/subtotal), qa-testing-expert (dataLayer inspection across payment paths)
+- **Docs:** StorefrontDeveloperGuide → Integrations → Google Analytics Events — "Tracked sales funnel events" table + "place_order payload" / "purchase payload" (`value`: "The order total, **excluding tax and shipping**").
+- **Source:** vc-frontend `client-app/modules/google-analytics/events.ts` (`beginCheckout`, `addShippingInfo`, `addPaymentInfo`, `placeOrder`, `purchase` — `transaction_id: order.id`, `value: order.subTotal.amount`, `shipping`/`tax` as separate fields) + `client-app/shared/payment/components/payment-processing-cyber-source.vue` (`if (!orderToPay) analytics("purchase", order)` guard).
+- **Amended:** 2026-09-19 (auto-applied, triangulated — BL-AUDIT-GA4-2026-09-19; MISSING → new entry. Docs + Source agree exactly on the subtotal-excludes-tax/shipping contract and the funnel order; the shared event-emission pipeline (`sendEvent` → `gtag` → `dataLayer`) was confirmed live this run via BL-GA4-001/002, not separately re-walked through a full paid checkout — see audit report for the residual scope note. **Resolves an open contradiction in the citing suite:** several cases assert `transaction_id` as a strict order-number match and `value` as the order grand total; both are refuted by this Rule — `transaction_id` is the opaque order id, `value` is the subtotal only.)
+
+### BL-GA4-004: GA4 is configured once per page with the session's current currency, language, and (when authenticated) user id `[P1-data]`
+- **Rule:** On every page load, the storefront issues a single `gtag("config", <trackId>, {...})` call whose config object carries the current store currency and the current UI language/culture; when the session is authenticated, it also carries `user_id` set to the logged-in user's own platform id; when the session is anonymous, `user_id` is omitted entirely — never a placeholder or empty string.
+- **Verify:** Load any page → inspect the `config` entry in `window.dataLayer` → `currency` matches the store's current currency, `language` matches the current locale → sign in → reload → `user_id` is now present and equals the authenticated user's own id → sign out → `user_id` absent again.
+- **Violation signal:** `config` event missing; `currency`/`language` absent or mismatched; `user_id` present for a guest, or absent/wrong for an authenticated user.
+- **Agents:** qa-frontend-expert (storefront init), qa-testing-expert (dataLayer inspection, authenticated vs guest)
+- **Docs:** N/A — implementation detail: the GA4 library's own `config` bootstrap call and its field set are not narrated in the Storefront Developer/User Guides, which document the tracked ecommerce/funnel/interaction EVENTS, not the config bootstrap. Source AND Live agree this run (§1a waiver).
+- **Source:** vc-frontend `client-app/modules/google-analytics/index.ts` (`init()` — `window.gtag("config", trackId, { currency, user_id: isAuthenticated ? user.id : undefined, language })`).
+- **Amended:** 2026-09-19 (auto-applied, triangulated — BL-AUDIT-GA4-2026-09-19; MISSING → new entry. Source + Live agree — `config` entry observed live on the deployed build carrying exactly `debugMode`/`currency`/`language` for a guest session, `user_id` omitted per source's conditional; the authenticated `user_id` sub-clause is source-confirmed but not separately live-observed this run — see audit report.)
+
+---
+
 ## Invariant Coverage Summary
 
 P0 column rolls up `[P0-revenue]` + `[P0-security]`; P1 column rolls up `[P1-data]` + `[P1-ux]`.

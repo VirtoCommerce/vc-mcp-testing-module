@@ -104,21 +104,25 @@ interface Finding {
  * ratchet caught it on the first run, which is exactly what it is for.
  */
 export const BLC_002_BASELINE: Record<string, number> = {
-  "BL-API-001": 26, "BL-API-002": 7, "BL-API-003": 16, "BL-API-004": 25, "BL-CART-018": 6,
-  "BL-CFG-001": 2, "BL-CFG-003": 8, "BL-CFG-004": 4, "BL-CFG-007": 4, "BL-CFG-008": 5,
-  "BL-CMS-001": 1, "BL-CMS-002": 1, "BL-CMS-003": 1, "BL-CMS-004": 1, "BL-CMS-005": 1,
-  "BL-CMS-006": 1, "BL-CMS-007": 1, "BL-CMS-008": 1, "BL-CMS-009": 1, "BL-CMS-010": 1,
-  "BL-CMS-011": 1, "BL-CR-002": 3, "BL-CR-003": 2, "BL-CR-004": 3, "BL-CR-005": 2,
-  "BL-CR-006": 1, "BL-CR-007": 2, "BL-CR-011": 1, "BL-CR-014": 1, "BL-CR-015": 1,
-  "BL-CROSS-013": 1, "BL-GA4-001": 10, "BL-GA4-002": 5, "BL-GA4-003": 14, "BL-GA4-004": 4,
-  // BL-PAY-005 removed 2026-09-19: it never existed in the oracle, and all 6 citations were
-  // purged from 041 (REG-2026-09-19-1035 triage) — every one of them already co-cited the real
-  // BL-PAY-003, so nothing lost traceability. BL-SEC-004 6→5: one citation cleared on
-  // SEC-AUTH-002, whose row was rebuilt in the same pass. Ratchet shrinks, per BLC-002's
-  // "fix + de-baseline" rule — never widen these numbers to make a build green.
-  "BL-PAY-002": 4, "BL-PAY-006": 1, "BL-SEC-001": 6, "BL-SEC-002": 3,
-  "BL-SEC-003": 8, "BL-SEC-004": 5, "BL-SEC-005": 2, "BL-STORE-002": 1, "BL-STORE-003": 3,
-  "BL-STORE-004": 9,
+  // Shrunk 2026-09-19 (REG-2026-09-19-1035 follow-up). 36 entries removed:
+  // BL-GA4-001..004 were PROMOTED into the oracle (Domain 26) and their 33 citations are now real;
+  // the rest were converted to declared forward-references with `npm run bl:remap --propose`,
+  // which lint-bl.ts exempts from BLC-002 by design. Per BLC-002: fix + de-baseline, never widen.
+  // Remaining entries are the BL-SEC-* family, whose citing rows in suite 044 are still unauthored —
+  // relabelling those would hide the debt rather than pay it.
+  "BL-SEC-001": 6, "BL-SEC-002": 3, "BL-SEC-003": 8, "BL-SEC-004": 5,
+  "BL-SEC-005": 2,
+  // BL-CFG-003/004/007/008 RESTORED 2026-09-19 after being dropped in the same pass.
+  // `npm run bl:remap --propose` reports "0 case(s) in 0 file(s)" for all four, but this lint
+  // reports 4/1/4/5 citing cases in
+  // regression/suites/Frontend/configurable-products/072e-configurable-products-conditional-sections.csv
+  // (verified by raw grep: `"BL-CFG-003"` sits bare in Business_Rule at line 375). The two tools
+  // disagree about what that file contains, so the citations could not be converted by the
+  // sanctioned path — and hand-editing a file whose structure a parser already stumbles on is how
+  // suite 044 got broken earlier today. Left baselined so the debt stays VISIBLE rather than
+  // silently un-ratcheted. FOLLOW-UP: fix bl:remap's suite discovery for 072e, then --propose and
+  // de-baseline these four.
+  "BL-CFG-003": 4, "BL-CFG-004": 1, "BL-CFG-007": 4, "BL-CFG-008": 5,
 };
 
 const find = (rule: string, severity: Severity, id: string, message: string): Finding => ({ rule, severity, id, message });
