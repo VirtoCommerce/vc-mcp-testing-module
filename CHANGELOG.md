@@ -8,6 +8,47 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Semver 
 
 ---
 
+## `qa-evidence/SKILL.md` was the THIRD copy of the report policy — trimmed to a router — 2026-09-19
+
+Follow-up to retiring `output-paths.md`: converting it revealed that the skill's own `SKILL.md` also
+restated the policy. It carried a mandatory-capture table, a skip-capturing list, a per-bug
+screenshot budget and an output-path table, all duplicating `reports-policy.md` §1 / §5.1 / §7 —
+**and two of its paths were dead**, verified against the live tree: `reports/bugs/api-traces/` does
+not exist (the same fiction dropped from `output-paths.md`), and there is no root `tests/` directory
+for the "test docs" it routed there.
+
+`SKILL.md` is now a router over `reports-policy.md`, 63 lines → 50.
+
+**The skill itself stays, and deleting it was considered and rejected** on four counts:
+`evidence-capture-policy.md` is **Tier-A locked** (`docs/versioning.md`), so removing it is a
+`**BREAKING:**` change, not a cleanup; `plugins/vc-fix/` ships the whole skill and five plugin files
+reference it; 30 path citations point at its files (15 each at the two stubs, which exist precisely
+to hold those); and `sign-off-templates.md` is 178 lines that exist nowhere else —
+`reports-policy.md` mentions sign-off **zero** times.
+
+**One table was kept because it is not a duplicate.** The 3-tier report verbosity (Compact /
+Detailed / Sign-Off) is defined in **no** other file — `reports-policy.md` has 0 mentions — and
+`qa-metrics/quality-metrics-catalog.md` cites it live ("Compact tier per `/qa-evidence`"). Deleting
+it with the rest would have broken a real reference. `SKILL.md` now says it is the source of truth
+for the tiers, and `evidence-capture-policy.md` flags that they did **not** move with the rest of
+the policy, which its own prose had implied.
+
+**A stale number fixed in both trees without forking them.** Both copies of
+`evidence-capture-policy.md` claimed "the 4 allowed report categories"; the root policy defines
+**ten** and `vc-fix` ships **two**, so the line was wrong on both sides and identical only because
+both were wrong the same way. First attempt stated each tree's own count — which turned an
+identical pair into a declared fork and **tripped `scripts/unit/mirror-parity.test.mjs`**
+("the mirror has not silently shrunk": gated pairs may not drop below 40). The guard was right, so
+the count is now de-transcribed instead, the pair is byte-identical again, and gated pairs are back
+at 40.
+
+**`mirror:check`:** `skills/qa-evidence/SKILL.md` reclassified `plugin-frontmatter` → `root-ahead`,
+since the root is now trimmed and the plugin copy still carries the full tables plus its own
+`disable-model-invocation` and tracker-neutral wording. It needs a manual, adaptation-preserving
+re-sync, never an overwrite.
+
+---
+
 ## Removed the `run-vc-mcp-testing-module` skill; its checks are now named directly — 2026-09-19
 
 **Removed:** `.claude/skills/run-vc-mcp-testing-module/` (`SKILL.md` + `driver.mjs`). It was the one

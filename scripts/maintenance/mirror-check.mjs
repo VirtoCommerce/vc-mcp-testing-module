@@ -148,7 +148,13 @@ export const FORKS = {
   "skills/qa-defect/SKILL.md": "plugin-scope",
   "skills/qa-defect/defect-lifecycle-workflow.md": "undecided",
   "skills/qa-defect/defect-report-templates.md": "tracker-agnostic",
-  "skills/qa-evidence/SKILL.md": "plugin-frontmatter",
+  // Root trimmed 2026-09-19: it was a THIRD copy of the report policy (capture table, skip list,
+  // output paths) carrying two dead paths - reports/bugs/api-traces/ and a root tests/ dir, both
+  // verified absent. The root is now a router over reports-policy.md and keeps only the 3-tier
+  // verbosity table, which lives nowhere else. The plugin copy still carries the full tables and
+  // needs a manual, adaptation-preserving re-sync (it holds disable-model-invocation and
+  // tracker-neutral wording of its own) - NOT an overwrite.
+  "skills/qa-evidence/SKILL.md": "root-ahead",
   // Adjudicated 2026-09-19 (was `undecided`). The ROOT copy is now a pointer at
   // `knowledge/execution/reports-policy.md` — the ten-category SSOT — because it had drifted into a
   // second, contradicting policy (0 mentions of the FAIL screenshot marker against that file's 24,
