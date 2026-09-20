@@ -51,15 +51,32 @@ function installsInCaches() {
         let marketplaces;
         try {
             marketplaces = fs.readdirSync(root, { withFileTypes: true });
-        } catch {
-            continue;   // a client that is not installed contributes nothing, and that is not an error
+        } catch (e) {
+            // ENOENT is a client that is not installed: it contributes nothing and that is not an
+            // error. Anything else is a root that EXISTS and could not be read, and collapsing the
+            // two reports an installed client as absent -- after which this shim resolves to an
+            // older install without a word, which is the one outcome the whole indirection exists
+            // to prevent.
+            if (e.code !== "ENOENT") {
+                fs.writeSync(2, `vc-secrets: ${root} could not be read (${e.code ?? e.message})`
+                    + " -- skipping it; any install under it is invisible to this launch\n");
+            }
+
+            continue;
         }
         for (const marketplace of marketplaces.filter(isDirLike)) {
             const pluginDir = path.join(root, marketplace.name, PLUGIN_NAME);
             let versions;
             try {
                 versions = fs.readdirSync(pluginDir, { withFileTypes: true });
-            } catch {
+            } catch (e) {
+                // The same line one level down: a marketplace that does not carry this plugin is the
+                // ordinary case, an unreadable one is not.
+                if (e.code !== "ENOENT") {
+                    fs.writeSync(2, `vc-secrets: ${pluginDir} could not be read (${e.code ?? e.message})`
+                        + " -- skipping it; any install under it is invisible to this launch\n");
+                }
+
                 continue;
             }
             for (const version of versions.filter(isDirLike)) {

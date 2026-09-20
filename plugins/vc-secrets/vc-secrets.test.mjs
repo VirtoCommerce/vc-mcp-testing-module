@@ -1692,6 +1692,19 @@ test("probeKeystoreWrite: a failing cleanup does not turn a good write into a ba
     assert.equal(status, "ok", "the probe's verdict is about the write, not the cleanup");
 });
 
+test("cmdDoctor: a resolver that threw is never recorded as a secret that was never set", () => {
+    // doctorReport's fallback branch prints "run vc-secrets set <name> (local) or check az login
+    // (keyvault)" -- the advice for a secret nobody configured. A throw is a different event, and an
+    // error carrying no message arrived at that branch through `false`, sending the developer to
+    // repair a configuration that may be correct. Source-inspected because cmdDoctor performs real
+    // keystore io. STRIP_COMMENTS first, for the reason given where it is declared.
+    const source = fs.readFileSync(LAUNCHER_PATH, "utf8").replace(STRIP_COMMENTS, "");
+    const assign = source.match(/resolvable\[name\] = (?!true)[\s\S]*?;/);
+    assert.ok(assign, "the failure branch's assignment moved");
+    assert.doesNotMatch(assign[0], /\bfalse\b/,
+        `a throw must not be recorded as the absent-secret case: ${assign[0]}`);
+});
+
 test("cmdDoctor: the write probe is actually wired to the report, not merely available", () => {
     // Both halves were tested and the seam between them was not: replacing the probe call in
     // cmdDoctor with a literal null would leave the suite green, which is the whole of what that
@@ -3507,9 +3520,16 @@ test("guard-declarations: allows .claude/settings.json", () => {
     assert.equal(r.status, 0);
 });
 
-test("guard-declarations: unparseable stdin is not grounds to block", () => {
+test("guard-declarations: unparseable stdin is reported and does not block", () => {
+    // Exit 0 is the decided answer and this pins it: a guard that cannot read its own input must not
+    // block work over a fault that is ours. The report is the other half. What reaches this branch is
+    // a client payload shape the guard no longer understands -- nobody in this repository causes it
+    // and nothing else announces it, so without the line the guard stops inspecting and reads exactly
+    // like one that inspected and allowed. "guard: an unreadable payload is reported and does not
+    // block" draws the same pair for the sibling fail-open.
     const r = runGuardHook("not json");
     assert.equal(r.status, 0);
+    assert.match(r.stderr, /not inspected/);
 });
 
 // ── vc-secrets-shim.mjs ─────────────────────────────────────────────────────────────────────────────
@@ -3568,6 +3588,28 @@ test("shim: no registry file at all → names the plugin as not installed, exit 
     const r = runShim(["doctor"]);
     assert.equal(r.status, 1);
     assert.match(r.stderr, /install the vc-secrets plugin|is not installed/);
+});
+
+test("shim: a cache root that exists but cannot be read is named, not counted as absent",
+    { skip: !CAN_DENY_BY_MODE && "needs POSIX mode bits that actually deny" }, () => {
+    // With no registry the resolution falls through to installsInCaches, and its answer decides
+    // between "not installed" and a version to run. An unreadable root took the same branch as an
+    // absent one, so "plugin ... is not installed -- looked in <roots>" was printed about a root
+    // nothing had looked in. The registry half of that same sentence is already drawn where
+    // registryProblem is reported: not installed is a claim this shim cannot support when the thing
+    // that would have said otherwise is the thing it could not read.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-shim-denied-"));
+    tmpDirs.push(home);
+    const root = path.join(home, ".claude", "plugins", "cache");
+    fs.mkdirSync(root, { recursive: true });
+    fs.chmodSync(root, 0o000);
+    try {
+        const r = spawnSync(process.execPath, [SHIM_PATH, "doctor"],
+            { env: shimEnv(home), cwd: home, encoding: "utf8" });
+        assert.match(r.stderr, /could not be read/, `the unreadable root must be named: ${r.stderr}`);
+    } finally {
+        fs.chmodSync(root, 0o700);   // or the tmpDirs teardown cannot remove it
+    }
 });
 
 test("shim: registry present but the plugin has no records → not installed, exit 1", () => {
@@ -4023,6 +4065,21 @@ test("install-shim: copies the shim, is idempotent, and prints the settings entr
     assert.match(second.stdout, /already up to date/);
     assert.equal(fs.existsSync(path.join(env.CLAUDE_PLUGIN_DATA, "vc-secrets-shim.mjs")), false,
         "must not write into another plugin's directory");
+});
+
+test("install-shim: a destination whose bytes differ is called different, not older", () => {
+    // The comparison settles THAT the two differ and nothing about which way, so a downgrade was
+    // announced as an upgrade. The word is the whole of what this pins.
+    const script = fileURLToPath(new URL("./scripts/install-shim.mjs", import.meta.url));
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-inst-diff-"));
+    tmpDirs.push(home);
+    const dest = path.join(home, ".claude", "plugins", "data", "vc-secrets-vc-tools", "vc-secrets-shim.mjs");
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, "// not the shim\n");
+    const r = spawnSync(process.execPath, [script], { encoding: "utf8", env: { ...process.env, HOME: home } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /replaced a different copy/);
+    assert.doesNotMatch(r.stdout, /older/);
 });
 
 test("install-shim: --data-dir decides the location, in both spellings", () => {

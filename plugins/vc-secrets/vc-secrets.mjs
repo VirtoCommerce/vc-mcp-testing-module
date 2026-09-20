@@ -105,6 +105,12 @@ function parseLiteral(value) {
 // realpath, not resolve: an aliased .claude — a symlinked home, a bind mount — is one file under two
 // strings, and comparing the strings makes every same-file check miss. Falls back to resolve for a path
 // that does not exist yet, where realpath cannot answer.
+//
+// The catch is wider than that reason -- EACCES and ELOOP take the same fallback, and three of the
+// four call sites test existsSync first, so ENOENT cannot even reach them there. Narrowing it to
+// ENOENT was weighed and rejected: it makes this throw at four call sites that never have to, to close a
+// gap that needs the two sides of one comparison to fail ASYMMETRICALLY. When both fall back, both
+// yield the same resolved string and the comparison still answers correctly.
 function canonicalPath(p) {
     try {
         return fs.realpathSync(p);
@@ -1356,6 +1362,15 @@ function runTool(spec, { stdinValue, redactValues = [] } = {}) {
         let stdout = "";
         let stderr = "";
         let settled = false;
+        // SIGKILL reaches the direct child and not its descendants. killProcessTree is the mechanism
+        // for that and is deliberately NOT reused here: it requires a child spawned DETACHED, and its
+        // own comment gives the reason -- a group kill against a child that is not names a pgid the
+        // child is not in, which a recycled pid makes somebody else's, and that group takes a SIGKILL
+        // five seconds later. Spawning every tool this runs detached would change signal and terminal
+        // delivery on the path every secret read takes, the interactive write included, which inherits
+        // stdio precisely so pinentry gets the TTY. And there is nothing to collect: no spec routed
+        // through here leaves a durable grandchild, the one that raises a long-lived UI carries
+        // timeoutMs: null and never arms this timer, and pinentry is gpg-agent's child, not gpg's.
         const timer = (!spec.interactive && typeof spec.timeoutMs === "number")
             ? setTimeout(() => {
                 settled = true;
@@ -3729,7 +3744,12 @@ async function cmdDoctor(cfg, flags = []) {
             await resolver(name, decl);
             resolvable[name] = true;
         } catch (e) {
-            resolvable[name] = e && e.message ? e.message : false;
+            // A throw is a FAILURE, and the advice for a secret that was simply never set is the
+            // wrong advice for a resolver that blew up: `false` reaches doctorReport's "run
+            // vc-secrets set ... or check az login" line, sending the developer to repair a
+            // configuration that may be perfectly correct. An error carrying no message is rare and
+            // is still a failure, so it gets a reason of its own rather than the absent-secret one.
+            resolvable[name] = e?.message || "the resolver threw without naming a reason";
             if (decl.backend === "local" && localBackend !== null) {
                 try {
                     if ((await readLegacyLocalValue(localBackend, name, process.env)) !== null) {

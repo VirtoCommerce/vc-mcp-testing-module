@@ -111,8 +111,16 @@ const PACKAGE_FILE_RE = /(^|\/)vc-secrets\/(?:[^/]+\/)?(clients\.(mjs|json)|hook
 let input;
 try {
     input = JSON.parse(readFileSync(0, "utf8"));
-} catch {
-    process.exit(0);   // unparseable input is not grounds to block an edit
+} catch (e) {
+    // Exit 0 stays: refusing every edit because this guard cannot read its own input blocks work
+    // over a fault that is ours, and that is the decided answer. The LINE is what the decision was
+    // missing. The `targets.readable` fail-open already says "not inspected" out loud for the same
+    // class, and the shape that reaches here is a payload this guard no longer understands -- a
+    // client protocol change, which nobody in this repository causes and nobody would otherwise
+    // learn about, because a guard that stops inspecting silently reads exactly like one that
+    // inspected and allowed.
+    fs.writeSync(2, `vc-secrets guard: could not read its input (${e.message}) -- not inspected\n`);
+    process.exit(0);
 }
 
 let targets;

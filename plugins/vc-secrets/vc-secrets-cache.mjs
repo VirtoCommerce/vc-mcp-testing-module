@@ -168,6 +168,12 @@ function sanitize(value) {
 // The environment is kept only as a last resort, for a uid with no passwd entry. Sharing a name
 // there does not mix credentials — the keystore entries are per-user regardless — but the second
 // launcher waits out the ceiling and then fails, so this is a fallback and not a default.
+//
+// Failing here instead of falling back to a literal was weighed and rejected. A uid with no passwd
+// entry and no USER launches successfully as this stands; refusing would take that away to prevent a
+// collision that additionally needs two such accounts sharing one filesystem. That is a decision
+// about which environments this serves, not a repair, and it does not belong to whoever next
+// rediscovers the literal.
 function lockOwner({ platform, env, userInfo }) {
     try {
         const info = userInfo();

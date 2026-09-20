@@ -108,13 +108,17 @@ if (!target) {
 
 const destination = path.join(target, SHIM);
 let replaced = "installed";
-if (fs.existsSync(destination)) {
-    replaced = fs.readFileSync(destination, "utf8") === fs.readFileSync(source, "utf8")
-        ? "already up to date"
-        : "replaced an older copy";
-}
 try {
     fs.mkdirSync(target, { recursive: true });
+    if (fs.existsSync(destination)) {
+        // "a different copy", not "an older copy": a byte comparison settles that the two differ and
+        // nothing about which way, so a downgrade read as an upgrade. Inside the try because these
+        // reads fail exactly where the copy fails -- an unreadable destination belongs in "cannot
+        // write the shim", not in a crash from the line that composes the report about it.
+        replaced = fs.readFileSync(destination, "utf8") === fs.readFileSync(source, "utf8")
+            ? "already up to date"
+            : "replaced a different copy";
+    }
     fs.copyFileSync(source, destination);
 } catch (e) {
     fail(`cannot write ${destination}: ${e.message}`);
