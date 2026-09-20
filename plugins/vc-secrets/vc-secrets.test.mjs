@@ -912,6 +912,44 @@ test("doctorReport: a clash is a finding, so the run cannot also say it has noth
     assert.doesNotMatch(lines.join("\n"), /nothing to report/);
 });
 
+test("doctorReport: an oversize access entry is a WARN beside the status, not instead of it", () => {
+    // The two are independent facts and both have to be said. The status line reads "needs-refresh"
+    // and is honestly an OK -- the next launch WILL renew. What it cannot say is that it will do so
+    // EVERY time and pay a refresh-token rotation for it, which is the only thing the developer
+    // could act on. So the WARN must accompany the OK rather than replace it.
+    //
+    // WARN and not FAIL: nothing is broken, nothing is lost, and a FAIL exits 1 -- it would redden
+    // every run on an affected machine over a condition with no local remedy.
+    const cfg = { projectId: "p", servers: {}, secrets: {},
+        oauth: { "ado-dev": { scope: "user", home: "user" } } };
+    const lines = m.doctorReport(cfg, {
+        env: {}, platform: "win32", enableLists: { enabled: [], disabled: [], envKeys: [] },
+        resolvable: {}, skipped: [], toolsMissing: [], wired: new Set(),
+        oauthStatus: { "ado-dev": "needs-refresh" },
+        oauthOversize: { "ado-dev": { backend: "wcm", bytes: 2588, limit: 2560 } },
+    });
+    const text = lines.join("\n");
+    assert.match(text, /^OK oauth "ado-dev" \(user\) signed in -- the access token is stale/m,
+        "the status line must survive");
+    assert.match(text, /^WARN oauth "ado-dev": the access entry does not fit Credential Manager \(2588 bytes, limit 2560\)\./m);
+    assert.match(text, /rotates the refresh token/, "and must say what it is costing");
+    assert.doesNotMatch(text, /^FAIL/m, "an unactionable condition may not exit 1");
+    // The store named in words. "wcm" is an internal id and this line is read by whoever decides
+    // whether the DPAPI contingency is now worth building.
+    assert.doesNotMatch(text, /\bwcm\b/);
+});
+
+test("doctorReport: no marker means no line, so a healthy machine reads exactly as before", () => {
+    const cfg = { projectId: "p", servers: {}, secrets: {},
+        oauth: { "ado-dev": { scope: "user", home: "user" } } };
+    const lines = m.doctorReport(cfg, {
+        env: {}, platform: "win32", enableLists: { enabled: [], disabled: [], envKeys: [] },
+        resolvable: {}, skipped: [], toolsMissing: [], wired: new Set(),
+        oauthStatus: { "ado-dev": "needs-refresh" },
+    });
+    assert.doesNotMatch(lines.join("\n"), /does not fit/);
+});
+
 test("doctorReport: a colliding oauth entry key is a WARN and does not fail the run", () => {
     const cfg = m.loadConfig(scopedPaths({ project: { projectId: "proj-x",
         oauth: { ado: OAUTH_DECL },
@@ -1123,6 +1161,206 @@ test("the read script prints hex, because the encoding has to be decided from th
     // no error anywhere.
     assert.match(m.PS_CRED_READ, /ToString\("x2"\)/);
     assert.doesNotMatch(m.PS_CRED_READ, /PtrToStringUni/);
+});
+
+function markerHome() {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-marker-"));
+    tmpDirs.push(dir);
+
+    return { XDG_CONFIG_HOME: dir };
+}
+
+test("the oversize marker lives beside the keystore, not inside it, and keeps the key's scope", () => {
+    // A sibling of `secrets/` rather than a child: something that walks the keystore directory must
+    // not meet a diagnostic file there and try to read it as an entry. And per-scope like the keys
+    // themselves -- two projects on one machine declare the same entry NAME routinely, and a flat
+    // layout would have each overwrite the other's marker and report the wrong project's overflow.
+    const env = markerHome();
+    const user = m.oversizeMarkerPath("vc-secrets:user:oauth-ado-dev-access", env);
+    const project = m.oversizeMarkerPath("vc-secrets:p1:oauth-ado-dev-access", env);
+    assert.equal(path.dirname(path.dirname(user)), path.join(env.XDG_CONFIG_HOME, "vc-secrets", "state"));
+    assert.equal(path.dirname(m.secretsDir(env)), path.dirname(path.dirname(path.dirname(user))),
+        "the state directory must sit beside the secrets directory, not under it");
+    assert.notEqual(user, project, "two scopes may not share one marker");
+});
+
+test("the oversize marker records the measurement and no byte of the value", () => {
+    // The value is the access TOKEN. Nothing about it may reach a file that exists to be read by a
+    // diagnostic and pasted into a report -- so the marker is handed a byte count and never the
+    // bytes, and the assertion below is on the whole object rather than on the fields of interest:
+    // a field added later carrying part of the value would pass a field-by-field check.
+    const env = markerHome();
+    const key = "vc-secrets:user:oauth-ado-dev-access";
+    m.recordOversizeMarker(key, { backend: "wcm", bytes: 2588, limit: 2560, env, at: 1_700_000_000 });
+    assert.deepEqual(JSON.parse(fs.readFileSync(m.oversizeMarkerPath(key, env), "utf8")),
+        { key, backend: "wcm", bytes: 2588, limit: 2560, at: 1_700_000_000 });
+});
+
+test("the oversize marker reads back, clears, and reports nothing once cleared", () => {
+    // Clearing is the half that makes this a CURRENT STATE rather than a log of something once
+    // true. Without it doctor keeps naming an overflow that a later, smaller entry already fixed --
+    // wrong in the reassuring direction, which is the expensive direction for a diagnostic.
+    const env = markerHome();
+    const key = "vc-secrets:user:oauth-ado-dev-access";
+    m.recordOversizeMarker(key, { backend: "wcm", bytes: 2588, limit: 2560, env });
+    assert.equal(m.readOversizeMarker(key, env).bytes, 2588);
+    m.clearOversizeMarker(key, env);
+    assert.equal(m.readOversizeMarker(key, env), null);
+});
+
+test("clearing a marker that was never written is silent, since that is every ordinary success", () => {
+    // Clear runs on the SUCCESS path of every login and every renewal, and almost none of them ever
+    // overflowed. Throwing here would fail a working sign-in over a file that correctly does not
+    // exist.
+    const env = markerHome();
+    m.clearOversizeMarker("vc-secrets:user:oauth-ado-dev-access", env);
+});
+
+test("a corrupt marker reads as no marker, because a hint that cannot be read is not a finding", () => {
+    // Deliberately the opposite call from the keystore reads, where collapsing absent with
+    // unreadable is a defect -- see PS_CRED_READ's ERROR_NOT_FOUND check and newKeyPresent, which
+    // both insist the two stay apart. What hangs on this one is whether doctor
+    // prints one advisory line -- not whether a token exists -- so inventing a finding out of an
+    // unparseable diagnostic would send a developer to diagnose the diagnostic.
+    const env = markerHome();
+    const key = "vc-secrets:user:oauth-ado-dev-access";
+    const file = m.oversizeMarkerPath(key, env);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, "{ not json");
+    assert.equal(m.readOversizeMarker(key, env), null);
+});
+
+test("a message improved for a human keeps the exit code the code reads", () => {
+    // mapResolveError returns a NEW error in every branch, so it silently dropped toolExitCode --
+    // and the caller still received an error, just one that no longer answered WHICH failure this
+    // was. The oversize marker is the consumer that made it visible: it must record only exit 4,
+    // and by the time the write failure reached it the 4 was gone.
+    const raw = Object.assign(new Error("value too large for Credential Manager (2588 bytes; limit 2560)"),
+        { toolExitCode: 4 });
+    const mapped = m.mapResolveError("wcm", "oauth-ado-dev-access", raw);
+    assert.equal(mapped.toolExitCode, 4, "the classification must survive the rewording");
+    assert.match(mapped.message, /too large for Credential Manager/);
+});
+
+test("readWiredServers: a documented knob is not wiring, while the documented entry still is", () => {
+    // Two grammars answered "is this server wired through us", and only one carried the `(?![A-Z_])`
+    // its own comment calls load-bearing. Without it a server that merely passes VC_SECRETS_TIMING
+    // reads as wired -- the false POSITIVE direction, which flips the legacy-token line from "still
+    // required" to "remove it": advice to delete a credential that is still live.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-wired-"));
+    tmpDirs.push(dir);
+    const file = path.join(dir, ".mcp.json");
+    fs.writeFileSync(file, JSON.stringify({ mcpServers: {
+        knobOnly: { command: "env", args: ["VC_SECRETS_TIMING=1", "node", "server.js"] },
+        documented: { command: "node", args: ["${VC_SECRETS}", "run", "ado"] },
+    } }));
+    const wired = m.readWiredServers(file);
+    assert.equal(wired.has("documented"), true,
+        "`${VC_SECRETS}` must still read as wired -- `}` is not [A-Z_], which is why the lookahead is safe here");
+    assert.equal(wired.has("knobOnly"), false, "a documented knob is not a wiring");
+});
+
+test("newKeyPresent on gpg: an entry that cannot be examined is not reported absent", async () => {
+    // existsSync said false for both "no such file" and "I could not look", and every caller read
+    // that as "nothing is stored". For migrate that is the difference between skipping and writing
+    // the pre-rotation value over the current one -- which is exactly what this function's own
+    // comment refuses to allow, on a backend where it did not hold.
+    //
+    // The scope directory is made a FILE so the stat fails ENOTDIR rather than ENOENT: deterministic,
+    // and needing no chmod, which a run as root would defeat.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-stat-"));
+    tmpDirs.push(dir);
+    const env = { XDG_CONFIG_HOME: dir };
+    fs.mkdirSync(path.join(dir, "vc-secrets", "secrets"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "vc-secrets", "secrets", "user"), "not a directory");
+    await assert.rejects(() => m.newKeyPresent("gpg", "vc-secrets:user:ado-pat", env),
+        /could not be examined/);
+});
+
+test("newKeyPresent on gpg: a genuinely missing entry is still simply absent", async () => {
+    // The half that keeps the distinction useful rather than merely loud: ENOENT is the one answer
+    // that means "no entry", and it must stay a quiet false.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-stat-absent-"));
+    tmpDirs.push(dir);
+    assert.equal(await m.newKeyPresent("gpg", "vc-secrets:user:ado-pat", { XDG_CONFIG_HOME: dir }), false);
+});
+
+test("readEnableLists: a settings.local.json that exists but cannot be read is reported", () => {
+    // The empty lists this returns are indistinguishable from a file that genuinely enables
+    // nothing, and they decide which servers count as consuming a secret and which env keys the
+    // file contributes -- so swallowing the failure made doctor answer both questions wrong rather
+    // than say it could not look. readWiredServers, reading the very next file, already reported
+    // its own; this one is the sibling that did not.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-enable-"));
+    tmpDirs.push(dir);
+    const file = path.join(dir, "settings.local.json");
+    fs.writeFileSync(file, "{ not json");
+    const problems = [];
+    assert.deepEqual(m.readEnableLists(file, problems), { enabled: [], disabled: [], envKeys: [] });
+    assert.equal(problems.length, 1, `expected one problem, got ${JSON.stringify(problems)}`);
+    assert.match(problems[0], /cannot be read/);
+});
+
+test("readEnableLists: an absent settings.local.json says nothing, because most projects have none", () => {
+    // The distinction that keeps the report above worth reading. Reporting an optional file that
+    // simply is not there would put a line in every healthy doctor run, and a warning everyone
+    // learns to skip is worse than no warning.
+    const problems = [];
+    m.readEnableLists(path.join(os.tmpdir(), "vc-secrets-no-such-dir", "settings.local.json"), problems);
+    assert.deepEqual(problems, []);
+});
+
+test("the write script stores the caller's bytes, trailing newline included", () => {
+    // The read path strips one line ending because `security -w` and the PowerShell reader APPEND
+    // one -- it removes the tool's artifact. Nothing appends on the way in: runTool does
+    // `child.stdin.write(stdinValue)` and ReadToEnd returns exactly those bytes, so a TrimEnd here
+    // deleted the caller's, and every trailing CR/LF rather than a single line ending.
+    //
+    // cmdMigrate is what makes it reachable: the other two writers hand over a token's JSON or a
+    // secret typed at a prompt, where Enter is the terminator. Migrate moves a value the user
+    // cannot retype, and its gpg read opts out of the same strip with keepTrailingNewline for
+    // precisely this reason -- Windows was doing what that opt-out exists to prevent.
+    assert.doesNotMatch(m.PS_CRED_WRITE, /TrimEnd/);
+    assert.match(m.PS_CRED_WRITE, /^\$value=\[Console\]::In\.ReadToEnd\(\)$/m);
+});
+
+test("childNodeVersionIo: a probe that could not run reports why, not an empty version", () => {
+    // Three different failures reported as the same blank: node missing from PATH, node killed by
+    // the timeout, and node aborting because it rejected an inherited NODE_OPTIONS. The last is the
+    // case this probe was ADDED to catch, and it was indistinguishable from the other two.
+    //
+    // The refusal is unchanged either way -- any non-version string fails the match below -- so what
+    // this pins is the message, which was the only thing wrong.
+    const missing = m.childNodeVersionIo({ run: () => ({ error: Object.assign(new Error("spawn node ENOENT"),
+        { code: "ENOENT" }), status: null, stdout: "" }) });
+    assert.match(missing, /ENOENT/);
+    assert.equal(m.childNodeSupportsImport(missing), false, "and it must still refuse");
+
+    // A node that RAN and exited non-zero: no `error`, so a check on that alone would miss it and
+    // hand back the empty stdout as though it were a version.
+    const rejected = m.childNodeVersionIo({ run: () => ({ error: undefined, status: 9, stdout: "" }) });
+    assert.match(rejected, /exit 9/);
+    assert.equal(m.childNodeSupportsImport(rejected), false);
+
+    // And a probe that worked still answers with the bare version, trimmed.
+    assert.equal(m.childNodeVersionIo({ run: () => ({ status: 0, stdout: "v22.23.2\n" }) }), "v22.23.2");
+});
+
+test("the read script exits absent only for ERROR_NOT_FOUND, never for an unreadable store", () => {
+    // The same rule PS_CRED_DELETE carries, and the read path is where breaking it costs most.
+    // Its readers take exit 3 as authoritative absence -- newKeyPresent's own comment insists
+    // absent and unreadable must not collapse, and on wcm they did. A Credential Manager that
+    // cannot be read (a logon session left locked after an RDP reconnect, a policy-restricted
+    // context) then reads as "not signed in", and the developer is sent through an interactive
+    // sign-in nothing had invalidated: it spends a single-use authorization code and rotates a live
+    // refresh token away. Losing the token is the failure; the wasted minute is not.
+    assert.match(m.PS_CRED_READ, /\$e -eq 1168/);
+    assert.match(m.PS_CRED_READ, /GetLastWin32Error/);
+
+    // Presence is not exclusivity, for the reason the delete script's twin of this assertion gives:
+    // adding `if($e -eq 5){ exit 3 }` -- ACCESS_DENIED -- satisfies both matches above while
+    // restoring exactly the collapse this test exists to prevent.
+    assert.equal(m.PS_CRED_READ.match(/exit 3/g).length, 1, "exactly one condition may exit 3");
 });
 
 test("a blob written by the pre-UTF-8 launcher still reads, since it cannot be re-entered", () => {
@@ -2250,9 +2488,10 @@ test("doctorReport: a child node AT the floor is not a finding", () => {
 });
 
 test("doctorReport: a child node that could not be run at all still names what it saw", () => {
-    // childNodeVersionIo returns "" when spawnSync fails outright, and "" is not null, so the guard
-    // still fires -- but "" IS the bug: rendered bare it produces "reports , which predates", a blank
-    // slot where a version belongs. `childNode || "no version"` is what turns that blank into a word.
+    // "" reaches here from a node that exits 0 and prints nothing -- a spawn that fails outright now
+    // returns its own reason instead. "" is not null, so the guard still fires, but "" IS the bug:
+    // rendered bare it produces "reports , which predates", a blank slot where a version belongs.
+    // `childNode || "no version"` is what turns that blank into a word.
     const lines = oauthDoctorLines({ childNode: "" });
     const line = lines.find((l) => l.startsWith("FAIL"));
     assert.match(line, /no version/);

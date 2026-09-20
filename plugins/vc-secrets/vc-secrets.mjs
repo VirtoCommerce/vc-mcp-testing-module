@@ -401,9 +401,20 @@ function validateLaunchables(label, map) {
 }
 
 function parseConfigFile(file, warnings) {
+    let raw;
     let cfg;
+    // The read and the parse are two failures wearing one label. Wrapped together, a config the
+    // developer cannot READ -- wrong owner after an edit under sudo, a directory where a file is
+    // expected, a broken symlink -- was announced as malformed JSON, and the remedy that implies is
+    // to go fix the syntax of a file that is either perfectly valid or not a file at all. The code
+    // is carried instead of the message here because EACCES and EISDIR ARE the diagnosis.
     try {
-        cfg = JSON.parse(fs.readFileSync(file, "utf8"));
+        raw = fs.readFileSync(file, "utf8");
+    } catch (e) {
+        throw new VcSecretsError(`config could not be read: ${file} (${e.code ?? e.message})`);
+    }
+    try {
+        cfg = JSON.parse(raw);
     } catch (e) {
         throw new VcSecretsError(`config is not valid JSON: ${file} (${e.message})`);
     }
@@ -879,6 +890,26 @@ function keyToPath(key, env = process.env) {
     return path.join(secretsDir(env), scope, `${name}.gpg`);
 }
 
+// ENOENT is the only answer that means "no entry", and existsSync could not say so. It answers
+// false for a file that IS there and cannot be stat'd -- a directory that lost its search bit, an
+// ACL change above it -- and all three callers read that false as "nothing is stored". The bill is
+// the same one PS_CRED_READ's ERROR_NOT_FOUND rule prevents on Windows: an interactive sign-in that
+// spends an authorization code and rotates a live refresh token, or a developer retyping a secret
+// that never left the disk. newKeyPresent's own comment demands this distinction outright; gpg was
+// the backend where it did not hold.
+function gpgEntryPresent(key, env = process.env) {
+    try {
+        fs.statSync(keyToPath(key, env));
+
+        return true;
+    } catch (e) {
+        if (e.code === "ENOENT") {
+            return false;
+        }
+        throw new VcSecretsError(`the keystore entry "${key}" could not be examined (${e.code ?? e.message})`);
+    }
+}
+
 // Pre-rename storage layout, read-only: cmdMigrate copies a value forward from here into the
 // new namespaced key, but nothing ever writes to this path again.
 function legacyKeyToPath(name, env = process.env) {
@@ -887,11 +918,79 @@ function legacyKeyToPath(name, env = process.env) {
     return path.join(base, LEGACY_KEY_PREFIX, "secrets", `${name}.gpg`);
 }
 
+// Where a keystore write that CANNOT come right on its own is recorded.
+//
+// On Credential Manager an oversize value fails deterministically: the value is larger than the
+// backend's ceiling, so the identical write fails identically at every launch and every renewal,
+// forever. Without this, that failure prints one line to fd 2 and is gone; the next tick repeats it
+// and nothing accumulates. The system still works -- each launch pays a token exchange instead of
+// reading a stored token -- but Entra rotates the refresh token on every exchange, so it pays a
+// rotation too, and nothing says so.
+//
+// A FILE, not a keystore entry, because the keystore is the thing that failed. A sibling of the
+// secrets directory rather than a child, so nothing that walks the keystore mistakes it for an
+// entry; split per scope the same way keyToPath splits the keys -- the scheme, not the directory --
+// so two projects on one machine cannot collide on one entry name.
+//
+// And it is CURRENT STATE, not an event log: a successful write for the same key deletes it. Without
+// that half, doctor would keep reporting a condition the next successful write had already fixed --
+// a diagnostic that is wrong in the reassuring direction, which is worse than none.
+function oversizeMarkerPath(key, env = process.env) {
+    const [, scope, name] = key.split(":");
+
+    return path.join(path.dirname(secretsDir(env)), "state", scope, `${name}.oversize.json`);
+}
+
+// Not one byte of the value. `bytes` is measured from what the caller tried to write rather than
+// scraped out of the backend's stderr the way mapResolveError does it: the number is already in hand
+// at both call sites, and parsing a message for it would be a second, independent way to be wrong
+// about the same quantity.
+function recordOversizeMarker(key, { backend, bytes, limit, env = process.env, at = Date.now() }) {
+    const file = oversizeMarkerPath(key, env);
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(file, JSON.stringify({ key, backend, bytes, limit, at }), { mode: 0o600 });
+}
+
+function clearOversizeMarker(key, env = process.env) {
+    try {
+        fs.rmSync(oversizeMarkerPath(key, env));
+    } catch (e) {
+        // Absent is the ordinary case: every successful write on a machine that never overflowed
+        // clears nothing. Anything else is reported but not thrown -- this runs on the SUCCESS path
+        // of a login or a renewal, and failing either over a leftover diagnostic file would trade a
+        // working sign-in for a tidy report.
+        if (e.code !== "ENOENT") {
+            fs.writeSync(2, `vc-secrets: a stale oversize marker for "${key}" could not be removed`
+                + ` (${e.code ?? e.message}) -- "vc-secrets doctor" may report a problem that is fixed\n`);
+        }
+    }
+}
+
+function readOversizeMarker(key, env = process.env) {
+    try {
+        return JSON.parse(fs.readFileSync(oversizeMarkerPath(key, env), "utf8"));
+    } catch {
+        // Absent and unreadable collapse deliberately, unlike the keystore reads where that collapse
+        // is a defect: this decides whether doctor prints one advisory line, not whether a token
+        // exists. A marker that cannot be read is not a finding of its own -- inventing one would
+        // send a developer to diagnose the diagnostic.
+        return null;
+    }
+}
+
 // PowerShell 5.1 P/Invoke for Credential Manager (no built-in cmdlets exist).
 // Passed via -EncodedCommand: immune to Windows argv re-quoting; -ExecutionPolicy Bypass
 // covers restricted policies; if Constrained Language Mode blocks Add-Type, set
 // VC_SECRETS_POWERSHELL=pwsh — record it in README.md when hit.
 // The keystore key arrives via env var VC_SECRETS_NAME; the value (write path) arrives on stdin.
+//
+// 1168 is ERROR_NOT_FOUND, and on this path too it is the ONLY code that may read as "no such
+// entry" — the rule PS_CRED_DELETE states below, applied to the read. Four call sites consume exit
+// 3 as authoritative absence, newKeyPresent's comment among them ("everything else is an unreadable
+// store"). A Credential Manager that cannot be read — a logon session left locked after an RDP
+// reconnect, a policy-restricted context — is then indistinguishable from an empty one, so the
+// developer is sent through an interactive sign-in nothing had invalidated: it spends a single-use
+// authorization code and rotates a live refresh token away.
 const PS_CRED_READ = `
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[System.Text.Encoding]::UTF8
@@ -907,7 +1006,11 @@ public static class CredMan {
 }
 '@
 $ptr=[IntPtr]::Zero
-if(-not [CredMan]::CredRead("$env:VC_SECRETS_NAME",1,0,[ref]$ptr)){ exit 3 }
+if(-not [CredMan]::CredRead("$env:VC_SECRETS_NAME",1,0,[ref]$ptr)){
+  $e=[System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+  if($e -eq 1168){ exit 3 }
+  [Console]::Error.Write("CredRead failed win32err=$e"); exit 1
+}
 $c=[System.Runtime.InteropServices.Marshal]::PtrToStructure($ptr,[type][CredMan+CREDENTIAL])
 $n=$c.CredentialBlobSize
 $b=New-Object byte[] $n
@@ -934,10 +1037,21 @@ if(-not [CredManDel]::CredDelete("$env:VC_SECRETS_NAME",1,0)){
 }
 `;
 
+// No TrimEnd on the value, and that is the opposite of what runTool does when it READS. The two are
+// not inconsistent: `security -w` and the PowerShell reader append a line ending of their own, so
+// stripping one on the way out removes the tool's artifact. Nothing appends anything on the way in
+// -- runTool writes `child.stdin.write(stdinValue)` and ReadToEnd returns exactly those bytes -- so
+// a TrimEnd here deleted the CALLER's, and every one of them rather than a single line ending.
+//
+// Reachable through cmdMigrate, the one caller whose value can legitimately end in a newline: the
+// other two write paths are a token's JSON and a secret typed at a prompt, where Enter is the
+// terminator. Migrate exists to move a value the user CANNOT retype, which is why its gpg read opts
+// out of the same strip with keepTrailingNewline -- Windows was quietly doing what that opt-out was
+// added to prevent.
 const PS_CRED_WRITE = `
 $ErrorActionPreference='Stop'
 [Console]::InputEncoding=[System.Text.Encoding]::UTF8
-$value=[Console]::In.ReadToEnd().TrimEnd("\`r","\`n")
+$value=[Console]::In.ReadToEnd()
 Add-Type -TypeDefinition @'
 using System; using System.Runtime.InteropServices;
 public static class CredManW {
@@ -1316,8 +1430,15 @@ function buildSpawnInvocation(resolved, args) {
 // Read AND write reach this: writeLocalValue routes exit 4 here and nothing else, because the two
 // "not found" rewrites above are advice for a read.
 function mapResolveError(backend, name, e) {
+    // Every branch that rewrites the message returns a NEW error, and a new error carries no
+    // toolExitCode -- so improving a message for a human silently stripped the classification the
+    // code downstream needs. The two are not alternatives, and the loss is invisible: the caller
+    // still gets an error, just one that no longer answers "which failure was this". The oversize
+    // marker reads exit 4 off an error that has already passed through here. The fall-through at
+    // the end returns the original untouched, so it needs no keep().
+    const keep = (mapped) => Object.assign(mapped, { toolExitCode: e.toolExitCode });
     if (backend === "wcm" && e.toolExitCode === 3) {
-        return new VcSecretsError(`secret "${name}" not found in Credential Manager -- run "vc-secrets set ${name}"`);
+        return keep(new VcSecretsError(`secret "${name}" not found in Credential Manager -- run "vc-secrets set ${name}"`));
     }
     if (backend === "wcm" && e.toolExitCode === 4) {
         // Keep the measured size, drop win32err=1783: the number a developer can act on is
@@ -1325,13 +1446,13 @@ function mapResolveError(backend, name, e) {
         const size = /(\d+) bytes/.exec(e.message)?.[1];
         const measured = size ? ` (${size} bytes)` : "";
 
-        return new VcSecretsError(`secret "${name}" is too large for Credential Manager${measured} -- the blob limit is ${WCM_BLOB_LIMIT} bytes`);
+        return keep(new VcSecretsError(`secret "${name}" is too large for Credential Manager${measured} -- the blob limit is ${WCM_BLOB_LIMIT} bytes`));
     }
     if (backend === "keychain" && e.toolExitCode === 44) {
-        return new VcSecretsError(`secret "${name}" not found in Keychain -- run "vc-secrets set ${name}"`);
+        return keep(new VcSecretsError(`secret "${name}" not found in Keychain -- run "vc-secrets set ${name}"`));
     }
     if (backend === "gpg") {
-        return new VcSecretsError(`${e.message} -- if the gpg agent is locked, run "vc-secrets unlock" in a terminal`);
+        return keep(new VcSecretsError(`${e.message} -- if the gpg agent is locked, run "vc-secrets unlock" in a terminal`));
     }
 
     return e;
@@ -1531,13 +1652,21 @@ async function ensureFreshToken({ serverName, readCache, writeCache, exchange, a
 // ("vc-secrets:<scope>:<name>"), never a bare entry name. Every read/write below is built from one
 // of those full keys.
 function oauthLaunchDeps(entryName, decl, cfg, { backend = detectLocalBackend(), env = process.env,
-    run = runTool, write = writeSecretValue } = {}) {
+    run = runTool, write = writeSecretValue, remove = null } = {}) {
     const keys = oauthEntryKeys(entryName, decl, cfg);
+    // `= null` in the parameter list and resolved here, the way cmdLogin and cmdLogout resolve their
+    // own locks: the default needs `backend`, `env` and `run`, and reading sibling parameters out of
+    // one destructuring pattern relies on evaluation order that is easy to break by reordering the
+    // list. A seam at all because the default DELETES — on gpg it is an `fs.rmSync` of a real file in
+    // the developer's keystore — and a test that reaches this path without injecting it would do
+    // that from a run that looks entirely green. That has happened once already, to cmdLogin's
+    // equivalent seam; the note is on loginDeps in the test file.
+    const removeEntry = remove ?? deleteEntryIo(backend, env, { run });
     const readEntry = async (key) => {
         // keyToPath (not the source's flat `${name}.gpg`) — this package's gpg layout already
         // namespaces entries by scope, so the file this key resolves to is the one keyToPath
         // computes everywhere else, not a hand-built path that skips the scope directory.
-        if (backend === "gpg" && !fs.existsSync(keyToPath(key, env))) {
+        if (backend === "gpg" && !gpgEntryPresent(key, env)) {
             return undefined;
         }
         // The bare segment after the last colon, for messages only — mapResolveError and the
@@ -1554,7 +1683,21 @@ function oauthLaunchDeps(entryName, decl, cfg, { backend = detectLocalBackend(),
             throw mapResolveError(backend, keyName, e);
         }
         try {
-            return cache.parseEntry(backend === "wcm" ? decodeCredBlobHex(raw).value : raw) ?? undefined;
+            const entry = cache.parseEntry(backend === "wcm" ? decodeCredBlobHex(raw).value : raw);
+            if (entry === null) {
+                // The corrupt case was the SILENT one, while the benign case below -- an entry a
+                // newer vc-secrets wrote -- got a line. That is backwards: one is a version skew a
+                // developer can reason about, the other is a keystore entry that has been damaged.
+                //
+                // parseEntry returns null rather than throwing because node embeds the first ten
+                // characters of its input in a JSON SyntaxError, and that input is a keystore blob.
+                // The notice is therefore built HERE, out of the key alone, so nothing of the value
+                // travels with it.
+                fs.writeSync(2, `vc-secrets: the stored entry for "${keyName}" is not readable JSON`
+                    + " -- treating it as absent; the next launch will sign in or exchange\n");
+            }
+
+            return entry ?? undefined;
         } catch (e) {
             // An entry written by a NEWER vc-secrets is named once and then treated as absent: the
             // next step is a sign-in either way, and refusing to launch over a cache this build
@@ -1590,6 +1733,23 @@ function oauthLaunchDeps(entryName, decl, cfg, { backend = detectLocalBackend(),
                     await write(keys.refresh, cache.serializeRefresh({ refreshToken: fresh.refreshToken,
                         tenantId: decl.tenantId, clientId: decl.clientId, scopes: decl.scopes }), { backend, env });
                 } catch (e) {
+                    // Both entries go, exactly as cmdLogin's identical branch does — and the reason
+                    // is STRONGER here, because nobody is watching. What is on disk after this
+                    // failure is a dead refresh token beside an access token that keeps working
+                    // until it expires. In `login` a human reads the throw and signs in again; here
+                    // the renewal timer catches it into one line on fd 2 and keeps ticking, so every
+                    // later tick spends the same dead token again. Cleared, the next tick reads the
+                    // entry as absent and says so.
+                    //
+                    // Certainly dead, not probably: this branch is reached only with a NEW refresh
+                    // token in hand, so Entra has rotated and what is stored cannot be redeemed.
+                    // Best effort, because the write failure is the actionable one and a delete's
+                    // error must not displace it.
+                    for (const stale of [keys.access, keys.refresh]) {
+                        try {
+                            await removeEntry(stale);
+                        } catch { /* best effort — the write failure is what the developer must see */ }
+                    }
                     // The one irreversible step: Entra invalidated the previous refresh token the
                     // moment it issued this one, so a failure here IS a signed-out state and must
                     // name the entry and the remedy rather than the tool that refused.
@@ -1597,10 +1757,23 @@ function oauthLaunchDeps(entryName, decl, cfg, { backend = detectLocalBackend(),
                         + `(${e.message}) -- run "vc-secrets login ${entryName}"`);
                 }
             }
+            const accessValue = cache.serializeAccess(fresh);
             try {
-                await write(keys.access, cache.serializeAccess(fresh), { backend, env });
+                await write(keys.access, accessValue, { backend, env });
+                clearOversizeMarker(keys.access, env);
             } catch (e) {
                 // Best effort by design: losing the access entry costs one exchange next launch.
+                //
+                // The renewal path is where an oversize entry HURTS, which is why it records the
+                // same marker cmdLogin does. RENEWAL_TICK_MS fires every five minutes and the tick
+                // decides from the store, so an access entry that never lands means an exchange --
+                // and a refresh-token rotation -- every five minutes, indefinitely, reported as one
+                // fd-2 line each time and never as a condition. Only exit 4, for the reason
+                // cmdLogin's twin of this branch spells out.
+                if (e.toolExitCode === 4) {
+                    recordOversizeMarker(keys.access, { backend, env, limit: WCM_BLOB_LIMIT,
+                        bytes: Buffer.byteLength(accessValue) });
+                }
                 fs.writeSync(2, `vc-secrets: the access entry could not be stored (${e.message}); `
                     + "the next launch will exchange one\n");
             }
@@ -1799,9 +1972,12 @@ function childNodeSupportsImport(version) {
 // The node that runs the server is whatever npx resolves on PATH, which need not be the one
 // running this launcher — so the gate reads the CHILD's version. Reading our own would pass
 // happily on a machine where the server cannot start.
-function childNodeVersionIo({ platform = process.platform, env = process.env } = {}) {
+// `run` is a seam only so the FAILURE path can be driven: the success path needs no help, but a
+// probe that cannot run is the case this function now has to describe, and arranging a real spawn
+// failure portably means breaking PATH resolution, whose rules differ per platform and node version.
+function childNodeVersionIo({ platform = process.platform, env = process.env, run = spawnSync } = {}) {
     const invocation = buildSpawnInvocation(resolveSpawnCommand("node", { platform, env }), ["--version"]);
-    const r = spawnSync(invocation.cmd, invocation.args,
+    const r = run(invocation.cmd, invocation.args,
         // Sanitized like runTool's and cmdLaunch's children, and last so no invocation option can
         // put a loader back. What this seam can actually show is the loud failure: node validates
         // NODE_OPTIONS even for --version, so an inherited value it rejects leaves the probe empty
@@ -1811,6 +1987,16 @@ function childNodeVersionIo({ platform = process.platform, env = process.env } =
         // rather than on a weaker per-site judgement.
         { encoding: "utf8", timeout: TIMEOUT_LOCAL_MS, windowsHide: true, ...invocation.opts,
             env: sanitizeEnv(env) });
+    if (r.error || r.status !== 0) {
+        // The reason rides out in the RETURN VALUE, because both consumers turn this into a refusal
+        // AND a message, and both were handed "". A node missing from PATH, a node killed by the
+        // timeout, and a node that aborted because it rejected an inherited NODE_OPTIONS all read as
+        // "no version" -- and that last one is the case this probe was added to catch, so it was the
+        // one indistinguishable from the others. Any non-version string still fails
+        // childNodeSupportsImport's match, so what happens next is unchanged; only what the
+        // developer is told changes.
+        return `no usable version (${r.error?.code ?? r.error?.message ?? `exit ${r.status}`})`;
+    }
 
     return (r.stdout ?? "").trim();
 }
@@ -1938,9 +2124,23 @@ function openBrowser(spec, { spawnProcess = spawn, log = (line) => process.stder
         { stdio: "ignore", detached: true, windowsHide: true, ...spec.opts });
     // A missing opener fails ASYNCHRONOUSLY, so the caller's try/catch is long gone by then and an
     // unhandled `error` would end the sign-in on a stack trace. Losing the browser is a degradation:
-    // the URL is printable and the listener is already waiting.
+    // the URL is already printed and the listener is already waiting.
     child.on("error", (e) => log(`vc-secrets: could not open a browser (${e.code ?? e.message})`
-        + " -- open the sign-in URL by hand\n"));
+        + " -- open the sign-in URL above by hand\n"));
+    // `error` covers a spawn that never happened; this covers one that happened and then failed,
+    // which is the commoner shape and was invisible. wslview with interop off, xdg-open on a
+    // headless host and a policy-blocked powershell all spawn cleanly and exit non-zero, so the
+    // sign-in went on waiting for a browser that was never going to appear with nothing said.
+    //
+    // Falsy rather than `!== 0`, because it must also pass over the null a signal gives: an opener
+    // the developer killed, or one that execs into a browser and dies with it, is not the opener
+    // reporting a failure of its own.
+    child.on("close", (code) => {
+        if (code) {
+            log(`vc-secrets: the browser opener exited with code ${code}`
+                + " -- open the sign-in URL above by hand\n");
+        }
+    });
 
     return child.unref();
 }
@@ -2048,6 +2248,24 @@ function handleCallback(req, expectedState, redirectPath) {
     return code ? { code } : { error: "no_code" };
 }
 
+// Generous on purpose. Its job is to end a HANG, not to hurry a human through MFA, a password
+// change or a first-time consent prompt -- anyone actually signing in returns long before it, and
+// anyone who is not gets the URL and a reason instead of a cursor. Nothing in the protocol bounds
+// this wait: the authorization code does not exist until the callback arrives, so its own short
+// lifetime constrains what happens after, never how long we may wait for it.
+const LOGIN_WAIT_MS = 10 * 60 * 1000;
+
+// Races a promise against a timer that is ALWAYS cleared. A bare Promise.race leaves the timer
+// pending on the winning path too, and node keeps the process alive until it fires -- so a sign-in
+// that completed in ten seconds would hold the CLI open for the remaining ten minutes, looking
+// exactly like the hang the deadline was added to prevent.
+function withDeadline(promise, ms, onTimeout) {
+    let timer = null;
+    const expiry = new Promise((resolve) => { timer = setTimeout(() => resolve(onTimeout()), ms); });
+
+    return Promise.race([promise, expiry]).finally(() => clearTimeout(timer));
+}
+
 async function cmdLogin(serverName, cfg, {
     listen = listenForCallback,
     open = openBrowser,
@@ -2061,6 +2279,8 @@ async function cmdLogin(serverName, cfg, {
     acquireLock = null,
     now = Date.now,
     sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+    waitMs = LOGIN_WAIT_MS,
+    oversize = null,
 } = {}) {
     const decl = (cfg.oauth ?? {})[serverName];
     if (!decl) {
@@ -2107,6 +2327,10 @@ async function cmdLogin(serverName, cfg, {
     // this function's own text keeps finding it as a seam.
     const acquire = acquireLock ?? tokenLockFor(serverName, decl, cfg);
     const removeStale = removeEntry ?? deleteEntryIo(backend);
+    // A seam for the same reason removeEntry is one: the default TOUCHES THE FILESYSTEM under the
+    // developer's own config directory, and a test that reaches either path without injecting it
+    // does that from a run that reports nothing but a pass.
+    const marker = oversize ?? { record: recordOversizeMarker, clear: clearOversizeMarker };
     const { verifier, challenge } = oauth.createPkcePair();
     const state = randomState();
     const server = await listen(state, { entryName: serverName });
@@ -2121,14 +2345,26 @@ async function cmdLogin(serverName, cfg, {
         const redirectUri = `http://localhost:${server.port}${REDIRECT_PATH}`;
         const url = oauth.buildAuthorizeUrl({ tenantId: decl.tenantId, clientId: decl.clientId,
             scopes: decl.scopes, redirectUri, state, challenge });
+        // Printed on EVERY path, and before the opener rather than instead of it. The URL carries
+        // the tenant, the client, the redirect and the PKCE CHALLENGE; the verifier never leaves
+        // this process, pinned by "cmdLogin: the verifier never leaves the process, only its digest
+        // does". So it is not a secret, and every degradation
+        // that can follow points at it: openBrowser's two failure lines say "open the sign-in URL
+        // above by hand", and the deadline below says the same. Printed only when there was no
+        // opener, that advice named something the developer had never been shown.
+        log(`vc-secrets: open this URL to sign in to "${serverName}":\n${url}\n`);
         const spec = browser(process.platform, process.env, url);
         if (spec) {
             open(spec);
-            log(`vc-secrets: opening a browser to sign in to "${serverName}"\n`);
-        } else {
-            log(`vc-secrets: open this URL to sign in to "${serverName}":\n${url}\n`);
+            log("vc-secrets: a browser is being opened on it\n");
         }
-        const verdict = await server.next();
+        // `next()` resolves only when the callback arrives, and every way a browser fails to reach
+        // it is silent, so the wait needs a bound of its own. It resolves to a VERDICT rather than
+        // throwing, so the `verdict.error` branch below reports a deadline exactly as it reports
+        // any other failed sign-in -- declawing included.
+        const verdict = await withDeadline(server.next(), waitMs, () => ({ error: "timed_out",
+            description: `nothing reached the callback within ${Math.round(waitMs / 1000)}s`
+                + " -- if no browser opened, sign in with the URL above and run this again" }));
         if (verdict.error) {
             // The extras carry whatever Entra chose to send instead of a description; without them
             // an `access_denied` reaches the developer as one word they can do nothing with.
@@ -2161,8 +2397,15 @@ async function cmdLogin(serverName, cfg, {
         // Past this line the authorization code is SPENT: an exception here stores nothing, clears
         // nothing, and leaves the previous login's entries in exactly the lying state the fatal
         // write branch below exists to prevent — and the developer cannot retry with the same code.
+        // A reason of its own, not acquireTokenLock's "unbindable". That function classifies
+        // deliberately and RETHROWS what it refuses to classify -- a TypeError from broken wiring,
+        // an EMFILE under fd exhaustion -- with its own comment calling a wide catch exactly the
+        // mistake this used to make: relabelling them here put them back under "the sandbox refused
+        // the bind", a diagnosis nobody had made, and the reader went to check their sandbox.
+        // Only the label changes HERE; storing the token anyway is unchanged and deliberate. The
+        // wording that goes with the new label is at the `lock-failed` branch below.
         const { lock, reason, error } = await acquireTokenLock({ acquireLock: acquire, now, sleep, log })
-            .catch((e) => ({ lock: null, reason: "unbindable", error: e }));
+            .catch((e) => ({ lock: null, reason: "lock-failed", error: e }));
         if (reason === "busy") {
             // Waited the full ceiling and gave up. Worded as "was still holding" rather than "is":
             // the latch that got us here remembers a holder was SEEN, not that one is there now.
@@ -2176,12 +2419,49 @@ async function cmdLogin(serverName, cfg, {
             log(`vc-secrets: the token lock could not be taken (${error?.code ?? error?.name}) -- this sign-in`
                 + " is NOT serialised against an in-flight renewal\n");
         }
+        if (reason === "lock-failed") {
+            // Stored anyway, exactly as the two branches above store: past the exchange the
+            // authorization code is SPENT, so refusing would charge the developer a fresh
+            // interactive sign-in for a fault that is ours. The wording is the only thing that
+            // separates this from the `unbindable` message -- "could not be taken" describes a lock
+            // that was unavailable, and this is not that; nothing was wrong with the lock.
+            log(`vc-secrets: taking the token lock FAILED (${error?.code ?? error?.name}) -- not a busy lock`
+                + " and not a sandbox refusal, so please report it; this sign-in is NOT serialised"
+                + " against an in-flight renewal\n");
+        }
         try {
-            // Refresh first, and its failure is fatal. Entra kills the old refresh token the moment
-            // it issues this one, so this write is the single step in the design that cannot be
-            // retried — an access entry stored beside a refresh token that never landed describes a
-            // session that works for an hour and then cannot be renewed by anything.
+            // The previous login's access entry goes first, and the refresh write follows it;
+            // both failures are fatal and share one clearing branch.
+            //
+            // The order is the whole point. An access entry carries no identity — serializeAccess
+            // stores none — so cacheStatus checks the declaration against the REFRESH entry and then
+            // serves whatever access token sits beside it. Sign in as a different account, store the
+            // new refresh token, then fail to store the new access token, and the previous account's
+            // token is still there and still inside its lifetime: the next read returns it and the
+            // server runs as that principal. Deleting first makes the worst case an access entry
+            // that is MISSING, which costs one exchange. Adding the identity to serializeAccess
+            // instead does not close it — two people signing in on one declaration share tenant,
+            // client and scopes, so the fields would match.
+            //
+            // Only on this path. A renewal cannot change identity, so an access entry that survives
+            // there belongs to the same account and using it is correct.
+            //
+            // The refresh write is the single step in the design that cannot be retried: Entra kills
+            // the old refresh token the moment it issues this one, so an access entry stored beside
+            // a refresh token that never landed describes a session that works for an hour and then
+            // cannot be renewed by anything.
             try {
+                try {
+                    await removeStale(names.access);
+                } catch (e) {
+                    // Only exit 3 means "there was no entry", which is every first login. Any other
+                    // failure leaves the previous entry readable — the state this delete exists to
+                    // prevent — so it takes the clearing branch below instead of being swallowed.
+                    // cmdLogout draws this same line, for the mirror reason.
+                    if (e.toolExitCode !== 3) {
+                        throw e;
+                    }
+                }
                 await writeEntry(names.refresh, cache.serializeRefresh({ refreshToken: parsed.refreshToken,
                     tenantId: decl.tenantId, clientId: decl.clientId, scopes: decl.scopes }));
             } catch (e) {
@@ -2196,11 +2476,30 @@ async function cmdLogin(serverName, cfg, {
                 }
                 throw e;
             }
+            const accessValue = cache.serializeAccess(parsed);
             try {
-                await writeEntry(names.access, cache.serializeAccess(parsed));
+                await writeEntry(names.access, accessValue);
+                // Cleared on success -- the marker is current state, not a log; the reason is on
+                // oversizeMarkerPath.
+                marker.clear(names.access);
             } catch (e) {
                 // Best-effort by design: losing the access entry costs one exchange on next launch,
                 // where failing the whole login would cost an interactive sign-in.
+                //
+                // Exit 4 is the one failure here that cannot come right on its own -- the value is
+                // over the backend's ceiling, so the identical write fails identically forever -- and
+                // it is recorded for exactly that reason. ONLY exit 4: a transient failure that left
+                // a marker behind would report a permanent condition that the very next successful
+                // write disproves, and that distinction is the whole point of the file.
+                //
+                // Credential Manager is the only backend that produces it (gpg has no ceiling to
+                // cross and keychain does not signal size this way), so WCM_BLOB_LIMIT is the limit
+                // to record; `backend` still goes in the marker, because a reader should not have
+                // to infer which store refused from the value of a number.
+                if (e.toolExitCode === 4) {
+                    marker.record(names.access, { backend, limit: WCM_BLOB_LIMIT,
+                        bytes: Buffer.byteLength(accessValue) });
+                }
                 log(`vc-secrets: signed in, but the access entry could not be stored (${e.message}); `
                     + "the next launch will exchange one\n");
             }
@@ -2272,7 +2571,19 @@ async function cmdLogout(serverName, cfg, { deleteEntry = null,
                 // Only exit 3 means "no such entry". Treating every failure as success would report
                 // a logout that left the refresh token on disk, which is the one thing logout is for.
                 if (e.toolExitCode !== 3) {
-                    throw e;
+                    // What the loop already removed leaves WITH the error. Thrown bare, the return
+                    // value died with the stack and the developer read "logout failed" over a state
+                    // where one of the two entries is in fact gone -- and the two halves fail
+                    // differently. A refresh token removed with the access token left behind keeps
+                    // working for up to an hour and then cannot renew; the reverse is merely an
+                    // extra exchange. The retry is the same command either way, so this is about
+                    // what the developer believes is on disk, not about what to do next.
+                    const partial = removed.length > 0
+                        ? ` -- this logout is HALF done, "${removed.join('", "')}" already removed`
+                        : "";
+
+                    throw Object.assign(new VcSecretsError(`${e.message}${partial}`),
+                        { toolExitCode: e.toolExitCode, removed: [...removed] });
                 }
                 alreadyAbsent.push(name);
             }
@@ -2299,7 +2610,7 @@ function makeSecretResolver(cfg, env = process.env) {
     const resolver = async (name, decl) => {
         const key = keyFor(name, decl, cfg);
         const backend = decl.backend === "keyvault" ? "keyvault" : detectLocalBackend(process.platform, env);
-        if (backend === "gpg" && !fs.existsSync(keyToPath(key, env))) {
+        if (backend === "gpg" && !gpgEntryPresent(key, env)) {
             throw new VcSecretsError(`secret "${name}" not set -- run "vc-secrets set ${name}"`);
         }
         const spec = backend === "keyvault" ? buildKeyvaultRead(decl) : buildLocalRead(backend, key, env);
@@ -2497,7 +2808,7 @@ async function readLegacyLocalValue(backend, name, env = process.env) {
 // that follows succeeds — so the overwrite is committed and reported as a successful migration.
 async function newKeyPresent(backend, key, env = process.env) {
     if (backend === "gpg") {
-        return fs.existsSync(keyToPath(key, env));
+        return gpgEntryPresent(key, env);
     }
     try {
         await runTool(buildLocalRead(backend, key, env));
@@ -2584,11 +2895,24 @@ async function cmdMigrate(cfg) {
     }
 }
 
-function readEnableLists(file) {
+function readEnableLists(file, problems = []) {
     let parsed;
     try {
         parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-    } catch {
+    } catch (e) {
+        // Reported when the file EXISTS, exactly as readWiredServers reports its own, and for the
+        // same reason: the empty lists returned below are indistinguishable from a file that
+        // genuinely enables nothing. They decide which servers count as consuming a secret and
+        // which env keys the file contributes, so an unreadable settings.local.json makes doctor
+        // quietly answer both questions wrong rather than say it could not look.
+        //
+        // Absent stays silent -- most projects have no settings.local.json, and a missing optional
+        // file is not a fault.
+        if (fs.existsSync(file)) {
+            problems.push(`${file}: cannot be read (${e.message}) -- treating it as no enable/disable lists,`
+                + " so the servers reported as consuming a secret may be wrong");
+        }
+
         return { enabled: [], disabled: [], envKeys: [] };
     }
 
@@ -2612,8 +2936,18 @@ function readWiredServers(mcpJsonPath, userJsonPath = null, projectRoot = null, 
     // does not contain the lowercase string — so a case-sensitive args-only match failed on exactly the
     // configuration this plugin tells people to write, leaving `wired` empty and the legacy-token advice
     // stuck at "still required".
-    const mentionsLauncher = (v) => typeof v === "string" && v.toLowerCase().includes("vc-secrets")
-        || typeof v === "string" && v.toUpperCase().includes("VC_SECRETS");
+    // `(?![A-Z_])` for the reason WIRED_MARKER_RE carries the same lookahead and calls it
+    // load-bearing: without it a server that merely sets a documented knob -- VC_SECRETS_TIMING,
+    // VC_SECRETS_LOCAL_BACKEND -- reads as wired through us. That is the false POSITIVE direction,
+    // and it flips the legacy-token line from "still required" to "remove it": advice to delete a
+    // credential that is still live. `${VC_SECRETS}` still matches, because `}` is not [A-Z_].
+    //
+    // The lowercase branch needs no such guard: the knobs spell it `VC_SECRETS_`, with an
+    // underscore, and this branch looks for the hyphenated `vc-secrets`. It stays broader than
+    // WIRED_MARKER_RE on purpose -- a launcher invoked as a bare `vc-secrets` on PATH carries no
+    // .mjs for the stricter grammar to find, and missing THAT is the cheap direction to be wrong in.
+    const mentionsLauncher = (v) => typeof v === "string"
+        && (v.toLowerCase().includes("vc-secrets") || /VC_SECRETS(?![A-Z_])/.test(v.toUpperCase()));
     const collect = (mcpServers) => {
         for (const [name, entry] of Object.entries(mcpServers ?? {})) {
             const fields = [entry?.command, ...(Array.isArray(entry?.args) ? entry.args : [])];
@@ -2892,7 +3226,7 @@ async function oauthTenantChecks(cfg, references, { resolveOrgTenant: resolve = 
     return checks;
 }
 
-function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, toolsMissing, wired, configDirOverride, legacyOnly = [], shimContract = null, wiringProblems = [], clientConfigsSeen = [], writeProbe = null, oauthStatus = {}, tenantChecks = [], childNode = null }) {
+function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, toolsMissing, wired, configDirOverride, legacyOnly = [], shimContract = null, wiringProblems = [], clientConfigsSeen = [], writeProbe = null, oauthStatus = {}, oauthOversize = {}, tenantChecks = [], childNode = null }) {
     const lines = [];
     const loadedFiles = Object.entries(cfg.files ?? {}).map(([scope, file]) => `${scope}=${file}`).join(", ");
     if (loadedFiles) {
@@ -2972,8 +3306,15 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
         lines.push(`SKIP secret "${name}" (keyvault) -- no enabled server consumes it; use --all to force`);
     }
     if (writeProbe === "ok") {
+        // The probe writes a value of exactly WCM_BLOB_LIMIT bytes, so it proves only that the store
+        // accepts a write of that size through the non-interactive path. Whether the entry THIS
+        // machine produces fits under it is a different question -- the measured access entry was
+        // 2536 of a 2560-byte ceiling, growing about forty bytes per group membership -- so a
+        // machine one group over passes this probe and then fails every real write. The oversize
+        // WARN above is what answers that question.
         lines.push(`OK ${backend ?? "the keystore"} accepts a write at the size limit`
-            + " (login and token renewal can store)");
+            + " -- login and renewal can reach the store; whether the token they produce fits under"
+            + " that limit is answered only by storing one");
     } else if (typeof writeProbe === "string") {
         lines.push(`FAIL ${backend ?? "the keystore"} rejected a write at the size limit`
             + ` -- "vc-secrets login" may not be able to store a token: ${writeProbe}`);
@@ -2997,6 +3338,24 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
             lines.push(`INFO oauth "${name}" (${home}): the declaration changed since sign-in (tenant, client or scopes) -- run "vc-secrets login ${name}"`);
         } else {
             lines.push(`FAIL oauth "${name}" (${home}) cache could not be read -- ${status}`);
+        }
+        // Printed beside the status rather than instead of it, because the two are independent: the
+        // entry above usually reads "needs-refresh", which is an OK line and honestly so -- the next
+        // launch WILL renew. What that line cannot say is that it will do so every single time, and
+        // pay a refresh-token rotation for it.
+        //
+        // WARN and not FAIL. Nothing is broken and nothing is lost; a FAIL exits 1 and would redden
+        // every run on an affected machine for a condition the developer cannot act on. The line
+        // exists to be seen when the contingency it names is finally worth building.
+        const oversize = oauthOversize[name];
+        if (oversize) {
+            // The store named in words, not as the internal backend id: "wcm" tells a developer
+            // nothing, and this line is read by whoever has to decide what to do about it.
+            const store = oversize.backend === "wcm" ? "Credential Manager" : oversize.backend;
+            lines.push(`WARN oauth "${name}": the access entry does not fit ${store}`
+                + ` (${oversize.bytes} bytes, limit ${oversize.limit}).`);
+            lines.push("     Every launch and every renewal now pays a token exchange, and each rotates the refresh token.");
+            lines.push("     Nothing to change locally -- this is the design's DPAPI contingency, and this line is its trigger.");
         }
     }
     // A list rather than one verdict: with two oauth entries a single variable reports only the last,
@@ -3270,8 +3629,13 @@ async function cmdDoctor(cfg, flags = []) {
     // checks are skipped rather than guessed at -- a missing project is not itself a fault.
     const projectFile = cfg.files.project ?? cfg.files.local;
     const claudeDir = projectFile ? path.dirname(projectFile) : null;
-    const enableLists = claudeDir ? readEnableLists(path.join(claudeDir, "settings.local.json")) : { enabled: [], disabled: [], envKeys: [] };
+    // Declared before the enable-list read rather than beside the wiring read: both inputs are
+    // optional files that doctor must not silently substitute defaults for, so they report through
+    // one channel.
     const wiringProblems = [];
+    const enableLists = claudeDir
+        ? readEnableLists(path.join(claudeDir, "settings.local.json"), wiringProblems)
+        : { enabled: [], disabled: [], envKeys: [] };
     const clientConfigsSeen = [];
     const wired = readWiredServers(
         claudeDir ? path.join(claudeDir, "..", ".mcp.json") : null,
@@ -3340,7 +3704,16 @@ async function cmdDoctor(cfg, flags = []) {
     // Read, never exchanged: proving a token is refreshable would rotate the refresh token as a side
     // effect of a diagnostic -- and Entra rotates on use, which signs out every session but one.
     const oauthStatus = {};
+    const oauthOversize = {};
     for (const [name, decl] of Object.entries(cfg.oauth ?? {})) {
+        // Read, never recomputed. doctor holds no fresh token and must not exchange for one, so it
+        // cannot measure what an access entry WOULD weigh -- and an entry that exceeded the ceiling
+        // was never stored, so there is nothing in the keystore to measure either. The marker a
+        // failed write left behind is the only place this fact survives.
+        const marker = readOversizeMarker(oauthEntryKeys(name, decl, cfg).access);
+        if (marker) {
+            oauthOversize[name] = marker;
+        }
         try {
             // cfg passed through (unlike the source's two-argument call): oauthEntryKeys needs it to
             // build a project-scope key -- keyFor reads cfg.projectId whenever decl.scope is not
@@ -3364,7 +3737,7 @@ async function cmdDoctor(cfg, flags = []) {
         env: process.env, platform: process.platform, enableLists, resolvable, skipped,
         toolsMissing, wired, configDirOverride: Boolean(process.env.VC_SECRETS_CONFIG_DIR), legacyOnly,
         shimContract: activeShimContract, wiringProblems, clientConfigsSeen,
-        writeProbe, oauthStatus, tenantChecks, childNode,
+        writeProbe, oauthStatus, oauthOversize, tenantChecks, childNode,
     });
     // sync write: stderr is an async pipe on Windows, and process.exit abandons pending writes
     fs.writeSync(2, lines.join("\n") + "\n");
@@ -3501,7 +3874,7 @@ async function cmdLaunch(kind, name, cfg, deps = {}) {
     });
     resolver.resolvedValues.length = 0;   // shrink the in-heap window
 
-    let reportedUndelivered = false;
+    let undelivered = 0;
     let renewing = false;
     if (channel !== null) {
         renewalTimer = setInterval(() => {
@@ -3520,10 +3893,31 @@ async function cmdLaunch(kind, name, cfg, deps = {}) {
                     return;
                 }
                 token = fresh;
-                if (channel.push(fresh) === 0 && !reportedUndelivered) {
-                    reportedUndelivered = true;
-                    fs.writeSync(2, "vc-secrets: renewed the token, but nothing is connected to the channel yet; "
-                        + "it will be handed over when the server connects\n");
+                if (channel.push(fresh) === 0) {
+                    undelivered += 1;
+                    // The first one is ordinary and its promise is true: a server still starting has
+                    // not connected yet, and the handover does happen when it does. A SECOND means
+                    // another RENEWAL_TICK_MS passed with nothing attached, and by then the likely
+                    // cause is that no process ever matched the declared target -- at which point
+                    // repeating the first message would be asserting a future that will not arrive.
+                    //
+                    // The preload cannot report this from its own side: NODE_OPTIONS reaches every
+                    // node process the server spawns, so failing isTargetEntry is the ordinary case
+                    // there and a line per miss would bury the one that matters.
+                    //
+                    // Silent from the third on. The condition cannot change without a restart, so a
+                    // line every tick would be noise -- but latching at ONE was what let the false
+                    // promise stand as the last word.
+                    if (undelivered === 1) {
+                        fs.writeSync(2, "vc-secrets: renewed the token, but nothing is connected to the channel yet; "
+                            + "it will be handed over when the server connects\n");
+                    } else if (undelivered === 2) {
+                        fs.writeSync(2, "vc-secrets: renewed the token again with nothing connected -- no process has"
+                            + ` matched the declared target (targetPackage "${oauthEntry.decl.targetPackage}"`
+                            + `${oauthEntry.decl.binName ? `, binName "${oauthEntry.decl.binName}"` : ""}),`
+                            + " so the server is running on the token it started with and will lose access when"
+                            + " that one expires\n");
+                    }
                 }
             }).catch((e) => {
                 // Loud on fd 2 and nowhere else: the stdio channel is the client's, and the
@@ -3755,6 +4149,7 @@ export {
     oauthEntryKeys, oauthKeyClashes, oauthStatusFrom, oauthReferences, oauthTenantChecks,
     ORG_FLAGS_WITH_VALUE, organisationFromArgs, resolveOrgTenant, TIMEOUT_TENANT_MS,
     resolveEnvEntries, detectLocalBackend, redactSecrets, secretsDir, psEncode, psCommand, PS_CRED_READ, PS_CRED_WRITE,
+    oversizeMarkerPath, recordOversizeMarker, clearOversizeMarker, readOversizeMarker,
     PS_CRED_DELETE, decodeCredBlobHex, buildLocalRead, buildLocalWrite, buildLocalDelete, deleteEntryIo,
     probeKeystoreWrite, WRITE_PROBE_NAME, writeProbeValue, WRITE_PROBED_BACKENDS,
     buildKeyvaultRead, TIMEOUT_LOCAL_MS, TIMEOUT_AZ_MS, VALUE_ON_STDIN, SECURITY_LINE_LIMIT, WCM_BLOB_LIMIT,
@@ -3763,7 +4158,7 @@ export {
     CHANNEL_GREETING_MAX, channelPipeName, createChannel, PRELOAD_PATH, buildChildEnv,
     childNodeSupportsImport, childNodeVersionIo,
     REDIRECT_PATH, MAX_ERROR_PARAMS, closeTabPage, forTerminal, escapeHtml, failedPage, listenForCallback,
-    openBrowser, buildBrowserCommand, handleCallback, cmdLogin, cmdLogout,
+    openBrowser, buildBrowserCommand, handleCallback, cmdLogin, cmdLogout, withDeadline, LOGIN_WAIT_MS,
     runTool, resolveSpawnCommand, buildSpawnInvocation, makeSecretResolver, cmdRun, cmdTask, cmdLaunch, killProcessTree,
     RENEWAL_TICK_MS,
     validateLaunchables, LEGACY_ENV_VARS, LEGACY_SECRET_ENV_VARS,

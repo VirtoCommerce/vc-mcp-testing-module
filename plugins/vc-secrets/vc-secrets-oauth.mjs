@@ -71,6 +71,18 @@ function describeTokenError(status, body) {
     return `HTTP ${status} with an unrecognised body`;
 }
 
+// Whether the body is Entra's own error object rather than whatever else arrived carrying the
+// status. Derived a second time instead of threading an extra return value out of describeTokenError,
+// whose callers and tests all take a string: this runs once, on an error path, and the duplicated
+// parse buys both readers a shape they can use on their own.
+function isEntraJudgement(body) {
+    try {
+        return Boolean(JSON.parse(body)?.error);
+    } catch {
+        return false;
+    }
+}
+
 function parseTokenResponse(status, body, now, kind, uptimeAtIssue) {
     if (status < 200 || status >= 300) {
         // Tagged, because the launcher has to tell a dead refresh token from a dead network: the
@@ -82,9 +94,16 @@ function parseTokenResponse(status, body, now, kind, uptimeAtIssue) {
         // Only where Entra JUDGED the grant, which is what a sign-in answers. 5xx, 408 and 429
         // are the service asking to be tried later: tagging those too would send a developer to
         // rotate a LIVE refresh token over an outage the next 60-second tick would have ridden out.
+        //
+        // And only where the answer came from Entra AT ALL. A status code cannot say that on its
+        // own: a captive portal, a corporate proxy or a misrouted request answers 400 with an HTML
+        // page, and reading that as a judgement sends the developer to sign in again -- which
+        // rotates a live refresh token away over a network that was merely in the way.
+        // describeTokenError already tells the two apart to choose its wording; this decision needs
+        // the same fact and was the only one not asking for it.
         const retryable = status >= 500 || status === 408 || status === 429;
         throw Object.assign(new VcSecretsError(`token endpoint refused the request: ${describeTokenError(status, body)}`),
-            { refused: !retryable });
+            { refused: !retryable && isEntraJudgement(body) });
     }
     let parsed;
     try {

@@ -85,12 +85,21 @@ function fail(message) {
 
 const registryPath = path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json");
 let registry = null;
+let registryProblem = null;
 try {
     registry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
-} catch {
+} catch (e) {
     // No longer fatal. This file belongs to one client, and the plugin is meant to run under three —
     // failing here is what made every generated config entry naming this shim useless on the other
     // two. The cache walk covers them, and the failure at the end names every root that was tried.
+    //
+    // Absent and CORRUPT are not the same answer, though, and the failure at the end stated the
+    // absent one for both: "plugin is not installed" sends a developer to reinstall something this
+    // file may record perfectly well, under a parse error nothing mentioned. ENOENT is ordinary —
+    // two of the three clients keep no registry at all — so only the rest is worth carrying.
+    if (e.code !== "ENOENT") {
+        registryProblem = e.code ?? e.message;
+    }
 }
 // This file is owned by the client, so a schema change arrives with a Claude Code upgrade — no user
 // action at all. Refusing to launch would take every wrapped server down at once, and the message lands
@@ -187,10 +196,19 @@ if (fromRegistry.length > 0) {
     // record it holds points at a directory with no launcher in it. installsInCaches returns only
     // directories that DO hold one, so anything it finds is usable by construction.
     const cached = installsInCaches();
+    if (cached.length === 0 && records.length > 0) {
+        fail(`no usable install of ${PLUGIN_KEY} -- every record in ${registryPath} points at a directory holding no ${LAUNCHER}, and no plugin cache holds one either. `
+            + "Reinstall it from the marketplace, then run the vc-secrets install skill");
+    }
     if (cached.length === 0) {
-        fail(records.length > 0
-            ? `no usable install of ${PLUGIN_KEY} -- every record in ${registryPath} points at a directory holding no ${LAUNCHER}, and no plugin cache holds one either. `
-                + "Reinstall it from the marketplace, then run the vc-secrets install skill"
+        // An absent registry and an unparseable one both arrive here with no records, and they need
+        // different words. "Not installed" is a claim this shim cannot support when the file that
+        // would have said otherwise is the one it could not read -- and it prescribes an install
+        // that will not fix a corrupt registry.
+        fail(registryProblem
+            ? `could not determine whether ${PLUGIN_KEY} is installed -- ${registryPath} could not be read `
+                + `(${registryProblem}), and no plugin cache in ${CACHE_ROOTS.join(", ")} holds a ${LAUNCHER}. `
+                + "Repair or remove that file, or install the plugin from the marketplace, then run the vc-secrets install skill"
             : `plugin ${PLUGIN_KEY} is not installed -- looked in ${registryPath} and in ${CACHE_ROOTS.join(", ")}. `
                 + "Install it from the marketplace, then run the vc-secrets install skill");
     }

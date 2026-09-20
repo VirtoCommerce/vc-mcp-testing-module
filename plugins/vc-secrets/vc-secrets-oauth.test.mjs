@@ -321,6 +321,13 @@ test("parseTokenResponse: only a judged grant is refused — a throttle or an ou
     assert.equal(tag(503, "<html>gateway</html>"), false);
     assert.equal(tag(429, JSON.stringify({ error: "temporarily_unavailable" })), false);
     assert.equal(tag(408, ""), false);
+    // A non-retryable status is NOT enough on its own. A captive portal, a corporate proxy or a
+    // misrouted request answers 400 with an HTML page, and nothing in that exchange was Entra
+    // judging the grant -- so tagging it a refusal sends the developer to sign in again and rotates
+    // a live refresh token away over a network that was merely in the way. The status code cannot
+    // tell these apart; only the body can.
+    assert.equal(tag(400, "<html>sign in to the guest wifi</html>"), false);
+    assert.equal(tag(401, "Proxy Authentication Required"), false);
 });
 
 // Measured on this machine: a bind that is refused does NOT throw from listen() — it emits
@@ -1230,6 +1237,34 @@ test("oauthLaunchDeps.readCache: a valid access entry is reported valid and carr
     assert.equal(status.refreshToken, undefined, "a valid verdict carries no refresh token");
 });
 
+test("oauthLaunchDeps.readCache: a corrupt stored entry is named, not silently treated as absent", async (t) => {
+    // Backwards before this: the BENIGN case -- an entry a newer vc-secrets wrote, which parseEntry
+    // throws for -- got a line on fd 2, while a damaged blob returned null and vanished. One is a
+    // version skew a developer can reason about; the other is a keystore entry that has been
+    // corrupted, and it was the silent one.
+    //
+    // Both still resolve to absent, which is the right ANSWER: the next launch signs in or
+    // exchanges either way. What was missing is that it happened at all.
+    const stderr = [];
+    t.mock.method(fs, "writeSync", (fd, str) => {
+        if (fd !== 2) {
+            throw new Error(`unexpected fs.writeSync(${fd}, ...) in this test`);
+        }
+        stderr.push(str);
+
+        return Buffer.byteLength(str);
+    });
+    const deps = m.oauthLaunchDeps("azure-mcp", LAUNCH_DECL, LAUNCH_CFG, { backend: "keychain",
+        run: async () => "ZZCORRUPTSENTINELZZ{{{" });
+    assert.deepEqual(await deps.readCache(), { state: "absent" });
+    assert.equal(stderr.length, 1, `expected exactly one notice, got ${JSON.stringify(stderr)}`);
+    assert.match(stderr[0], /not readable JSON/);
+    // The reason parseEntry returns null instead of throwing: node embeds the first ten characters
+    // of its input in a JSON SyntaxError, and that input is a keystore blob. A notice built from
+    // the rethrown message would have carried a token prefix into the developer's terminal.
+    assert.doesNotMatch(stderr[0], /ZZCORRUPTSENTINELZZ/, "no byte of the stored value may appear");
+});
+
 test("oauthLaunchDeps.writeCache: a renewal that issues no new refresh token leaves the stored one alone", async () => {
     // RFC 6749 section 6 makes refresh_token optional on the refresh grant. Writing the entry
     // anyway serialises `undefined` over a LIVE refresh token, and the next launch then demands
@@ -1249,12 +1284,99 @@ test("oauthLaunchDeps.writeCache: a refresh token that cannot be stored names th
     // The one irreversible step: Entra killed the previous refresh token when it issued this one,
     // so a failure here IS a signed-out state, and reporting the tool's own words would name a
     // keystore problem instead of the sign-in that fixes it.
+    //
+    // `remove` is injected although this test asserts nothing about it: the failure below now takes
+    // the clearing branch, and the default seam DELETES for real — an `fs.rmSync` on gpg, a spawned
+    // `security` here. Left out, this test would reach the developer's own keystore from a run that
+    // reports nothing but a pass, which is how the same omission cost a live sign-in once already.
     const deps = m.oauthLaunchDeps("azure-mcp", LAUNCH_DECL, LAUNCH_CFG, { backend: "keychain",
-        write: async () => { throw new Error("security: SecKeychainItemCreateFromContent failed"); } });
+        write: async () => { throw new Error("security: SecKeychainItemCreateFromContent failed"); },
+        remove: async () => {} });
     await assert.rejects(() => deps.writeCache({ accessToken: "a2", refreshToken: "r2",
         expiresAt: 9e15, obtainedAt: 1, lifetimeMs: 3600_000, uptimeAtIssue: 1 }),
         (e) => e instanceof m.VcSecretsError && /oauth-azure-mcp-refresh/.test(e.message)
             && /vc-secrets login azure-mcp/.test(e.message));
+});
+
+test("oauthLaunchDeps.writeCache: a failed refresh write clears both entries, so the timer stops spending a dead token", async () => {
+    // The renewal path used to throw and clear nothing, while cmdLogin cleared on the identical
+    // condition with the reasoning written out. The asymmetry matters because of who is watching:
+    // `login` throws at a human, but this throw is caught by the renewal interval into one line on
+    // fd 2 and the interval keeps running -- so every subsequent tick exchanges a refresh token
+    // Entra killed when it issued the one that could not be stored. Cleared, the next tick reads
+    // absent and names the sign-in instead.
+    const removed = [];
+    const deps = m.oauthLaunchDeps("azure-mcp", LAUNCH_DECL, LAUNCH_CFG, { backend: "keychain",
+        write: async () => { throw new Error("security: SecKeychainItemCreateFromContent failed"); },
+        remove: async (key) => { removed.push(key); } });
+    await assert.rejects(() => deps.writeCache({ accessToken: "a2", refreshToken: "r2",
+        expiresAt: 9e15, obtainedAt: 1, lifetimeMs: 3600_000, uptimeAtIssue: 1 }));
+    assert.deepEqual(removed, [LAUNCH_KEYS.access, LAUNCH_KEYS.refresh]);
+});
+
+test("oauthLaunchDeps.writeCache: an oversize access entry is recorded on the renewal path too", async () => {
+    // This is the path where an oversize entry actually HURTS. RENEWAL_TICK_MS fires every five
+    // minutes and the tick decides from the STORE, so an access entry that never lands means an
+    // exchange -- and, since Entra rotates on use, a refresh-token rotation -- every five minutes
+    // for as long as the session runs. Before the marker that was one line on fd 2 per tick and
+    // nothing that said the condition was permanent.
+    //
+    // Real file IO against a throwaway XDG_CONFIG_HOME rather than a double: the seam here is `env`,
+    // and driving the actual writer is what proves the path it computes is the one doctor reads.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-marker-renew-"));
+    tmpDirs.push(dir);
+    const env = { XDG_CONFIG_HOME: dir, USER: "u" };
+    const deps = m.oauthLaunchDeps("azure-mcp", LAUNCH_DECL, LAUNCH_CFG, { backend: "wcm", env,
+        write: async (key) => {
+            if (key.endsWith("-access")) {
+                throw Object.assign(new m.VcSecretsError("too large for Credential Manager"), { toolExitCode: 4 });
+            }
+        } });
+    await deps.writeCache({ accessToken: "a2", refreshToken: "r2", expiresAt: 9e15,
+        obtainedAt: 1, lifetimeMs: 3600_000, uptimeAtIssue: 1 });
+    const marker = m.readOversizeMarker(LAUNCH_KEYS.access, env);
+    assert.equal(marker.backend, "wcm");
+    assert.equal(marker.limit, m.WCM_BLOB_LIMIT);
+    assert.equal(marker.key, LAUNCH_KEYS.access);
+});
+
+test("oauthLaunchDeps.writeCache: a transient access failure leaves no marker, and a success clears one", async () => {
+    // The two halves that keep the marker honest, driven through the real writer in one test
+    // because they are the same claim from both sides: only a deterministic failure may record, and
+    // any success must erase. Recording unconditionally, or never clearing, both leave doctor
+    // reporting a permanent problem that is not there -- and both look identical from a green run.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-marker-clear-"));
+    tmpDirs.push(dir);
+    const env = { XDG_CONFIG_HOME: dir, USER: "u" };
+    const fresh = { accessToken: "a2", refreshToken: "r2", expiresAt: 9e15,
+        obtainedAt: 1, lifetimeMs: 3600_000, uptimeAtIssue: 1 };
+
+    const transient = m.oauthLaunchDeps("azure-mcp", LAUNCH_DECL, LAUNCH_CFG, { backend: "wcm", env,
+        write: async (key) => {
+            if (key.endsWith("-access")) { throw new m.VcSecretsError("the keystore was busy"); }
+        } });
+    await transient.writeCache(fresh);
+    assert.equal(m.readOversizeMarker(LAUNCH_KEYS.access, env), null,
+        "a failure that can succeed next time may not be recorded as permanent");
+
+    m.recordOversizeMarker(LAUNCH_KEYS.access, { backend: "wcm", bytes: 2588, limit: m.WCM_BLOB_LIMIT, env });
+    const ok = m.oauthLaunchDeps("azure-mcp", LAUNCH_DECL, LAUNCH_CFG, { backend: "wcm", env,
+        write: async () => {} });
+    await ok.writeCache(fresh);
+    assert.equal(m.readOversizeMarker(LAUNCH_KEYS.access, env), null,
+        "a successful write must erase the marker, or doctor reports a problem that is fixed");
+});
+
+test("oauthLaunchDeps.writeCache: a delete that fails too does not displace the write error", async () => {
+    // The clearing is best effort and the write failure is the actionable one: it is what names the
+    // entry and the `login` that fixes it. A delete error surfacing instead would send the developer
+    // to diagnose the keystore removal that failed rather than the renewal that did.
+    const deps = m.oauthLaunchDeps("azure-mcp", LAUNCH_DECL, LAUNCH_CFG, { backend: "keychain",
+        write: async () => { throw new Error("security: SecKeychainItemCreateFromContent failed"); },
+        remove: async () => { throw new Error("security: item could not be removed"); } });
+    await assert.rejects(() => deps.writeCache({ accessToken: "a2", refreshToken: "r2",
+        expiresAt: 9e15, obtainedAt: 1, lifetimeMs: 3600_000, uptimeAtIssue: 1 }),
+        (e) => e instanceof m.VcSecretsError && /vc-secrets login azure-mcp/.test(e.message));
 });
 
 test("oauthLaunchDeps.writeCache: forwards env to both the refresh and the access write", async () => {
@@ -1294,7 +1416,17 @@ test("oauthLaunchDeps.writeCache: a failed ACCESS write is a warning, not a lost
 
         return Buffer.byteLength(str);
     });
+    // A throwaway XDG_CONFIG_HOME although this test asserts nothing about markers: the write
+    // double below throws a plain `Error`, which carries no toolExitCode, so it never reaches the
+    // marker TODAY. It is the cost of being
+    // wrong that decides this: change that error to an exit 4, or widen the marker's condition, and
+    // without an env here the marker write lands in the DEVELOPER'S OWN config directory -- measured,
+    // by mutating exactly that condition, which left a real file under ~/.config/vc-secrets/state.
+    // The same omission on the delete seam once destroyed a live sign-in from a green run.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-warn-"));
+    tmpDirs.push(dir);
     const deps = m.oauthLaunchDeps("azure-mcp", LAUNCH_DECL, LAUNCH_CFG, { backend: "keychain",
+        env: { XDG_CONFIG_HOME: dir, USER: "u" },
         write: async (name) => { if (name.endsWith("-access")) { throw new Error("full"); } } });
     await deps.writeCache({ accessToken: "a2", refreshToken: "r2", expiresAt: 9e15,
         obtainedAt: 1, lifetimeMs: 3600_000, uptimeAtIssue: 1 });
@@ -1714,6 +1846,61 @@ test("openBrowser: a missing opener is reported, not thrown", () => {
     assert.match(logged.join(""), /by hand/, "and must say what the developer can still do");
 });
 
+test("openBrowser: an opener that spawned and then failed is reported too", () => {
+    // `error` covers only a spawn that never happened, and that is the RARER shape. wslview with
+    // interop off, xdg-open on a headless host and a policy-blocked powershell each spawn cleanly
+    // and exit non-zero -- so the sign-in went on waiting for a browser that was never going to
+    // appear, with nothing printed and no timeout to end it.
+    const logged = [];
+    const handlers = {};
+    m.openBrowser({ cmd: "wslview", args: ["http://x/"] }, {
+        log: (line) => logged.push(line),
+        spawnProcess: () => ({ unref() {}, on(event, fn) { handlers[event] = fn; } }),
+    });
+    assert.ok(handlers.close, "openBrowser must subscribe to the child's close");
+    handlers.close(1);
+    assert.match(logged.join(""), /exited with code 1/);
+    assert.match(logged.join(""), /by hand/, "and must say what the developer can still do");
+});
+
+test("openBrowser: a clean exit and a killed opener say nothing", () => {
+    // Exit 0 is the ordinary case: an opener hands the URL to the browser and returns. `null` is
+    // what a signal gives -- an opener the developer killed, or one that execs into the browser and
+    // dies with it. Neither is the opener reporting a failure of its own, and a line on either
+    // would land AFTER a sign-in that worked, which is worse than silence.
+    const logged = [];
+    const handlers = {};
+    m.openBrowser({ cmd: "xdg-open", args: ["http://x/"] }, {
+        log: (line) => logged.push(line),
+        spawnProcess: () => ({ unref() {}, on(event, fn) { handlers[event] = fn; } }),
+    });
+    handlers.close(0);
+    handlers.close(null);
+    assert.deepEqual(logged, []);
+});
+
+test("withDeadline: a promise that wins leaves no timer behind", async (t) => {
+    // The half that is easy to omit and impossible to see. A bare Promise.race keeps the loser's
+    // timer pending, and node holds the process open until it fires -- so a sign-in that finished
+    // in ten seconds would leave the CLI sitting for the rest of the ten minutes, which is exactly
+    // the hang the deadline was added to end. Ticking past the deadline AFTER the win is what
+    // distinguishes a cleared timer from one that merely has not fired yet.
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let fired = false;
+    const value = await m.withDeadline(Promise.resolve("arrived"), m.LOGIN_WAIT_MS,
+        () => { fired = true; return "late"; });
+    assert.equal(value, "arrived");
+    t.mock.timers.tick(m.LOGIN_WAIT_MS);
+    assert.equal(fired, false, "the timer must have been cleared, not merely outrun");
+});
+
+test("withDeadline: the deadline wins when nothing ever arrives", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const raced = m.withDeadline(new Promise(() => {}), m.LOGIN_WAIT_MS, () => "deadline");
+    t.mock.timers.tick(m.LOGIN_WAIT_MS);
+    assert.equal(await raced, "deadline");
+});
+
 const GET = (url) => ({ url, method: "GET" });
 
 test("handleCallback: a mismatched state decides nothing, and says so", () => {
@@ -2065,6 +2252,8 @@ function loginDeps(overrides = {}) {
     const logged = [];
     const lock = [];
     const removed = [];
+    const marked = [];
+    const cleared = [];
     const deps = {
         listen: async () => ({ port: 51234, next: async () => ({ code: "the-code" }), close: async () => {} }),
         open: (cmd) => { opened.push(cmd); },
@@ -2088,10 +2277,15 @@ function loginDeps(overrides = {}) {
         // looks like nothing at all. Measured 2026-08-20: both oauth entries for the affected
         // server were present before the run and gone after, with every other test still passing.
         removeEntry: async (name) => { removed.push(name); },
+        // Injected for exactly the reason removeEntry is, and it was written down there first: the
+        // default WRITES and DELETES a file under the developer's own config directory, and both
+        // halves run on ordinary paths -- `clear` on every successful login. Left to default, every
+        // login test would litter a real machine from a green run.
+        oversize: { record: (key, info) => { marked.push([key, info]); }, clear: (key) => { cleared.push(key); } },
         ...overrides,
     };
 
-    return { deps, written, opened, logged, lock, removed };
+    return { deps, written, opened, logged, lock, removed, marked, cleared };
 }
 
 // Depth-aware rather than line-anchored: the first version of this matched only a seam standing
@@ -2164,10 +2358,13 @@ test("loginDeps: every cmdLogin seam that reaches outside this process is inject
     // A parser that quietly finds nothing would make this test pass forever. Pin the whole list,
     // so adding a seam fails here and forces a decision about whether it needs injecting.
     assert.deepEqual(seams, ["listen", "open", "browser", "exchange", "writeEntry", "removeEntry",
-        "randomState", "log", "backend", "acquireLock", "now", "sleep"],
+        "randomState", "log", "backend", "acquireLock", "now", "sleep", "waitMs", "oversize"],
         "the seam list changed, or the parse broke — both need a human");
-    // These three stay inside the process: a pure command builder, the clock, and a timer.
-    const mayDefault = ["browser", "now", "sleep"];
+    // These four stay inside the process: a pure command builder, the clock, a timer, and a plain
+    // number of milliseconds. `waitMs` is injected by the tests that drive the deadline, but it
+    // needs no fixture default — left alone it is ten minutes, and no test waits that long: every
+    // one either answers the callback or injects its own `waitMs`.
+    const mayDefault = ["browser", "now", "sleep", "waitMs"];
     const injected = definedSeams(loginDeps().deps);
     assert.deepEqual(seams.filter((s) => !mayDefault.includes(s) && !injected.includes(s)), [],
         "each of these would fall through to a real implementation in every login test");
@@ -2290,6 +2487,111 @@ test("cmdLogin: a failed ACCESS write is not fatal — losing it costs one excha
     assert.ok(logged.some((l) => /access/i.test(l)), `the degraded write must be reported: ${logged.join("")}`);
 });
 
+test("cmdLogin: an access entry too large for the keystore is recorded, not just logged", async () => {
+    // On Credential Manager this failure is DETERMINISTIC: the value is over the ceiling, so the
+    // identical write fails identically at every launch and every renewal, forever. It printed one
+    // line to fd 2 and was forgotten, and the next tick printed it again -- so the machine paid a
+    // token exchange, and a refresh-token rotation with it, every five minutes with nothing
+    // anywhere saying the condition was permanent. The marker is what lets doctor say it.
+    const { deps, marked, logged } = loginDeps({
+        writeEntry: async (name) => {
+            if (name.endsWith("-access")) {
+                throw Object.assign(new m.VcSecretsError("too large for Credential Manager"), { toolExitCode: 4 });
+            }
+        },
+        backend: "wcm",
+    });
+    await m.cmdLogin("azure-mcp", LOGIN_CFG, deps);
+    assert.equal(marked.length, 1, `exactly one marker: ${JSON.stringify(marked)}`);
+    const [key, info] = marked[0];
+    assert.equal(key, LOGIN_KEYS.access);
+    assert.equal(info.backend, "wcm");
+    assert.equal(info.limit, m.WCM_BLOB_LIMIT);
+    // Measured from what we tried to write, not scraped from the backend's message -- the number is
+    // in hand here, and parsing a string for it would be a second way to be wrong about it.
+    assert.equal(info.bytes, Buffer.byteLength(cache.serializeAccess({ accessToken: "at",
+        expiresAt: 1_703_600_000, obtainedAt: 1_700_000_000, lifetimeMs: 3600_000, uptimeAtIssue: 1000 })));
+    assert.ok(logged.some((l) => /access entry could not be stored/.test(l)), "and the login still reports it");
+});
+
+test("cmdLogin: an access write that failed for any other reason leaves no marker", async () => {
+    // The distinction the whole file rests on. A transient failure -- a locked store, a timeout --
+    // will succeed on the next attempt, and a marker left for one would have doctor report a
+    // permanent condition that the very next launch silently disproves. Recording unconditionally
+    // is the easy mistake and it looks identical from a green run.
+    const { deps, marked } = loginDeps({
+        writeEntry: async (name) => {
+            if (name.endsWith("-access")) { throw new m.VcSecretsError("the keystore was busy"); }
+        },
+        backend: "wcm",
+    });
+    await m.cmdLogin("azure-mcp", LOGIN_CFG, deps);
+    assert.deepEqual(marked, [], "only a deterministic oversize failure may be recorded");
+});
+
+test("cmdLogin: a successful access write clears any marker for that entry", async () => {
+    // The load-bearing half: the marker is CURRENT STATE, not an event record. An entry that
+    // shrank back under the ceiling -- a group membership dropped, a narrower scope list -- must
+    // stop being reported, or doctor goes on naming a problem that is fixed.
+    const { deps, cleared } = loginDeps();
+    await m.cmdLogin("azure-mcp", LOGIN_CFG, deps);
+    assert.deepEqual(cleared, [LOGIN_KEYS.access]);
+});
+
+test("cmdLogin: the previous access entry is deleted before the new refresh entry is written", async () => {
+    // An access entry carries no identity of its own -- serializeAccess stores none -- so cacheStatus
+    // checks the declaration against the REFRESH entry and then serves whatever access token sits
+    // beside it. Sign in as a different account, store the new refresh token, then fail to store the
+    // new access token, and the previous account's token is still there and still inside its
+    // lifetime: the next read returns it and the server runs as that principal. Deleting FIRST makes
+    // the worst case an access entry that is missing, which costs one exchange.
+    //
+    // Removals and writes share one array because the ordering BETWEEN them is the entire fix; two
+    // separate logs would each be green in the order that reintroduces the hole.
+    const events = [];
+    const { deps } = loginDeps({
+        writeEntry: async (name) => { events.push(`write ${name}`); },
+        removeEntry: async (name) => { events.push(`remove ${name}`); },
+    });
+    await m.cmdLogin("azure-mcp", LOGIN_CFG, deps);
+    assert.deepEqual(events, [`remove ${LOGIN_KEYS.access}`, `write ${LOGIN_KEYS.refresh}`,
+        `write ${LOGIN_KEYS.access}`]);
+});
+
+test("cmdLogin: a first sign-in, with no access entry to delete, still stores both entries", async () => {
+    // Exit 3 is how every backend reports "no such entry" -- gpg maps ENOENT to it, keychain maps
+    // 44 -- and on a first sign-in there is nothing to delete, so this is the ordinary path and not
+    // an edge case. Without the exemption the pre-delete would refuse every first sign-in, and only
+    // after the authorization code had been spent, which is the one failure a developer cannot retry.
+    const { deps, written } = loginDeps({
+        removeEntry: async () => {
+            throw Object.assign(new m.VcSecretsError("no stored entry"), { toolExitCode: 3 });
+        },
+    });
+    await m.cmdLogin("azure-mcp", LOGIN_CFG, deps);
+    assert.deepEqual(written.map(([name]) => name), [LOGIN_KEYS.refresh, LOGIN_KEYS.access]);
+});
+
+test("cmdLogin: a pre-delete failing for any other reason stores nothing and clears both entries", async () => {
+    // The delete is what stops the previous account's token from being served, so a failure that is
+    // not "there was no entry" leaves exactly the state it exists to prevent. Swallowing it would
+    // store the new refresh token beside the OLD access token -- the principal confusion, reached
+    // through the one path that looks like a successful sign-in. Clearing both instead makes the
+    // state unambiguously signed-out; the cost is one interactive sign-in, and it is the cheaper
+    // side of that trade.
+    const removed = [];
+    let calls = 0;
+    const { deps, written } = loginDeps({
+        removeEntry: async (name) => {
+            removed.push(name);
+            if (++calls === 1) { throw new m.VcSecretsError("keystore locked"); }
+        },
+    });
+    await assert.rejects(() => m.cmdLogin("azure-mcp", LOGIN_CFG, deps), /keystore locked/);
+    assert.deepEqual(written, [], "nothing may be stored once the stale access entry could not be removed");
+    assert.deepEqual(removed, [LOGIN_KEYS.access, LOGIN_KEYS.access, LOGIN_KEYS.refresh]);
+});
+
 test("cmdLogin: the redirect_uri is the registered localhost URI, with the bound port and no path", async () => {
     // Three independent failure modes in one string, and none of them fails locally.
     //
@@ -2346,6 +2648,36 @@ test("cmdLogin: with no browser opener the URL is printed and the sign-in still 
     assert.ok(logged.some((l) => l.includes("https://login.microsoftonline.com/")),
         `the URL must reach the operator: ${logged.join("")}`);
     assert.equal(written.length, 2, "and the sign-in completes normally");
+});
+
+test("cmdLogin: the URL is printed on the browser branch too, since that is where the advice points", async () => {
+    // Three messages point the developer at the "URL above" -- openBrowser's spawn failure,
+    // openBrowser's non-zero exit, and the deadline -- and every one of them fires on a path where
+    // a browser WAS opened. While the URL was printed only on the branch with no opener, all three
+    // named something the developer had never been shown.
+    const { deps, opened, logged } = loginDeps({ browser: () => ({ cmd: "xdg-open", args: ["http://x/"] }) });
+    await m.cmdLogin("azure-mcp", LOGIN_CFG, deps);
+    assert.equal(opened.length, 1, "this fixture must take the branch that opens a browser");
+    assert.ok(logged.some((l) => l.includes("https://login.microsoftonline.com/")),
+        `the URL must be printed even when a browser opens: ${logged.join("")}`);
+});
+
+test("cmdLogin: a callback that never arrives ends on the deadline instead of waiting forever", async () => {
+    // There was no timeout anywhere in the sign-in, and `next()` resolves only when the callback
+    // arrives. Every way a browser fails to reach it is silent, so the command sat on a cursor with
+    // no reason given and no way out but Ctrl-C.
+    //
+    // The listener must still be closed: it holds its port for the life of the process, and on this
+    // path there is nobody watching to notice.
+    let closed = false;
+    const { deps } = loginDeps({
+        waitMs: 5,
+        listen: async () => ({ port: 51234, next: () => new Promise(() => {}),
+            close: async () => { closed = true; } }),
+    });
+    await assert.rejects(() => m.cmdLogin("azure-mcp", LOGIN_CFG, deps),
+        (e) => /timed_out/.test(e.message) && /URL above/.test(e.message));
+    assert.equal(closed, true, "the listener must be closed on the deadline path");
 });
 
 test("cmdLogin: the verifier never leaves the process, only its digest does", async () => {
@@ -2405,13 +2737,21 @@ test("cmdLogin: a failed refresh write also clears the stale entries a previous 
         removeEntry: async (n) => { removed.push(n); },
     });
     await assert.rejects(() => m.cmdLogin("azure-mcp", LOGIN_CFG, deps), /keystore full/);
-    assert.deepEqual(removed.sort(), [LOGIN_KEYS.access, LOGIN_KEYS.refresh].sort());
+    // The access entry appears TWICE, and the sequence is asserted rather than the set: the first
+    // removal is the pre-delete this login always performs, the second is this cleanup. A set would
+    // stay green if the pre-delete disappeared, which is the regression worth catching here.
+    assert.deepEqual(removed, [LOGIN_KEYS.access, LOGIN_KEYS.access, LOGIN_KEYS.refresh]);
 });
 
 test("cmdLogin: a cleanup failure does not replace the write error the developer needs", async () => {
+    // The first delete must SUCCEED for this test to reach its subject. Both the pre-delete and the
+    // cleanup go through this one seam, so a double that throws unconditionally fails the login
+    // before the refresh write is ever attempted -- and the assertion below would then be pinning
+    // the pre-delete's error, under a name that promises the write's.
+    let calls = 0;
     const { deps } = loginDeps({
         writeEntry: async (name) => { if (name.endsWith("-refresh")) { throw new m.VcSecretsError("keystore full"); } },
-        removeEntry: async () => { throw new m.VcSecretsError("delete failed too"); },
+        removeEntry: async () => { if (++calls > 1) { throw new m.VcSecretsError("delete failed too"); } },
     });
     await assert.rejects(() => m.cmdLogin("azure-mcp", LOGIN_CFG, deps), /keystore full/);
 });
@@ -2475,6 +2815,27 @@ test("cmdLogin: no lock failure costs the developer a spent authorization code",
         assert.match(logged.join(""), new RegExp(boom.code ?? boom.name),
             `the warning must name ${boom.code ?? boom.name}`);
     }
+});
+
+test("cmdLogin: a sandbox refusal and a fault nothing classified do not print the same diagnosis", async () => {
+    // acquireTokenLock treats EPERM/EACCES as "unbindable" -- one measured sandbox condition -- and
+    // RETHROWS everything it will not classify, its own comment naming a wide catch as the mistake.
+    // cmdLogin's catch then made that exact mistake one level up: a TypeError from broken wiring
+    // printed "the token lock could not be taken", and the reader went to check a sandbox that was
+    // perfectly fine. "cmdLogin: no lock failure costs the developer a spent authorization code"
+    // pins that both still store the token and both name the code; this one pins that they are not
+    // the same sentence, which is the part that was wrong.
+    const sentences = [];
+    for (const boom of [Object.assign(new Error("refused"), { code: "EPERM" }),
+        new TypeError("acquireLock is not a function")]) {
+        const { deps, logged } = loginDeps({ acquireLock: async () => { throw boom; } });
+        await m.cmdLogin("azure-mcp", LOGIN_CFG, deps);
+        sentences.push(logged.find((l) => /NOT serialised/.test(l)));
+    }
+    assert.match(sentences[0], /could not be taken \(EPERM\)/);
+    assert.match(sentences[1], /FAILED \(TypeError\)/);
+    assert.doesNotMatch(sentences[1], /could not be taken/,
+        "a fault nothing classified must not read as the sandbox declining a bind");
 });
 
 test("cmdLogin: the lock is released even when the refresh write fails and the entries are cleared", async () => {
@@ -2628,6 +2989,46 @@ test("cmdLogout: a store that fails part-way has already removed the refresh tok
     }), /keystore locked/);
     assert.deepEqual(deleted, [LOGOUT_KEYS.refresh],
         "the long-lived credential must be the one already gone when a store fails part-way");
+});
+
+test("cmdLogout: a part-way failure says what it already removed, instead of losing it with the stack", async () => {
+    // "cmdLogout: a store that fails part-way has already removed the refresh token, not the access
+    // one" observes that half-done state from OUTSIDE, through its own double. Nobody who
+    // runs the command has that vantage point: the loop threw bare, its return value died with the
+    // stack, and the developer read "keystore locked" over a state where the refresh token -- the
+    // credential this verb exists to remove -- is in fact already gone. Retrying is right either
+    // way; what changes is what the developer believes is still on disk.
+    await assert.rejects(() => m.cmdLogout("azure-mcp", LOGOUT_CFG, {
+        deleteEntry: async (n) => {
+            if (n === LOGOUT_KEYS.access) {
+                throw Object.assign(new m.VcSecretsError("keystore locked"), { toolExitCode: 1 });
+            }
+        },
+        acquireLock: FREE_LOCK,
+    }), (e) => {
+        assert.match(e.message, /keystore locked/, "the failure itself must still lead");
+        assert.match(e.message, /HALF done/);
+        assert.match(e.message, new RegExp(LOGOUT_KEYS.refresh.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+        assert.deepEqual(e.removed, [LOGOUT_KEYS.refresh], "and structured, for anything that is not a human");
+        assert.equal(e.toolExitCode, 1, "the classification must survive the rewording");
+
+        return true;
+    });
+});
+
+test("cmdLogout: a failure on the FIRST entry claims nothing was removed", async () => {
+    // The other side of the same message, and the one that would be a lie: "HALF done" appended
+    // unconditionally would tell a developer a credential is gone when the store refused before
+    // touching anything.
+    await assert.rejects(() => m.cmdLogout("azure-mcp", LOGOUT_CFG, {
+        deleteEntry: async () => { throw Object.assign(new m.VcSecretsError("keystore locked"), { toolExitCode: 1 }); },
+        acquireLock: FREE_LOCK,
+    }), (e) => {
+        assert.doesNotMatch(e.message, /HALF done/);
+        assert.deepEqual(e.removed, []);
+
+        return true;
+    });
 });
 
 test("cmdLogout: an undeclared server is refused before anything is deleted", async () => {
@@ -4001,10 +4402,17 @@ channelTest("cmdLaunch: a slow renewal tick does not stack on the one still runn
     }
 });
 
-channelTest("cmdLaunch: a renewal reaching nobody is reported once, not every tick", async (t) => {
-    // New coverage (source gap): mcpw.js's cmdRun and the reportedUndelivered flag it sets have no
-    // test in the source's own suite. No client ever connects here, so channel.push() returns 0 on
-    // every tick; the warning must still fire exactly once.
+channelTest("cmdLaunch: a renewal reaching nobody is reported twice and then not again", async (t) => {
+    // New coverage (source gap): mcpw.js's cmdRun and the flag it sets have no test in the source's
+    // own suite. No client ever connects here, so channel.push() returns 0 on every tick.
+    //
+    // TWICE, and the difference between the two lines is the point. The first one's promise -- "it
+    // will be handed over when the server connects" -- is true of a server that is merely still
+    // starting. By the second tick it is the likeliest false statement in the session, because the
+    // ordinary reason nothing connects is that no process ever matched the declared target; so the
+    // second line says THAT rather than repeating the promise. From the third on it is silent: the
+    // condition cannot change without a restart. Latching at one is what let the false promise
+    // stand as the session's last word on the subject.
     const stderr = [];
     t.mock.method(fs, "writeSync", (fd, str) => {
         if (fd !== 2) {
@@ -4023,9 +4431,13 @@ channelTest("cmdLaunch: a renewal reaching nobody is reported once, not every ti
     });
     try {
         await new Promise((r) => setTimeout(r, 60));
-        const undelivered = stderr.filter((s) => s.includes("nothing is connected to the channel"));
-        assert.ok(calls >= 2, `the renewal must actually run more than once, ran ${calls}`);
-        assert.equal(undelivered.length, 1, `expected exactly one undelivered warning, got ${undelivered.length}`);
+        const first = stderr.filter((s) => s.includes("nothing is connected to the channel"));
+        const escalation = stderr.filter((s) => s.includes("no process has matched the declared target"));
+        assert.ok(calls >= 3, `the renewal must run past the second tick for silence to mean anything, ran ${calls}`);
+        assert.equal(first.length, 1, `expected exactly one first-tick warning, got ${first.length}`);
+        assert.equal(escalation.length, 1, `expected exactly one escalation, got ${escalation.length}`);
+        assert.match(escalation[0], /some-oauth-package/,
+            "the escalation must name the target nothing matched, or it is not actionable");
     } finally {
         await handle.dispose();
     }
