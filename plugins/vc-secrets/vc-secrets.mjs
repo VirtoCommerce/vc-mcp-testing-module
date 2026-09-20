@@ -707,14 +707,37 @@ function loadConfig(paths = configPaths()) {
     return { secrets, servers, tasks, oauth, vaults, registrations, projectId, collisions, warnings, files };
 }
 
-// The keystore key. Project and local declarations share one namespace on purpose — they are the
-// same project, so a locally declared server may use the project's secrets.
-function keyFor(name, decl, cfg) {
-    if (decl.scope === USER_SCOPE) {
-        return `${KEY_PREFIX}:${USER_SCOPE}:${name}`;
-    }
+// The scope half of a keystore key. Project and local declarations share one namespace on purpose —
+// they are the same project, so a locally declared server may use the project's secrets.
+//
+// Everything that has to agree with keyFor about which entries are the same project's calls this:
+// the token lock and the renewal channel both serialise on it, and a second spelling that drifts
+// serialises against nothing while each copy still reads as correct.
+function scopeKeyFor(decl, cfg) {
+    return decl.scope === USER_SCOPE ? USER_SCOPE : cfg.projectId;
+}
 
-    return `${KEY_PREFIX}:${cfg.projectId}:${name}`;
+// The keystore key.
+function keyFor(name, decl, cfg) {
+    return `${KEY_PREFIX}:${scopeKeyFor(decl, cfg)}:${name}`;
+}
+
+// The two variable segments back out again. One parse rather than one per reader: the same key is
+// taken apart for a secret's path, for its oversize-marker path and for the messages a developer
+// reads, and separate spellings of one grammar can disagree about a key neither of them validated
+// while each still looks right where it stands.
+function keyParts(key) {
+    const [, scope, name] = key.split(":");
+
+    return { scope, name };
+}
+
+// The bare name, for messages only: mapResolveError and the "treating as absent" notice read as
+// advice about a keystore entry, not about a three-segment internal key. Not called entryName --
+// oauthLaunchDeps already binds that to the oauth entry ("ado-dev"), where this yields the key's
+// last segment ("oauth-ado-dev-refresh"); two values a message must not confuse.
+function nameFromKey(key) {
+    return keyParts(key).name;
 }
 
 function oauthEntryKeys(name, decl, cfg) {
@@ -904,17 +927,21 @@ function redactSecrets(text, values) {
     return out;
 }
 
-function secretsDir(env = process.env) {
-    const base = env.XDG_CONFIG_HOME || path.join(env.HOME || os.homedir(), ".config");
+// Where both storage layouts live, current and legacy. cmdUnlock walks the two in one loop, so a
+// second spelling that drifts surfaces as "nothing to unlock" rather than as an error.
+function configBase(env) {
+    return env.XDG_CONFIG_HOME || path.join(env.HOME || os.homedir(), ".config");
+}
 
-    return path.join(base, KEY_PREFIX, "secrets");
+function secretsDir(env = process.env) {
+    return path.join(configBase(env), KEY_PREFIX, "secrets");
 }
 
 // Keys are "vc-secrets:<scope>:<name>" (see keyFor) — a directory per scope is clearer than
 // colons in filenames, even though the latter would be legal on Linux; the gpg backend is
 // Linux/WSL-only, so there is no Windows-path angle to weigh here.
 function keyToPath(key, env = process.env) {
-    const [, scope, name] = key.split(":");
+    const { scope, name } = keyParts(key);
 
     return path.join(secretsDir(env), scope, `${name}.gpg`);
 }
@@ -942,9 +969,7 @@ function gpgEntryPresent(key, env = process.env) {
 // Pre-rename storage layout, read-only: cmdMigrate copies a value forward from here into the
 // new namespaced key, but nothing ever writes to this path again.
 function legacyKeyToPath(name, env = process.env) {
-    const base = env.XDG_CONFIG_HOME || path.join(env.HOME || os.homedir(), ".config");
-
-    return path.join(base, LEGACY_KEY_PREFIX, "secrets", `${name}.gpg`);
+    return path.join(configBase(env), LEGACY_KEY_PREFIX, "secrets", `${name}.gpg`);
 }
 
 // Where a keystore write that CANNOT come right on its own is recorded.
@@ -965,7 +990,7 @@ function legacyKeyToPath(name, env = process.env) {
 // that half, doctor would keep reporting a condition the next successful write had already fixed --
 // a diagnostic that is wrong in the reassuring direction, which is worse than none.
 function oversizeMarkerPath(key, env = process.env) {
-    const [, scope, name] = key.split(":");
+    const { scope, name } = keyParts(key);
 
     return path.join(path.dirname(secretsDir(env)), "state", scope, `${name}.oversize.json`);
 }
@@ -1152,16 +1177,41 @@ function decodeCredBlobHex(hex) {
 // would keep validating the old prefix after a rename, and every read would look correct.
 const KEY_RE = new RegExp(`^${KEY_PREFIX}:[a-z0-9-]+:[a-z0-9-]+$`);
 
-function buildLocalRead(backend, key, env = process.env) {
+// Every builder below puts the key into a command line, so each checks the shape first. The check
+// lives here rather than once per builder: nothing in a builder's signature says it is mandatory,
+// and a new builder that omits it is the failure this guards against.
+function assertKeyShape(key) {
     if (!KEY_RE.test(key)) {
         throw new VcSecretsError(`invalid secret key "${key}" -- expected vc-secrets:<scope>:<name>`);
     }
+}
+
+// The account `security` is addressed with. Read, write and delete have to agree on it, or an entry
+// is written where it cannot be read back.
+function keychainAccount(env) {
+    return env.USER || os.userInfo().username;
+}
+
+// What a backend says when the entry is simply not there: the PowerShell branch exits 3 by
+// construction, security(1) answers 44. gpg is absent from this list on purpose — its entries are
+// files, so gpgEntryPresent settles that case before a read is attempted at all.
+//
+// One home for the rule because both ways of getting it wrong are silent. A store that merely could
+// not be read, taken for absent, costs an interactive sign-in that spends an authorization code and
+// rotates a live refresh token; a genuinely empty store, taken for broken, refuses to sign in.
+// deleteEntryIo states the same rule for the delete path, in the terms that path needs.
+function isAbsentEntry(backend, e) {
+    return (backend === "wcm" && e.toolExitCode === 3) || (backend === "keychain" && e.toolExitCode === 44);
+}
+
+function buildLocalRead(backend, key, env = process.env) {
+    assertKeyShape(key);
     if (backend === "wcm") {
         return { cmd: psCommand(env), args: psArgs(PS_CRED_READ),
             extraEnv: { VC_SECRETS_NAME: key }, timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: true };
     }
     if (backend === "keychain") {
-        return { cmd: "security", args: ["find-generic-password", "-a", env.USER || os.userInfo().username, "-s", key, "-w"],
+        return { cmd: "security", args: ["find-generic-password", "-a", keychainAccount(env), "-s", key, "-w"],
             timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: true };
     }
 
@@ -1173,15 +1223,13 @@ function buildLocalRead(backend, key, env = process.env) {
 }
 
 function buildLocalWrite(backend, key, env = process.env, { tmp = false, value = undefined } = {}) {
-    if (!KEY_RE.test(key)) {
-        throw new VcSecretsError(`invalid secret key "${key}" -- expected vc-secrets:<scope>:<name>`);
-    }
+    assertKeyShape(key);
     if (backend === "wcm") {
         return { cmd: psCommand(env), args: psArgs(PS_CRED_WRITE),
             extraEnv: { VC_SECRETS_NAME: key }, stdinData: VALUE_ON_STDIN, timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: false };
     }
     if (backend === "keychain") {
-        const account = env.USER || os.userInfo().username;
+        const account = keychainAccount(env);
         // Three shapes, and the differences are load-bearing. `set`: `-w` with no value makes security
         // prompt on the TTY, so the plaintext never passes through this process at all.
         if (value === undefined) {
@@ -1225,15 +1273,13 @@ function buildLocalWrite(backend, key, env = process.env, { tmp = false, value =
 }
 
 function buildLocalDelete(backend, key, env = process.env) {
-    if (!KEY_RE.test(key)) {
-        throw new VcSecretsError(`invalid secret key "${key}" -- expected vc-secrets:<scope>:<name>`);
-    }
+    assertKeyShape(key);
     if (backend === "wcm") {
         return { cmd: psCommand(env), args: psArgs(PS_CRED_DELETE),
             extraEnv: { VC_SECRETS_NAME: key }, timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: false };
     }
     if (backend === "keychain") {
-        return { cmd: "security", args: ["delete-generic-password", "-a", env.USER || os.userInfo().username, "-s", key],
+        return { cmd: "security", args: ["delete-generic-password", "-a", keychainAccount(env), "-s", key],
             timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: false };
     }
     // gpg entries are files, removed by deleteEntryIo directly. Falling through to the keychain
@@ -1248,9 +1294,7 @@ function buildLocalDelete(backend, key, env = process.env) {
 function deleteEntryIo(backend = detectLocalBackend(), env = process.env, { run = runTool, rm = fs.rmSync } = {}) {
     return async (key) => {
         if (backend === "gpg") {
-            if (!KEY_RE.test(key)) {
-                throw new VcSecretsError(`invalid secret key "${key}" -- expected vc-secrets:<scope>:<name>`);
-            }
+            assertKeyShape(key);
             try {
                 rm(keyToPath(key, env));
             } catch (e) {
@@ -1288,7 +1332,7 @@ async function writeLocalValue(backend, key, spec, value, env = process.env, run
             if (e.toolExitCode !== 4) {
                 throw e;
             }
-            throw mapResolveError(backend, key.split(":")[2], e);
+            throw mapResolveError(backend, nameFromKey(key), e);
         }
 
         return;
@@ -1523,19 +1567,12 @@ const MAX_LOCK_POLLS = 64;
 // against nothing while every one of the three still reads as correct. Built here once rather than
 // at each call site for that reason.
 //
-// scopeKey MUST be the same scope notion keyFor uses (decl.scope === USER_SCOPE ? USER_SCOPE :
-// cfg.projectId, see keyFor above) — this is load-bearing, not a convenience: the lock and the
-// keystore entries it guards have to agree on what "the same project" means. keyFor merges a
-// project-scope AND a local-scope declaration into ONE keystore namespace (cfg.projectId), on the
-// premise that a local declaration is the same project under a different home. A lock computed
-// from a different notion of scope — the raw `decl.scope` string, say, which is "project" for both
-// but was normalised from "local" — breaks that: whatever this function uses to key the lock has to
-// be EXACTLY what keyFor uses to key the entries, or two projects that keyFor treats as separate
-// (different projectId, both scope "project") would collide on a lock computed some other way — or
-// worse, two declarations keyFor treats as the SAME project would fail to serialise against each
-// other at all.
+// The lock and the keystore entries it guards have to agree on what "the same project" means, which
+// is why the scope comes from scopeKeyFor rather than from `decl.scope` — that string is "project"
+// for a local declaration too, so a lock keyed on it would serialise two separate projects against
+// each other and fail to serialise one project against itself.
 function tokenLockFor(entryName, decl, cfg, { platform = process.platform, env = process.env } = {}) {
-    const scopeKey = decl.scope === USER_SCOPE ? USER_SCOPE : cfg.projectId;
+    const scopeKey = scopeKeyFor(decl, cfg);
 
     return () => cache.acquireLock(cache.lockPathFor(entryName, scopeKey, { platform, env }));
 }
@@ -1694,6 +1731,47 @@ async function ensureFreshToken({ serverName, readCache, writeCache, exchange, a
     }
 }
 
+// The tail both token writers share -- cmdLogin after an interactive sign-in, writeCache after a
+// renewal. Best effort throughout: losing the access entry costs one exchange on the next launch,
+// where failing the whole operation would cost an interactive sign-in.
+//
+// ONLY exit 4 records a marker. It is the one failure that cannot come right on its own -- the value
+// is over the backend's ceiling, so the identical write fails identically forever. A transient
+// failure that left a marker behind would report a permanent condition that the very next successful
+// write disproves, and that distinction is the whole point of the file. Credential Manager is the
+// only backend that produces it (gpg has no ceiling to cross, keychain does not signal size this
+// way), so WCM_BLOB_LIMIT is the limit recorded; `backend` goes in the marker too, because a reader
+// should not have to infer which store refused from the value of a number.
+//
+// Cleared on success because the marker is current state, not a log; the reason is on
+// oversizeMarkerPath. Four coupled rules in one body rather than two, so a fifth writer gets them
+// by calling rather than by copying.
+async function storeAccessEntry(key, value, { write, marker, log, backend, note = "" }) {
+    try {
+        await write(key, value);
+        marker.clear(key);
+    } catch (e) {
+        if (e.toolExitCode === 4) {
+            marker.record(key, { backend, limit: WCM_BLOB_LIMIT, bytes: Buffer.byteLength(value) });
+        }
+        log(`vc-secrets: ${note}the access entry could not be stored (${e.message}); `
+            + "the next launch will exchange one\n");
+    }
+}
+
+// Once the refresh token has rotated, both stored entries are lies: the stored one cannot be
+// redeemed, and the access token that went with it keeps working until it expires, at which point
+// the session dies mid-use with nothing to renew from. Clearing both makes the state unambiguously
+// signed-out. Best effort, because the write failure is the actionable one and a delete's error must
+// not displace it.
+async function clearEntryPair(remove, keys) {
+    for (const stale of keys) {
+        try {
+            await remove(stale);
+        } catch { /* best effort — the write failure is what the developer must see */ }
+    }
+}
+
 // The real backends behind ensureFreshToken's seams. Nothing here decides anything: the storage
 // rules live in vc-secrets-cache.mjs and the protocol in vc-secrets-oauth.mjs.
 //
@@ -1720,15 +1798,12 @@ function oauthLaunchDeps(entryName, decl, cfg, { backend = detectLocalBackend(),
         if (backend === "gpg" && !gpgEntryPresent(key, env)) {
             return undefined;
         }
-        // The bare segment after the last colon, for messages only — mapResolveError and the
-        // "treating as absent" notice below read as advice about a keystore entry, not about a
-        // three-segment internal key; writeLocalValue does the same slice for the same reason.
-        const keyName = key.slice(key.lastIndexOf(":") + 1);
+        const keyName = nameFromKey(key);
         let raw;
         try {
             raw = await run(buildLocalRead(backend, key, env));
         } catch (e) {
-            if ((backend === "wcm" && e.toolExitCode === 3) || (backend === "keychain" && e.toolExitCode === 44)) {
+            if (isAbsentEntry(backend, e)) {
                 return undefined;   // not stored: "sign in", not a tool failure
             }
             throw mapResolveError(backend, keyName, e);
@@ -1794,13 +1869,7 @@ function oauthLaunchDeps(entryName, decl, cfg, { backend = detectLocalBackend(),
                     //
                     // Certainly dead, not probably: this branch is reached only with a NEW refresh
                     // token in hand, so Entra has rotated and what is stored cannot be redeemed.
-                    // Best effort, because the write failure is the actionable one and a delete's
-                    // error must not displace it.
-                    for (const stale of [keys.access, keys.refresh]) {
-                        try {
-                            await removeEntry(stale);
-                        } catch { /* best effort — the write failure is what the developer must see */ }
-                    }
+                    await clearEntryPair(removeEntry, [keys.access, keys.refresh]);
                     // The one irreversible step: Entra invalidated the previous refresh token the
                     // moment it issued this one, so a failure here IS a signed-out state and must
                     // name the entry and the remedy rather than the tool that refused.
@@ -1808,26 +1877,20 @@ function oauthLaunchDeps(entryName, decl, cfg, { backend = detectLocalBackend(),
                         + `(${e.message}) -- run "vc-secrets login ${entryName}"`);
                 }
             }
-            const accessValue = cache.serializeAccess(fresh);
-            try {
-                await write(keys.access, accessValue, { backend, env });
-                clearOversizeMarker(keys.access, env);
-            } catch (e) {
-                // Best effort by design: losing the access entry costs one exchange next launch.
-                //
-                // The renewal path is where an oversize entry HURTS, which is why it records the
-                // same marker cmdLogin does. RENEWAL_TICK_MS fires every five minutes and the tick
-                // decides from the store, so an access entry that never lands means an exchange --
-                // and a refresh-token rotation -- every five minutes, indefinitely, reported as one
-                // fd-2 line each time and never as a condition. Only exit 4, for the reason
-                // cmdLogin's twin of this branch spells out.
-                if (e.toolExitCode === 4) {
-                    recordOversizeMarker(keys.access, { backend, env, limit: WCM_BLOB_LIMIT,
-                        bytes: Buffer.byteLength(accessValue) });
-                }
-                fs.writeSync(2, `vc-secrets: the access entry could not be stored (${e.message}); `
-                    + "the next launch will exchange one\n");
-            }
+            // The renewal path is where an oversize entry HURTS, which is why it records the marker
+            // at all. RENEWAL_TICK_MS fires every five minutes and the tick decides from the store,
+            // so an access entry that never lands means an exchange -- and a refresh-token rotation
+            // -- every five minutes, indefinitely, reported as one fd-2 line each time and never as
+            // a condition.
+            await storeAccessEntry(keys.access, cache.serializeAccess(fresh), {
+                write: (k, v) => write(k, v, { backend, env }),
+                marker: {
+                    clear: (k) => clearOversizeMarker(k, env),
+                    record: (k, meta) => recordOversizeMarker(k, { ...meta, env }),
+                },
+                log: (s) => fs.writeSync(2, s),
+                backend,
+            });
         },
         exchange: (refreshToken) => oauth.exchange(decl.tenantId, oauth.buildTokenBody({ kind: "refresh",
             clientId: decl.clientId, refreshToken, scopes: decl.scopes })),
@@ -2536,40 +2599,14 @@ async function cmdLogin(serverName, cfg, {
                 // login's entries are now lies: the old refresh token is dead and the old access
                 // token keeps working until it expires, at which point the session dies mid-use with
                 // nothing to renew from. Clearing both makes the state unambiguously signed-out.
-                for (const stale of [names.access, names.refresh]) {
-                    try {
-                        await removeStale(stale);
-                    } catch { /* best effort — the write failure is what the developer must see */ }
-                }
+                await clearEntryPair(removeStale, [names.access, names.refresh]);
                 throw e;
             }
-            const accessValue = cache.serializeAccess(parsed);
-            try {
-                await writeEntry(names.access, accessValue);
-                // Cleared on success -- the marker is current state, not a log; the reason is on
-                // oversizeMarkerPath.
-                marker.clear(names.access);
-            } catch (e) {
-                // Best-effort by design: losing the access entry costs one exchange on next launch,
-                // where failing the whole login would cost an interactive sign-in.
-                //
-                // Exit 4 is the one failure here that cannot come right on its own -- the value is
-                // over the backend's ceiling, so the identical write fails identically forever -- and
-                // it is recorded for exactly that reason. ONLY exit 4: a transient failure that left
-                // a marker behind would report a permanent condition that the very next successful
-                // write disproves, and that distinction is the whole point of the file.
-                //
-                // Credential Manager is the only backend that produces it (gpg has no ceiling to
-                // cross and keychain does not signal size this way), so WCM_BLOB_LIMIT is the limit
-                // to record; `backend` still goes in the marker, because a reader should not have
-                // to infer which store refused from the value of a number.
-                if (e.toolExitCode === 4) {
-                    marker.record(names.access, { backend, limit: WCM_BLOB_LIMIT,
-                        bytes: Buffer.byteLength(accessValue) });
-                }
-                log(`vc-secrets: signed in, but the access entry could not be stored (${e.message}); `
-                    + "the next launch will exchange one\n");
-            }
+            // "signed in, but": the sign-in itself succeeded and the refresh entry landed, so the
+            // line must not read as a failed login.
+            await storeAccessEntry(names.access, cache.serializeAccess(parsed), {
+                write: writeEntry, marker, log, backend, note: "signed in, but ",
+            });
         } finally {
             // Covers the stale-clearing path too: that branch deletes the very entries a waiting
             // renewal is about to read, and releasing before it would let the renewal see one of
@@ -2801,7 +2838,7 @@ function unlockTargets(cfg, exists = fs.existsSync) {
     }
     for (const [name, decl] of Object.entries(cfg.oauth ?? {})) {
         for (const key of Object.values(oauthEntryKeys(name, decl, cfg))) {
-            const entryName = key.slice(key.lastIndexOf(":") + 1);   // SECRET_NAME_RE bars ":" from a name
+            const entryName = nameFromKey(key);
             const file = keyToPath(key);
             if (exists(file)) {
                 files.push({ name: entryName, file });
@@ -2854,15 +2891,14 @@ async function readLegacyLocalValue(backend, name, env = process.env) {
     const legacyName = `${LEGACY_KEY_PREFIX}:${name}`;
     const spec = backend === "wcm"
         ? { cmd: psCommand(env), args: psArgs(PS_CRED_READ), extraEnv: { VC_SECRETS_NAME: legacyName }, timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: true }
-        : { cmd: "security", args: ["find-generic-password", "-a", env.USER || os.userInfo().username, "-s", legacyName, "-w"],
+        : { cmd: "security", args: ["find-generic-password", "-a", keychainAccount(env), "-s", legacyName, "-w"],
             timeoutMs: TIMEOUT_LOCAL_MS, captureStdout: true };
     try {
         const value = await runTool(spec);
 
         return backend === "wcm" ? decodeCredBlobHex(value).value : value;
     } catch (e) {
-        // exit 3 (wcm) / 44 (keychain) both mean "not found" — same codes mapResolveError reads.
-        if ((backend === "wcm" && e.toolExitCode === 3) || (backend === "keychain" && e.toolExitCode === 44)) {
+        if (isAbsentEntry(backend, e)) {
             return null;
         }
         throw e;
@@ -2882,8 +2918,7 @@ async function newKeyPresent(backend, key, env = process.env) {
 
         return true;
     } catch (e) {
-        // The only two codes that mean "no such entry"; everything else is an unreadable store.
-        if ((backend === "wcm" && e.toolExitCode === 3) || (backend === "keychain" && e.toolExitCode === 44)) {
+        if (isAbsentEntry(backend, e)) {
             return false;
         }
         throw e;
@@ -3264,6 +3299,7 @@ function isAzureDevOpsScoped(scopes) {
 // avoid a network call.
 async function oauthTenantChecks(cfg, references, { resolveOrgTenant: resolve = resolveOrgTenant } = {}) {
     const checks = [];
+    const bindings = [];
     for (const [name, decl] of Object.entries(cfg.oauth ?? {})) {
         // Driven by the DECLARATION, not by the reference: the reference only appears with the
         // switch, and a tenant-binding mistake is worth catching at setup, before the switch lands.
@@ -3282,12 +3318,20 @@ async function oauthTenantChecks(cfg, references, { resolveOrgTenant: resolve = 
         // ADO-scoped, and its argv could not be read" (the WARN doctorReport prints below).
         const applicable = hasConsumer && adoScoped;
         const org = applicable ? organisationFromArgs(cfg[consumerKind][consumerName].args) : null;
-        const check = { name, org, declared: decl.tenantId, applicable,
-            bound: org === null ? null : await resolve(org) };
+        const check = { name, org, declared: decl.tenantId, applicable, bound: null };
         if (!applicable) {
             check.reason = hasConsumer ? "not-ado-scope" : "no-consumer";
         }
         checks.push(check);
+        // Started here, awaited together below. Each is one unauthenticated HEAD that may burn the
+        // whole TIMEOUT_TENANT_MS, and doctor prints nothing until every check has finished -- so
+        // awaiting inside the loop makes a developer wait for their sum rather than for the slowest.
+        // They are independent by construction: resolveOrgTenant answers null rather than rejecting.
+        bindings.push(org === null ? null : resolve(org));
+    }
+    const bound = await Promise.all(bindings);
+    for (const [i, tenant] of bound.entries()) {
+        checks[i].bound = tenant;
     }
 
     return checks;
@@ -3571,9 +3615,7 @@ const WRITE_PROBE_NAME = "vc-secrets-writeprobe";
 // the user otherwise, so the key stays syntactically valid (vc-secrets:<scope>:<name>) even with no
 // project configured at all.
 function writeProbeKey(cfg) {
-    return cfg && cfg.projectId
-        ? `${KEY_PREFIX}:${cfg.projectId}:${WRITE_PROBE_NAME}`
-        : `${KEY_PREFIX}:${USER_SCOPE}:${WRITE_PROBE_NAME}`;
+    return keyFor(WRITE_PROBE_NAME, { scope: cfg?.projectId ? "project" : USER_SCOPE }, cfg);
 }
 
 // Rehearses at the LIMIT, not with a token-shaped string, and the two backends fail at different
@@ -3930,7 +3972,7 @@ async function cmdLaunch(kind, name, cfg, deps = {}) {
         // there, and fail() runs only the handlers already installed. With a null channel the
         // handler is a no-op, so registering early costs nothing and closes the window entirely.
         process.on("exit", cleanup);
-        const scopeKey = oauthEntry.decl.scope === USER_SCOPE ? USER_SCOPE : cfg.projectId;
+        const scopeKey = scopeKeyFor(oauthEntry.decl, cfg);
         channel = await (deps.createChannel ?? createChannel)({ name, scopeKey, nonce });
         childEnv = buildChildEnv(childEnv, { token, envVar: oauthEntry.envVar,
             channelPath: channel.path, nonce, preloadPath: PRELOAD_PATH,
