@@ -42,7 +42,7 @@ const CACHE_ROOTS = [
 // measured. Filtering on it alone silently skips a linked install, which either picks an older real
 // directory or reports a plugin that is installed as missing. Loading a plugin from a local directory
 // is a documented route on one of these clients, so linked entries are ordinary here. Whether the
-// target is really usable is settled two lines later by looking for the launcher inside it.
+// target is really usable is settled inside installsInCaches, by looking for the launcher in it.
 const isDirLike = (entry) => entry.isDirectory() || entry.isSymbolicLink();
 
 function installsInCaches() {

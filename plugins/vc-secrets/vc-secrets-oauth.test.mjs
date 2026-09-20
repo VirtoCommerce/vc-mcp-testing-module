@@ -90,8 +90,9 @@ test("createPkcePair: S256 challenge is base64url of the verifier's digest", () 
 });
 
 test("createPkcePair: two pairs never agree", () => {
-    // The positive control for the digest test above, which also passes for a constant
-    // verifier: a fixed one would make every authorize request replayable.
+    // The positive control for "createPkcePair: S256 challenge is base64url of the verifier's
+    // digest", which also passes for a constant verifier: a fixed one would make every authorize
+    // request replayable.
     assert.notEqual(oauth.createPkcePair().verifier, oauth.createPkcePair().verifier);
 });
 
@@ -288,8 +289,9 @@ test("parseTokenResponse: an Entra error surfaces its code and the AADSTS number
 });
 
 test("parseTokenResponse: an error body's other fields do not travel into the message", () => {
-    // The positive control for the test above, which also passes for a message built by
-    // JSON.stringify of the whole body — and an error body can carry a token hint.
+    // The positive control for "parseTokenResponse: an Entra error surfaces its code and the
+    // AADSTS number", which also passes for a message built by JSON.stringify of the whole body —
+    // and an error body can carry a token hint.
     assert.throws(() => oauth.parseTokenResponse(400, JSON.stringify({ error: "invalid_grant",
         error_description: "AADSTS70008: expired", trace_id: "trace-must-not-leak" }), 0),
     (e) => !e.message.includes("trace-must-not-leak"));
@@ -901,7 +903,7 @@ test("the margin covers the tick, the exchange, the skew allowance and both keys
 // acquireLock binds a UNIX socket (abstract on linux, a filesystem path on darwin) — a different
 // privilege from socketTest's loopback TCP probe above. Measured on this sandbox: TCP loopback
 // bind is permitted, both an abstract AND a filesystem unix-socket bind are EPERM. So reusing
-// socketTest here would answer "can bind" and every test below would then fail EPERM, reading as
+// socketTest here would answer "can bind" and every lockTest case would then fail EPERM, reading as
 // a regression rather than a sandbox restriction — a probe of the wrong privilege answers
 // confidently either way. This exact defect has already been fixed once in this file, in the
 // OTHER direction: socketTest's own probe was adapted FROM a unix-domain-socket probe TO a TCP
@@ -1393,8 +1395,9 @@ test("oauthLaunchDeps.writeCache: forwards env to both the refresh and the acces
     // env, so writeSecretValue fell back to process.env. Reads and writes then land in two
     // different homes, readCache never sees what writeCache just wrote, and EVERY launch
     // re-exchanges -- rotating the refresh token a second time on top of the rotation Entra
-    // already did the moment it issued the one just stored. Unreachable today (no production
-    // caller passes a custom env yet), so this test is what keeps the fix from regressing back.
+    // already did the moment it issued the one just stored. Unreachable as things stand (no
+    // production caller passes a custom env yet), so this test is what keeps env from being
+    // dropped again.
     const seenEnvs = [];
     const customEnv = { USER: "u", XDG_CONFIG_HOME: "/custom/home" };
     const deps = m.oauthLaunchDeps("azure-mcp", LAUNCH_DECL, LAUNCH_CFG, { backend: "keychain", env: customEnv,
@@ -1532,9 +1535,10 @@ test("acquireTokenLock: the poll cap is a backstop, not the terminator of the wa
 test("acquireTokenLock: seed, doubling and ceiling of its own wait", async () => {
     // Declared locally rather than imported, same discipline as the source's own pinned-copy
     // test: the point is to pin the numbers this loop actually PRODUCES, not to track whatever
-    // the module constant currently says. Driven directly (not through ensureFreshToken, which
-    // has its own, separate loop with its own pinned test a few tests up) -- a change to
-    // acquireTokenLock's seed/ceiling alone must redden only this test, not the other loop's.
+    // the module constant currently says. Driven directly (not through ensureFreshToken, which has
+    // its own, separate loop pinned by "ensureFreshToken: the contended wait's backoff and ceiling
+    // bound the deadline it enforces") -- a change to acquireTokenLock's seed/ceiling alone must
+    // redden only this test, not the other loop's.
     const LOCK_POLL_SEED = 250;
     const LOCK_POLL_CEILING = 2_000;
     const slept = [];
@@ -1669,9 +1673,10 @@ lockTest("tokenLockFor: user scope keys the lock on USER_SCOPE, ignoring cfg.pro
         { platform: process.platform, env: process.env });
 
     const holder = await cache.acquireLock(predictedUserPath);
-    // Collected and released defensively, same reason as the project-scope test above: a WRONG
-    // scope key gives back a real, live-listening lock instead of HELD_BY_OTHER, and leaving it
-    // unreleased keeps the process alive after the assertion has already failed.
+    // Collected and released defensively, for the reason "tokenLockFor: project scope keys the lock
+    // exactly the way keyFor keys the keystore entry" gives: a WRONG scope key gives back a real,
+    // live-listening lock instead of HELD_BY_OTHER, and leaving it unreleased keeps the process
+    // alive after the assertion has already failed.
     const got = [];
     try {
         // Two configs that disagree about projectId: at user scope keyFor ignores cfg.projectId
@@ -1735,7 +1740,8 @@ test("buildLocalWrite(keychain).stdinCommand: composes up to the line limit, ref
 });
 
 test("writeSecretValue: an oversize keychain value is refused before the runner is ever reached", async () => {
-    // The refusal itself is pinned by the test above; what this pins is that it happens EARLY. The
+    // The refusal itself is pinned by "buildLocalWrite(keychain).stdinCommand: composes up to the
+    // line limit, refuses one byte past it"; what this pins is that it happens EARLY. The
     // runner composes spec.stdinCommand only AFTER it has spawned, so without writeSecretValue's own
     // validating call an oversize value leaves an orphaned `security -i` waiting on a stdin that
     // never arrives, until the runner's timeout kills it.
@@ -2280,7 +2286,7 @@ function loginDeps(overrides = {}) {
         // against any other invocation of this tool running on this machine.
         acquireLock: async () => { lock.push("acquire"); return { release: async () => { lock.push("release"); } }; },
         // Same reason as acquireLock, and it was missed here once at a real cost: the default is
-        // the REAL deleteEntryIo, so the refresh-write-failure test below cleared a developer's
+        // the REAL deleteEntryIo, so a test whose refresh write fails cleared a developer's
         // live sign-in out of the actual keystore. From a GREEN run -- a delete that succeeds
         // looks like nothing at all. Measured 2026-08-20: both oauth entries for the affected
         // server were present before the run and gone after, with every other test still passing.
@@ -2939,7 +2945,8 @@ const LOGOUT_KEYS = m.oauthEntryKeys("azure-mcp", LOGOUT_DECL, LOGOUT_CFG);
 const FREE_LOCK = async () => ({ release: async () => {} });
 
 test("cmdLogout: removes both entries, refresh before access", async () => {
-    // The ORDER is asserted rather than sorted away, and the partial-failure test below is why.
+    // The ORDER is asserted rather than sorted away, and "cmdLogout: a store that fails part-way
+    // has already removed the refresh token, not the access one" is why.
     // The source sorts both sides here (mcpw.test.js), which makes the order invisible:
     // measured, reversing `names` in the production loop left the whole suite green.
     const deleted = [];
@@ -3701,14 +3708,14 @@ channelTest("the socket is private to this uid, and its directory goes on close"
 });
 
 channelTest("close() releases the endpoint, not merely the directory", async (t) => {
-    // Ported from mcpw.test.js. The connect assertion in the test above cannot fail on
-    // POSIX: close() removes the whole directory, so a connect answers ENOENT whether or not the
-    // listener was ever released. Suppressing only the directory teardown makes the guarantee
-    // falsifiable: node unlinks a unix socket exactly when the server closes and not before, so
-    // with the directory still present, the FILE's absence is the release, and its presence is a
-    // listener that outlived its channel.
+    // Ported from mcpw.test.js. The connect assertion in "the socket is private to this uid, and its
+    // directory goes on close" cannot fail on POSIX: close() removes the whole directory, so a
+    // connect answers ENOENT whether or not the listener was ever released. Suppressing only the
+    // directory teardown makes the guarantee falsifiable: node unlinks a unix socket exactly when
+    // the server closes and not before, so with the directory still present, the FILE's absence is
+    // the release, and its presence is a listener that outlived its channel.
     if (process.platform === "win32") {
-        t.skip("no directory to suppress -- the connect assertion above is load-bearing there");
+        t.skip("no directory to suppress -- the connect assertion in the uid-privacy case is load-bearing there");
 
         return;
     }
@@ -3727,12 +3734,14 @@ channelTest("close() releases the endpoint, not merely the directory", async (t)
 });
 
 channelTest("close() destroys still-open client sockets rather than waiting for them to drain", async () => {
-    // Neither test above ever leaves a connection open when close() runs, so neither can catch
-    // this comment's own claim going missing: server.close() alone waits for every open
-    // connection to end, and a client that never destroys its own end would turn teardown into a
-    // hang. Authentication is made OBSERVABLE -- the client waits for the pushed frame `latest`
-    // serves on a successful greet -- rather than assumed after a fixed delay, which under load
-    // can fail this test for the wrong reason (the socket not yet in `clients` when close() runs).
+    // Neither "the socket is private to this uid, and its directory goes on close" nor "close()
+    // releases the endpoint, not merely the directory" ever leaves a connection open when close()
+    // runs, so neither can catch this comment's own claim going missing: server.close() alone waits
+    // for every open connection to end, and a client that never destroys its own end would turn
+    // teardown into a hang. Authentication is made OBSERVABLE -- the client waits for the pushed
+    // frame `latest` serves on a successful greet -- rather than assumed after a fixed delay, which
+    // under load can fail this test for the wrong reason (the socket not yet in `clients` when
+    // close() runs).
     // Racing close() against a timer is the only way to see "did not hang" without actually
     // hanging this suite if it regresses.
     const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "n" });
@@ -4058,9 +4067,9 @@ channelTest("a target process receives the token into the variable its own envir
 channelTest("preload: a wrong nonce is refused and nothing is assigned", async () => {
     // Faithful port of mcpw.test.js, against the real createChannel: a push BEFORE the
     // wrong-nonce child runs is what makes "nothing is assigned" a claim about the refusal rather
-    // than about a token that was simply never sent. The channel-level test above pins the same
-    // refusal at the channel's own API; this one pins it at the process boundary the preload
-    // actually crosses.
+    // than about a token that was simply never sent. "a client presenting no nonce or a wrong one
+    // is refused and gets no token" pins the same refusal at the channel's own API; this one pins
+    // it at the process boundary the preload actually crosses.
     const refusals = [];
     const ch = await m.createChannel({ name: "s", scopeKey: "p1", nonce: "right-nonce",
         onRefusal: (w) => refusals.push(w) });
@@ -4267,7 +4276,7 @@ function fakeChild() {
 // referenced from needs a registration grant (resolveEnvEntries exempts a user-scope launchable
 // outright) or a projectId (keyFor and cmdLaunch's scopeKey both short-circuit on
 // decl.scope === "user"). That keeps these tests about the launch mechanics cmdLaunch adds, not
-// about the authorization machinery already covered elsewhere.
+// about the authorization machinery vc-secrets.test.mjs already covers.
 const CMD_LAUNCH_OAUTH_DECL = { ...DECL_IDENTITY, scope: "user", home: "user", kind: "oauth",
     declaredName: "ado", targetPackage: "some-oauth-package" };
 const CMD_LAUNCH_CFG = {
@@ -4691,7 +4700,8 @@ test("vc-secrets-probe: a silent server death stays the server's even with the l
     // and the probe blamed the launcher. Two independent discriminators cover it -- the knob is
     // dropped from the child's environment, and the relayed exit code is not 1 -- but this test pins
     // only the FIRST: restoring the knob's inheritance reddens it. The exit-code half is pinned by
-    // the classifier test above, and measured -- deleting that branch leaves THIS test green, because
+    // "classifyProbeFailure: an exit code the launcher cannot produce itself is the server's,
+    // whatever the last line said", and measured -- deleting that branch leaves THIS test green, because
     // with the knob dropped there is no benign line left for it to misread.
     const dir = tmpProbeConfigDir({ projectId: "p", secrets: {},
         servers: { silent: { command: process.execPath, args: ["-e", "setTimeout(()=>process.exit(3),80)"], env: {} } } });

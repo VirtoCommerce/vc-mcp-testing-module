@@ -1721,9 +1721,9 @@ function oauthLaunchDeps(entryName, decl, cfg, { backend = detectLocalBackend(),
         try {
             const entry = cache.parseEntry(backend === "wcm" ? decodeCredBlobHex(raw).value : raw);
             if (entry === null) {
-                // The corrupt case was the SILENT one, while the benign case below -- an entry a
-                // newer vc-secrets wrote -- got a line. That is backwards: one is a version skew a
-                // developer can reason about, the other is a keystore entry that has been damaged.
+                // Both cases are named on fd 2, and this one most of all: a version skew is a
+                // thing a developer can reason about, a keystore entry that has been damaged is
+                // not.
                 //
                 // parseEntry returns null rather than throwing because node embeds the first ten
                 // characters of its input in a JSON SyntaxError, and that input is a keystore blob.
@@ -3877,8 +3877,8 @@ async function cmdLaunch(kind, name, cfg, deps = {}) {
     }
     Object.assign(childEnv, entries.env);
 
-    // Only a launchable with an oauth reference goes through what follows. Every other one keeps
-    // today's path exactly -- routing them all through it would widen the NODE_OPTIONS carve-out
+    // Only a launchable with an oauth reference goes through what follows. Every other one takes
+    // the plain spawn path -- routing them all through this would widen the NODE_OPTIONS carve-out
     // past the child it was authorised for.
     const [oauthEntry] = entries.oauth;
     let channel = null;

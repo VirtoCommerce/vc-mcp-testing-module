@@ -12,7 +12,7 @@ import { killProcessTree } from "./vc-secrets.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Two failures used to print one message. A child that never answers is either a server binary
+// Two failures, two messages. A child that never answers is either a server binary
 // that cannot start or a launcher that refused before spawning it — and under OAuth the second is
 // routine (nobody has signed in yet) while the first is a regression. One message for both means a
 // token regression reads exactly like a working setup on a broken machine, which is the shape that

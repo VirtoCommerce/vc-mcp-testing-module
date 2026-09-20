@@ -67,7 +67,8 @@ const CAN_DENY_BY_MODE = probe(() => {
 // Several tests stand a stub binary on PATH in place of gpg, security or powershell.exe. On win32
 // stubBinary writes a .sh body behind a .cmd launcher, so the stub runs only where a POSIX shell
 // exists. Note this one is true on POSIX by CONSTRUCTION -- the short-circuit -- while the three
-// around it are live measurements, which is what the probe self-test below is for.
+// around it are live measurements, which is what "capability probes: the ones a POSIX machine
+// cannot lack answer true" is for.
 const CAN_RUN_POSIX_STUB = process.platform !== "win32"
     || probe(() => spawnSync("sh", ["-c", "exit 0"]).status === 0);
 
@@ -542,7 +543,8 @@ test("an oauth declaration is stamped with the scope, the home and its kind", ()
     assert.equal(cfg.oauth.ado.kind, "oauth");
     // Stamped here rather than added by a call site, unlike a secret's. Dropping it makes
     // authorizationFor's pointer read `oauth."undefined"` -- measured, that reddens this test and
-    // the user-scope authorization test below, and nothing else.
+    // "a user-scope oauth declaration is authorized on the declaration, as a secret is", and
+    // nothing else.
     assert.equal(cfg.oauth.ado.declaredName, "ado");
 });
 
@@ -892,7 +894,7 @@ test("both entries of one sign-in clashing are both reported", () => {
         oauth: { ado: OAUTH_DECL },
         secrets: { "oauth-ado-refresh": { backend: "local" }, "oauth-ado-access": { backend: "local" } } } }));
     const clashes = m.oauthKeyClashes(cfg);
-    // Every other fixture collides on exactly one entry, so "length === 1" elsewhere pins
+    // Every other fixture collides on exactly one entry, so their "length === 1" pins
     // "no more than one" and never "all of them".
     assert.equal(clashes.length, 2);
     assert.ok(clashes.some((c) => /refresh entry/.test(c)));
@@ -1567,7 +1569,8 @@ test("deleteEntryIo: a malformed gpg key is refused, not read as already-absent"
 // which writes a bare WRITE_PROBE_NAME -- one probe entry per machine. Here the entry is scoped, so
 // there is one per declared project. The key grammar does not force this (vc-secrets:user:<name>
 // satisfies KEY_RE unconditionally); it is chosen so two projects' diagnostics cannot write over
-// each other's slot, and it is pinned by the scope test below.
+// each other's slot, and it is pinned by "the probe writes AND deletes under the scope the config
+// declares, in both directions".
 //
 // The other adaptation is mechanical: this package's keys are three segments
 // (vc-secrets:<scope>:<name>) against the source's two, and it has no composeStdin, so the overhead
@@ -2342,8 +2345,10 @@ test("doctorReport: two oauth entries both get their own tenant finding", () => 
 
 test("doctorReport: a tenant check with no consumer at all is not applicable, not a WARN that can never pass", () => {
     // org===null has more than one cause, and only this one is "nothing to check" -- a consumer that
-    // exists but whose argv could not be read is a real misconfiguration (the next test), and folding
-    // both into one WARN would either silence that or turn this one into a WARN that can never clear,
+    // exists but whose argv could not be read is a real misconfiguration, pinned by "doctorReport: a
+    // consumer whose argv could not be read still warns, and is not folded into not applicable", and
+    // folding both into one WARN would either silence that or turn this one into a WARN that can
+    // never clear,
     // since nothing bound to an organisation exists to satisfy it.
     const lines = oauthDoctorLines({
         tenantChecks: [{ name: "azure-mcp", org: null, declared: "aaa", bound: null, applicable: false, reason: "no-consumer" }] });
@@ -2697,7 +2702,8 @@ test("resolveEnvEntries: an oauth reference never resolves a same-named secret",
     assert.equal(m.crossingProblem(cfg, "servers", "s", "ado"), null);
     // Matched, not bare: a bare `rejects` is satisfied by any throw, so the refusal could move to an
     // unrelated cause and `asked === 0` would still hold for the wrong reason. The message's own
-    // content is pinned by the authorization test below, not here.
+    // content is pinned by "an authorization refusal names the doctor command, and doctor's own
+    // report names the same where", not here.
     await assert.rejects(() => m.resolveEnvEntries("s", cfg, async () => { asked += 1; return "PLAINTEXT"; }),
         /not authorized/);
     assert.equal(asked, 0, "the secret resolver is never reached");
@@ -2769,7 +2775,8 @@ test("resolveEnvEntries: a user-scope launchable needs no grant for a sign-in, e
 
 test("resolveEnvEntries: the exemption follows the launchable's home, not the declaration's", async () => {
     // The two are only distinguishable where they differ. A fixture with both at user scope is
-    // satisfied by either rule, which is why the test above cannot stand in for this one.
+    // satisfied by either rule, which is why "resolveEnvEntries: a user-scope launchable needs no
+    // grant for a sign-in, exactly as for a secret" cannot stand in for this one.
     const cfg = m.loadConfig(scopedPaths({
         user: { servers: { s: { command: "npx", args: [], env: { TOK: "oauth:ado" } } } },
         project: { projectId: "proj-x", oauth: { ado: OAUTH_DECL } },
@@ -2862,8 +2869,9 @@ test("an authorization refusal names the doctor command, and doctor's own report
 });
 
 test("doctorReport: an oauth crossing is reported, and a launchable naming both kinds gets a line for each", () => {
-    // Named after the rule, not the crossingProblem call site: the test above reaches the oauth
-    // crossing only through its FAIL lines, whose `where` point 3 also produces -- so it leaves the
+    // Named after the rule, not the crossingProblem call site: "an authorization refusal names the
+    // doctor command, and doctor's own report names the same where" reaches the oauth crossing
+    // only through its FAIL lines, whose `where` point 3 also produces -- so it leaves the
     // authorized `INFO` line and the kind-keyed dedup unpinned. Both are honest value-mutants,
     // injected as a value, never a throw, so the surrounding catch cannot absorb it -- each with its
     // own positive control.
@@ -3121,7 +3129,8 @@ test("consumedSecrets: an oauth reference does not consume a same-named secret, 
 });
 
 test("consumedSecrets: a secret reference on an enabled server is still consumed", () => {
-    // The positive control: without it an empty body satisfies the test above.
+    // The positive control: without it an empty body satisfies "consumedSecrets: an oauth
+    // reference does not consume a same-named secret, on either route".
     assert.deepEqual([...m.consumedSecrets(consumedFixture("secret:ado"), CONSUMED_LISTS, new Set())], ["ado"]);
 });
 
@@ -4679,7 +4688,8 @@ const GUARDED_ANYWHERE = [
 
 // The same criterion, with a shorter reach. These names belong to half the repositories on this machine
 // and the hook runs in all of them, so the guard scopes them to the package directory instead of
-// claiming the names. What that gives up has a test of its own below rather than a footnote here.
+// claiming the names. What that gives up is pinned by "guard: a name this package does not own is
+// guarded inside the package and nowhere else" rather than by a footnote here.
 //
 // A hook registration switches this guard off with one key, where editing `guard-declarations.mjs` does
 // it the hard way -- and a client manifest is cheaper still, since one of them is the only thing
@@ -4767,8 +4777,9 @@ test("guard: a module match is anchored at a path boundary and at the .mjs exten
     // edits is the guard people switch off; fixtures 1 and 2 pin that. Drop the `$` and a backup file
     // beside the module becomes unwritable; fixtures 3 and 4 pin that, and it is the smaller and more
     // likely edit of the two. Deleting `\.mjs$` outright is a THIRD mutation and reaches further than
-    // either: it reddens fixtures 3 and 4 here AND takes the package's own test files read-only, which
-    // the next test holds. `$` alone does not reach that second effect, because `.test.mjs` cannot
+    // either: it reddens fixtures 3 and 4 here AND takes the package's own test files read-only,
+    // which "guard: the package's own test files stay writable" holds. `$` alone does not reach
+    // that second effect, because `.test.mjs` cannot
     // match `(-…)?\.mjs` however the tail is anchored -- which is why the two mutations are not
     // interchangeable even though both touch the same four characters.
     for (const notOurs of [
