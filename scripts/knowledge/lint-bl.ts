@@ -110,19 +110,20 @@ export const BLC_002_BASELINE: Record<string, number> = {
   // which lint-bl.ts exempts from BLC-002 by design. Per BLC-002: fix + de-baseline, never widen.
   // Remaining entries are the BL-SEC-* family, whose citing rows in suite 044 are still unauthored —
   // relabelling those would hide the debt rather than pay it.
-  "BL-SEC-001": 6, "BL-SEC-002": 3, "BL-SEC-003": 8, "BL-SEC-004": 5,
+  "BL-SEC-001": 3, "BL-SEC-002": 1, "BL-SEC-003": 8, "BL-SEC-004": 5,
   "BL-SEC-005": 2,
-  // BL-CFG-003/004/007/008 RESTORED 2026-09-19 after being dropped in the same pass.
-  // `npm run bl:remap --propose` reports "0 case(s) in 0 file(s)" for all four, but this lint
-  // reports 4/1/4/5 citing cases in
-  // regression/suites/Frontend/configurable-products/072e-configurable-products-conditional-sections.csv
-  // (verified by raw grep: `"BL-CFG-003"` sits bare in Business_Rule at line 375). The two tools
-  // disagree about what that file contains, so the citations could not be converted by the
-  // sanctioned path — and hand-editing a file whose structure a parser already stumbles on is how
-  // suite 044 got broken earlier today. Left baselined so the debt stays VISIBLE rather than
-  // silently un-ratcheted. FOLLOW-UP: fix bl:remap's suite discovery for 072e, then --propose and
-  // de-baseline these four.
-  "BL-CFG-003": 4, "BL-CFG-004": 1, "BL-CFG-007": 4, "BL-CFG-008": 5,
+  // BL-CFG-003/004/007/008 REMOVED 2026-09-19 — the tool bug that stranded them is fixed.
+  // They were briefly restored here because `npm run bl:remap --propose` reported "0 case(s) in
+  // 0 file(s)" for all four while THIS lint reported 4/1/4/5 citing cases in 072e. The cause was
+  // in bl:remap, not in the data: it read suites with `readFileSync(f, "utf8")`, which does not
+  // strip a UTF-8 BOM, so the first header cell parsed as "﻿ID", `indexOf("ID")` returned
+  // -1, and its `if (ci < 0 || ii < 0) continue;` guard dropped all 13 BOM-carrying suites
+  // silently. Same class as the bug that taught `parseSuite` `bom: true` (see buildCoverage).
+  // bl:remap now strips/restores the BOM and REPORTS every suite it skips; the 14 citations were
+  // converted by the sanctioned path and both tools now agree id-for-id and case-for-case.
+  // BL-SEC-001 (6→3) and BL-SEC-002 (3→1) are also tightened to their measured counts. The old
+  // numbers predated the 044 authoring pass; the ratchet accepts a shrink silently, so an
+  // entry left above its real count is headroom the next drift can grow into unnoticed.
 };
 
 const find = (rule: string, severity: Severity, id: string, message: string): Finding => ({ rule, severity, id, message });

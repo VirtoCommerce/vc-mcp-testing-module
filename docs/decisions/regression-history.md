@@ -207,3 +207,41 @@ also invalidated an already-approved CSV correction **before it was applied** �
 would have *passed*, because on an empty cart `remaining` equals `target`. Classification from artifacts
 is a hypothesis generator. **Phase 4 live verification is not optional polish; it is what separates a
 finding from a plausible story.**
+
+## Tooling failures found in the follow-up (2026-09-19)
+
+### 10. `bl:remap` reported `0 case(s) in 0 file(s)` for citations that existed
+
+`npm run bl:lint` reported `BL-CFG-003` cited by 4 cases in `072e-configurable-products-conditional-sections.csv`;
+`npm run bl:remap -- --propose BL-CFG-003` reported **zero**, for the same id in the same corpus. Raw grep
+sided with the lint. Because only one of the two tools can write, the four `BL-CFG-*` ids were left
+baselined in `BLC_002_BASELINE` as debt that could not be burned down by the sanctioned path.
+
+Root cause was in `bl:remap`, not in the data, and the full write-up lives in that file's header comment
+(`scripts/knowledge/remap-bl-citations.ts` §THE BOM INCIDENT) — not restated here. Two things are worth
+recording at this level:
+
+**The failure mode is the one this repo keeps paying for: a tool that is wrong and silent.** The guard that
+dropped the files was `if (ci < 0 || ii < 0) continue;` — no report, no count, no exit code. A zero from a
+tool that cannot say which files it failed to read is not a measurement, and it was believed for long
+enough to get written into a baseline comment as a permanent disagreement between two tools. `lint-bl.ts`
+had already learned this lesson and encoded it as **BLC-005** (`buildCoverage` returns `unparsed` rather
+than swallowing it, after the same class of bug produced 3 false BLC-004 findings); `bl:remap` carried the
+identical hazard with no equivalent report. The fix therefore has two halves — strip/restore the BOM, *and*
+report every skipped suite — and splits the report into `legacy` (a known corpus class, exit 0) and
+`unreadable` (a real anomaly, exit 1), because a warning that fires on every run is a warning nobody reads.
+
+**Fixing the first defect exposed a second that the tool's own verification could not see.** With discovery
+working, applying the 14 citations rewrote **111 of 111 lines** and dropped 1,140 bytes: `ser()` re-quoted
+minimally, stripping quotes from every cell that did not strictly need them, across columns the tool's own
+SAFETY block promises never to touch. Its post-write check passed — it compares *parsed* values, which were
+identical. That is the right check for correctness and the wrong one for churn, and in a repo where a suite
+CSV has exactly one author per change and a conflict in one is **never** resolved with git, the diff
+footprint *is* a correctness property. After the fix the same operation touches 14 lines and +126 bytes
+(14 × `PROPOSED-`), with the BOM and all 651 CRs byte-identical.
+
+Regression tests: `scripts/unit/remap-bl-citations.test.ts` (6 tests, mutation-checked — reverting either
+half of the fix fails them). Both tools now agree id-for-id and case-for-case; `BLC_002_BASELINE` shrank
+from 9 entries to 5, and `BL-SEC-001`/`BL-SEC-002` were tightened to their measured counts (6→3, 3→1)
+because the ratchet accepts a shrink silently, so an entry left above its real count is headroom the next
+drift can grow into unnoticed.

@@ -683,7 +683,7 @@ Testable business rules for the Virto Commerce B2B e-commerce platform. Use this
   silent on any store-scope override or its fallback — a released, in-use mechanism neither guide documents
   (finding, not a defect in the mechanism). Source: `scripts/seed-data/b2b/membership-roles-whitelist-specs.mjs`
   header (measured live on vcst 2026-09-18) + `vc-module-customer` `ModuleConstants.cs` +
-  `Scripts/services/rolesPickerService.js`. See `.claude/knowledge/domain/b2b-organizations.md` §G7 for the fuller
+  `Scripts/services/rolesPickerService.js`. See `.claude/knowledge/domain/b2b-organizations.md` §2d for the fuller
   mechanism write-up. The surviving invariant is unchanged: the whitelist constrains the Admin UI picker's offered
   options only; server-side enforcement (VCST-5239 EPIC-5239-03) remains a planned gate.
 
