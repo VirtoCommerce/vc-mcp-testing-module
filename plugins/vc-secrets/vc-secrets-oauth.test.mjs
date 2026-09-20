@@ -2525,7 +2525,11 @@ test("cmdLogin: an access entry too large for the keystore is recorded, not just
     // in hand here, and parsing a string for it would be a second way to be wrong about it.
     assert.equal(info.bytes, Buffer.byteLength(cache.serializeAccess({ accessToken: "at",
         expiresAt: 1_703_600_000, obtainedAt: 1_700_000_000, lifetimeMs: 3600_000, uptimeAtIssue: 1000 })));
-    assert.ok(logged.some((l) => /access entry could not be stored/.test(l)), "and the login still reports it");
+    // "signed in, but" included on purpose: without it the same sentence reads as a failed login,
+    // at the moment a developer is most likely to re-run `login` and rotate away the token they
+    // just got. The prefix is a parameter of the shared write tail, so it is droppable in one edit.
+    assert.ok(logged.some((l) => /signed in, but the access entry could not be stored/.test(l)),
+        "and the login still reports it, without reading as a failed sign-in");
 });
 
 test("cmdLogin: an access write that failed for any other reason leaves no marker", async () => {
@@ -2810,6 +2814,10 @@ test("cmdLogin: a renewal that will not release still stores the token, and name
     // meet that only as an unexplained request to sign in again.
     assert.match(logged.join(""), /still holding the lock/, "the hazard has to be named where it is taken");
     assert.match(logged.join(""), /run this again/, "together with what to do about it");
+    // The entry name, not a bare verb: `logout` is argument-required, so advice without it sends a
+    // developer to a usage line whose `[name]` reads as optional -- and the window this advisory
+    // exists to close stays open while they decide the advice was stale.
+    assert.match(logged.join(""), /"vc-secrets logout azure-mcp"/, "and a remedy the CLI accepts");
 });
 
 test("cmdLogin: no lock failure costs the developer a spent authorization code", async () => {

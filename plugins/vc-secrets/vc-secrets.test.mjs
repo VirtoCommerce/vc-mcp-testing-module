@@ -3532,6 +3532,39 @@ test("guard-declarations: unparseable stdin is reported and does not block", () 
     assert.match(r.stderr, /not inspected/);
 });
 
+test("guard-declarations: an unparseable payload is reported without any of its bytes", () => {
+    // fd 0 here carries the client's tool payload -- the file content about to be written -- so V8's
+    // parse message is built out of a credential. It has three shapes and the one that leaks most is
+    // the whole input, which is what a short payload produces. The launcher answers this by rebuilding
+    // the reason from digits; the guard cannot import that helper and answers by carrying no part of
+    // the message at all.
+    // Deliberately not shaped like a real credential: this repository is public, and a fixture that
+    // merely LOOKS like a token is enough to trip a host's secret scanner and block the push. What
+    // the assertion needs is a string V8 will carry, not a realistic one -- and only its first ten
+    // or so characters survive, because the window is clipped on both sides.
+    const canary = "LEAKCANARY0123456789";
+    // An UNQUOTED value on purpose. A payload that merely ends early fails at its last position and
+    // V8 answers with the positional shape, which carries nothing -- so the assertion below would
+    // pass without the fix and the test would be green for the wrong reason. The control after it
+    // is what holds that shut.
+    const payload = `{"tool_input":{"content":${canary}}}`;
+    const r = runGuardHook(payload);
+
+    assert.equal(r.status, 0);
+    assert.match(r.stderr, /not valid JSON/);
+    assert.doesNotMatch(r.stderr, /LEAKCANARY|content|tool_input/,
+        "no window of the payload may travel with the reason");
+
+    let raw = "";
+    try {
+        JSON.parse(payload);
+    } catch (e) {
+        raw = e.message;
+    }
+    assert.match(raw, /LEAKCANARY/,
+        "the control: this exact payload must make V8 build a message out of its bytes");
+});
+
 // ── vc-secrets-shim.mjs ─────────────────────────────────────────────────────────────────────────────
 
 const SHIM_PATH = fileURLToPath(new URL("./vc-secrets-shim.mjs", import.meta.url));

@@ -115,11 +115,21 @@ try {
     // Exit 0 stays: refusing every edit because this guard cannot read its own input blocks work
     // over a fault that is ours, and that is the decided answer. The LINE is what the decision was
     // missing. The `targets.readable` fail-open already says "not inspected" out loud for the same
-    // class, and the shape that reaches here is a payload this guard no longer understands -- a
-    // client protocol change, which nobody in this repository causes and nobody would otherwise
-    // learn about, because a guard that stops inspecting silently reads exactly like one that
-    // inspected and allowed.
-    fs.writeSync(2, `vc-secrets guard: could not read its input (${e.message}) -- not inspected\n`);
+    // class, and what reaches here is stdin that is not JSON at all -- a framing or encoding change,
+    // or a truncated write. (A payload whose SHAPE changed is still valid JSON and reaches
+    // targetsFrom.) Nobody in this repository causes it and nobody would otherwise learn about it,
+    // because a guard that stops inspecting silently reads exactly like one that inspected and
+    // allowed.
+    //
+    // The reason carries no part of V8's message. That message is built from a window of the input,
+    // and on this fd the input is the client's tool payload -- the file content about to be written,
+    // which is how a PAT in a .env reaches this line. jsonSyntaxWhere makes the same refusal in the
+    // launcher and keeps the positional triple; here even that is dropped, because a position into
+    // a transient stdin frame points at nothing the developer can open. This guard cannot import
+    // jsonSyntaxWhere: targets.mjs imports nothing on purpose, and the launcher that holds it is
+    // ~200 KB loaded once per tool call.
+    const why = e instanceof SyntaxError ? "not valid JSON" : e.code ?? e.name;
+    fs.writeSync(2, `vc-secrets guard: could not read its input (${why}) -- not inspected\n`);
     process.exit(0);
 }
 

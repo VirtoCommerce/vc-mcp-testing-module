@@ -2541,9 +2541,9 @@ async function cmdLogin(serverName, cfg, {
             // leaves the previous refresh entry readable until it overwrites it.
             log(`vc-secrets: a token renewal for "${serverName}" was still holding the lock -- storing the new`
                 + " token anyway; if the next launch asks you to sign in, run this again."
-                + " If this sign-in was for a DIFFERENT account, run \"vc-secrets logout\" and sign in"
-                + " again: the renewal can still store the previous account's tokens, and reads serve"
-                + " that account until its access token expires\n");
+                + ` If this sign-in was for a DIFFERENT account, run "vc-secrets logout ${serverName}"`
+                + " and sign in again: the renewal can still store the previous account's tokens, and"
+                + " reads serve that account until its access token expires\n");
         }
         if (reason === "unbindable") {
             log(`vc-secrets: the token lock could not be taken (${error?.code ?? error?.name}) -- this sign-in`
