@@ -115,11 +115,12 @@ try {
     // Exit 0 stays: refusing every edit because this guard cannot read its own input blocks work
     // over a fault that is ours, and that is the decided answer. The LINE is what the decision was
     // missing. The `targets.readable` fail-open already says "not inspected" out loud for the same
-    // class, and what reaches here is stdin that is not JSON at all -- a framing or encoding change,
-    // or a truncated write. (A payload whose SHAPE changed is still valid JSON and reaches
-    // targetsFrom.) Nobody in this repository causes it and nobody would otherwise learn about it,
-    // because a guard that stops inspecting silently reads exactly like one that inspected and
-    // allowed.
+    // class, and two things reach here: stdin that is not JSON at all -- a framing or encoding
+    // change, or a truncated write -- and an fd 0 that cannot be read, which answers with an errno
+    // (`0< /tmp` gives EISDIR). That second one is why the reason is not simply the word JSON. (A
+    // payload whose SHAPE changed is still valid JSON and reaches targetsFrom.) Nobody in this
+    // repository causes either and nobody would otherwise learn about them, because a guard that
+    // stops inspecting silently reads exactly like one that inspected and allowed.
     //
     // The reason carries no part of V8's message. That message is built from a window of the input,
     // and on this fd the input is the client's tool payload -- the file content about to be written,

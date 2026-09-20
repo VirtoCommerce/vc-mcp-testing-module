@@ -2539,6 +2539,12 @@ async function cmdLogin(serverName, cfg, {
             // remedy rather than a second sign-in because it removes BOTH entries, leaving a waking
             // renewal nothing to exchange; a second sign-in re-opens this very window, since it too
             // leaves the previous refresh entry readable until it overwrites it.
+            //
+            // cmdLogout takes this same lock and refuses while the holder is still wedged, so the
+            // advice can bounce once. Not named in the line: its refusal is loud and says what to do
+            // ("find the vc-secrets run that is still refreshing it"), and the whole reason this
+            // advisory exists is that the outcome is otherwise silent. A caveat here would lengthen
+            // it for a case that already speaks for itself.
             log(`vc-secrets: a token renewal for "${serverName}" was still holding the lock -- storing the new`
                 + " token anyway; if the next launch asks you to sign in, run this again."
                 + ` If this sign-in was for a DIFFERENT account, run "vc-secrets logout ${serverName}"`

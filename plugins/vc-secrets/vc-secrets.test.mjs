@@ -3523,10 +3523,11 @@ test("guard-declarations: allows .claude/settings.json", () => {
 test("guard-declarations: unparseable stdin is reported and does not block", () => {
     // Exit 0 is the decided answer and this pins it: a guard that cannot read its own input must not
     // block work over a fault that is ours. The report is the other half. What reaches this branch is
-    // a client payload shape the guard no longer understands -- nobody in this repository causes it
-    // and nothing else announces it, so without the line the guard stops inspecting and reads exactly
-    // like one that inspected and allowed. "guard: an unreadable payload is reported and does not
-    // block" draws the same pair for the sibling fail-open.
+    // stdin that does not parse, or an fd 0 that cannot be read at all -- nobody in this repository
+    // causes either and nothing else announces them, so without the line the guard stops inspecting
+    // and reads exactly like one that inspected and allowed. "guard: an unreadable payload is
+    // reported and does not block" draws the same pair for the sibling fail-open, which IS the
+    // shape-the-guard-no-longer-understands branch: that payload parsed, and targetsFrom refused it.
     const r = runGuardHook("not json");
     assert.equal(r.status, 0);
     assert.match(r.stderr, /not inspected/);
