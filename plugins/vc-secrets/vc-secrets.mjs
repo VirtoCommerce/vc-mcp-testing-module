@@ -2449,11 +2449,23 @@ async function cmdLogin(serverName, cfg, {
         if (reason === "busy") {
             // Waited the full ceiling and gave up. Worded as "was still holding" rather than "is":
             // the latch that got us here remembers a holder was SEEN, not that one is there now.
-            // Stored anyway for the reason above — but a holder that later wakes and completes will
-            // overwrite this, and the developer would otherwise meet that only as an unexplained
-            // request to sign in again.
+            // Stored anyway, which is deliberate for every unserialised reason here — but a holder
+            // that later wakes and completes will overwrite this, and the developer would otherwise
+            // meet that only as an unexplained request to sign in again.
+            //
+            // A sign-in under a DIFFERENT principal is the case the advice has to name, because it
+            // is the one that stays SILENT. This path deletes the access entry while the previous
+            // principal's refresh entry is still readable, so a renewal that wakes inside that
+            // window exchanges it and stores that principal's pair. Nothing then asks for anything:
+            // reads serve the previous account until its access token expires. cmdLogout is the
+            // remedy rather than a second sign-in because it removes BOTH entries, leaving a waking
+            // renewal nothing to exchange; a second sign-in re-opens this very window, since it too
+            // leaves the previous refresh entry readable until it overwrites it.
             log(`vc-secrets: a token renewal for "${serverName}" was still holding the lock -- storing the new`
-                + " token anyway; if the next launch asks you to sign in, run this again\n");
+                + " token anyway; if the next launch asks you to sign in, run this again."
+                + " If this sign-in was for a DIFFERENT account, run \"vc-secrets logout\" and sign in"
+                + " again: the renewal can still store the previous account's tokens, and reads serve"
+                + " that account until its access token expires\n");
         }
         if (reason === "unbindable") {
             log(`vc-secrets: the token lock could not be taken (${error?.code ?? error?.name}) -- this sign-in`
