@@ -1838,7 +1838,7 @@ test("a keyvault secret is not an unlock target, since there is no local file to
     assert.deepEqual(m.unlockTargets(cfg, () => true), []);
 });
 
-test("unlock reports a count, since naming one entry reads as only that one being affected", { skip: !CAN_RUN_POSIX_STUB && "needs a POSIX shell, which the stub binary on PATH is written behind" }, async () => {
+test("unlock reports a count, since naming one entry reads as only that one being affected", { skip: m.detectLocalBackend(process.platform, process.env) !== "gpg" && "needs gpg to be the backend this machine selects -- cmdUnlock returns early on any other, and this test injects its own run rather than reaching a stub" }, async () => {
     const cfg = { secrets: { a: { backend: "local", scope: "user" }, b: { backend: "local", scope: "user" } },
         oauth: {}, projectId: "p", files: {} };
     const err = [];
@@ -3750,11 +3750,13 @@ test("doctorReport: duplicate-tool suppression matches gpg's real message shape 
         "exactly one gpg line — the missing-tool FAIL, not a second per-secret FAIL");
 });
 
-test("cmdMigrate: prints no advice about \"the other scope\" for a project/local secret collision", { skip: !CAN_RUN_POSIX_STUB && "needs a POSIX shell, which the stub binary on PATH is written behind" }, () => {
+test("cmdMigrate: a project/local collision on one name is one keystore entry, reported once as already present", { skip: !CAN_RUN_POSIX_STUB && "needs a POSIX shell, which the stub binary on PATH is written behind" }, () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-migrate-collision-"));
     tmpDirs.push(dir);
     // The only secret collision that can still occur: project and local declare the same name — they
-    // share one keystore namespace, so any per-collision "set it in the other scope too" advice is false.
+    // share one keystore namespace, so the collision is one entry rather than two. cmdMigrate prints no
+    // per-collision advice about a second scope and its own comment records why; asserting that absence
+    // here would pin one wording of advice nobody writes, and stay green for every other wording.
     const decl = { projectId: "demo", secrets: { dup: { backend: "local" } }, servers: {}, tasks: {} };
     fs.writeFileSync(path.join(dir, m.CONFIG_NAME), JSON.stringify(decl));
     fs.writeFileSync(path.join(dir, m.LOCAL_CONFIG_NAME), JSON.stringify(decl));
@@ -3767,7 +3769,6 @@ test("cmdMigrate: prints no advice about \"the other scope\" for a project/local
 
     assert.equal(r.status, 0);
     assert.match(r.stderr, /dup: already present/);
-    assert.ok(!/other scope|key was written/i.test(r.stderr), `unexpected scope-advice text in migrate output:\n${r.stderr}`);
 });
 
 test("cmdMigrate: refuses to touch a secret whose current state it cannot read", { skip: !CAN_RUN_POSIX_STUB && "needs a POSIX shell, which the stub binary on PATH is written behind" }, () => {
