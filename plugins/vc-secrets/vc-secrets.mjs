@@ -400,6 +400,29 @@ function validateLaunchables(label, map) {
     }
 }
 
+// A JSON.parse failure is the one error in these readers whose message carries FILE CONTENT. V8
+// builds it out of a window of the source around the error position, in three shapes: a window with
+// text elided on both sides, a window anchored at the start, and -- for an input short enough -- the
+// whole text. Every file parsed through here is one a credential sits in: .mcp.json and
+// settings.local.json carry env blocks, and the config file carries the secrets map. The messages
+// reach `doctor`, whose output is what a developer pastes into an issue.
+//
+// So the reason is rebuilt from the part that is provably content-free -- the positional triple,
+// which is digits -- rather than filtered out of V8's prose. A filter has to anticipate every shape
+// V8 emits, including on Node versions this will run on but was never tested against, and the
+// whole-text shape is what missing one costs. An allowlist of digits cannot leak a shape it has
+// never met. Nothing becomes unavailable by this: the developer holds the file, and an editor or a
+// `node -e` one-liner reports the detail there, where it does not travel.
+function jsonSyntaxWhere(e) {
+    return /at position \d+ \(line \d+ column \d+\)/.exec(e.message)?.[0] ?? "position not reported";
+}
+
+// For the readers that wrap the read and the parse in one try. An fs failure passes through: ENOENT,
+// EACCES and EISDIR describe the file rather than its contents, and they ARE the diagnosis.
+function readFailureReason(e) {
+    return e instanceof SyntaxError ? `not valid JSON, ${jsonSyntaxWhere(e)}` : e.code ?? e.message;
+}
+
 function parseConfigFile(file, warnings) {
     let raw;
     let cfg;
@@ -416,7 +439,7 @@ function parseConfigFile(file, warnings) {
     try {
         cfg = JSON.parse(raw);
     } catch (e) {
-        throw new VcSecretsError(`config is not valid JSON: ${file} (${e.message})`);
+        throw new VcSecretsError(`config is not valid JSON: ${file} (${jsonSyntaxWhere(e)})`);
     }
     if (typeof cfg.schemaVersion === "number" && cfg.schemaVersion > SCHEMA_VERSION) {
         throw new VcSecretsError(`${file}: schemaVersion ${cfg.schemaVersion} needs a newer vc-secrets (this one speaks ${SCHEMA_VERSION}) -- update the plugin`);
@@ -947,8 +970,21 @@ function oversizeMarkerPath(key, env = process.env) {
 // about the same quantity.
 function recordOversizeMarker(key, { backend, bytes, limit, env = process.env, at = Date.now() }) {
     const file = oversizeMarkerPath(key, env);
-    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-    fs.writeFileSync(file, JSON.stringify({ key, backend, bytes, limit, at }), { mode: 0o600 });
+    try {
+        fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+        fs.writeFileSync(file, JSON.stringify({ key, backend, bytes, limit, at }), { mode: 0o600 });
+    } catch (e) {
+        // Both call sites stand inside a catch that has already decided this failure will not fail
+        // the operation -- cmdLogin says so in as many words, because failing there costs an
+        // interactive sign-in. A throw from here escapes that catch and rejects a login whose
+        // refresh token is already stored, sending the developer to sign in again and rotate away
+        // the token they just obtained. The state directory is exactly where that happens: a
+        // read-only profile, a file where the directory should be, or a full disk.
+        //
+        // clearOversizeMarker draws this line on the success path for the same reason.
+        fs.writeSync(2, `vc-secrets: the oversize marker for "${key}" could not be written`
+            + ` (${e.code ?? e.message}) -- "vc-secrets doctor" will not report the ceiling\n`);
+    }
 }
 
 function clearOversizeMarker(key, env = process.env) {
@@ -1994,8 +2030,12 @@ function childNodeVersionIo({ platform = process.platform, env = process.env, ru
         // "no version" -- and that last one is the case this probe was added to catch, so it was the
         // one indistinguishable from the others. Any non-version string still fails
         // childNodeSupportsImport's match, so what happens next is unchanged; only what the
-        // developer is told changes.
-        return `no usable version (${r.error?.code ?? r.error?.message ?? `exit ${r.status}`})`;
+        // developer is told changes. A child killed by a signal carries no status at all, so the
+        // signal is the part that names it. The OOM killer on a loaded machine reaches this branch;
+        // `TIMEOUT_LOCAL_MS` does not, because spawnSync reports that one as ETIMEDOUT on `error`,
+        // which is both earlier here and the more precise of the two answers.
+        return `no usable version (${r.error?.code ?? r.error?.message
+            ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`)})`;
     }
 
     return (r.stdout ?? "").trim();
@@ -2348,10 +2388,10 @@ async function cmdLogin(serverName, cfg, {
         // Printed on EVERY path, and before the opener rather than instead of it. The URL carries
         // the tenant, the client, the redirect and the PKCE CHALLENGE; the verifier never leaves
         // this process, pinned by "cmdLogin: the verifier never leaves the process, only its digest
-        // does". So it is not a secret, and every degradation
-        // that can follow points at it: openBrowser's two failure lines say "open the sign-in URL
-        // above by hand", and the deadline below says the same. Printed only when there was no
-        // opener, that advice named something the developer had never been shown.
+        // does". So it is not a secret, and every degradation that can follow points at it:
+        // openBrowser's two failure lines say "open the sign-in URL above by hand", and
+        // withDeadline's timeout verdict says the same. Printed only when there was no opener, that
+        // advice named something the developer had never been shown.
         log(`vc-secrets: open this URL to sign in to "${serverName}":\n${url}\n`);
         const spec = browser(process.platform, process.env, url);
         if (spec) {
@@ -2403,7 +2443,7 @@ async function cmdLogin(serverName, cfg, {
         // mistake this used to make: relabelling them here put them back under "the sandbox refused
         // the bind", a diagnosis nobody had made, and the reader went to check their sandbox.
         // Only the label changes HERE; storing the token anyway is unchanged and deliberate. The
-        // wording that goes with the new label is at the `lock-failed` branch below.
+        // wording that goes with it is at the `lock-failed` branch.
         const { lock, reason, error } = await acquireTokenLock({ acquireLock: acquire, now, sleep, log })
             .catch((e) => ({ lock: null, reason: "lock-failed", error: e }));
         if (reason === "busy") {
@@ -2909,7 +2949,7 @@ function readEnableLists(file, problems = []) {
         // Absent stays silent -- most projects have no settings.local.json, and a missing optional
         // file is not a fault.
         if (fs.existsSync(file)) {
-            problems.push(`${file}: cannot be read (${e.message}) -- treating it as no enable/disable lists,`
+            problems.push(`${file}: cannot be read (${readFailureReason(e)}) -- treating it as no enable/disable lists,`
                 + " so the servers reported as consuming a secret may be wrong");
         }
 
@@ -2963,7 +3003,7 @@ function readWiredServers(mcpJsonPath, userJsonPath = null, projectRoot = null, 
             return JSON.parse(fs.readFileSync(file, "utf8"));
         } catch (e) {
             if (fs.existsSync(file)) {
-                problems.push(`${file}: cannot be read (${e.message}) -- treating it as no wiring, so advice about leftover tokens may be wrong`);
+                problems.push(`${file}: cannot be read (${readFailureReason(e)}) -- treating it as no wiring, so advice about leftover tokens may be wrong`);
             }
 
             return null;
@@ -4146,6 +4186,7 @@ export {
     runCli, REQUIRED_SHIM_CONTRACT,
     VcSecretsError, REF_RE, parseReference, parseLiteral, LITERAL_PREFIX, CONFIG_NAME, LOCAL_CONFIG_NAME, KEY_PREFIX,
     SCHEMA_VERSION, SCOPE_ORDER, configPaths, parseConfigFile, loadConfig, keyFor, keyToPath, legacyKeyToPath,
+    jsonSyntaxWhere, readFailureReason,
     oauthEntryKeys, oauthKeyClashes, oauthStatusFrom, oauthReferences, oauthTenantChecks,
     ORG_FLAGS_WITH_VALUE, organisationFromArgs, resolveOrgTenant, TIMEOUT_TENANT_MS,
     resolveEnvEntries, detectLocalBackend, redactSecrets, secretsDir, psEncode, psCommand, PS_CRED_READ, PS_CRED_WRITE,

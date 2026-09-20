@@ -1230,6 +1230,22 @@ test("a corrupt marker reads as no marker, because a hint that cannot be read is
     assert.equal(m.readOversizeMarker(key, env), null);
 });
 
+test("recordOversizeMarker: a state path that cannot be created warns instead of failing the sign-in", () => {
+    // Both call sites stand inside a catch that has already decided this failure will not fail the
+    // operation -- cmdLogin says so in as many words, because a login rejected there costs an
+    // interactive sign-in while the refresh token it just stored is rotated away by the next one.
+    // clearOversizeMarker was guarded from the start; this is the sibling that was not, and the
+    // asymmetry is reachable: a read-only profile, a full disk, or the case staged here.
+    const env = markerHome();
+    const key = "vc-secrets:user:oauth-ado-dev-access";
+    fs.mkdirSync(path.join(env.XDG_CONFIG_HOME, "vc-secrets"), { recursive: true });
+    fs.writeFileSync(path.join(env.XDG_CONFIG_HOME, "vc-secrets", "state"), "");
+    assert.doesNotThrow(() => m.recordOversizeMarker(key,
+        { backend: "wcm", bytes: 2588, limit: 2560, env }));
+    assert.equal(m.readOversizeMarker(key, env), null,
+        "a marker that could not be written must not read back as one that was");
+});
+
 test("a message improved for a human keeps the exit code the code reads", () => {
     // mapResolveError returns a NEW error in every branch, so it silently dropped toolExitCode --
     // and the caller still received an error, just one that no longer answered WHICH failure this
@@ -1301,6 +1317,52 @@ test("readEnableLists: a settings.local.json that exists but cannot be read is r
     assert.match(problems[0], /cannot be read/);
 });
 
+test("readEnableLists: a malformed settings.local.json is reported without its contents", () => {
+    // This is the file whose env block the success path reads KEY NAMES from and never values, and
+    // doctor renders every problem as a WARN line -- the output a developer pastes into an issue.
+    // A JSON.parse message is built from a window of the source around the error position, so a
+    // token that lost a quote is adjacent to the error by construction.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-enable-"));
+    tmpDirs.push(dir);
+    const file = path.join(dir, "settings.local.json");
+    fs.writeFileSync(file, '{"env":{"ADO_PAT":ghp_SUPERSECRETVALUE}}');
+    const problems = [];
+    m.readEnableLists(file, problems);
+    assert.equal(problems.length, 1, `expected one problem, got ${JSON.stringify(problems)}`);
+    assert.doesNotMatch(problems[0], /ghp_|SUPERSECRET/,
+        `the parse failure carried file content out: ${problems[0]}`);
+});
+
+test("readFailureReason: no shape of a JSON.parse message carries file content out", () => {
+    // The three shapes V8 produces for a content window -- elided on both sides, anchored at the
+    // start, and, for an input short enough, the whole text -- plus the two positional shapes that
+    // carry none. The whole-text shape is why the reason is rebuilt from the positional triple
+    // rather than filtered out of the message: a filter written against the other two lets an
+    // entire short file through, and a short file is exactly what a one-secret .mcp.json is.
+    const secret = "ghp_SUPERSECRETVALUE";
+    for (const text of [`{"a":1,"b":2,"c":3,"d":4,"env":{"PAT":${secret},"x":1}}`, `{"P":${secret}}`,
+        secret, `{"P":"${secret}",}`, `{"P":"${secret}"`]) {
+        let reason = null;
+        try {
+            JSON.parse(text);
+        } catch (e) {
+            reason = m.readFailureReason(e);
+        }
+        assert.ok(reason !== null, `expected ${JSON.stringify(text)} to be malformed`);
+        assert.doesNotMatch(reason, /ghp_|SUPERSECRET/,
+            `content travelled for ${JSON.stringify(text)}: ${reason}`);
+    }
+});
+
+test("readFailureReason: an fs failure passes through, because its code IS the diagnosis", () => {
+    // The readers that wrap the read and the parse in one try hand both kinds of failure here.
+    // ENOENT, EACCES and EISDIR describe the file rather than its contents, and collapsing them
+    // into "not valid JSON" would send a developer to fix the syntax of a file that is either
+    // perfectly valid or not a file at all.
+    assert.equal(m.readFailureReason(Object.assign(new Error("permission denied"), { code: "EACCES" })),
+        "EACCES");
+});
+
 test("readEnableLists: an absent settings.local.json says nothing, because most projects have none", () => {
     // The distinction that keeps the report above worth reading. Reporting an optional file that
     // simply is not there would put a line in every healthy doctor run, and a warning everyone
@@ -1341,6 +1403,14 @@ test("childNodeVersionIo: a probe that could not run reports why, not an empty v
     const rejected = m.childNodeVersionIo({ run: () => ({ error: undefined, status: 9, stdout: "" }) });
     assert.match(rejected, /exit 9/);
     assert.equal(m.childNodeSupportsImport(rejected), false);
+
+    // A node killed by a signal: `status` is null, so an exit code names nothing. spawnSync routes
+    // a TIMEOUT through `error` as ETIMEDOUT, so what arrives here is the kill that came from
+    // outside -- the OOM killer being the one to expect on a machine loaded enough to matter.
+    const killed = m.childNodeVersionIo({ run: () => ({ error: undefined, status: null,
+        signal: "SIGKILL", stdout: "" }) });
+    assert.match(killed, /SIGKILL/);
+    assert.equal(m.childNodeSupportsImport(killed), false);
 
     // And a probe that worked still answers with the bare version, trimmed.
     assert.equal(m.childNodeVersionIo({ run: () => ({ status: 0, stdout: "v22.23.2\n" }) }), "v22.23.2");
