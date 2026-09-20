@@ -3624,6 +3624,40 @@ test("shim: no registry file at all → names the plugin as not installed, exit 
     assert.match(r.stderr, /install the vc-secrets plugin|is not installed/);
 });
 
+test("shim: a corrupt registry is named as corrupt, without any of its bytes", () => {
+    // registryProblem lands on the launched server's stderr, and a SyntaxError has no `.code` -- so
+    // the fallback used to be V8's message, which it builds out of a window of the file it was given.
+    // Same class the guard hook and the launcher's three readers already refuse. Not a credential
+    // store, but it is the client's file and this shim has no business quoting it.
+    //
+    // Unquoted value on purpose: a registry that merely ends early fails at its last position, and
+    // V8 then answers with the positional shape, which carries nothing -- the assertion would hold
+    // with the fix reverted. The control below is what keeps that shut.
+    const canary = "LEAKCANARY0123456789";
+    const corrupt = `{"plugins":{"vc-tools":${canary}}}`;
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-shim-corrupt-"));
+    tmpDirs.push(home);
+    fs.mkdirSync(path.join(home, ".claude", "plugins"), { recursive: true });
+    fs.writeFileSync(path.join(home, ".claude", "plugins", "installed_plugins.json"), corrupt);
+
+    const r = spawnSync(process.execPath, [SHIM_PATH, "doctor"],
+        { env: shimEnv(home), cwd: home, encoding: "utf8" });
+
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /not valid JSON/, `the corruption must be named: ${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /LEAKCANARY|plugins":/,
+        "no window of the registry may travel with the reason");
+
+    let raw = "";
+    try {
+        JSON.parse(corrupt);
+    } catch (e) {
+        raw = e.message;
+    }
+    assert.match(raw, /LEAKCANARY/,
+        "the control: this exact file must make V8 build a message out of its bytes");
+});
+
 test("shim: a cache root that exists but cannot be read is named, not counted as absent",
     { skip: !CAN_DENY_BY_MODE && "needs POSIX mode bits that actually deny" }, () => {
     // With no registry the resolution falls through to installsInCaches, and its answer decides

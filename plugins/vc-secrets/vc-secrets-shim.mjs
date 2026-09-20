@@ -114,8 +114,14 @@ try {
     // absent one for both: "plugin is not installed" sends a developer to reinstall something this
     // file may record perfectly well, under a parse error nothing mentioned. ENOENT is ordinary —
     // two of the three clients keep no registry at all — so only the rest is worth carrying.
+    //
+    // A SyntaxError has no `.code`, so before the SyntaxError arm below this reported V8's message
+    // -- which it builds from a window of the source, i.e. of the REGISTRY's bytes -- onto the
+    // launched server's stderr. The launcher makes the same refusal in jsonSyntaxWhere and keeps the
+    // positional triple; the shim cannot import it, being copied to the data dir alone, and a
+    // position into a registry nobody is about to open buys nothing here.
     if (e.code !== "ENOENT") {
-        registryProblem = e.code ?? e.message;
+        registryProblem = e.code ?? (e instanceof SyntaxError ? "not valid JSON" : e.message);
     }
 }
 // This file is owned by the client, so a schema change arrives with a Claude Code upgrade — no user
