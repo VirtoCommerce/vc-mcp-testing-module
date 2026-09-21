@@ -2032,6 +2032,11 @@ async function createChannel({ name, scopeKey, nonce, onRefusal = () => {}, chmo
 
             return delivered;
         },
+        // How many receivers are attached right now, which push() can only answer by sending
+        // something. The renewal timer asks this on every tick, and a tick that exchanges nothing
+        // still needs the answer: whether anything is listening is a property of the channel, not of
+        // the token.
+        peers: () => clients.size,
         removeSync,
         close: () => severedClose().then(removeSync),
     };
@@ -2300,7 +2305,21 @@ function buildBrowserCommand(platform, env, url, onPath = commandOnPath) {
         return { cmd: "wslview", args: [url] };
     }
     if (onPath("powershell.exe")) {
-        return { cmd: "powershell.exe", args: ["-NoProfile", "-Command", "Start-Process", url] };
+        // Quoted for the same reason the win32 branch quotes, in the other shell's syntax: everything
+        // after -Command is joined back into script text, and & is an argument-mode metacharacter
+        // anywhere in a token, not only between commands (about_Parsing, "Handling special
+        // characters"). Measured on Windows PowerShell 5.1: the unquoted form does not truncate the
+        // URL, it does not parse at all -- exit 1, nothing on stdout, "The ampersand (&) character is
+        // not allowed" -- so no browser opens and the developer is left with the by-hand fallback.
+        // A single-quoted literal interpolates nothing, and arrived whole in the same measurement.
+        if (url.includes("'")) {
+            // Same shape as the double-quote guard above: the URL is built here, so this is an
+            // invariant made checkable rather than a guess about input, and it throws before the
+            // browser opens, with no authorization code at stake.
+            throw new VcSecretsError("refusing to open a URL containing a single quote");
+        }
+
+        return { cmd: "powershell.exe", args: ["-NoProfile", "-Command", "Start-Process", `'${url}'`] };
     }
     if (onPath("xdg-open")) {
         return { cmd: "xdg-open", args: [url] };
@@ -2996,7 +3015,7 @@ async function cmdMigrate(cfg) {
     // legacyOnly probe in `doctor` reports exactly that, by name, and the legacy entry stays in place —
     // so the guidance belongs where it can be re-checked rather than in a one-shot line printed here.
     lines.push(`vc-secrets: migrate -- ${migrated} migrated, ${failed} failed`);
-    // sync write: stderr is an async pipe on Windows, and process.exit abandons pending writes
+    // sync write: stderr is async on a POSIX pipe and on a Windows console, and process.exit drops pending writes
     fs.writeSync(2, lines.join("\n") + "\n");
     if (failed > 0) {
         process.exit(1);
@@ -3242,7 +3261,20 @@ function oauthReferences(cfg) {
 // Declaring it a second time in the oauth block would be the same fact in two places with nothing
 // keeping them in agreement -- and the divergence would make doctor compare the declared tenant
 // against the wrong organisation and report agreement.
-const ORG_FLAGS_WITH_VALUE = ["-a", "--auth", "-t", "--tenant", "-d", "--domains"];
+// The server defines three options that take a value -- `--authentication`/`-a`, `--tenant`/`-t`,
+// `--domains`/`-d` -- and the long forms are what its own README tells an operator to write. `--auth`
+// is not one of them; it stays because it costs nothing until that exact token appears, and consuming
+// a value after it is still the better guess if it ever does.
+const ORG_FLAGS_WITH_VALUE = ["-a", "--auth", "--authentication", "-t", "--tenant"];
+
+// `--domains` is declared to yargs as an ARRAY, so it swallows every following token up to the next
+// flag -- the organisation included. Measured against the server's own option definitions: `--domains
+// all myorg` and `--domains repositories builds myorg` both die at "Not enough non-option arguments",
+// while `myorg --domains repositories builds` starts. So an argv naming domains before the
+// organisation cannot launch at all, and answering null -- "could not determine", a reported state --
+// is what keeps this parser's answer and the server's behaviour in step. Returning the first domain
+// as the organisation instead would send doctor to compare a tenant against a name nobody launched.
+const ORG_FLAGS_WITH_VALUES = ["-d", "--domains"];
 
 function organisationFromArgs(args) {
     for (let i = 0; i < args.length; i += 1) {
@@ -3250,6 +3282,12 @@ function organisationFromArgs(args) {
         if (ORG_FLAGS_WITH_VALUE.includes(arg)) {
             i += 1;   // named rather than assumed: a generic "every flag takes a value" rule
             continue;  // swallows the organisation whenever a valueless flag precedes it
+        }
+        if (ORG_FLAGS_WITH_VALUES.includes(arg)) {
+            while (i + 1 < args.length && !args[i + 1].startsWith("-")) {
+                i += 1;
+            }
+            continue;
         }
         if (arg.startsWith("-")) {
             continue;
@@ -3432,9 +3470,15 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
         lines.push(`OK ${backend ?? "the keystore"} accepts a write at the size limit`
             + " -- login and renewal can reach the store; whether the token they produce fits under"
             + " that limit is answered only by storing one");
-    } else if (typeof writeProbe === "string") {
-        lines.push(`FAIL ${backend ?? "the keystore"} rejected a write at the size limit`
-            + ` -- "vc-secrets login" may not be able to store a token: ${writeProbe}`);
+    } else if (writeProbe !== null && typeof writeProbe === "object") {
+        // Two verdicts, because they send the reader to different places. Only the first is about the
+        // ceiling; the second covers a locked keychain, a sandbox, a timeout -- causes whose remedy
+        // has nothing to do with size. The distinction is the probe's, made where the exit code was.
+        lines.push(writeProbe.oversize
+            ? `FAIL ${backend ?? "the keystore"} rejected a write at the size limit`
+                + ` -- "vc-secrets login" may not be able to store a token: ${writeProbe.message}`
+            : `FAIL ${backend ?? "the keystore"} refused a write`
+                + ` -- "vc-secrets login" may not be able to store a token: ${writeProbe.message}`);
     }
     for (const [name, status] of Object.entries(oauthStatus)) {
         // The home is part of the verdict, not decoration: cfg.oauth merges config scopes (user,
@@ -3674,7 +3718,15 @@ async function probeKeystoreWrite({ backend, write = writeSecretValue, remove = 
     try {
         await write(key, writeProbeValue(cfg, process.env, backend), { backend });
     } catch (e) {
-        return e.message;
+        // Classified here, where the error still carries its exit code, and narrowly: exit 4 is the
+        // Credential Manager helper's own code for an oversize blob and means nothing on any other
+        // backend, so a `security` exiting 4 for an unrelated reason must not be read as a ceiling.
+        // The keychain cannot reach this branch over its size at all -- writeProbeValue sizes the
+        // probe so the composed line lands exactly ON the limit and the guard is strictly greater --
+        // so it is only wcm that has a size verdict to report. Everything else is an ordinary refusal
+        // (a locked keychain, a sandbox, a timeout), and calling those the ceiling sends the reader
+        // after a size that was never the problem.
+        return { oversize: backend === "wcm" && e.toolExitCode === 4, message: e.message };
     } finally {
         // Best effort, and deliberately also on the success path: a probe entry left behind is
         // clutter in the developer's keychain that nothing else would ever clean up.
@@ -3684,7 +3736,11 @@ async function probeKeystoreWrite({ backend, write = writeSecretValue, remove = 
             // The verdict is about the write, not the cleanup -- but a diagnostic that silently
             // leaves a stray entry behind has told the developer something untrue by omission.
             if (e.toolExitCode !== 3) {
-                process.stderr.write(`vc-secrets: could not remove the write probe "${key}" (${e.message})\n`);
+                // sync write: stderr is async on a POSIX pipe and on a Windows console, and
+                // process.exit drops pending writes. This is the finally, so the line can appear on a
+                // successful probe as easily as a failed one -- and doctor writes its whole report
+                // before exiting(1) on any FAIL in it, long after this line was queued.
+                fs.writeSync(2, `vc-secrets: could not remove the write probe "${key}" (${e.message})\n`);
             }
         }
     }
@@ -3817,7 +3873,11 @@ async function cmdDoctor(cfg, flags = []) {
     // cfg passed, because the probe's own guard is worthless without it: it refuses to run when a
     // DECLARED secret carries the probe name, and a caller not handing it the config would check
     // nothing. A guard nothing feeds is a comment.
-    const writeProbe = localBackend === null
+    //
+    // Skipped when the backend's own tool is missing, the same suppression the secret loop above
+    // makes: the line naming the missing tool is already printed, and running the probe anyway added
+    // a SECOND FAIL for that one cause plus a cleanup warning about an entry that was never written.
+    const writeProbe = localBackend === null || backendTools.some((t) => toolsMissing.includes(t))
         ? null
         : await probeKeystoreWrite({ backend: localBackend, cfg });
 
@@ -3859,7 +3919,7 @@ async function cmdDoctor(cfg, flags = []) {
         shimContract: activeShimContract, wiringProblems, clientConfigsSeen,
         writeProbe, oauthStatus, oauthOversize, tenantChecks, childNode,
     });
-    // sync write: stderr is an async pipe on Windows, and process.exit abandons pending writes
+    // sync write: stderr is async on a POSIX pipe and on a Windows console, and process.exit drops pending writes
     fs.writeSync(2, lines.join("\n") + "\n");
     if (lines.some((l) => l.startsWith("FAIL"))) {
         process.exit(1);
@@ -3938,9 +3998,15 @@ async function cmdLaunch(kind, name, cfg, deps = {}) {
     }
     const server = cfg[kind][name];
     let childEnv = sanitizeEnv(process.env);
-    for (const varName of LEGACY_SECRET_ENV_VARS) {
-        if (!(varName in entries.env)) {
-            delete childEnv[varName];   // a stale session token must not leak into the child
+    // Every spelling goes, not only the canonical one, for the reason isDangerousEnvKey folds case:
+    // on Windows a name differing only by case is the same variable, and childEnv is a plain object
+    // that no longer folds anything, so deleting AZURE_CLIENT_SECRET leaves `Azure_Client_Secret`
+    // standing. Unconditional, because keeping one spelling while the declaration adds another would
+    // hand the child both and let the platform pick -- Object.assign(childEnv, entries.env) runs
+    // after this loop, so whatever the launchable declares wins there.
+    for (const key of Object.keys(childEnv)) {
+        if (LEGACY_SECRET_ENV_VARS.includes(key.toUpperCase())) {
+            delete childEnv[key];   // a stale session token must not leak into the child
         }
     }
     Object.assign(childEnv, entries.env);
@@ -3994,10 +4060,54 @@ async function cmdLaunch(kind, name, cfg, deps = {}) {
     });
     resolver.resolvedValues.length = 0;   // shrink the in-heap window
 
-    let undelivered = 0;
+    let unattachedTicks = 0;
+    let everAttached = false;
     let renewing = false;
     if (channel !== null) {
         renewalTimer = setInterval(() => {
+            // Asked every tick, and before the exchange, because "is anything attached" is a property
+            // of the channel rather than of the token. Counting it on the renewal instead made the
+            // warning wait for a NEW token: ensureFreshToken returns the cached one while it is still
+            // valid, so the first line arrived at the first mid-life refresh -- about 48 minutes into
+            // a 60-minute token -- and the escalation only at the rotation after that, half an hour
+            // after the token the server started with had expired. The text promised ticks; the
+            // counter counted rotations.
+            if (channel.peers() > 0) {
+                everAttached = true;
+                unattachedTicks = 0;   // whatever the count was about is over, and its claim with it
+            } else {
+                unattachedTicks += 1;
+                // The first is ordinary and its promise is true: a server still starting has not
+                // connected yet, and the handover does happen when it does. A SECOND means another
+                // RENEWAL_TICK_MS passed with nothing attached, and by then the likely cause is that
+                // no process ever matched the declared target -- at which point repeating the first
+                // message would be asserting a future that will not arrive.
+                //
+                // That diagnosis is only available while nothing has EVER attached. A client can drop
+                // while the launcher lives (the channel deletes it from the push set on close or
+                // error), and then the count starts over from zero -- so without everAttached the
+                // second tick after a drop would state, of a process that did match and did receive
+                // tokens, that none ever matched. Resetting the count alone only delayed that by two
+                // ticks; it is the CLAIM that has to be withdrawn, not the timer restarted.
+                //
+                // The preload cannot report this from its own side: NODE_OPTIONS reaches every node
+                // process the server spawns, so failing isTargetEntry is the ordinary case there and
+                // a line per miss would bury the one that matters.
+                //
+                // Silent from the third on: while nothing attaches the condition does not change, so
+                // a line every tick would be noise -- but latching at ONE was what let the false
+                // promise stand as the last word.
+                if (unattachedTicks === 1) {
+                    fs.writeSync(2, "vc-secrets: nothing is connected to the token channel; a renewed token "
+                        + "will be handed over when a process connects\n");
+                } else if (unattachedTicks === 2 && !everAttached) {
+                    fs.writeSync(2, "vc-secrets: still nothing connected to the token channel -- no process has"
+                        + ` matched the declared target (targetPackage "${oauthEntry.decl.targetPackage}"`
+                        + `${oauthEntry.decl.binName ? `, binName "${oauthEntry.decl.binName}"` : ""}),`
+                        + " so the server is running on the token it started with and will lose access when"
+                        + " that one expires\n");
+                }
+            }
             // A tick can outlast its own interval -- the contended wait alone runs to 45 s -- and
             // overlapping ticks cannot double-exchange (the bind is process-wide) but do multiply
             // the poll load on the backend least able to absorb it.
@@ -4013,32 +4123,10 @@ async function cmdLaunch(kind, name, cfg, deps = {}) {
                     return;
                 }
                 token = fresh;
-                if (channel.push(fresh) === 0) {
-                    undelivered += 1;
-                    // The first one is ordinary and its promise is true: a server still starting has
-                    // not connected yet, and the handover does happen when it does. A SECOND means
-                    // another RENEWAL_TICK_MS passed with nothing attached, and by then the likely
-                    // cause is that no process ever matched the declared target -- at which point
-                    // repeating the first message would be asserting a future that will not arrive.
-                    //
-                    // The preload cannot report this from its own side: NODE_OPTIONS reaches every
-                    // node process the server spawns, so failing isTargetEntry is the ordinary case
-                    // there and a line per miss would bury the one that matters.
-                    //
-                    // Silent from the third on. The condition cannot change without a restart, so a
-                    // line every tick would be noise -- but latching at ONE was what let the false
-                    // promise stand as the last word.
-                    if (undelivered === 1) {
-                        fs.writeSync(2, "vc-secrets: renewed the token, but nothing is connected to the channel yet; "
-                            + "it will be handed over when the server connects\n");
-                    } else if (undelivered === 2) {
-                        fs.writeSync(2, "vc-secrets: renewed the token again with nothing connected -- no process has"
-                            + ` matched the declared target (targetPackage "${oauthEntry.decl.targetPackage}"`
-                            + `${oauthEntry.decl.binName ? `, binName "${oauthEntry.decl.binName}"` : ""}),`
-                            + " so the server is running on the token it started with and will lose access when"
-                            + " that one expires\n");
-                    }
-                }
+                // The delivery count is not read here: a push reaching nobody is the same condition
+                // the tick above already counted, on the same tick, and reporting it twice would put
+                // the warning back on the rotation clock it was moved off.
+                channel.push(fresh);
             }).catch((e) => {
                 // Loud on fd 2 and nowhere else: the stdio channel is the client's, and the
                 // server keeps serving on the token it already has until that token expires.
@@ -4058,7 +4146,7 @@ async function cmdLaunch(kind, name, cfg, deps = {}) {
     // handle it has already disposed would otherwise have the whole CLI exit under it when the
     // child it no longer owns happens to close.
     const onChildError = (e) => {
-        // sync write: stderr is an async pipe on Windows, and process.exit abandons pending writes
+        // sync write: stderr is async on a POSIX pipe and on a Windows console, and process.exit drops pending writes
         fs.writeSync(2, `vc-secrets: failed to spawn ${server.command}: ${e.message}\n`);
         process.exit(1);
     };
@@ -4102,8 +4190,14 @@ function cmdTask(taskName, cfg) {
 
 // --- CLI entry ---
 function fail(e) {
-    // sync write: stderr is an async pipe on Windows, and process.exit abandons pending writes
-    fs.writeSync(2, `vc-secrets: ${e?.message ?? String(e)}\n`);   // one line, no stack
+    // One PHYSICAL line, which "no stack" alone did not achieve: a backend tool's own stderr is
+    // embedded in the message with its newlines intact, and the probe decides whose failure this was
+    // by reading the LAST stderr line. Three lines from a locked gpg agent left that last line
+    // looking like the server's, and "server exited before responding" is the one outcome the doctor
+    // skill reads as a broken binary -- so the launcher's own refusal was reported as the server's.
+    const message = String(e?.message ?? e).replace(/\s*\n\s*/g, " ");
+    // sync write: stderr is async on a POSIX pipe and on a Windows console, and process.exit drops pending writes
+    fs.writeSync(2, `vc-secrets: ${message}\n`);
     process.exit(e instanceof VcSecretsError ? e.exitCode : 1);
 }
 
@@ -4268,7 +4362,7 @@ export {
     SCHEMA_VERSION, SCOPE_ORDER, configPaths, parseConfigFile, loadConfig, keyFor, keyToPath, legacyKeyToPath,
     jsonSyntaxWhere, readFailureReason,
     oauthEntryKeys, oauthKeyClashes, oauthStatusFrom, oauthReferences, oauthTenantChecks,
-    ORG_FLAGS_WITH_VALUE, organisationFromArgs, resolveOrgTenant, TIMEOUT_TENANT_MS,
+    ORG_FLAGS_WITH_VALUE, ORG_FLAGS_WITH_VALUES, organisationFromArgs, resolveOrgTenant, TIMEOUT_TENANT_MS,
     resolveEnvEntries, detectLocalBackend, redactSecrets, secretsDir, psEncode, psCommand, PS_CRED_READ, PS_CRED_WRITE,
     oversizeMarkerPath, recordOversizeMarker, clearOversizeMarker, readOversizeMarker,
     PS_CRED_DELETE, decodeCredBlobHex, buildLocalRead, buildLocalWrite, buildLocalDelete, deleteEntryIo,

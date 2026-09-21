@@ -95,7 +95,7 @@ function installsInCaches() {
 }
 
 function fail(message) {
-    // sync write: stderr is an async pipe on Windows, and process.exit abandons pending writes
+    // sync write: stderr is async on a POSIX pipe and on a Windows console, and process.exit drops pending writes
     fs.writeSync(2, `vc-secrets: ${message}\n`);
     process.exit(1);
 }

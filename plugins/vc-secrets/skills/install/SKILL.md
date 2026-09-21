@@ -32,7 +32,9 @@ Resolve that relative path against **this file's directory**, not the working di
 
 Both placeholders are substituted in a plugin skill's markdown content and in the `allowed-tools` Bash
 rules; the same variable in both places is what lets the script run without a permission prompt. The
-script does not trust the value on arrival — it checks that the directory names this plugin. Where the
+script does not trust the `--data-dir` value on arrival — it checks that the directory names this
+plugin — and it does not read either placeholder to find the shim it copies: that comes from the
+script's own location, so a plugin root belonging to something else cannot redirect the source. Where the
 placeholder is not substituted the line is an ordinary shell line, so the shell expands it from the
 inherited environment instead, and an argument and an expansion are indistinguishable by the time the
 script reads them. That is why the check exists rather than the trust.
@@ -68,9 +70,10 @@ node ../../vc-secrets.mjs doctor
 2. **Run the `doctor` command the script prints** and report its output. On a machine with no declaration
    file yet the whole output is `FAIL no declaration file found` — expected at this point, not a bug
    report. The next step is writing a declaration, then `set`.
-3. If the script exits non-zero, relay its message and stop. `CLAUDE_PLUGIN_ROOT` unset means this is not
-   a complete plugin install; a `--data-dir` that is not an absolute path means the placeholder reached the
-   script as text, which a shell would have expanded, so the line ran somewhere neither substitutes.
+3. If the script exits non-zero, relay its message and stop. `vc-secrets-shim.mjs not found` means the
+   shim is missing beside the script, i.e. this is not a complete plugin install; a `--data-dir` that is
+   not an absolute path means the placeholder reached the script as text, which a shell would have
+   expanded, so the line ran somewhere neither substitutes.
 
 ## Report
 

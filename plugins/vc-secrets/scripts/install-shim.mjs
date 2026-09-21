@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { SHIM, CANONICAL_DATA_ID, defaultDataHome, defaultShimDir } from "./shim-path.mjs";
 
 function fail(message) {
-    // sync write: stderr is an async pipe on Windows, and process.exit abandons pending writes
+    // sync write: stderr is async on a POSIX pipe and on a Windows console, and process.exit drops pending writes
     fs.writeSync(2, `install-shim: ${message}\n`);
     process.exit(1);
 }
@@ -52,11 +52,16 @@ function flag(name) {
     return value;
 }
 
-const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT
-    ?? path.dirname(path.dirname(fileURLToPath(import.meta.url)));   // scripts/ -> plugin root
+// Derived from this file's own location and nothing else. The script always sits at <root>/scripts/,
+// so the derivation cannot be wrong, while an inherited CLAUDE_PLUGIN_ROOT names whichever plugin's
+// context reached this process -- the `--data-dir` check records a measured leak of exactly that
+// shape for the sibling variable. Preferring the variable made a foreign root holding a file of this name
+// install THAT file and exit 0, which is the silent half; the loud half was an install that aborted
+// because the root it was handed contains no shim at all.
+const pluginRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));   // scripts/ -> plugin root
 const source = path.join(pluginRoot, SHIM);
 if (!fs.existsSync(source)) {
-    fail(`${source} not found -- CLAUDE_PLUGIN_ROOT is ${process.env.CLAUDE_PLUGIN_ROOT ?? "unset"}, so this is not a complete plugin install`);
+    fail(`${source} not found -- this is not a complete plugin install`);
 }
 
 // The data directory survives plugin updates; the cache path carries the version and does not, which is

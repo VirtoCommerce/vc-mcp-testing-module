@@ -1632,10 +1632,17 @@ test("probeKeystoreWrite: Credential Manager is probed too, at the blob limit", 
     assert.equal(m.WCM_BLOB_LIMIT, 2560, "and the constant must still be the documented ceiling");
 });
 
-test("probeKeystoreWrite: a Credential Manager refusal is reported, not swallowed", async () => {
-    const status = await m.probeKeystoreWrite({ backend: "wcm",
-        write: async () => { throw new m.VcSecretsError("win32err=1783"); }, remove: async () => {} });
-    assert.match(status, /1783/);
+test("probeKeystoreWrite: a Credential Manager refusal is reported, not swallowed, and says whether it was the ceiling", async () => {
+    const overLimit = await m.probeKeystoreWrite({ backend: "wcm", remove: async () => {},
+        write: async () => { throw Object.assign(new m.VcSecretsError("win32err=1783"), { toolExitCode: 4 }); } });
+    assert.match(overLimit.message, /1783/);
+    assert.equal(overLimit.oversize, true, "exit 4 is the store refusing the size, which is what this probe measures");
+    // Everything else reaches the same catch and used to be reported as the size limit too -- a locked
+    // keychain, a sandbox, a timeout. The remedy for those has nothing to do with how big the value is.
+    const locked = await m.probeKeystoreWrite({ backend: "wcm", remove: async () => {},
+        write: async () => { throw Object.assign(new m.VcSecretsError("user interaction is not allowed"), { toolExitCode: 36 }); } });
+    assert.equal(locked.oversize, false);
+    assert.match(locked.message, /user interaction/);
 });
 
 test("doctorReport: the write-probe lines name the backend they probed", () => {
@@ -1645,8 +1652,16 @@ test("doctorReport: the write-probe lines name the backend they probed", () => {
         { ...base, platform: "win32", writeProbe: "ok" }).find((l) => l.includes("accepts a write"));
     assert.match(okLine, /wcm/, `must name the backend, got: ${okLine}`);
     const failLine = m.doctorReport({ secrets: {}, servers: {}, oauth: {} },
-        { ...base, platform: "win32", writeProbe: "win32err=1783" }).find((l) => l.includes("rejected a write"));
+        { ...base, platform: "win32", writeProbe: { oversize: true, message: "win32err=1783" } })
+        .find((l) => l.includes("rejected a write"));
     assert.match(failLine, /^FAIL wcm .*1783/, `must name the backend and the cause, got: ${failLine}`);
+    // The size wording is reserved for the size refusal. Any other cause reaches the same branch, and
+    // claiming the ceiling there sends the reader after a number that was never the problem.
+    const lockedLine = m.doctorReport({ secrets: {}, servers: {}, oauth: {} },
+        { ...base, platform: "win32", writeProbe: { oversize: false, message: "user interaction is not allowed" } })
+        .find((l) => l.startsWith("FAIL wcm"));
+    assert.doesNotMatch(lockedLine, /size limit/, `got: ${lockedLine}`);
+    assert.match(lockedLine, /user interaction/, `must still carry the cause, got: ${lockedLine}`);
 });
 
 test("the probe writes AND deletes under the scope the config declares, in both directions", async () => {
@@ -1682,8 +1697,16 @@ test("probeKeystoreWrite: a refused write is reported, and cleanup still runs", 
     const status = await m.probeKeystoreWrite({ backend: "keychain",
         write: async () => { throw new m.VcSecretsError("security exited 1: interaction required"); },
         remove: async (key) => { removed.push(key); } });
-    assert.match(status, /interaction required/);
+    assert.match(status.message, /interaction required/);
+    assert.equal(status.oversize, false, "an interaction prompt is not the ceiling, and must not be reported as one");
     assert.deepEqual(removed, [`${m.KEY_PREFIX}:user:${m.WRITE_PROBE_NAME}`]);
+    // 4 is the Credential Manager helper's own code for an oversize blob and means nothing to
+    // `security`. Classifying on the number alone would report an unrelated keychain failure as the
+    // ceiling -- and the keychain cannot hit a size ceiling here anyway, since the probe value is
+    // built to land exactly on the command-line limit while the guard refuses only what exceeds it.
+    const sameCodeElsewhere = await m.probeKeystoreWrite({ backend: "keychain", remove: async () => {},
+        write: async () => { throw Object.assign(new m.VcSecretsError("security exited 4: unrelated"), { toolExitCode: 4 }); } });
+    assert.equal(sameCodeElsewhere.oversize, false);
 });
 
 test("probeKeystoreWrite: a failing cleanup does not turn a good write into a bad verdict", async () => {
@@ -1742,12 +1765,14 @@ test("doctorReport: the write probe is reported in both directions, naming the b
         resolvable: {}, skipped: [], toolsMissing: [], wired: new Set(), configDirOverride: false };
     const ok = m.doctorReport(cfg, { ...base, platform: "darwin", oauthStatus: {}, writeProbe: "ok" });
     assert.ok(ok.some((l) => l.startsWith("OK keychain accepts")), ok.join("\n"));
-    const bad = m.doctorReport(cfg, { ...base, platform: "darwin", writeProbe: "interaction required" });
+    const bad = m.doctorReport(cfg, { ...base, platform: "darwin",
+        writeProbe: { oversize: false, message: "interaction required" } });
     const fail = bad.find((l) => l.startsWith("FAIL"));
     assert.match(fail, /login/, "the line must say what the developer loses, not just that a write failed");
     // A platform where the probe does not run must stay SILENT rather than report a passing check it
     // never made -- the difference between "verified" and "not applicable". base is linux, so gpg.
-    assert.equal(m.doctorReport(cfg, base).some((l) => /accepts a write|rejected a write/.test(l)), false);
+    assert.equal(m.doctorReport(cfg, base)
+        .some((l) => /accepts a write|rejected a write|refused a write/.test(l)), false);
 });
 
 test("writeProbeValue: the probe writes the largest value the path will ever carry", () => {
@@ -2529,6 +2554,21 @@ test("organisationFromArgs: a valueless flag before the organisation does not sw
     assert.equal(m.organisationFromArgs(["-y", "@azure-devops/mcp@2.9.0", "--silent", "org-a"]), "org-a");
     assert.equal(m.organisationFromArgs(["-y", "@azure-devops/mcp@2.9.0", "-a", "envvar", "org-a"]), "org-a",
         "a flag that does take a value still consumes it");
+    assert.equal(m.organisationFromArgs(["-y", "@azure-devops/mcp@2.9.0", "--authentication", "envvar", "org-a"]), "org-a",
+        "the long form takes a value too -- with only the short one listed, `envvar` becomes the organisation");
+});
+
+test("organisationFromArgs: domains named before the organisation reads as null, because that argv cannot launch", () => {
+    // --domains is an ARRAY option, so the server's own parser swallows every following token up to
+    // the next flag -- the organisation with them -- and the launch dies at "Not enough non-option
+    // arguments". Measured against its option definitions, both forms below. Returning the first
+    // domain instead would hand doctor an organisation nobody launched, and a tenant WARN to match.
+    assert.equal(m.organisationFromArgs(["-y", "@azure-devops/mcp@2.9.0", "--domains", "all", "org-a"]), null);
+    assert.equal(m.organisationFromArgs(["-y", "@azure-devops/mcp@2.9.0", "--domains", "repositories", "builds", "org-a"]), null);
+    // The two shapes that DO launch, and both must still read: the organisation ahead of the list,
+    // and a following flag ending the list before the organisation.
+    assert.equal(m.organisationFromArgs(["-y", "@azure-devops/mcp@2.9.0", "org-a", "--domains", "repositories", "builds"]), "org-a");
+    assert.equal(m.organisationFromArgs(["-y", "@azure-devops/mcp@2.9.0", "-d", "all", "-a", "envvar", "org-a"]), "org-a");
 });
 
 test("resolveOrgTenant: reads the binding header, and answers null when it cannot", async () => {
@@ -3043,7 +3083,8 @@ test("cmdLaunch: hands createChannel the same namespace keyFor keys the entry un
             createChannel: ({ scopeKey }) => {
                 passed = scopeKey;
 
-                return { path: "/tmp/not-a-real.sock", push: () => 1, close: async () => {}, removeSync: () => {} };
+                return { path: "/tmp/not-a-real.sock", push: () => 1, peers: () => 1,
+                    close: async () => {}, removeSync: () => {} };
             },
             spawnFn: () => fakeChild(),
         });
@@ -3989,6 +4030,42 @@ test("cmdRun: identifiers (AZURE_TENANT_ID, AZURE_CLIENT_ID) survive into the ch
     assert.equal(r.status, 7, `expected AZURE_TENANT_ID/AZURE_CLIENT_ID to survive into the child; stderr: ${r.stderr}`);
 });
 
+test("cmdRun: a legacy credential inherited under another case is stripped too", () => {
+    const dir = tmpConfigDir({
+        secrets: {},
+        servers: { probe: { command: process.execPath,
+            args: ["-e", "process.exit(Object.keys(process.env).some((k) => /^azure_client_secret$/i.test(k)) ? 9 : 7)"],
+            env: {} } },
+    });
+    const r = spawnSync(process.execPath, [LAUNCHER_PATH, "run", "probe"], {
+        env: { ...process.env, VC_SECRETS_CONFIG_DIR: dir, Azure_Client_Secret: "stale" },
+        encoding: "utf8",
+    });
+
+    // The strip named the canonical spellings and deleted those. On Windows a name differing only by
+    // case is the same variable, so the plaintext this exists to drop reached the child under whichever
+    // spelling the operator's shell happened to export -- the reason isDangerousEnvKey folds case too.
+    assert.equal(r.status, 7, `expected no case-variant of AZURE_CLIENT_SECRET in the child; stderr: ${r.stderr}`);
+});
+
+test("cmdRun: a legacy name the launchable declares itself survives the strip", () => {
+    // The strip is unconditional, so this is what keeps it from eating a declared value: the
+    // declaration is assigned after the delete. Without this the two could be reordered and only a
+    // Windows operator would find out.
+    const dir = tmpConfigDir({
+        secrets: {},
+        servers: { probe: { command: process.execPath,
+            args: ["-e", "process.exit(process.env.AZURE_CLIENT_SECRET === 'declared' ? 7 : 9)"],
+            env: { AZURE_CLIENT_SECRET: "literal:declared" } } },
+    });
+    const r = spawnSync(process.execPath, [LAUNCHER_PATH, "run", "probe"], {
+        env: { ...process.env, VC_SECRETS_CONFIG_DIR: dir, AZURE_CLIENT_SECRET: "stale" },
+        encoding: "utf8",
+    });
+
+    assert.equal(r.status, 7, `expected the declared value to reach the child; stderr: ${r.stderr}`);
+});
+
 test("a launchable name with a path separator, a space, or a control character is refused at parse", () => {
     for (const bad of ["../evil", "with/slash", "with\\backslash", "has space", "ctrl\nchar"]) {
         assert.throws(
@@ -3996,6 +4073,37 @@ test("a launchable name with a path separator, a space, or a control character i
             /name must match/,
             `expected server name "${bad}" to be refused`);
     }
+});
+
+test("cmdDoctor: with the backend's tool missing, the write probe does not run at all", () => {
+    // It ran regardless, and the run cost two lines: a second FAIL for the one cause already named
+    // above it, and a warning about failing to clean up an entry that was never written. Measured on
+    // a machine without `security`: FAIL required tool, then FAIL ... rejected a write at the size
+    // limit, then the cleanup warning -- one missing tool told three different ways.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-doctor-notool-"));
+    tmpDirs.push(root);
+    const claudeDir = path.join(root, ".claude");
+    fs.mkdirSync(claudeDir, { recursive: true });
+    fs.writeFileSync(path.join(claudeDir, m.CONFIG_NAME), JSON.stringify({
+        projectId: "demo",
+        secrets: { plain: { backend: "local" } },
+        servers: { s: { command: "true", args: [], env: { OTHER: "secret:plain" } } },
+    }));
+    const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-doctor-notool-home-"));
+    tmpDirs.push(isolatedHome);
+    // An empty PATH is what makes the case reproducible anywhere: `security` exists on macOS and
+    // nowhere else, so leaving the real PATH would make this test assert one thing on the maintainer's
+    // machine and another on the one the store actually ships to.
+    const emptyBin = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-nobin-"));
+    tmpDirs.push(emptyBin);
+
+    const r = spawnSync(process.execPath, [LAUNCHER_PATH, "doctor"], { cwd: root, encoding: "utf8",
+        env: { ...process.env, HOME: isolatedHome, PATH: emptyBin, VC_SECRETS_LOCAL_BACKEND: "keychain" } });
+
+    assert.match(r.stderr, /FAIL required tool "security"/, `the one real cause must be named: ${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /a write at the size limit/, `the probe must not have run: ${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /refused a write/, `the probe must not have run: ${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /could not remove the write probe/, `nothing was written to clean up: ${r.stderr}`);
 });
 
 test("cmdDoctor: a task's name does not mark a same-named server as enabled", () => {
@@ -4182,6 +4290,28 @@ test("install-shim: copies the shim, is idempotent, and prints the settings entr
     assert.match(second.stdout, /already up to date/);
     assert.equal(fs.existsSync(path.join(env.CLAUDE_PLUGIN_DATA, "vc-secrets-shim.mjs")), false,
         "must not write into another plugin's directory");
+});
+
+test("install-shim: the shim it copies comes from its own location, not from CLAUDE_PLUGIN_ROOT", () => {
+    // Same provenance as the foreign CLAUDE_PLUGIN_DATA above: the value belongs to whichever plugin's
+    // context reached this process. Preferring it copied whatever file of this name that root held --
+    // exit 0, a line saying installed, and the wrong shim on disk. Asserting the BYTES, because the
+    // path is identical either way and only the content tells the two sources apart.
+    const script = fileURLToPath(new URL("./scripts/install-shim.mjs", import.meta.url));
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-inst-root-"));
+    tmpDirs.push(home);
+    const foreign = path.join(home, "foreign");
+    fs.mkdirSync(foreign, { recursive: true });
+    fs.writeFileSync(path.join(foreign, "vc-secrets-shim.mjs"), "// a decoy, not this package's shim\n");
+
+    const r = spawnSync(process.execPath, [script], { encoding: "utf8",
+        env: { ...process.env, HOME: home, CLAUDE_PLUGIN_ROOT: foreign } });
+
+    assert.equal(r.status, 0, r.stderr);
+    const installed = path.join(home, ".claude", "plugins", "data", "vc-secrets-vc-tools", "vc-secrets-shim.mjs");
+    const own = fileURLToPath(new URL("./vc-secrets-shim.mjs", import.meta.url));
+    assert.equal(fs.readFileSync(installed, "utf8"), fs.readFileSync(own, "utf8"),
+        "the installed bytes must be this package's own shim");
 });
 
 test("install-shim: a destination whose bytes differ is called different, not older", () => {

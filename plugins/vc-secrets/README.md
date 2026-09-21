@@ -492,7 +492,7 @@ intended path.
 
 ### Checking it by hand
 
-Five payloads, fed to the hook directly. The two that must exit **0** are the ones worth running: a
+Six payloads, fed to the hook directly. The three that must exit **0** are the ones worth running: a
 guard is easy to check when it refuses and impossible to check when it stays silent, so the probes
 that pin the silence are the ones worth the keystrokes.
 
@@ -526,12 +526,25 @@ p "not our declaration" '{"tool_name":"Write","tool_input":{"file_path":"vendor.
 
 # 5. a write whose payload this guard cannot read              ALLOW, exit 0, and it says so
 p "unreadable payload" '{"tool_name":"Write","tool_input":{"filePath":".claude/vc-secrets.json"}}'
+
+# 6. an input that is not JSON at all                          ALLOW, exit 0, and it names the reason
+#    The value is deliberately unquoted, which is what makes this a leak check rather than a
+#    formality: V8's own parse message for it quotes a window of the input, and the input on this fd
+#    is the client's tool payload -- the file content about to be written.
+p "unreadable input" '{"tool_name":"Write","tool_input":{"file_path":SHOULD-NOT-APPEAR}}'
 ```
 
 Probes 4 and 5 both exit 0, and the difference is the line probe 5 prints:
 `vc-secrets guard: unrecognised Write payload -- not inspected`. That sentence is the whole point of
 the pair — without it, a client whose payload shape this guard has never seen is indistinguishable
 from a client with nothing to block, and the guard is inert while reading as clean.
+
+Probe 6 is the third exit-0 case, and it pins the other silence: an input this guard cannot parse at
+all. It must print `vc-secrets guard: could not read its input (not valid JSON) -- not inspected`, and
+that line must **not** contain `SHOULD-NOT-APPEAR`. V8's own message for the same input is
+`Unexpected token 'S', ..."ile_path":SHOULD-NOT"... is not valid JSON` — a window onto the payload,
+which on this fd is the content of the file the client was about to write. A guard that forwards that
+message to stderr publishes whatever it failed to parse, a secret in a `.env` included.
 
 ## Scope of the protection
 

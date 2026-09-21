@@ -1818,13 +1818,25 @@ test("buildBrowserCommand: a URL carrying & or | survives to the browser on ever
     assert.equal(win.opts.windowsVerbatimArguments, true,
         "without this node re-quotes the line and the quotes stop protecting anything");
     assert.match(win.args[0], /\?code=a&b=c\|whoami"$/, "everything after the & must still be there");
+    // A third property, again not the same one. powershell.exe joins everything after -Command back
+    // into script text, so the argv element is as invisible to it as it is to cmd.exe -- and & is an
+    // argument-mode metacharacter anywhere in a token. Asserting the element would pass on the broken
+    // form, which is exactly how the win32 assertion stayed green while the launch was broken.
+    const wsl = m.buildBrowserCommand("linux", {}, nasty, onPath("powershell.exe"));
+    const script = wsl.args.slice(wsl.args.indexOf("-Command") + 1).join(" ");
+    assert.equal(script, `Start-Process '${nasty}'`, "the URL must reach PowerShell as a single-quoted literal");
+    assert.match(script, /&b=c\|whoami'$/, "everything after the & must still be there");
 });
 
-test("buildBrowserCommand: a URL containing a double quote is refused, not quoted anyway", () => {
+test("buildBrowserCommand: a URL carrying the quote character its shell's form relies on is refused, not quoted anyway", () => {
     // The win32 form embeds the URL in a quoted string, so a quote inside it would end that string
     // early and hand the rest to cmd.exe as syntax. Cannot happen from outside today — guids,
     // base64url and configured scopes — so this keeps it that way rather than trusting it stays.
     assert.throws(() => m.buildBrowserCommand("win32", {}, 'http://127.0.0.1:1/?a="&calc', onPath()),
+        m.VcSecretsError);
+    // The WSL branch embeds the URL in a single-quoted PowerShell literal, so there it is the single
+    // quote that would end the string early. Same invariant, the other shell's quoting character.
+    assert.throws(() => m.buildBrowserCommand("linux", {}, "http://127.0.0.1:1/?a='&calc", onPath("powershell.exe")),
         m.VcSecretsError);
 });
 
@@ -4427,9 +4439,15 @@ channelTest("cmdLaunch: a slow renewal tick does not stack on the one still runn
     }
 });
 
-channelTest("cmdLaunch: a renewal reaching nobody is reported twice and then not again", async (t) => {
+channelTest("cmdLaunch: a tick with nothing attached is reported twice and then not again", async (t) => {
     // New coverage (source gap): mcpw.js's cmdRun and the flag it sets have no test in the source's
-    // own suite. No client ever connects here, so channel.push() returns 0 on every tick.
+    // own suite. No client ever connects here, so the channel has no peers on any tick.
+    //
+    // readCache returns the SAME token every time, which is what a valid cache entry does -- cacheStatus
+    // hands back the stored accessToken unchanged. The fixture used to return a new one per call, a
+    // state no real entry can be in, and that is what made this test pass while the counter advanced
+    // only on rotations: with a constant token the warnings never arrived at all, and the first one
+    // would really have waited for the first mid-life refresh, about 48 minutes in.
     //
     // TWICE, and the difference between the two lines is the point. The first one's promise -- "it
     // will be handed over when the server connects" -- is true of a server that is merely still
@@ -4452,17 +4470,71 @@ channelTest("cmdLaunch: a renewal reaching nobody is reported twice and then not
         childNodeVersion: () => "v20.11.0",
         spawnFn: () => fakeChild(),
         renewalTickMs: 5,
-        readCache: async () => { calls += 1; return { state: "valid", accessToken: `t${calls}` }; },
+        readCache: async () => { calls += 1; return { state: "valid", accessToken: "t" }; },
     });
     try {
         await new Promise((r) => setTimeout(r, 60));
-        const first = stderr.filter((s) => s.includes("nothing is connected to the channel"));
+        const first = stderr.filter((s) => s.includes("nothing is connected to the token channel"));
         const escalation = stderr.filter((s) => s.includes("no process has matched the declared target"));
         assert.ok(calls >= 3, `the renewal must run past the second tick for silence to mean anything, ran ${calls}`);
         assert.equal(first.length, 1, `expected exactly one first-tick warning, got ${first.length}`);
         assert.equal(escalation.length, 1, `expected exactly one escalation, got ${escalation.length}`);
         assert.match(escalation[0], /some-oauth-package/,
             "the escalation must name the target nothing matched, or it is not actionable");
+    } finally {
+        await handle.dispose();
+    }
+});
+
+test("cmdLaunch: once something has attached, a later drop reports the silence but never the target diagnosis", async (t) => {
+    // The escalation says no process ever matched the declared target. Once something has attached,
+    // that sentence is false for the rest of the session -- and a client CAN drop while the launcher
+    // lives, since the channel deletes it from the push set on close or error. Restarting the count
+    // alone would only postpone the false line by two ticks, so what this pins is that the claim is
+    // withdrawn: after a drop the first line returns, and the escalation never does. A scripted
+    // peers() drives it: nothing attached, then attached, then gone again.
+    const stderr = [];
+    t.mock.method(fs, "writeSync", (fd, str) => {
+        if (fd !== 2) {
+            throw new Error(`unexpected fs.writeSync(${fd}, ...) in this test`);
+        }
+        stderr.push(str);
+
+        return Buffer.byteLength(str);
+    });
+    let peers = 0;
+    const count = (needle) => stderr.filter((s) => s.includes(needle)).length;
+    const waitFor = async (done, ms = 1000) => {
+        const started = Date.now();
+        while (Date.now() - started < ms && !done()) {
+            await new Promise((r) => setTimeout(r, 5));
+        }
+
+        return done();
+    };
+    const handle = await m.cmdLaunch("servers", "s", CMD_LAUNCH_CFG, {
+        childNodeVersion: () => "v20.11.0",
+        spawnFn: () => fakeChild(),
+        renewalTickMs: 5,
+        readCache: async () => ({ state: "valid", accessToken: "t" }),
+        createChannel: () => ({ path: "/tmp/not-a-real.sock", push: () => peers, peers: () => peers,
+            close: async () => {}, removeSync: () => {} }),
+    });
+    try {
+        assert.ok(await waitFor(() => count("nothing is connected to the token channel") === 1),
+            `expected the first warning while nothing is attached: ${stderr.join("")}`);
+        peers = 1;
+        await new Promise((r) => setTimeout(r, 40));   // eight ticks with a client attached
+        assert.equal(count("no process has matched the declared target"), 0,
+            "a tick with something attached must not escalate");
+        peers = 0;
+        assert.ok(await waitFor(() => count("nothing is connected to the token channel") === 2),
+            `the count must start over, so the first line is what a fresh drop reports: ${stderr.join("")}`);
+        // Far past the second unattached tick, which is where the escalation would fire if the claim
+        // were only being postponed rather than withdrawn.
+        await new Promise((r) => setTimeout(r, 60));   // twelve further ticks with nothing attached
+        assert.equal(count("no process has matched the declared target"), 0,
+            `something did match, so that diagnosis must never be printed in this session: ${stderr.join("")}`);
     } finally {
         await handle.dispose();
     }
@@ -4673,6 +4745,41 @@ test("vc-secrets-probe: a launcher refusal is captured, classified, and still ec
     assert.match(r.stderr, /^vc-secrets: unknown server/m, "the launcher's own line must still reach the developer");
     assert.equal(r.stdout, "", "the probe writes nothing on fd 1");
     assert.equal(r.status, 1);
+});
+
+test("vc-secrets-probe: a backend tool's multi-line failure is still a launcher refusal, not a dead server",
+    { skip: m.detectLocalBackend(process.platform, process.env) !== "gpg"
+        && "needs gpg to be the backend this machine selects -- the stub on PATH stands in for it" }, () => {
+    // The classifier reads the LAST stderr line, and a tool's own stderr arrives embedded in the
+    // launcher's message with its newlines intact. A locked gpg agent answers in three lines, so the
+    // last one was "gpg: decryption failed ..." -- nobody's launcher prefix -- and the probe reported
+    // "server exited before responding", the one outcome the doctor skill reads as a broken binary.
+    // Asserting through the probe rather than on the line shape, because the verdict is what misled.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-multiline-"));
+    tmpDirs.push(home);
+    const secretPath = path.join(home, "vc-secrets", "secrets", "demo", "plain.gpg");
+    fs.mkdirSync(path.dirname(secretPath), { recursive: true });
+    fs.writeFileSync(secretPath, "ciphertext-placeholder");   // only has to exist for the pre-check
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-gpgfail-"));
+    tmpDirs.push(binDir);
+    fs.writeFileSync(path.join(binDir, "gpg"), '#!/bin/sh\n'
+        + '>&2 echo "gpg: encrypted with 1 passphrase"\n'
+        + '>&2 echo "gpg: public key decryption failed: No pinentry"\n'
+        + '>&2 echo "gpg: decryption failed: No secret key"\n'
+        + 'exit 2\n', { mode: 0o755 });
+    const dir = tmpProbeConfigDir({
+        projectId: "demo",
+        secrets: { plain: { backend: "local" } },
+        servers: { s: { command: "true", args: [], env: { OTHER: "secret:plain" } } },
+    });
+
+    const r = spawnSync(process.execPath, [PROBE_PATH, "s"], { encoding: "utf8",
+        env: { ...process.env, VC_SECRETS_CONFIG_DIR: dir, XDG_CONFIG_HOME: home,
+            PATH: `${binDir}${path.delimiter}${process.env.PATH}` } });
+
+    assert.match(r.stderr, /launcher refused/, `the probe must blame the launcher, not the server:\n${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /server exited before responding/);
+    assert.match(r.stderr, /No secret key/, "the tool's own words must survive the collapse into one line");
 });
 
 test("classifyProbeFailure: a launcher line followed by a server death is the server's failure", () => {
