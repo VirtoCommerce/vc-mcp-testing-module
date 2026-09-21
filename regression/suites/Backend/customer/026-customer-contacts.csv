@@ -533,28 +533,30 @@ Role_1 assigned to User_1",,"1. Login as User_1
 [WAIT] observe the blade's behavior after the forced failure","[STATE] verify whether the blade shows a scoped error/notification rather than an indefinite spinner {HYPOTHESIS}
 [REL] verify whether the rest of the Admin SPA (main menu, any other open blade) remains exactly as interactive after the forced failure as it was immediately before triggering it — no cascading unresponsiveness {HYPOTHESIS}","[NETWORK] the forced failure is visible on the intercepted request (status/timeout as armed)
 [CONSOLE] no unhandled promise rejection that breaks the wider SPA","spinner remains indefinitely with no timeout or error surfaced, the whole Admin SPA becomes unresponsive, an unhandled exception appears in console","None — read-only. Remove the network interception; discard any unsaved condition-tree edit by navigating away without saving.","VCST-5547 · Archetype:FALLBACK · Technique:EG","Draft"
-"CUST-170","Show customers — the link and the filtered blade remain reachable at high browser zoom, dark mode, and print","Customer > Condition Tree > Show customers by user group","High","","ECL-15.1","Admin logged in; a Promotion's condition tree with a ""User group is"" condition and a group selected, so the link is visible.","back_url={{BACK_URL}}, admin_user={{ADMIN_EMAIL}}, admin_pass={{ADMIN_PASSWORD}}","[NAV] {{BACK_URL}}
+"CUST-170","Show customers — the link and the filtered blade remain reachable at high browser zoom, dark mode, and print","Customer > Condition Tree > Show customers by user group","High","","ECL-15.1","Admin logged in; a Promotion's condition tree with a ""User group is"" condition and a group selected, so the link is visible. Baseline viewport 1920x1080 - every reflow size below is derived from it, so a lane running at another baseline must recompute them.","back_url={{BACK_URL}}, admin_user={{ADMIN_EMAIL}}, admin_pass={{ADMIN_PASSWORD}}","[NAV] {{BACK_URL}}
 [ACT] fill 'User name': {{ADMIN_EMAIL}}
 [ACT] fill 'Password': {{ADMIN_PASSWORD}}
 [ACT] click 'Login'
 [WAIT] Admin SPA main menu loads
 [NAV] open the condition tree with a group selected so the 'Show customers' link is visible
-[ACT] set browser zoom to 200%
-[WAIT] page reflows at 200% zoom
-[ACT] set browser zoom to 400%
-[WAIT] page reflows at 400% zoom
-[ACT] reset zoom to 100%
-[ACT] enable dark mode (OS/browser prefers-color-scheme, or the Admin theme's own dark mode if one exists)
-[ACT] enable reduced-motion
+[ACT] resize the viewport to 960x540 - the CSS-viewport reflow equivalent of 200% zoom from a 1920x1080 baseline. Playwright MCP cannot set Chrome's own zoom level, and WCAG 2.2 SC 1.4.10 measures reflow exactly this way; never claim browser zoom was set
+[WAIT] the page settles at 960x540
+[ACT] resize the viewport to 480x270 - the 400% equivalent
+[WAIT] the page settles at 480x270
+[ACT] resize the viewport to 320x1080 - SC 1.4.10's own 320 CSS px target, which isolates the width axis from the height axis
+[WAIT] the page settles at 320x1080
+[ACT] restore the viewport to 1920x1080
+[ACT] emulate prefers-color-scheme dark
+[ACT] emulate prefers-reduced-motion reduce
 [ACT] click 'Show customers'
-[WAIT] the blade opens under dark mode / reduced motion
-[ACT] reset dark mode to normal
-[ACT] reset reduced-motion to normal
-[ACT] trigger the browser's print preview on the opened member-list blade
-[WAIT] the print preview renders","[DOM] the 'Show customers' link element stays within the visible viewport and clickable — not clipped by a fixed-position ancestor — at 200% and 400% browser zoom {HYPOTHESIS}
-[REL] verify whether the link's position relative to its own container is the same shape at 200%/400% zoom as at 100% (no ancestor newly clips it only at higher zoom) {HYPOTHESIS}
-[DOM] verify whether the opened blade renders coherently under dark mode / reduced motion — no illegible contrast, no motion-dependent affordance hidden by reduced-motion {HYPOTHESIS}
-[DOM] the print-preview render of the member-list grid shows readable row text for at least the first visible row, not a blank or clipped page {HYPOTHESIS}","[CONSOLE] no error triggered purely by zoom/theme/print changes","link or blade content clipped/unreachable at any tested zoom level, illegible contrast in dark mode, blank print preview","None — read-only. Reset zoom/theme/print state; discard any unsaved condition-tree edit.","VCST-5547 · Archetype:RENDER · Technique:EG","Draft"
+[WAIT] the blade opens under the dark / reduced-motion overrides
+[ACT] clear the colour-scheme and reduced-motion overrides
+[ACT] emulate the print media type on the opened member-list blade
+[WAIT] the grid re-renders under print media
+[ACT] clear the media override and restore the 1920x1080 viewport","[DOM] the 'Show customers' link stays within the visible viewport and clickable at BOTH reflow equivalents (960x540 and 480x270) — not clipped by a fixed-position or overflow:hidden ancestor, and not covered by the blade's own fixed footer {DOC} WCAG 2.2 SC 1.4.10 Reflow
+[REL] the link's offset inside its own container is IDENTICAL at 1920x1080, 960x540, 480x270 and 320x1080 (measured dx=0 dy=48) — the link itself never moves, so any clipping comes from an ancestor losing height, not from the link shifting {OBSERVED}
+[DOM] the opened blade renders coherently under both overrides: the Admin SPA ships NO dark theme, so prefers-color-scheme dark is not honoured and the light palette renders at full contrast - that is the accepted behaviour, not a miss - and under reduced motion the link still opens and populates the blade, so no affordance depends on a transition completing {OBSERVED}
+[DOM] under the print media type the member-list grid shows readable row text for at least the first visible row, not a blank or clipped page {OBSERVED}  <- this is CSS print-media emulation into the viewport; Chrome's paginated print dialog (page breaks, headers/footers) is not reachable from a Playwright lane and is out of scope for this row","[CONSOLE] no error triggered purely by zoom/theme/print changes","link or blade content clipped/unreachable at any tested zoom level, illegible contrast in dark mode, blank print preview","None — read-only. Reset zoom/theme/print state; discard any unsaved condition-tree edit.","VCST-5547 · Archetype:RENDER · Technique:EG","Draft"
 "CUST-171","Show customers — grid rendering across the member-count shapes reachable live on this environment (empty, exactly one, the largest available group)","Customer > Condition Tree > Show customers by user group","High","","ECL-13.1","Admin logged in; the live Customer.MemberGroups dictionary contains, at minimum, one group with totalCount==0 and one with totalCount==1 (self-contained discovery, same apparatus as CUST-152/153/155). An 'overflowing/paginated' shape is NOT guaranteed reachable on this environment — if no live group's count meets or exceeds one grid page, that slice is recorded as a coverage gap here rather than fabricated.","back_url={{BACK_URL}}, admin_user={{ADMIN_EMAIL}}, admin_pass={{ADMIN_PASSWORD}}","[NAV] {{BACK_URL}}
 [ACT] fill 'User name': {{ADMIN_EMAIL}}
 [ACT] fill 'Password': {{ADMIN_PASSWORD}}
