@@ -65,6 +65,26 @@ answering. Only the last is the binary's fault:
 node "${CLAUDE_PLUGIN_ROOT}/vc-secrets-probe.mjs" <server>
 ```
 
+## A server that worked, then lost access
+
+Neither check above sees this one, and it is the only failure here that arrives late: the secret
+resolves, the handshake succeeds, and an `oauth:`-backed server serves normally until the token it
+started with expires. The cause is a renewal with nowhere to go — no process matched the declared
+`targetPackage`/`binName`, so nothing was ever handed the new token.
+
+`doctor` cannot report it: the condition exists only inside a launch. The launcher does, on its second
+renewal tick, to its own stderr — which is where the client keeps a wrapped server's log:
+
+```
+vc-secrets: still nothing connected to the token channel -- no process has matched the declared
+target (targetPackage "...", binName "..."), so the server is running on the token it started
+with and will lose access when that one expires
+```
+
+The usual cause is a missing or wrong `binName`. Check it against the package's own `bin` entry: the
+key is the name to declare, and the value says whether the `dist/index.js` alternative can match at
+all — `../../README.md` has the rule and the packages it does not hold for.
+
 ## Report
 
 The output verbatim, then one line per non-`OK` entry saying what it means and the exact command to

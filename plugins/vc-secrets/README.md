@@ -179,11 +179,19 @@ and the server process that is meant to hold the token:
   name also matches a scoped package of the same name (`@other/<name>`), and a `binName` matches any
   file so named — within the launched server's own process tree, which already holds the token it was
   started with.
-- `binName` is optional: the package's executable, as `npx` normally starts it (`node_modules/.bin/<bin>`).
-  It is its own key because a bin name is not derivable from the package name — the example's package
-  ships the bin `mcp-server-azuredevops`, not `mcp`. **Leave it out and a server started through its
-  `.bin` shim never receives a renewed token**: it runs on the token it was launched with, and loses
-  access when that expires, with nothing reporting why.
+- **`dist/index.js` is a convention this matcher assumes, not a path it reads from the package.** It
+  holds for many MCP servers and fails for any package whose `bin` points somewhere else —
+  `@playwright/mcp` and `mcp-remote` both do. For those the package alternative matches nothing at all,
+  so `binName` is the only way to reach them and is **not** optional there. Read both halves of the
+  package's own `bin` entry rather than assuming either: the key is what `binName` wants, and the value
+  is what tells you whether the package alternative is live at all.
+- `binName` is optional where that convention holds: the package's executable, as `npx` normally starts
+  it (`node_modules/.bin/<bin>`). It is its own key because a bin name is not derivable from the package
+  name — the example's package ships the bin `mcp-server-azuredevops`, not `mcp`. **Leave it out and a
+  server started through its `.bin` shim never receives a renewed token**: it runs on the token it was
+  launched with, and loses access when that expires. The launcher reports the miss on its second renewal
+  tick, naming the target the declaration asked for — and that line is the only report there is, so a
+  server that quietly loses access is worth a look at the launcher's stderr.
 - `authorized` works as it does for a secret: in your user file it names the project servers allowed to
   use the token, and anywhere else it is ignored with a warning.
 
