@@ -2763,35 +2763,49 @@ test("childNodeProbes: one entry per launchable, however many oauth references i
         version: "v18.17.1" });
 });
 
-test("childNodeProbes: each launchable is judged by its own command, and one binary is probed once", () => {
+test("childNodeProbes: each launchable is judged by its own command, on either platform", () => {
     // The defect at its second site: a single PATH probe standing for every launchable judges a
     // declaration naming its own node by a binary it never runs. `declared` is what lets the message
     // say which of the two it holds, and a wrapper falls back to PATH because which node it resolves
     // is not knowable from the declaration.
+    //
+    // `platform` is pinned rather than inherited, so the win32 branch of isNodeCommand is reached on
+    // every runner. Inherited, the Windows row asserts exactly what the wrapper row already asserts
+    // on a POSIX box, and the branch goes unexercised wherever the suite actually runs.
+    const WIN_NODE = "C:\\Program Files\\nodejs\\node.exe";
     const cfg = { servers: {
         own: { command: "/usr/local/bin/node", env: {} },
         wrapped: { command: "npx", env: {} },
-        windows: { command: "C:\\Program Files\\nodejs\\node.exe", env: {} },
-    }, tasks: { alsoOwn: { command: "/usr/local/bin/node", env: {} } } };
+        windows: { command: WIN_NODE, env: {} },
+    }, tasks: { own: { command: "/usr/local/bin/node", env: {} } } };
+    // A task and a server may carry the same name -- validateLaunchables runs per map and enforces no
+    // uniqueness across them -- so `kind` is load-bearing in the dedup key. Keyed on the name alone,
+    // the task below is silently dropped from the report, which is this commit's own defect class.
     const refs = [
         { kind: "servers", launchableName: "own" }, { kind: "servers", launchableName: "wrapped" },
-        { kind: "servers", launchableName: "windows" }, { kind: "tasks", launchableName: "alsoOwn" },
+        { kind: "servers", launchableName: "windows" }, { kind: "tasks", launchableName: "own" },
     ];
-    const probedCommands = [];
-    const out = m.childNodeProbes(cfg, refs,
-        { probe: ({ command }) => { probedCommands.push(command); return "v18.17.1"; } });
 
-    assert.deepEqual(out.map((x) => [x.launchableName, x.command, x.declared]), [
-        ["own", "/usr/local/bin/node", true],
-        ["wrapped", "npx", false],
-        ["windows", "C:\\Program Files\\nodejs\\node.exe", process.platform === "win32"],
-        ["alsoOwn", "/usr/local/bin/node", true],
-    ]);
-    // "own" and "alsoOwn" name one binary across two kinds, so it is probed once; the wrapper adds
-    // the PATH probe. The Windows path is a node only on win32, so it joins whichever group applies.
-    assert.equal(new Set(probedCommands).size, probedCommands.length, "no command probed twice");
-    assert.ok(probedCommands.includes("/usr/local/bin/node") && probedCommands.includes("node"),
-        probedCommands.join(", "));
+    for (const [platform, windowsIsNode] of [["linux", false], ["win32", true]]) {
+        const probedCommands = [];
+        const out = m.childNodeProbes(cfg, refs, { platform,
+            probe: ({ command }) => { probedCommands.push(command); return "v18.17.1"; } });
+
+        assert.deepEqual(out.map((x) => [x.launchableName, x.command, x.declared]), [
+            ["own", "/usr/local/bin/node", true],
+            ["wrapped", "npx", false],
+            ["windows", WIN_NODE, windowsIsNode],
+            ["own", "/usr/local/bin/node", true],
+        ], platform);
+        // The server and the task share a name and differ only in kind, so four references survive as
+        // four entries: dropping `kind` from the key would lose the last one.
+        assert.equal(out.length, 4, `${platform}: a task is not the server of the same name`);
+        assert.equal(new Set(probedCommands).size, probedCommands.length, `${platform}: no command probed twice`);
+        assert.ok(probedCommands.includes("/usr/local/bin/node") && probedCommands.includes("node"),
+            `${platform}: ${probedCommands.join(", ")}`);
+        assert.equal(probedCommands.includes(WIN_NODE), windowsIsNode,
+            `${platform}: a Windows node is probed as itself only where it is one`);
+    }
 });
 
 test("cmdDoctor: the oauth checks are wired to the report, not merely available", () => {

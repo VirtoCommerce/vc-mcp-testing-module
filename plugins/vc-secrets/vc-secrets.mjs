@@ -2138,12 +2138,13 @@ function childNodeRefusal({ launchableName, command, declared, version }) {
 // fact and must be one finding, or doctor prints the same sentence twice and the reader goes looking
 // for a second problem. (cmdLaunch refuses such a declaration, but only at launch, so doctor is where
 // it is seen at all.) `probedVersions` is the cheaper one: it saves a duplicate `--version` spawn
-// where several launchables name the same command, keyed on the command as declared -- two spellings
-// of one binary are still probed twice, which costs a process and no correctness.
+// where several launchables resolve to the same binary. Its key is what will be probed, so every
+// wrapper collapses onto the one PATH entry; two spellings of one node are still probed twice, which
+// costs a process and no correctness.
 //
 // The probe mirrors cmdLaunch exactly, so doctor's verdict and the launch's are answers about the
 // same binary rather than about two different ones.
-function childNodeProbes(cfg, references, { probe = childNodeVersionIo } = {}) {
+function childNodeProbes(cfg, references, { probe = childNodeVersionIo, platform = process.platform } = {}) {
     const probedVersions = new Map();
     const seenLaunchables = new Set();
     const out = [];
@@ -2154,7 +2155,7 @@ function childNodeProbes(cfg, references, { probe = childNodeVersionIo } = {}) {
         }
         seenLaunchables.add(seen);
         const command = cfg[kind][launchableName].command;
-        const probed = isNodeCommand(command) ? command : "node";
+        const probed = isNodeCommand(command, { platform }) ? command : "node";
         if (!probedVersions.has(probed)) {
             probedVersions.set(probed, probe({ command: probed }));
         }
@@ -4019,7 +4020,6 @@ async function cmdDoctor(cfg, flags = []) {
 
     // Only where an oauth reference exists: before the switch no child needs --import at all, and a
     // FAIL about a flag nothing uses would be a diagnostic inventing its own problem.
-    //
     const childNodes = childNodeProbes(cfg, references);
 
     const lines = doctorReport(cfg, {
