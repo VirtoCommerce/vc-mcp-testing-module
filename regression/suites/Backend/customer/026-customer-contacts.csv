@@ -400,7 +400,8 @@ Role_1 assigned to User_1",,"1. Login as User_1
 [WAIT] the blade opens with at least one row
 [ACT] open the row-level context menu (or equivalent per-row action control) on the first row
 [WAIT] the row menu renders and its full item list is readable
-[ACT] record EVERY item the menu offers, then click 'Manage'
+[ACT] record EVERY item the menu offers
+[ACT] click 'Manage'
 [WAIT] the member record opens with its own Save/Reset toolbar","[GRID] enumerate the row-level action control: record whether a menu opens and list EVERY item it offers {OBSERVED}  <- recording this is mandatory; an absent menu must be reported as absent, never left blank
 [GRID] Delete is NOT among the items offered {SPEC}
 [GRID] 'Manage' IS offered and opens the member record - the read-only mode suppresses the LIST's own mutating commands (Add / Delete / Invite), not navigation to a member; the stricter containment reading was raised and explicitly withdrawn by the product owner on 2026-09-15 {SPEC}","[CONSOLE] no error attempting to open the row context menu","Delete is offered on a row; or an offered item (e.g. Manage) opens a member blade carrying Save/Reset, editable fields, or removable group chips; or the enumeration in assertion 1 is not recorded at all - read-only containment is escapable or unverified","None — read-only; discard any unsaved condition-tree edit by reloading.","VCST-5547 | BUG-VCST-5547-readonly-mode-escapable.md | assertions rewritten 2026-09-14 after the 5b verifier showed the prior wording was vacuously satisfiable by the menu's total absence, so it could not discriminate the two implementations it exists to tell apart | Promoted: REG-2026-09-17-2013 (2026-09-17)",Automated
@@ -508,7 +509,7 @@ Role_1 assigned to User_1",,"1. Login as User_1
 [WAIT] Admin SPA main menu loads
 [NAV] open a Promotion's condition tree, add a ""User group is"" condition, select any one available group
 [ACT] click 'Show customers'
-[WAIT] the blade opens","[DOM] the header count badge reflects the FILTERED member count, not the unfiltered member total — the count is what distinguishes this blade from the root list {OBSERVED}
+[WAIT] the blade opens","[DOM] the blade header's count badge shows the FILTERED member count - equal to the selected group's totalCount from POST /api/members/search and not the unfiltered member total the root Contacts blade's own badge shows - so the badge, not the title, is what distinguishes the two blades {OBSERVED}
 [DOM] the blade's title-bar text is byte-identical to the unfiltered root Contacts/member-list blade's own title, with no group name in title or subtitle — naming the group there was proposed and explicitly set aside by the product owner on 2026-09-15, so this case guards the accepted behaviour {OBSERVED}","[CONSOLE] no error","title-bar text is identical to the root Contacts blade, no group name appears in title or subtitle, no count badge distinguishes the filtered result from the root list","None — read-only; discard any unsaved condition-tree edit by reloading.",VCST-5547 · Archetype:FALLBACK · Technique:EG | Promoted: REG-2026-09-17-2013 (2026-09-17),Automated
 "CUST-168","Show customers — browser Back after opening the filtered member-list blade over an unsaved condition-tree edit","Customer > Condition Tree > Show customers by user group","High","","ECL-7.1","Admin logged in; a Promotion has an unsaved condition-tree edit in progress (an in-progress description marker plus an added, unsaved 'User group is' condition with any one group selected) and the member-list blade can be opened from it.","back_url={{BACK_URL}}, admin_user={{ADMIN_EMAIL}}, admin_pass={{ADMIN_PASSWORD}}","[NAV] {{BACK_URL}}
 [ACT] fill 'User name': {{ADMIN_EMAIL}}
@@ -533,13 +534,13 @@ Role_1 assigned to User_1",,"1. Login as User_1
 [WAIT] observe the blade's behavior after the forced failure","[STATE] verify whether the blade shows a scoped error/notification rather than an indefinite spinner {HYPOTHESIS}
 [REL] verify whether the rest of the Admin SPA (main menu, any other open blade) remains exactly as interactive after the forced failure as it was immediately before triggering it — no cascading unresponsiveness {HYPOTHESIS}","[NETWORK] the forced failure is visible on the intercepted request (status/timeout as armed)
 [CONSOLE] no unhandled promise rejection that breaks the wider SPA","spinner remains indefinitely with no timeout or error surfaced, the whole Admin SPA becomes unresponsive, an unhandled exception appears in console","None — read-only. Remove the network interception; discard any unsaved condition-tree edit by navigating away without saving.","VCST-5547 · Archetype:FALLBACK · Technique:EG","Draft"
-"CUST-170","Show customers — the link and the filtered blade remain reachable at high browser zoom, dark mode, and print","Customer > Condition Tree > Show customers by user group","High","","ECL-15.1","Admin logged in; a Promotion's condition tree with a ""User group is"" condition and a group selected, so the link is visible. Baseline viewport 1920x1080 - every reflow size below is derived from it, so a lane running at another baseline must recompute them.","back_url={{BACK_URL}}, admin_user={{ADMIN_EMAIL}}, admin_pass={{ADMIN_PASSWORD}}","[NAV] {{BACK_URL}}
+"CUST-170","Show customers — the link and the filtered blade remain reachable at high browser zoom, dark mode, and print","Customer > Condition Tree > Show customers by user group","High","","ECL-15.1","Admin logged in; a Promotion's condition tree with a ""User group is"" condition and a group selected, so the link is visible. Baseline viewport 1920x1080 - every reflow size below is derived from it, so a lane running at another baseline must recompute them. Playwright MCP cannot set Chrome's own zoom level; WCAG 2.2 SC 1.4.10 measures reflow by CSS viewport, so 200% and 400% are exercised as 960x540 and 480x270 and a runner must never claim it set browser zoom.","back_url={{BACK_URL}}, admin_user={{ADMIN_EMAIL}}, admin_pass={{ADMIN_PASSWORD}}","[NAV] {{BACK_URL}}
 [ACT] fill 'User name': {{ADMIN_EMAIL}}
 [ACT] fill 'Password': {{ADMIN_PASSWORD}}
 [ACT] click 'Login'
 [WAIT] Admin SPA main menu loads
 [NAV] open the condition tree with a group selected so the 'Show customers' link is visible
-[ACT] resize the viewport to 960x540 - the CSS-viewport reflow equivalent of 200% zoom from a 1920x1080 baseline. Playwright MCP cannot set Chrome's own zoom level, and WCAG 2.2 SC 1.4.10 measures reflow exactly this way; never claim browser zoom was set
+[ACT] resize the viewport to 960x540 - the reflow equivalent of 200% zoom
 [WAIT] the page settles at 960x540
 [ACT] resize the viewport to 480x270 - the 400% equivalent
 [WAIT] the page settles at 480x270
@@ -550,12 +551,14 @@ Role_1 assigned to User_1",,"1. Login as User_1
 [ACT] emulate prefers-reduced-motion reduce
 [ACT] click 'Show customers'
 [WAIT] the blade opens under the dark / reduced-motion overrides
-[ACT] clear the colour-scheme and reduced-motion overrides
+[ACT] clear the colour-scheme override
+[ACT] clear the reduced-motion override
 [ACT] emulate the print media type on the opened member-list blade
 [WAIT] the grid re-renders under print media
-[ACT] clear the media override and restore the 1920x1080 viewport","[DOM] the 'Show customers' link stays within the visible viewport and clickable at BOTH reflow equivalents (960x540 and 480x270) — not clipped by a fixed-position or overflow:hidden ancestor, and not covered by the blade's own fixed footer {DOC} WCAG 2.2 SC 1.4.10 Reflow
+[ACT] clear the media override
+[ACT] restore the viewport to 1920x1080","[DOM] the 'Show customers' link stays within the visible viewport and clickable at BOTH reflow equivalents (960x540 and 480x270) — not clipped by a fixed-position or overflow:hidden ancestor, and not covered by the blade's own fixed footer {DOC} WCAG 2.2 SC 1.4.10 Reflow
 [REL] the link's offset inside its own container is IDENTICAL at 1920x1080, 960x540, 480x270 and 320x1080 (measured dx=0 dy=48) — the link itself never moves, so any clipping comes from an ancestor losing height, not from the link shifting {OBSERVED}
-[DOM] the opened blade renders coherently under both overrides: the Admin SPA ships NO dark theme, so prefers-color-scheme dark is not honoured and the light palette renders at full contrast - that is the accepted behaviour, not a miss - and under reduced motion the link still opens and populates the blade, so no affordance depends on a transition completing {OBSERVED}
+[DOM] under prefers-color-scheme dark the member grid's row text keeps the same computed colour and background as at default (the Admin SPA ships NO dark theme, so the light palette is the accepted result, not a miss) and its contrast ratio stays above 4.5:1; under prefers-reduced-motion reduce the 'Show customers' link still opens the 'Companies and contacts' blade and its grid renders at least one row, so no affordance depends on a transition completing {OBSERVED}
 [DOM] under the print media type the member-list grid shows readable row text for at least the first visible row, not a blank or clipped page {OBSERVED}  <- this is CSS print-media emulation into the viewport; Chrome's paginated print dialog (page breaks, headers/footers) is not reachable from a Playwright lane and is out of scope for this row","[CONSOLE] no error triggered purely by zoom/theme/print changes","link or blade content clipped/unreachable at any tested zoom level, illegible contrast in dark mode, blank print preview","None — read-only. Reset zoom/theme/print state; discard any unsaved condition-tree edit.","VCST-5547 · Archetype:RENDER · Technique:EG","Draft"
 "CUST-171","Show customers — grid rendering across the member-count shapes reachable live on this environment (empty, exactly one, the largest available group)","Customer > Condition Tree > Show customers by user group","High","","ECL-13.1","Admin logged in; the live Customer.MemberGroups dictionary contains, at minimum, one group with totalCount==0 and one with totalCount==1 (self-contained discovery, same apparatus as CUST-152/153/155). An 'overflowing/paginated' shape is NOT guaranteed reachable on this environment — if no live group's count meets or exceeds one grid page, that slice is recorded as a coverage gap here rather than fabricated.","back_url={{BACK_URL}}, admin_user={{ADMIN_EMAIL}}, admin_pass={{ADMIN_PASSWORD}}","[NAV] {{BACK_URL}}
 [ACT] fill 'User name': {{ADMIN_EMAIL}}
