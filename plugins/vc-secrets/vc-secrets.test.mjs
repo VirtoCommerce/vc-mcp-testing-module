@@ -1053,6 +1053,27 @@ test("resolveEnvEntries: field on non-json secret → VcSecretsError", async () 
     await assert.rejects(m.resolveEnvEntries("bad-field", CFG, async () => "x"), /format: "json"/);
 });
 
+test("resolveEnvEntries: valid JSON that is not an object names the shape, and never throws TypeError", async () => {
+    // `null` is the one that used to escape as a raw TypeError: JSON.parse accepts it, and indexing
+    // it throws before the missing-field diagnostic below could run -- so a wrong-shaped secret
+    // surfaced as an internal launcher failure. The scalars did not throw; they reached "missing
+    // string field", which is true and names the wrong problem when there is no object to select from.
+    for (const body of ["null", "5", '"a string"', "true"]) {
+        await assert.rejects(
+            m.resolveEnvEntries("azure-monitor", CFG, async () => body),
+            (e) => {
+                assert.ok(e instanceof m.VcSecretsError, `${body}: must stay a VcSecretsError, got ${e?.constructor?.name}`);
+                assert.match(e.message, /valid JSON but not an object/, body);
+
+                return true;
+            },
+            body);
+    }
+
+    // An array indexes harmlessly, so it keeps the field diagnostic rather than gaining a second one.
+    await assert.rejects(m.resolveEnvEntries("azure-monitor", CFG, async () => "[]"), /missing string field/);
+});
+
 test("resolveEnvEntries: json parse failure names reference, not value", async () => {
     await assert.rejects(
         m.resolveEnvEntries("azure-monitor", CFG, async () => "SECRET-NOT-JSON"),
@@ -1416,6 +1437,39 @@ test("childNodeVersionIo: a probe that could not run reports why, not an empty v
 
     // And a probe that worked still answers with the bare version, trimmed.
     assert.equal(m.childNodeVersionIo({ run: () => ({ status: 0, stdout: "v22.23.2\n" }) }), "v22.23.2");
+});
+
+test("childNodeVersionIo: probes the command it is given, and PATH node only by default", () => {
+    // The defect this pins: the probe hardcoded "node", so a declaration naming another node was
+    // measured by an unrelated binary -- refusing a server that would have started, or passing one
+    // that then aborts on --import. Asserting the spawned path is the only way to see which node ran.
+    // `platform` is pinned because the probe hands its command to resolveSpawnCommand: on win32 a
+    // bare `node` carries no extension and no separator, so it goes through the PATHEXT scan and
+    // comes back as an absolute path. Unpinned, this asserts the POSIX spelling on every platform
+    // and reddens the Windows leg of the matrix while passing everywhere it was written.
+    const spawned = [];
+    const run = (cmd) => { spawned.push(cmd); return { status: 0, stdout: "v22.23.2\n" }; };
+
+    m.childNodeVersionIo({ run, platform: "linux" });
+    m.childNodeVersionIo({ command: "/opt/node22/bin/node", run, platform: "linux" });
+
+    assert.deepEqual(spawned, ["node", "/opt/node22/bin/node"]);
+});
+
+test("isNodeCommand: only a binary named node, so a wrapper is never mistaken for one", () => {
+    // `npx`, a .bin shim and `dnx` all reach a node the declaration cannot name -- npx resolves its
+    // own, and dnx runs no node at all. Answering true for those would put the declared path into a
+    // message claiming it was probed, which is the false claim this whole change removes.
+    for (const yes of ["node", "/usr/bin/node", "/opt/node22/bin/node", "./node"]) {
+        assert.equal(m.isNodeCommand(yes, { platform: "linux" }), true, yes);
+    }
+    for (const no of ["npx", "dnx", "bash", "/usr/bin/npx", "nodemon", "node-red", "", null, undefined, 7]) {
+        assert.equal(m.isNodeCommand(no, { platform: "linux" }), false, String(no));
+    }
+
+    // Windows spells it with the extension, and only Windows does.
+    assert.equal(m.isNodeCommand("C:\\Program Files\\nodejs\\node.exe", { platform: "win32" }), true);
+    assert.equal(m.isNodeCommand("node.exe", { platform: "linux" }), false, "no .exe stripping off win32");
 });
 
 test("the read script exits absent only for ERROR_NOT_FOUND, never for an unreadable store", () => {
@@ -2626,6 +2680,22 @@ test("doctorReport: a child node that could not be run at all still names what i
     assert.ok(!/reports , which/.test(line), line);
 });
 
+test("doctorReport: \"predates\" is said only where a version was actually read", () => {
+    // The probe returns its own reason when it could not run, and that reason took the same sentence
+    // as a real version -- "reports no usable version (ENOENT), which predates --import (18.18.0)"
+    // asserts a comparison nothing performed, and sends the reader to upgrade a node that answered
+    // fine. The failure is a wrong instruction, not a crash, so only the wording carries it.
+    const old = oauthDoctorLines({ childNode: "v18.17.1" }).find((l) => l.startsWith("FAIL"));
+    assert.match(old, /predates/, old);
+
+    for (const unreadable of ["no usable version (ENOENT)", "no usable version (killed by SIGKILL)", ""]) {
+        const line = oauthDoctorLines({ childNode: unreadable }).find((l) => l.startsWith("FAIL"));
+        assert.ok(line, `a FAIL is still expected for ${JSON.stringify(unreadable)}`);
+        assert.doesNotMatch(line, /predates/, line);
+        assert.match(line, /not a version to compare/, line);
+    }
+});
+
 test("cmdDoctor: the oauth checks are wired to the report, not merely available", () => {
     // Both halves tested and the seam between them not: computing oauthStatus and forgetting to pass
     // it leaves every test above green while doctor reports nothing. Source-inspected because
@@ -3033,6 +3103,52 @@ test("cmdLaunch: a child node below the flag floor is refused before anything is
     }), /18\.18\.0/);
     assert.equal(spawned, 0);
     assert.deepEqual(channelDirs(), before, "the version gate must precede createChannel");
+});
+
+test("cmdLaunch: the version gate probes the declared node, and says so when it could not", async () => {
+    // Two halves of one defect. The probe ran `node --version` off PATH whatever the declaration
+    // said, so a server commanding its own node was judged by an unrelated binary; and the refusal
+    // read "the node that runs <name>", asserting it had resolved theirs. A reader acting on that
+    // message would go and upgrade a node the launch never touches.
+    const declared = "/opt/node22/bin/node";
+    const decl = { command: declared, args: ["server.js"], env: { ADO_TOKEN: "oauth:ado" } };
+    const paths = scopedPaths({
+        user: { registrations: { [OAUTH_TENANT_ID]: { [OAUTH_CLIENT_ID]: {
+            servers: { s: { command: declared, args: ["server.js"], envKeys: ["ADO_TOKEN"] } } } } } },
+        project: { projectId: "proj-x", oauth: { ado: OAUTH_DECL }, servers: { s: decl } },
+    });
+
+    let probed = null;
+    await assert.rejects(() => m.cmdLaunch("servers", "s", m.loadConfig(paths), {
+        childNodeVersion: (opts) => { probed = opts?.command ?? null; return "v18.17.1"; },
+        readCache: async () => ({ state: "valid", accessToken: "cached" }),
+        spawnFn: () => { throw new Error("must not spawn"); },
+    }), (e) => {
+        assert.match(e.message, new RegExp(declared.replace(/[/.]/g, "\\$&")),
+            `the refusal must name the binary it measured: ${e.message}`);
+
+        return true;
+    });
+    assert.equal(probed, declared, "the declared node is what gets probed, not PATH");
+});
+
+test("cmdLaunch: a wrapper command is probed via PATH, and the refusal does not claim otherwise", async () => {
+    // The fixture commands `npx`, which resolves a node the declaration cannot name. PATH is then a
+    // proxy rather than an answer, so the message must not repeat the claim removed above — it says
+    // which node it holds and that the launch goes through the wrapper.
+    let probed = "unset";
+    await assert.rejects(() => m.cmdLaunch("servers", "s", m.loadConfig(authorizedOauthPaths()), {
+        childNodeVersion: (opts) => { probed = opts?.command ?? null; return "v18.17.1"; },
+        readCache: async () => ({ state: "valid", accessToken: "cached" }),
+        spawnFn: () => { throw new Error("must not spawn"); },
+    }), (e) => {
+        assert.match(e.message, /node on PATH/, e.message);
+        assert.match(e.message, /npx/, "and it names the wrapper the launch actually goes through");
+        assert.doesNotMatch(e.message, /the node that runs "s"/, "the withdrawn claim must not return");
+
+        return true;
+    });
+    assert.equal(probed, "node", "a wrapper falls back to the PATH node");
 });
 
 test("cmdLaunch: no usable token fails naming login, and never spawns", async () => {

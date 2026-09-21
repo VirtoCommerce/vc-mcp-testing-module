@@ -856,6 +856,15 @@ async function resolveEnvEntries(name, cfg, resolveSecret, kind = "servers") {
             }
         }
         const parsed = jsonCache.get(ref.name);
+        // `null` is valid JSON and indexing it throws a raw TypeError, which reaches the operator as an
+        // internal launcher failure instead of the diagnostic below. The other scalars do not throw --
+        // they reach "missing string field", which is true but names the wrong problem when the content
+        // is not an object at all. One predicate covers both, so a wrong-shaped secret is always told
+        // what is wrong with its shape. Arrays stay on the field path: indexing one is harmless.
+        if (parsed === null || (typeof parsed !== "object")) {
+            throw new VcSecretsError(`secret "${ref.name}": content is valid JSON but not an object, so field `
+                + `"${ref.field}" cannot be selected from it`);
+        }
         if (typeof parsed[ref.field] !== "string") {
             throw new VcSecretsError(`secret "${ref.name}": missing string field "${ref.field}"`);
         }
@@ -2070,8 +2079,13 @@ function buildChildEnv(base, { token, envVar, channelPath, nonce, preloadPath, t
 
 const NODE_IMPORT_FLOOR = [18, 18, 0];
 
+// Shared with the two refusal messages: they must distinguish "read a version, and it is too old"
+// from "could not read one at all", and a second copy of this pattern would let the two drift into
+// disagreeing about which case a given string is.
+const NODE_VERSION_RE = /^v?(\d+)\.(\d+)\.(\d+)/;
+
 function childNodeSupportsImport(version) {
-    const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(version ?? ""));
+    const match = NODE_VERSION_RE.exec(String(version ?? ""));
     if (match === null) {
         // Refused rather than assumed: an unrecognised NODE_OPTIONS flag makes node abort at
         // startup, so guessing "new enough" trades a named error here for a server that does not
@@ -2088,14 +2102,38 @@ function childNodeSupportsImport(version) {
     return true;
 }
 
-// The node that runs the server is whatever npx resolves on PATH, which need not be the one
-// running this launcher — so the gate reads the CHILD's version. Reading our own would pass
-// happily on a machine where the server cannot start.
+// Whether a declared `command` names a node binary, so its own version can be probed. A declaration
+// reaches its server through `npx`, a `.bin` shim or a wrapper just as often, and for those the node
+// that ends up running the entry file is not knowable from the declaration: NODE_OPTIONS reaches every
+// node below the launcher, so a wrapper that ends in `exec node` delivers a renewal perfectly well --
+// which node it picked is simply not something the declaration says. `dnx` is the case that genuinely
+// cannot receive one, because nothing below it is node at all.
+function isNodeCommand(command, { platform = process.platform } = {}) {
+    if (typeof command !== "string" || command === "") {
+        return false;
+    }
+    const P = platform === "win32" ? path.win32 : path.posix;
+    const base = P.basename(command).toLowerCase();
+
+    return base === "node" || (platform === "win32" && base === "node.exe");
+}
+
+// The node that runs the server need not be the one running this launcher — so the gate reads the
+// CHILD's version. Reading our own would pass happily on a machine where the server cannot start.
+//
+// `command` is the binary this launch will actually spawn, when that binary is a node. A declaration
+// naming an absolute node -- or any node other than the one first on PATH -- is measured by the wrong
+// probe otherwise, and the error it produces is wrong in both directions: an old PATH node refuses a
+// server that would have started, and a new one passes a child that then aborts on --import. Callers
+// that cannot name a node (a declaration commanding `npx`, a wrapper, or anything not node at all)
+// pass nothing and get the PATH node, which is a proxy rather than an answer -- so the messages built
+// from this must say which of the two they hold. See isNodeCommand.
+//
 // `run` is a seam only so the FAILURE path can be driven: the success path needs no help, but a
 // probe that cannot run is the case this function now has to describe, and arranging a real spawn
 // failure portably means breaking PATH resolution, whose rules differ per platform and node version.
-function childNodeVersionIo({ platform = process.platform, env = process.env, run = spawnSync } = {}) {
-    const invocation = buildSpawnInvocation(resolveSpawnCommand("node", { platform, env }), ["--version"]);
+function childNodeVersionIo({ command = "node", platform = process.platform, env = process.env, run = spawnSync } = {}) {
+    const invocation = buildSpawnInvocation(resolveSpawnCommand(command, { platform, env }), ["--version"]);
     const r = run(invocation.cmd, invocation.args,
         // Sanitized like runTool's and cmdLaunch's children, and last so no invocation option can
         // put a loader back. What this seam can actually show is the loud failure: node validates
@@ -3557,8 +3595,17 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
         }
     }
     if (childNode !== null && !childNodeSupportsImport(childNode)) {
-        lines.push(`FAIL the node that will run the oauth server reports ${childNode || "no version"}, which predates `
-            + `--import (${NODE_IMPORT_FLOOR.join(".")}) -- a renewed token could not be delivered to it`);
+        // "the node on PATH", not "the node that will run it": one probe stands for every oauth
+        // launchable here, and each declares its own command. The launch path names the binary it
+        // actually measured; this one cannot, so it says which node it holds instead of implying it
+        // resolved theirs.
+        //
+        // Same split as the launch refusal: "predates" only where a version was actually read.
+        lines.push(`FAIL the node on PATH reports ${childNode || "no version"}, which `
+            + `${NODE_VERSION_RE.test(String(childNode ?? ""))
+                ? `predates --import (${NODE_IMPORT_FLOOR.join(".")})`
+                : `is not a version to compare against --import (${NODE_IMPORT_FLOOR.join(".")})`}`
+            + ` -- a renewed token could not be delivered to a server this node runs`);
     }
     // Tasks carry the same env references as servers, so an unchecked task would be the one place a
     // typo'd or undeclared reference survives until someone actually runs it.
@@ -4029,10 +4076,23 @@ async function cmdLaunch(kind, name, cfg, deps = {}) {
         launchDeps = { serverName: oauthEntry.name,
             ...oauthLaunchDeps(oauthEntry.name, oauthEntry.decl, cfg, { ...deps }), ...deps };
         token = await ensureFreshToken(launchDeps);
-        const version = (deps.childNodeVersion ?? childNodeVersionIo)();
+        // Probe the declared binary when it is a node; otherwise the PATH node, which is a guess at
+        // what the wrapper will resolve. The message distinguishes the two, because a refusal naming
+        // a node the reader never declared is one they cannot act on.
+        const probed = isNodeCommand(server.command) ? server.command : "node";
+        const version = (deps.childNodeVersion ?? childNodeVersionIo)({ command: probed });
         if (!childNodeSupportsImport(version)) {
-            throw new VcSecretsError(`the node that runs "${name}" reports ${version || "no version"}, which predates `
-                + `--import (${NODE_IMPORT_FLOOR.join(".")}) -- a renewed token could not be delivered to it`);
+            const subject = probed === server.command
+                ? `the node that runs "${name}" (${server.command})`
+                : `the node on PATH -- "${name}" launches through "${server.command}", so this is the closest probe --`;
+            // "predates" is a version comparison, so it may only be said where a version was read.
+            // A probe that could not run returns its reason here, and calling that reason old names
+            // a fact nothing established -- sending the reader to upgrade a node that answered fine.
+            const verdict = NODE_VERSION_RE.test(String(version ?? ""))
+                ? `reports ${version}, which predates --import (${NODE_IMPORT_FLOOR.join(".")})`
+                : `reports ${version || "no version"}, which is not a version to compare against `
+                    + `--import (${NODE_IMPORT_FLOOR.join(".")})`;
+            throw new VcSecretsError(`${subject} ${verdict} -- a renewed token could not be delivered to it`);
         }
         const nonce = crypto.randomBytes(32).toString("base64url");
         // "exit" is where this process actually leaves: the normal path is child.on("close") ->
@@ -4371,7 +4431,7 @@ export {
     COMMAND_ON_STDIN, quoteForSecurityInteractive, writeSecretValue,
     tokenLockFor, acquireTokenLock, ensureFreshToken, oauthLaunchDeps,
     CHANNEL_GREETING_MAX, channelPipeName, createChannel, PRELOAD_PATH, buildChildEnv,
-    childNodeSupportsImport, childNodeVersionIo,
+    childNodeSupportsImport, childNodeVersionIo, isNodeCommand,
     REDIRECT_PATH, MAX_ERROR_PARAMS, closeTabPage, forTerminal, escapeHtml, failedPage, listenForCallback,
     openBrowser, buildBrowserCommand, handleCallback, cmdLogin, cmdLogout, withDeadline, LOGIN_WAIT_MS,
     runTool, resolveSpawnCommand, buildSpawnInvocation, makeSecretResolver, cmdRun, cmdTask, cmdLaunch, killProcessTree,
