@@ -124,6 +124,20 @@ try {
         registryProblem = e.code ?? (e instanceof SyntaxError ? "not valid JSON" : e.message);
     }
 }
+// A field of the client's registry, for a message. The hostile-shape rule stated at `records` below
+// covers what gets PRINTED as much as what gets read: a template literal joins an array's elements,
+// so a field of the wrong type put the file's own content on the launched server's stderr. Only the
+// type the field is meant to have is shown; anything else is described. Length is deliberately not
+// bounded -- a projectPath is the client's legitimate data and can be long, and the rule is about
+// shape, the way the `records` filter is.
+function registryField(value, type, absent) {
+    if (value === undefined || value === null) {
+        return absent;
+    }
+
+    return typeof value === type ? String(value) : `(not a ${type})`;
+}
+
 // This file is owned by the client, so a schema change arrives with a Claude Code upgrade — no user
 // action at all. Refusing to launch would take every wrapped server down at once, and the message lands
 // on a server's stderr, which surfaces only as "server failed to start" — pointing away from here. So
@@ -132,7 +146,7 @@ try {
 // `projectPath` empties the nearest-project match and falls back to every record, and a moved `version`
 // ties them all at the bottom so `lastUpdated` decides, which is the staleness this shim exists to stop.
 if (registry && registry.version !== REGISTRY_SCHEMA) {
-    fs.writeSync(2, `vc-secrets: ${registryPath} is schema version ${registry.version}, this shim was written for ${REGISTRY_SCHEMA} -- continuing, but update the plugin\n`);
+    fs.writeSync(2, `vc-secrets: ${registryPath} is schema version ${registryField(registry.version, "number", "unknown")}, this shim was written for ${REGISTRY_SCHEMA} -- continuing, but update the plugin\n`);
 }
 
 // Drop anything that is not an object before reading fields off it: the file is the client's, and a
@@ -162,8 +176,13 @@ const candidates = byProject.length > 0 ? byProject : records;
 // declarations, silently. It is kept OUT of the number array rather than appended to it, because an
 // appended sentinel sits at an index that moves with the segment count, which would then decide
 // between two spellings of the same version.
+// The ranking reads two fields of each record as text. String() on the client's value calls that
+// value's own toString, which a hostile record can make a non-function -- a raw TypeError before
+// anything launches, the exact outcome the `records` rule forbids. A field of any other type ranks
+// as absent: junk keeps losing to any real version, and an unstamped record to any stamped one.
+const rankText = (value) => (typeof value === "string" ? value : "");
 const versionKey = (r) => {
-    const raw = String(r.version ?? "");
+    const raw = rankText(r.version);
     const dash = raw.indexOf("-");
     const core = dash === -1 ? raw : raw.slice(0, dash);
 
@@ -187,7 +206,7 @@ const newer = (a, b) => {
         return va.release;   // equal cores: the release outranks a prerelease of itself
     }
 
-    return String(a.lastUpdated ?? "") > String(b.lastUpdated ?? "");
+    return rankText(a.lastUpdated) > rankText(b.lastUpdated);
 };
 const pick = (rs) => rs.reduce((best, r) => (newer(r, best) ? r : best), rs[0]);
 
@@ -212,7 +231,7 @@ let record;
 if (fromRegistry.length > 0) {
     record = pick(fromRegistry);
     if (byProject.length === 0 && records.length > 1) {
-        fs.writeSync(2, `vc-secrets: this directory belongs to none of the ${records.length} installs; using version ${record.version ?? "unknown"} from ${record.projectPath ?? "user scope"}\n`);
+        fs.writeSync(2, `vc-secrets: this directory belongs to none of the ${records.length} installs; using version ${registryField(record.version, "string", "unknown")} from ${registryField(record.projectPath, "string", "user scope")}\n`);
     }
 } else {
     // Either the registry knew nothing — ordinary on a client that does not maintain one — or every

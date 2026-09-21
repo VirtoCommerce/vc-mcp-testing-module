@@ -3698,6 +3698,54 @@ test("shim: a registry schema version mismatch warns but still runs the resolved
     assert.match(r.stderr, /STUB-RAN:proceed/);
 });
 
+test("shim: a registry field of the wrong type is described, never printed", () => {
+    // The file parses, so registryProblem never sees it -- the SHAPE is what is hostile. A template literal
+    // joins an array's elements, so each of these three fields used to put its contents on the
+    // launched server's stderr: the schema version in the mismatch warning, and the chosen record's
+    // version and projectPath in the none-of-the-installs line. Both records are hostile, so whichever
+    // one the ranking picks, its fields are the ones printed.
+    const stubA = writeStubInstall("hostile-a");
+    const stubB = writeStubInstall("hostile-b");
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-shim-hostile-"));
+    tmpDirs.push(outsideDir);
+    const hostile = (installPath, lastUpdated) => ({ projectPath: ["LEAKCANARY-PATH"],
+        version: ["LEAKCANARY-VERSION"], lastUpdated, installPath });
+    const registry = { version: ["LEAKCANARY-SCHEMA", "second"], plugins: { "vc-secrets@vc-tools": [
+        hostile(stubA, "2030-01-01"), hostile(stubB, "2010-01-01"),
+    ] } };
+    const r = runShim(["doctor"], { registry, cwd: outsideDir });
+
+    assert.doesNotMatch(r.stderr, /LEAKCANARY/, `no field of the registry may be printed as-is: ${r.stderr}`);
+    assert.match(r.stderr, /schema version \(not a number\)/);
+    assert.match(r.stderr, /using version \(not a string\) from \(not a string\)/);
+    // Described, not refused: the launch still proceeds, which is the point of warning and continuing.
+    assert.match(r.stderr, /STUB-RAN:hostile-/);
+});
+
+test("shim: a ranking field whose toString is not a function ranks as absent instead of crashing", () => {
+    // Valid JSON, so neither registryProblem nor the records filter refuses it: an object is an object.
+    // The ranking then called String() on it, and String() calls the value's own toString -- here a
+    // number -- which threw a raw TypeError before anything launched. Two records in each case, with
+    // equal versions in the lastUpdated case, so the tie-break provably reaches lastUpdated rather
+    // than relying on how pick treats a single record.
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-shim-tostring-"));
+    tmpDirs.push(outsideDir);
+    const cases = {
+        version: (stub, n) => ({ version: n === 1 ? { toString: 1 } : "1.0.0", lastUpdated: "2020-01-01", installPath: stub }),
+        lastUpdated: (stub, n) => ({ version: "1.0.0", lastUpdated: n === 1 ? { toString: 1 } : "2020-01-01", installPath: stub }),
+    };
+    for (const [field, make] of Object.entries(cases)) {
+        const registry = { version: 2, plugins: { "vc-secrets@vc-tools": [
+            make(writeStubInstall(`${field}-1`), 1), make(writeStubInstall(`${field}-2`), 2),
+        ] } };
+        const r = runShim(["doctor"], { registry, cwd: outsideDir });
+
+        assert.doesNotMatch(r.stderr, /TypeError|at .*vc-secrets-shim\.mjs/, `${field}: no raw stack: ${r.stderr}`);
+        // The healthy record wins: a field of the wrong type ranks as absent, and absent loses.
+        assert.match(r.stderr, new RegExp(`STUB-RAN:${field}-2`), `${field}: ${r.stderr}`);
+    }
+});
+
 test("shim: cwd matching none of the installs picks the higher VERSION, not the later lastUpdated", () => {
     const stubA = writeStubInstall("a");
     const stubB = writeStubInstall("b");
