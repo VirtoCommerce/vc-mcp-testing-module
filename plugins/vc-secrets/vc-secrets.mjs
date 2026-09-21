@@ -2127,6 +2127,44 @@ function childNodeRefusal({ launchableName, command, declared, version }) {
         + `could not be delivered through it`;
 }
 
+// What doctor asks about every oauth launchable's node, as data rather than as a side effect. Pure
+// but for `probe`, which is the seam: cmdDoctor around it performs real keystore io and cannot be
+// driven from a test, so leaving this inline meant the only available check was grepping the source
+// -- and a grep for the presence of a guard passes against a guard that has been disabled, which was
+// measured here rather than supposed.
+//
+// Two dedups, because oauthReferences yields one entry per ENV VAR, not per launchable.
+// `seenLaunchables` keeps the report honest: a launchable naming two oauth entries is one machine
+// fact and must be one finding, or doctor prints the same sentence twice and the reader goes looking
+// for a second problem. (cmdLaunch refuses such a declaration, but only at launch, so doctor is where
+// it is seen at all.) `probedVersions` is the cheaper one: it saves a duplicate `--version` spawn
+// where several launchables name the same command, keyed on the command as declared -- two spellings
+// of one binary are still probed twice, which costs a process and no correctness.
+//
+// The probe mirrors cmdLaunch exactly, so doctor's verdict and the launch's are answers about the
+// same binary rather than about two different ones.
+function childNodeProbes(cfg, references, { probe = childNodeVersionIo } = {}) {
+    const probedVersions = new Map();
+    const seenLaunchables = new Set();
+    const out = [];
+    for (const { kind, launchableName } of references) {
+        const seen = `${kind}/${launchableName}`;
+        if (seenLaunchables.has(seen)) {
+            continue;
+        }
+        seenLaunchables.add(seen);
+        const command = cfg[kind][launchableName].command;
+        const probed = isNodeCommand(command) ? command : "node";
+        if (!probedVersions.has(probed)) {
+            probedVersions.set(probed, probe({ command: probed }));
+        }
+        out.push({ launchableName, command, declared: probed === command,
+            version: probedVersions.get(probed) });
+    }
+
+    return out;
+}
+
 // Whether a declared `command` names a node binary, so its own version can be probed. A declaration
 // reaches its server through `npx`, a `.bin` shim or a wrapper just as often, and for those the node
 // that ends up running the entry file is not knowable from the declaration: NODE_OPTIONS reaches every
@@ -3619,10 +3657,12 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
                 + `"${org}" is bound to (${bound}) -- delegated tokens only work where the two agree`);
         }
     }
-    // One probe per oauth launchable, because each declares its own command. A single PATH probe
-    // standing for all of them fails the one case the launch path was just taught to get right: a
-    // declaration naming its own node is judged here by a binary it never runs, and doctor exits 1 on
-    // any FAIL -- so the setup gate the README prescribes refuses a machine whose launch works.
+    // One entry per oauth launchable -- the caller dedupes to that, since each declares its own
+    // command and one launchable is one machine fact however many references it carries. A single
+    // PATH probe standing for all of them fails the case the launch path was just taught to get
+    // right: a declaration naming its own node is judged here by a binary it never runs, and doctor
+    // exits 1 on any FAIL -- so the setup gate the README prescribes refuses a machine whose launch
+    // works.
     for (const probe of childNodes) {
         if (!childNodeSupportsImport(probe.version)) {
             lines.push(`FAIL ${childNodeRefusal(probe)}`);
@@ -3980,21 +4020,7 @@ async function cmdDoctor(cfg, flags = []) {
     // Only where an oauth reference exists: before the switch no child needs --import at all, and a
     // FAIL about a flag nothing uses would be a diagnostic inventing its own problem.
     //
-    // One probe per launchable, deduplicated by the binary it resolves to -- several servers naming
-    // the same node would otherwise spawn the same `--version` per reference, and report the same
-    // finding once per reference too. The probe mirrors cmdLaunch exactly, so doctor's verdict and
-    // the launch's are answers about the same binary rather than about two different ones.
-    const probedVersions = new Map();
-    const childNodes = [];
-    for (const { kind, launchableName } of references) {
-        const command = cfg[kind][launchableName].command;
-        const probed = isNodeCommand(command) ? command : "node";
-        if (!probedVersions.has(probed)) {
-            probedVersions.set(probed, childNodeVersionIo({ command: probed }));
-        }
-        childNodes.push({ launchableName, command, declared: probed === command,
-            version: probedVersions.get(probed) });
-    }
+    const childNodes = childNodeProbes(cfg, references);
 
     const lines = doctorReport(cfg, {
         env: process.env, platform: process.platform, enableLists, resolvable, skipped,
@@ -4458,7 +4484,7 @@ export {
     COMMAND_ON_STDIN, quoteForSecurityInteractive, writeSecretValue,
     tokenLockFor, acquireTokenLock, ensureFreshToken, oauthLaunchDeps,
     CHANNEL_GREETING_MAX, channelPipeName, createChannel, PRELOAD_PATH, buildChildEnv,
-    childNodeSupportsImport, childNodeVersionIo, isNodeCommand, childNodeRefusal,
+    childNodeSupportsImport, childNodeVersionIo, isNodeCommand, childNodeRefusal, childNodeProbes,
     REDIRECT_PATH, MAX_ERROR_PARAMS, closeTabPage, forTerminal, escapeHtml, failedPage, listenForCallback,
     openBrowser, buildBrowserCommand, handleCallback, cmdLogin, cmdLogout, withDeadline, LOGIN_WAIT_MS,
     runTool, resolveSpawnCommand, buildSpawnInvocation, makeSecretResolver, cmdRun, cmdTask, cmdLaunch, killProcessTree,

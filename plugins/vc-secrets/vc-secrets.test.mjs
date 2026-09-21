@@ -1464,9 +1464,10 @@ test("isNodeCommand: only a binary named node, so a wrapper is never mistaken fo
     // `npx`, a .bin shim and `dnx` all reach a node the declaration cannot name -- npx resolves its
     // own, and dnx runs no node at all. Answering true for those would put the declared path into a
     // message claiming it was probed, which is the false claim this whole change removes.
-    // Real install layouts, not invented ones: a distro node, a locally built one, an nvm-style
-    // versioned tree, and the Windows installer's path. A fixture that looks like a convention
-    // nobody uses teaches the next reader a layout that does not exist.
+    // Real install layouts, not invented ones: a distro node, a locally installed one, an `n`-style
+    // versioned tree ($N_PREFIX/n/versions/node/<version>/bin/node -- nvm spells it differently, under
+    // $NVM_DIR with a `v` prefix), and the Windows installer's path. A fixture that looks like a
+    // convention nobody uses teaches the next reader a layout that does not exist.
     const posix = { platform: "linux" };
     for (const yes of ["node", "/usr/bin/node", "/usr/local/bin/node", "./node",
         "/usr/local/n/versions/node/22.11.0/bin/node"]) {
@@ -2697,7 +2698,7 @@ test("doctorReport: a child node that could not be run at all still names what i
     // "" reaches here from a node that exits 0 and prints nothing -- a spawn that fails outright now
     // returns its own reason instead. "" is not null, so the guard still fires, but "" IS the bug:
     // rendered bare it produces "reports , which predates", a blank slot where a version belongs.
-    // `childNode || "no version"` is what turns that blank into a word.
+    // `version || "no version"` in childNodeRefusal is what turns that blank into a word.
     const lines = oauthDoctorLines({ childNodes: [childNodeProbe("")] });
     const line = lines.find((l) => l.startsWith("FAIL"));
     assert.match(line, /no version/);
@@ -2745,19 +2746,52 @@ test("doctorReport: each oauth launchable is judged by its own declared node, no
     }
 });
 
-test("cmdDoctor: the child-node probe is derived per launchable, not taken from PATH once", () => {
-    // Source-inspected for the reason the sibling test below gives: cmdDoctor performs real keystore
-    // io, so driving it behaviourally needs a live backend. The rendering is covered above; what is
-    // covered here is that the probe reaching it is per-declaration at all. The defect was a bare
-    // `childNodeVersionIo()`, and a mutation restoring it leaves every behavioural test green —
-    // measured, which is why this test exists in this shape rather than as another doctorReport case.
-    const source = fs.readFileSync(LAUNCHER_PATH, "utf8");
-    const block = source.match(/const probedVersions = new Map\(\);[\s\S]*?\n {4}\}/);
-    assert.ok(block, "the childNodes construction moved");
-    assert.match(block[0], /isNodeCommand\(command\)/, "the declared command decides what is probed");
-    assert.match(block[0], /childNodeVersionIo\(\{ command: probed \}\)/, "and it is what gets probed");
-    assert.match(block[0], /declared: probed === command/, "the message needs to know which of the two it holds");
-    assert.doesNotMatch(source, /childNodeVersionIo\(\)/, "a bare probe is the defect this replaced");
+test("childNodeProbes: one entry per launchable, however many oauth references it carries", () => {
+    // oauthReferences yields an entry per ENV VAR, so a launchable naming two oauth entries is seen
+    // twice. Undeduped that renders two byte-identical FAIL lines, and a reader counting findings
+    // looks for a second problem there is no second one of. cmdLaunch refuses such a declaration,
+    // but only at launch -- doctor is where it is seen at all.
+    const cfg = { servers: { s: { command: "/usr/bin/node", env: {} } }, tasks: {} };
+    const refs = [{ kind: "servers", launchableName: "s", envVar: "A", name: "ado" },
+        { kind: "servers", launchableName: "s", envVar: "B", name: "gh" }];
+    let spawns = 0;
+    const out = m.childNodeProbes(cfg, refs, { probe: () => { spawns += 1; return "v18.17.1"; } });
+
+    assert.equal(out.length, 1, "one launchable is one finding");
+    assert.equal(spawns, 1, "and one probe");
+    assert.deepEqual(out[0], { launchableName: "s", command: "/usr/bin/node", declared: true,
+        version: "v18.17.1" });
+});
+
+test("childNodeProbes: each launchable is judged by its own command, and one binary is probed once", () => {
+    // The defect at its second site: a single PATH probe standing for every launchable judges a
+    // declaration naming its own node by a binary it never runs. `declared` is what lets the message
+    // say which of the two it holds, and a wrapper falls back to PATH because which node it resolves
+    // is not knowable from the declaration.
+    const cfg = { servers: {
+        own: { command: "/usr/local/bin/node", env: {} },
+        wrapped: { command: "npx", env: {} },
+        windows: { command: "C:\\Program Files\\nodejs\\node.exe", env: {} },
+    }, tasks: { alsoOwn: { command: "/usr/local/bin/node", env: {} } } };
+    const refs = [
+        { kind: "servers", launchableName: "own" }, { kind: "servers", launchableName: "wrapped" },
+        { kind: "servers", launchableName: "windows" }, { kind: "tasks", launchableName: "alsoOwn" },
+    ];
+    const probedCommands = [];
+    const out = m.childNodeProbes(cfg, refs,
+        { probe: ({ command }) => { probedCommands.push(command); return "v18.17.1"; } });
+
+    assert.deepEqual(out.map((x) => [x.launchableName, x.command, x.declared]), [
+        ["own", "/usr/local/bin/node", true],
+        ["wrapped", "npx", false],
+        ["windows", "C:\\Program Files\\nodejs\\node.exe", process.platform === "win32"],
+        ["alsoOwn", "/usr/local/bin/node", true],
+    ]);
+    // "own" and "alsoOwn" name one binary across two kinds, so it is probed once; the wrapper adds
+    // the PATH probe. The Windows path is a node only on win32, so it joins whichever group applies.
+    assert.equal(new Set(probedCommands).size, probedCommands.length, "no command probed twice");
+    assert.ok(probedCommands.includes("/usr/local/bin/node") && probedCommands.includes("node"),
+        probedCommands.join(", "));
 });
 
 test("cmdDoctor: the oauth checks are wired to the report, not merely available", () => {
