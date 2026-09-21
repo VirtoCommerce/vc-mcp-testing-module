@@ -2102,6 +2102,31 @@ function childNodeSupportsImport(version) {
     return true;
 }
 
+// The one wording for "this node cannot take a renewal", shared by the launch refusal and doctor's
+// FAIL. They measure the same thing and used to hedge differently, which reads as two findings about
+// two subjects; and a declaration whose command is not node reached a sentence calling the PATH node
+// "the closest probe", which is not close to anything when nothing below `dnx` is node at all.
+//
+// `declared` is whether `command` is the binary that was probed. When it is not, which node runs the
+// server is not knowable from the declaration -- NODE_OPTIONS reaches every node below the launcher,
+// and a wrapper may resolve any of them or none -- so the sentence reports the PATH node as the thing
+// measured and does not promise what the launch will do.
+function childNodeRefusal({ launchableName, command, declared, version }) {
+    const subject = declared
+        ? `the node that runs "${launchableName}" (${command})`
+        : `the node on PATH -- "${launchableName}" launches through "${command}", so which node runs it `
+            + `is not knowable from the declaration --`;
+    // "predates" is a version comparison, so it may only be said where a version was read. A probe
+    // that could not run returns its reason here, and calling that reason old asserts a comparison
+    // nothing performed -- sending the reader to upgrade a node that answered perfectly well.
+    const verdict = NODE_VERSION_RE.test(String(version ?? ""))
+        ? `predates --import (${NODE_IMPORT_FLOOR.join(".")})`
+        : `is not a version to compare against --import (${NODE_IMPORT_FLOOR.join(".")})`;
+
+    return `${subject} reports ${version || "no version"}, which ${verdict} -- a renewed token `
+        + `could not be delivered through it`;
+}
+
 // Whether a declared `command` names a node binary, so its own version can be probed. A declaration
 // reaches its server through `npx`, a `.bin` shim or a wrapper just as often, and for those the node
 // that ends up running the entry file is not knowable from the declaration: NODE_OPTIONS reaches every
@@ -2126,8 +2151,8 @@ function isNodeCommand(command, { platform = process.platform } = {}) {
 // probe otherwise, and the error it produces is wrong in both directions: an old PATH node refuses a
 // server that would have started, and a new one passes a child that then aborts on --import. Callers
 // that cannot name a node (a declaration commanding `npx`, a wrapper, or anything not node at all)
-// pass nothing and get the PATH node, which is a proxy rather than an answer -- so the messages built
-// from this must say which of the two they hold. See isNodeCommand.
+// pass the literal "node" and get the PATH one, which is a proxy rather than an answer -- so the
+// message built from it must say which of the two it holds. See isNodeCommand and childNodeRefusal.
 //
 // `run` is a seam only so the FAILURE path can be driven: the success path needs no help, but a
 // probe that cannot run is the case this function now has to describe, and arranging a real spawn
@@ -3419,7 +3444,7 @@ async function oauthTenantChecks(cfg, references, { resolveOrgTenant: resolve = 
     return checks;
 }
 
-function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, toolsMissing, wired, configDirOverride, legacyOnly = [], shimContract = null, wiringProblems = [], clientConfigsSeen = [], writeProbe = null, oauthStatus = {}, oauthOversize = {}, tenantChecks = [], childNode = null }) {
+function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, toolsMissing, wired, configDirOverride, legacyOnly = [], shimContract = null, wiringProblems = [], clientConfigsSeen = [], writeProbe = null, oauthStatus = {}, oauthOversize = {}, tenantChecks = [], childNodes = [] }) {
     const lines = [];
     const loadedFiles = Object.entries(cfg.files ?? {}).map(([scope, file]) => `${scope}=${file}`).join(", ");
     if (loadedFiles) {
@@ -3594,18 +3619,14 @@ function doctorReport(cfg, { env, platform, enableLists, resolvable, skipped, to
                 + `"${org}" is bound to (${bound}) -- delegated tokens only work where the two agree`);
         }
     }
-    if (childNode !== null && !childNodeSupportsImport(childNode)) {
-        // "the node on PATH", not "the node that will run it": one probe stands for every oauth
-        // launchable here, and each declares its own command. The launch path names the binary it
-        // actually measured; this one cannot, so it says which node it holds instead of implying it
-        // resolved theirs.
-        //
-        // Same split as the launch refusal: "predates" only where a version was actually read.
-        lines.push(`FAIL the node on PATH reports ${childNode || "no version"}, which `
-            + `${NODE_VERSION_RE.test(String(childNode ?? ""))
-                ? `predates --import (${NODE_IMPORT_FLOOR.join(".")})`
-                : `is not a version to compare against --import (${NODE_IMPORT_FLOOR.join(".")})`}`
-            + ` -- a renewed token could not be delivered to a server this node runs`);
+    // One probe per oauth launchable, because each declares its own command. A single PATH probe
+    // standing for all of them fails the one case the launch path was just taught to get right: a
+    // declaration naming its own node is judged here by a binary it never runs, and doctor exits 1 on
+    // any FAIL -- so the setup gate the README prescribes refuses a machine whose launch works.
+    for (const probe of childNodes) {
+        if (!childNodeSupportsImport(probe.version)) {
+            lines.push(`FAIL ${childNodeRefusal(probe)}`);
+        }
     }
     // Tasks carry the same env references as servers, so an unchecked task would be the one place a
     // typo'd or undeclared reference survives until someone actually runs it.
@@ -3958,13 +3979,28 @@ async function cmdDoctor(cfg, flags = []) {
 
     // Only where an oauth reference exists: before the switch no child needs --import at all, and a
     // FAIL about a flag nothing uses would be a diagnostic inventing its own problem.
-    const childNode = references.length > 0 ? childNodeVersionIo() : null;
+    //
+    // One probe per launchable, deduplicated by the binary it resolves to -- several servers naming
+    // the same node would otherwise spawn the same `--version` per reference, and report the same
+    // finding once per reference too. The probe mirrors cmdLaunch exactly, so doctor's verdict and
+    // the launch's are answers about the same binary rather than about two different ones.
+    const probedVersions = new Map();
+    const childNodes = [];
+    for (const { kind, launchableName } of references) {
+        const command = cfg[kind][launchableName].command;
+        const probed = isNodeCommand(command) ? command : "node";
+        if (!probedVersions.has(probed)) {
+            probedVersions.set(probed, childNodeVersionIo({ command: probed }));
+        }
+        childNodes.push({ launchableName, command, declared: probed === command,
+            version: probedVersions.get(probed) });
+    }
 
     const lines = doctorReport(cfg, {
         env: process.env, platform: process.platform, enableLists, resolvable, skipped,
         toolsMissing, wired, configDirOverride: Boolean(process.env.VC_SECRETS_CONFIG_DIR), legacyOnly,
         shimContract: activeShimContract, wiringProblems, clientConfigsSeen,
-        writeProbe, oauthStatus, oauthOversize, tenantChecks, childNode,
+        writeProbe, oauthStatus, oauthOversize, tenantChecks, childNodes,
     });
     // sync write: stderr is async on a POSIX pipe and on a Windows console, and process.exit drops pending writes
     fs.writeSync(2, lines.join("\n") + "\n");
@@ -4082,17 +4118,8 @@ async function cmdLaunch(kind, name, cfg, deps = {}) {
         const probed = isNodeCommand(server.command) ? server.command : "node";
         const version = (deps.childNodeVersion ?? childNodeVersionIo)({ command: probed });
         if (!childNodeSupportsImport(version)) {
-            const subject = probed === server.command
-                ? `the node that runs "${name}" (${server.command})`
-                : `the node on PATH -- "${name}" launches through "${server.command}", so this is the closest probe --`;
-            // "predates" is a version comparison, so it may only be said where a version was read.
-            // A probe that could not run returns its reason here, and calling that reason old names
-            // a fact nothing established -- sending the reader to upgrade a node that answered fine.
-            const verdict = NODE_VERSION_RE.test(String(version ?? ""))
-                ? `reports ${version}, which predates --import (${NODE_IMPORT_FLOOR.join(".")})`
-                : `reports ${version || "no version"}, which is not a version to compare against `
-                    + `--import (${NODE_IMPORT_FLOOR.join(".")})`;
-            throw new VcSecretsError(`${subject} ${verdict} -- a renewed token could not be delivered to it`);
+            throw new VcSecretsError(childNodeRefusal({ launchableName: name, command: server.command,
+                declared: probed === server.command, version }));
         }
         const nonce = crypto.randomBytes(32).toString("base64url");
         // "exit" is where this process actually leaves: the normal path is child.on("close") ->
@@ -4431,7 +4458,7 @@ export {
     COMMAND_ON_STDIN, quoteForSecurityInteractive, writeSecretValue,
     tokenLockFor, acquireTokenLock, ensureFreshToken, oauthLaunchDeps,
     CHANNEL_GREETING_MAX, channelPipeName, createChannel, PRELOAD_PATH, buildChildEnv,
-    childNodeSupportsImport, childNodeVersionIo, isNodeCommand,
+    childNodeSupportsImport, childNodeVersionIo, isNodeCommand, childNodeRefusal,
     REDIRECT_PATH, MAX_ERROR_PARAMS, closeTabPage, forTerminal, escapeHtml, failedPage, listenForCallback,
     openBrowser, buildBrowserCommand, handleCallback, cmdLogin, cmdLogout, withDeadline, LOGIN_WAIT_MS,
     runTool, resolveSpawnCommand, buildSpawnInvocation, makeSecretResolver, cmdRun, cmdTask, cmdLaunch, killProcessTree,

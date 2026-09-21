@@ -1443,33 +1443,50 @@ test("childNodeVersionIo: probes the command it is given, and PATH node only by 
     // The defect this pins: the probe hardcoded "node", so a declaration naming another node was
     // measured by an unrelated binary -- refusing a server that would have started, or passing one
     // that then aborts on --import. Asserting the spawned path is the only way to see which node ran.
-    // `platform` is pinned because the probe hands its command to resolveSpawnCommand: on win32 a
-    // bare `node` carries no extension and no separator, so it goes through the PATHEXT scan and
-    // comes back as an absolute path. Unpinned, this asserts the POSIX spelling on every platform
-    // and reddens the Windows leg of the matrix while passing everywhere it was written.
-    const spawned = [];
-    const run = (cmd) => { spawned.push(cmd); return { status: 0, stdout: "v22.23.2\n" }; };
+    // Both platforms, because the probe hands its command to resolveSpawnCommand and that function
+    // is where they differ: on win32 a bare `node` carries no extension and no separator, so it goes
+    // through the PATHEXT scan. `env: {}` gives that scan nothing to find, so it falls through to the
+    // name as written and the case stays deterministic without stubbing the filesystem. Pinning one
+    // platform and calling it covered is what leaves the other leg of the CI matrix unexercised.
+    for (const [platform, declared] of [["linux", "/usr/local/bin/node"],
+        ["win32", "C:\\Program Files\\nodejs\\node.exe"]]) {
+        const spawned = [];
+        const run = (cmd) => { spawned.push(cmd); return { status: 0, stdout: "v22.23.2\n" }; };
 
-    m.childNodeVersionIo({ run, platform: "linux" });
-    m.childNodeVersionIo({ command: "/opt/node22/bin/node", run, platform: "linux" });
+        m.childNodeVersionIo({ run, platform, env: {} });
+        m.childNodeVersionIo({ command: declared, run, platform, env: {} });
 
-    assert.deepEqual(spawned, ["node", "/opt/node22/bin/node"]);
+        assert.deepEqual(spawned, ["node", declared], platform);
+    }
 });
 
 test("isNodeCommand: only a binary named node, so a wrapper is never mistaken for one", () => {
     // `npx`, a .bin shim and `dnx` all reach a node the declaration cannot name -- npx resolves its
     // own, and dnx runs no node at all. Answering true for those would put the declared path into a
     // message claiming it was probed, which is the false claim this whole change removes.
-    for (const yes of ["node", "/usr/bin/node", "/opt/node22/bin/node", "./node"]) {
-        assert.equal(m.isNodeCommand(yes, { platform: "linux" }), true, yes);
+    // Real install layouts, not invented ones: a distro node, a locally built one, an nvm-style
+    // versioned tree, and the Windows installer's path. A fixture that looks like a convention
+    // nobody uses teaches the next reader a layout that does not exist.
+    const posix = { platform: "linux" };
+    for (const yes of ["node", "/usr/bin/node", "/usr/local/bin/node", "./node",
+        "/usr/local/n/versions/node/22.11.0/bin/node"]) {
+        assert.equal(m.isNodeCommand(yes, posix), true, yes);
     }
     for (const no of ["npx", "dnx", "bash", "/usr/bin/npx", "nodemon", "node-red", "", null, undefined, 7]) {
-        assert.equal(m.isNodeCommand(no, { platform: "linux" }), false, String(no));
+        assert.equal(m.isNodeCommand(no, posix), false, String(no));
     }
 
-    // Windows spells it with the extension, and only Windows does.
-    assert.equal(m.isNodeCommand("C:\\Program Files\\nodejs\\node.exe", { platform: "win32" }), true);
-    assert.equal(m.isNodeCommand("node.exe", { platform: "linux" }), false, "no .exe stripping off win32");
+    // Windows: the extension is accepted, both separators resolve, and a wrapper is still a wrapper.
+    // `.exe` is stripped on win32 ONLY -- a POSIX file genuinely named `node.exe` is not a node.
+    const win = { platform: "win32" };
+    for (const yes of ["node", "node.exe", "C:\\Program Files\\nodejs\\node.exe",
+        "C:/Program Files/nodejs/node.exe", "C:\\Program Files\\nodejs\\node"]) {
+        assert.equal(m.isNodeCommand(yes, win), true, yes);
+    }
+    for (const no of ["npx.cmd", "C:\\Program Files\\nodejs\\npx.cmd", "dnx.exe", "node.bat"]) {
+        assert.equal(m.isNodeCommand(no, win), false, no);
+    }
+    assert.equal(m.isNodeCommand("node.exe", posix), false, "no .exe stripping off win32");
 });
 
 test("the read script exits absent only for ERROR_NOT_FOUND, never for an unreadable store", () => {
@@ -2330,6 +2347,13 @@ const OAUTH_DOCTOR_CFG = {
     servers: { "azure-mcp": { command: "npx", args: ["-y"], home: "project", env: { ADO_MCP_AUTH_TOKEN: "oauth:azure-mcp" } } },
 };
 
+// One probe entry in the shape doctorReport now consumes: doctor measures per launchable, because
+// each declares its own command. `declared: false` is the wrapper case (the PATH node was probed),
+// which is what the OAUTH_DOCTOR_CFG fixture's `npx` server produces.
+function childNodeProbe(version, overrides = {}) {
+    return { launchableName: "s", command: "npx", declared: false, version, ...overrides };
+}
+
 function oauthDoctorLines(overrides = {}) {
     return m.doctorReport(OAUTH_DOCTOR_CFG, {
         env: {}, platform: "linux", enableLists: { enabled: [], disabled: [], envKeys: [] },
@@ -2657,14 +2681,14 @@ test("resolveOrgTenant: an empty binding header is unknown, not a tenant of the 
 });
 
 test("doctorReport: a child node below the flag floor is a FAIL naming the floor", () => {
-    const lines = oauthDoctorLines({ childNode: "v18.17.1" });
+    const lines = oauthDoctorLines({ childNodes: [childNodeProbe("v18.17.1")] });
     assert.ok(lines.some((l) => l.startsWith("FAIL") && l.includes("18.18.0") && l.includes("v18.17.1")),
         lines.join("\n"));
 });
 
 test("doctorReport: a child node AT the floor is not a finding", () => {
     for (const version of ["v18.18.0", "v20.5.1", "v22.22.0"]) {
-        const lines = oauthDoctorLines({ childNode: version });
+        const lines = oauthDoctorLines({ childNodes: [childNodeProbe(version)] });
         assert.ok(!lines.some((l) => l.startsWith("FAIL")), `${version}: ${lines.join("\n")}`);
     }
 });
@@ -2674,7 +2698,7 @@ test("doctorReport: a child node that could not be run at all still names what i
     // returns its own reason instead. "" is not null, so the guard still fires, but "" IS the bug:
     // rendered bare it produces "reports , which predates", a blank slot where a version belongs.
     // `childNode || "no version"` is what turns that blank into a word.
-    const lines = oauthDoctorLines({ childNode: "" });
+    const lines = oauthDoctorLines({ childNodes: [childNodeProbe("")] });
     const line = lines.find((l) => l.startsWith("FAIL"));
     assert.match(line, /no version/);
     assert.ok(!/reports , which/.test(line), line);
@@ -2685,15 +2709,55 @@ test("doctorReport: \"predates\" is said only where a version was actually read"
     // as a real version -- "reports no usable version (ENOENT), which predates --import (18.18.0)"
     // asserts a comparison nothing performed, and sends the reader to upgrade a node that answered
     // fine. The failure is a wrong instruction, not a crash, so only the wording carries it.
-    const old = oauthDoctorLines({ childNode: "v18.17.1" }).find((l) => l.startsWith("FAIL"));
+    const old = oauthDoctorLines({ childNodes: [childNodeProbe("v18.17.1")] }).find((l) => l.startsWith("FAIL"));
     assert.match(old, /predates/, old);
 
     for (const unreadable of ["no usable version (ENOENT)", "no usable version (killed by SIGKILL)", ""]) {
-        const line = oauthDoctorLines({ childNode: unreadable }).find((l) => l.startsWith("FAIL"));
+        const line = oauthDoctorLines({ childNodes: [childNodeProbe(unreadable)] }).find((l) => l.startsWith("FAIL"));
         assert.ok(line, `a FAIL is still expected for ${JSON.stringify(unreadable)}`);
         assert.doesNotMatch(line, /predates/, line);
         assert.match(line, /not a version to compare/, line);
     }
+});
+
+test("doctorReport: each oauth launchable is judged by its own declared node, not one shared probe", () => {
+    // The defect the launch path was fixed for, at its second site. doctor probed PATH once for the
+    // whole config, so a server declaring its own node was judged by a binary it never runs -- and
+    // doctor exits 1 on any FAIL, which makes the README's `doctor # expect no FAIL` setup gate
+    // refuse a machine whose launch works. One entry per launchable is what makes the two agree.
+    const lines = oauthDoctorLines({ childNodes: [
+        childNodeProbe("v22.11.0", { launchableName: "modern", command: "/usr/local/bin/node", declared: true }),
+        childNodeProbe("v18.17.1", { launchableName: "ancient", command: "/usr/bin/node", declared: true }),
+        childNodeProbe("v18.17.1", { launchableName: "windows", command: "C:\\Program Files\\nodejs\\node.exe", declared: true }),
+    ] });
+    const fails = lines.filter((l) => l.startsWith("FAIL"));
+
+    // One finding per failing launchable, and the passing one produces none: a single shared verdict
+    // would either condemn `modern` or clear `ancient`, and both are the same bug seen from one side.
+    assert.equal(fails.length, 2, `one per failing launchable: ${lines.join("\n")}`);
+    assert.ok(fails.some((l) => l.includes('"ancient" (/usr/bin/node)')), fails.join("\n"));
+    // A Windows command survives into the message verbatim -- backslashes are not a path this code
+    // parses, only a string it reports, and the declaration travels between platforms.
+    assert.ok(fails.some((l) => l.includes('"windows" (C:\\Program Files\\nodejs\\node.exe)')), fails.join("\n"));
+    for (const line of fails) {
+        assert.doesNotMatch(line, /modern/, "a passing launchable must not appear in another's finding");
+        assert.doesNotMatch(line, /node on PATH/, "a declared node is named, not PATH");
+    }
+});
+
+test("cmdDoctor: the child-node probe is derived per launchable, not taken from PATH once", () => {
+    // Source-inspected for the reason the sibling test below gives: cmdDoctor performs real keystore
+    // io, so driving it behaviourally needs a live backend. The rendering is covered above; what is
+    // covered here is that the probe reaching it is per-declaration at all. The defect was a bare
+    // `childNodeVersionIo()`, and a mutation restoring it leaves every behavioural test green —
+    // measured, which is why this test exists in this shape rather than as another doctorReport case.
+    const source = fs.readFileSync(LAUNCHER_PATH, "utf8");
+    const block = source.match(/const probedVersions = new Map\(\);[\s\S]*?\n {4}\}/);
+    assert.ok(block, "the childNodes construction moved");
+    assert.match(block[0], /isNodeCommand\(command\)/, "the declared command decides what is probed");
+    assert.match(block[0], /childNodeVersionIo\(\{ command: probed \}\)/, "and it is what gets probed");
+    assert.match(block[0], /declared: probed === command/, "the message needs to know which of the two it holds");
+    assert.doesNotMatch(source, /childNodeVersionIo\(\)/, "a bare probe is the defect this replaced");
 });
 
 test("cmdDoctor: the oauth checks are wired to the report, not merely available", () => {
@@ -2703,7 +2767,7 @@ test("cmdDoctor: the oauth checks are wired to the report, not merely available"
     const source = fs.readFileSync(LAUNCHER_PATH, "utf8");
     const call = source.match(/const lines = doctorReport\(cfg, \{[\s\S]*?\}\);/);
     assert.ok(call, "the doctorReport call site moved");
-    for (const key of ["oauthStatus", "tenantChecks", "childNode"]) {
+    for (const key of ["oauthStatus", "tenantChecks", "childNodes"]) {
         assert.match(call[0], new RegExp(`\\b${key}\\b`), `${key} is computed but never passed`);
     }
 });
@@ -3110,7 +3174,7 @@ test("cmdLaunch: the version gate probes the declared node, and says so when it 
     // said, so a server commanding its own node was judged by an unrelated binary; and the refusal
     // read "the node that runs <name>", asserting it had resolved theirs. A reader acting on that
     // message would go and upgrade a node the launch never touches.
-    const declared = "/opt/node22/bin/node";
+    const declared = "/usr/local/bin/node";
     const decl = { command: declared, args: ["server.js"], env: { ADO_TOKEN: "oauth:ado" } };
     const paths = scopedPaths({
         user: { registrations: { [OAUTH_TENANT_ID]: { [OAUTH_CLIENT_ID]: {
@@ -3126,6 +3190,10 @@ test("cmdLaunch: the version gate probes the declared node, and says so when it 
     }), (e) => {
         assert.match(e.message, new RegExp(declared.replace(/[/.]/g, "\\$&")),
             `the refusal must name the binary it measured: ${e.message}`);
+        // Naming the path is not enough on its own: the wrapper branch interpolates server.command
+        // too, so a regressed discriminator would still satisfy the match above. This is the half
+        // that tells the two branches apart.
+        assert.doesNotMatch(e.message, /node on PATH/, e.message);
 
         return true;
     });
