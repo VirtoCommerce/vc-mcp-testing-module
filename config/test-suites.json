@@ -3,8 +3,8 @@
   "_meta": {
     "version": "3.0",
     "description": "Regression test suite manifest for parallel orchestration with module-aligned directories under Frontend/Backend layers",
-    "generated": "2026-09-15",
-    "totalSuites": 141,
+    "generated": "2026-09-18",
+    "totalSuites": 143,
     "csvFormat": "Enriched Agent-Native CSV (ID, Title, Section, Priority, Business_Rule, Edge_Case_Refs, Preconditions, Test_Data, Steps, Assertions, Cross_Layer_Checks, Failure_Signals, Cleanup, References, Automation_Status)",
     "domains": [
       "purchase-flow",
@@ -411,7 +411,7 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 47,
+      "testCount": 50,
       "estimatedMinutes": 31,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -662,8 +662,8 @@
       "layer": "backend",
       "concern": "admin",
       "priority": "P1",
-      "testCount": 53,
-      "estimatedMinutes": 36,
+      "testCount": 73,
+      "estimatedMinutes": 50,
       "agent": "qa-backend-expert",
       "tags": [
         "customer",
@@ -676,7 +676,8 @@
         "customer"
       ],
       "envRiskGate": "staging",
-      "customerApplicability": "reference"
+      "customerApplicability": "reference",
+      "clickDriven": true
     },
     {
       "id": "027",
@@ -716,7 +717,7 @@
       "layer": "backend",
       "concern": "admin",
       "priority": "P1",
-      "testCount": 18,
+      "testCount": 20,
       "estimatedMinutes": 27,
       "agent": "qa-backend-expert",
       "tags": [
@@ -738,7 +739,7 @@
       "clickDriven": true,
       "lanes": {
         "machine": 9,
-        "browser": 9,
+        "browser": 11,
         "manual": 0
       }
     },
@@ -1857,7 +1858,7 @@
       "layer": "backend",
       "concern": "admin",
       "priority": "P1",
-      "testCount": 25,
+      "testCount": 32,
       "estimatedMinutes": 15,
       "agent": "qa-backend-expert",
       "tags": [
@@ -2650,7 +2651,7 @@
       "layer": "backend",
       "concern": "api",
       "priority": "P1",
-      "testCount": 19,
+      "testCount": 22,
       "estimatedMinutes": 55,
       "agent": "qa-backend-expert",
       "tags": [
@@ -2670,7 +2671,7 @@
       "notes": "SEPARATE SUITE, deliberately: every case here requires the store setting Loyalty.LoyaltyBalanceCalculationMode = Organization on {{STORE_ID}}. The platform default is Customer, which the REST of the loyalty corpus (075, 075b-e, 083, 083b-d) assumes — mixing these cases into those suites would make them unrunnable in the default mode. The run sets the mode before this suite and restores it after; LOYORG-006/007/014/019 own the mode for their own duration and each restores Organization. No other loyalty suite may run on the same store inside that window. Every balance assertion is a RELATIVE DELTA against a value read immediately before the action — a loyalty balance cannot be reset on this platform (the operation log is read-only, no balance set/debit API), so absolute figures are not reproducible. LOYORG-009 is DESTRUCTIVE (it drains the pooled balance) and must be scheduled last. PREFLIGHT (added 2026-09-11): run `npm run carts:check -- --email <each loyalty account>` before this suite. Every case here asserts a BALANCE DELTA, and xAPI resolves reads and writes to different carts when an account holds more than one cart for the same (customerId, storeId, currency) — which makes a delta measure the wrong cart and fail for a reason that is not the product. [PRE:RESET_CART] CANNOT cover this: it empties the RENDERED cart through the UI, so a competing cart stays invisible to it (see scripts/seed-data/carts/check-competing-carts.mjs). Note also that [PRE:*] primitives are DECLARATIVE — parsePreconditions is called by no runner, so an agent executing the case must act on them; they are inert on the machine lane.",
       "clickDriven": true,
       "lanes": {
-        "machine": 18,
+        "machine": 21,
         "browser": 1,
         "manual": 0
       }
@@ -3005,7 +3006,7 @@
       "layer": "frontend",
       "concern": "e2e",
       "priority": "P1",
-      "testCount": 7,
+      "testCount": 8,
       "estimatedMinutes": 60,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -3023,7 +3024,7 @@
       "envRiskGate": "staging",
       "customerApplicability": "reference",
       "clickDriven": true,
-      "notes": "SEPARATE SUITE, deliberately: every case here requires the store setting Loyalty.LoyaltyBalanceCalculationMode = Organization on {{STORE_ID}}. The platform default is Customer, which the REST of the loyalty corpus (075, 075b-e, 083, 083b-d) assumes — mixing these cases into those suites would make them unrunnable in the default mode. The run sets the mode before this suite and restores it after; LOYORG-E2E-005 is the ONLY case that writes the mode itself, and it restores Organization at the end of its own steps. No other loyalty suite may run on the same store inside that window. Every balance assertion is a RELATIVE DELTA against a value read immediately before the action — a loyalty balance cannot be reset on this platform (the operation log is read-only, no balance set/debit API), so absolute figures are not reproducible. ORDERING (corrected 2026-09-14 — the previous text named LOYORG-006/007/014/019 and LOYORG-009, none of which exist in this CSV; the real ids are LOYORG-E2E-001..006). Run in CSV ORDER. LOYORG-E2E-001 is the destructive case (it spends the pooled balance) and LOYORG-E2E-005 writes the store mode, so 005 goes last. Critically, LOYORG-E2E-002 DEPENDS ON LOYORG-E2E-001: its precondition requires the pooled ledger to hold at least one row the reader did not cause, and it correctly reports BLOCKED against an empty ledger. Do NOT hoist the read-only cases ahead of 001 on destructiveness grounds — that was done on 2026-09-14 (REG-2026-09-14-0928) and BLOCKED 002 for a reason that was not the product. Reads-before-writes is the wrong heuristic for this suite; the CSV order already encodes the dependency. PREFLIGHT (added 2026-09-11): run `npm run carts:check -- --email <each loyalty account>` before this suite. Every case here asserts a BALANCE DELTA, and xAPI resolves reads and writes to different carts when an account holds more than one cart for the same (customerId, storeId, currency) — which makes a delta measure the wrong cart and fail for a reason that is not the product. [PRE:RESET_CART] CANNOT cover this: it empties the RENDERED cart through the UI, so a competing cart stays invisible to it (see scripts/seed-data/carts/check-competing-carts.mjs). Note also that [PRE:*] primitives are DECLARATIVE — parsePreconditions is called by no runner, so an agent executing the case must act on them; they are inert on the machine lane."
+      "notes": "SEPARATE SUITE, deliberately: every case here requires the store setting Loyalty.LoyaltyBalanceCalculationMode = Organization on {{STORE_ID}}. The platform default is Customer, which the REST of the loyalty corpus (075, 075b-e, 083, 083b-d) assumes — mixing these cases into those suites would make them unrunnable in the default mode. The run sets the mode before this suite and restores it after; LOYORG-E2E-005 is the ONLY case that writes the mode itself, and it restores Organization at the end of its own steps. No other loyalty suite may run on the same store inside that window. Every balance assertion is a RELATIVE DELTA against a value read immediately before the action — a loyalty balance cannot be reset on this platform (the operation log is read-only, no balance set/debit API), so absolute figures are not reproducible. ORDERING (corrected 2026-09-14 — the previous text named LOYORG-006/007/014/019 and LOYORG-009, none of which exist in this CSV; the real ids are LOYORG-E2E-001..008 — that 2026-09-14 correction said 001..006 and was itself stale: the CSV has held eight cases since #293). Run in CSV ORDER, with ONE deviation: LOYORG-E2E-005 is pulled to the END. LOYORG-E2E-001 is the destructive case (it spends the pooled balance) and stays FIRST. LOYORG-E2E-005 is the ONLY case that writes the store mode (it restores Organization at the end of its own steps), so it runs LAST and no other case can execute inside a window where the mode is wrong — note that \"005 last\" is no longer the same thing as \"last in the CSV\", which is what it meant back when this note assumed six cases. Critically, LOYORG-E2E-002 DEPENDS ON LOYORG-E2E-001: its precondition requires the pooled ledger to hold at least one row the reader did not cause, and it correctly reports BLOCKED against an empty ledger. Do NOT hoist the read-only cases ahead of 001 on destructiveness grounds — that was done on 2026-09-14 (REG-2026-09-14-0928) and BLOCKED 002 for a reason that was not the product. Reads-before-writes is the wrong heuristic for this suite; the CSV order already encodes the dependency. PREFLIGHT (added 2026-09-11): run `npm run carts:check -- --email <each loyalty account>` before this suite. Every case here asserts a BALANCE DELTA, and xAPI resolves reads and writes to different carts when an account holds more than one cart for the same (customerId, storeId, currency) — which makes a delta measure the wrong cart and fail for a reason that is not the product. [PRE:RESET_CART] CANNOT cover this: it empties the RENDERED cart through the UI, so a competing cart stays invisible to it (see scripts/seed-data/carts/check-competing-carts.mjs). Note also that [PRE:*] primitives are DECLARATIVE — parsePreconditions is called by no runner, so an agent executing the case must act on them; they are inert on the machine lane."
     },
     {
       "id": "084",
@@ -3275,7 +3276,7 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 80,
+      "testCount": 79,
       "estimatedMinutes": 61,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -3317,7 +3318,7 @@
         "VirtoCommerce.OpenTelemetry",
         "VirtoCommerce.ApplicationInsights"
       ],
-      "notes": "VCST-5544. Needs App Insights READ access (AAD via Connect-AzAccount, or APPINSIGHTS_API_KEY_BACKEND) — without it every telemetry assertion is unverifiable, not failing. Adaptive sampling on the AI resource (~1-in-8) means a single request may leave no telemetry: repeat >=14x or disable sampling before concluding a signal is absent. 4 cases are Manual (InputCaptureMode matrix + bridge-off + breaking-change communication) and need an ISOLATED stand: the settings bind through a cached IOptions and are read only at startup, so each change is an appsettings edit + platform restart. Excluded from the backend/full selections until /qa-test 5g promotion — 19 cases are still Draft and UCPO-005/014/018 intentionally document defects that are OPEN."
+      "notes": "VCST-5544. Needs App Insights READ access (AAD via Connect-AzAccount, or APPINSIGHTS_API_KEY_BACKEND) — without it every telemetry assertion is unverifiable, not failing. Adaptive sampling on the AI resource (~1-in-8) means a single request may leave no telemetry: repeat >=14x or disable sampling before concluding a signal is absent. 4 cases are Manual (InputCaptureMode matrix + bridge-off + breaking-change communication) and need an ISOLATED stand: the settings bind through a cached IOptions and are read only at startup, so each change is an appsettings edit + platform restart. Excluded from the backend/full selections until /qa-test 5g promotion — 19 cases are still Draft and UCPO-005/014/018 intentionally document defects that are OPEN. RESOLUTION RULES (apply to every case in this suite). <SEARCH_TERM>: live-discover a term that returns >=1 product ON THIS env (POST /api/catalog/search/products; take a word from a returned product name) and never hardcode it — the former literal \"bolt\" returned 0 products on a fashion catalog, so the suite did not port between environments. REST context: every /ucp/v1 call also needs context:{currency:{{CURRENCY_CODE}},language:{{CULTURE_NAME}}}; without it even a valid store returns INVALID_OPERATION, because the MCP path defaults it and REST does not. SPAN TYPE: on an OpenTelemetry-exporter build every internal span exports as type=\"InProc\", so filtering on type in (\"UCP\",\"XAPI\",\"MCP\",\"VirtoCommerce\") returns ZERO rows and reads as a telemetry blackout — discriminate on the span NAME prefix (\"UCP \" / \"XAPI \" / \"VC \") or on customDimensions[\"vc.dependency.system\"]. SAMPLING: measured 2026-09-17 at microsoft.sample_rate=50 (not the ~1-in-8 recorded earlier), dropping to 33/25/20 under bursts — fire >=20 requests paced ~0.7s apart before claiming a signal is absent, and state how many you fired."
     },
     {
       "id": "095",
@@ -3375,7 +3376,7 @@
       "layer": "frontend",
       "concern": "functional",
       "priority": "P1",
-      "testCount": 37,
+      "testCount": 38,
       "estimatedMinutes": 40,
       "agent": "qa-frontend-expert",
       "tags": [
@@ -3411,6 +3412,58 @@
         "sprint"
       ],
       "customerApplicability": "universal",
+      "clickDriven": true
+    },
+    {
+      "id": "099",
+      "name": "Catalog Personalization (User Groups)",
+      "file": "regression/suites/Backend/catalog/099-catalog-personalization.csv",
+      "domain": "catalog-search",
+      "layer": "backend",
+      "concern": "api",
+      "priority": "P1",
+      "testCount": 10,
+      "estimatedMinutes": 40,
+      "agent": "qa-backend-expert",
+      "tags": [
+        "catalog",
+        "personalization",
+        "user-groups",
+        "tags",
+        "inheritance",
+        "backend"
+      ],
+      "requiresModules": [
+        "catalog",
+        "VirtoCommerce.CatalogPersonalization"
+      ],
+      "envRiskGate": "staging",
+      "customerApplicability": "reference"
+    },
+    {
+      "id": "100",
+      "name": "Catalog Personalization - Storefront Visibility",
+      "file": "regression/suites/Frontend/catalog/100-catalog-personalization-storefront.csv",
+      "domain": "catalog-search",
+      "layer": "frontend",
+      "concern": "functional",
+      "priority": "P0",
+      "testCount": 6,
+      "estimatedMinutes": 30,
+      "agent": "qa-frontend-expert",
+      "tags": [
+        "catalog",
+        "personalization",
+        "user-groups",
+        "storefront",
+        "visibility"
+      ],
+      "requiresModules": [
+        "catalog",
+        "VirtoCommerce.CatalogPersonalization"
+      ],
+      "envRiskGate": "staging",
+      "customerApplicability": "reference",
       "clickDriven": true
     }
   ],

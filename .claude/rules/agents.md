@@ -8,24 +8,25 @@ Knowledge-base inventory and the read-before-you-write rules (`graphql-schema.md
 
 Project `.mcp.json` (gitignored, per machine): `playwright-chrome` / `playwright-firefox` / `playwright-edge` (`config/mcp-playwright-*.config.json`), `postman`, `github`, `context7`; user/IDE level: Chrome DevTools, Azure, Atlassian, Figma, Microsoft Learn, **VirtoOZ** (primary VC docs via `/vc-docs`). Browser login secrets go through Playwright MCP `--secrets .env.playwright.local` — type the **bare key name** (`ORG_USER_PASSWORD`), never `{{VAR}}`: the miss is silent and hook-blocked. **Chrome DevTools MCP has no `--secrets`**; a DevTools brief must name its auth path (persistent profile / mint an account / delegate to a Playwright lane). Full server table, `--secrets` setup and the DevTools auth options: [`knowledge/execution/browser-lanes.md`](../knowledge/execution/browser-lanes.md).
 
+**Unclear product behaviour ⇒ ask VirtoOZ first.** Any agent, any task: when what the platform or the storefront is *supposed* to do is not clear, query VirtoOZ via `/vc-docs` before acting on a guess — the rule and its 3-source caveat live in [`../../CLAUDE.md`](../../CLAUDE.md) §Essential Rules → *Product context*.
+
+**But a doc is authoritative for MECHANISM, not SURFACE** — exact UI strings, control types, layout and counts are `{OBSERVED}`, never `{DOC}` (a user guide paraphrases labels by design); a documented rule binds only to the surface the doc names; and docs contradicting an existing case, suite or knowledge file is a trigger to OBSERVE, never a licence to overwrite it. **Delegation teeth, which is this file's business: a dispatch brief must never instruct a subagent to prefer a doc over the artifact it is about to edit** — the artifact may be the only source written from the screen, and the subagent cannot re-check the brief's premise. Full rule, the enforceable quote test and the measured incident (VCST-5959: a doc-first brief put two nonexistent UI labels into a suite that had them right): [`../knowledge/agents/qa/shared-instructions.md`](../knowledge/agents/qa/shared-instructions.md) §What VirtoOZ is authoritative FOR.
+
 ## Browser Automation Rules
 
 - Install browsers: `npx playwright install chromium firefox` (Edge uses the system-installed `msedge` channel).
 - Default to `chromium` (not `chrome`) for Playwright MCP browser launches. WebKit is NOT supported on Windows — fall back to Edge or Chrome immediately without attempting installation.
 - Always verify MCP server config uses correct browser engine names: `chromium`, `firefox`, `webkit` (not `chrome`, `edge`).
 - After any MCP config change, remind the user that a server restart is required before the new config takes effect.
-- Browser configs set viewport to 1920x1080, isolated contexts, HAR capture, and **video capture — which
-  records ALWAYS, not on failure** (`recordVideo` is a browser-context option; `retain-on-failure` is a
-  *test-runner* setting and does not exist here). Videos land in `test-results/<browser>/video/`
-  (gitignored, pruned with the rest of `test-results/`). Added 2026-09-11 — before that the three configs
-  carried **no** video setting at all while this line claimed "video on failure", so a reader who needed a
-  recording found none. **A config change needs an MCP server restart before it takes effect.**
+- Browser configs set viewport to 1920x1080, isolated contexts, and HAR capture. Video recording was
+  removed from all four lane configs 2026-09-21 — do not re-add a `recordVideo` block without also
+  restoring the guard in `scripts/unit/playwright-lane-configs.test.mjs`.
 
 ## QA Team (+ shared-instructions)
 
 | Agent | Model | Purpose |
 |-------|-------|---------|
-| **qa-lead-orchestrator** | sonnet | Orchestrates testing, delegates to specialists, makes go/no-go decisions. **Sole custodian of ticket STATUS** — a transition is an outward-facing write to a shared board, so no specialist, runner, verifier, doer or sub-agent ever makes one; they report it up (§Status custodian, single source of truth `knowledge/execution/ticket-status-transitions.md`: at most two hops per run — the opening one at `1a` when the `feature-test` route resolves, never confirmed, and the closing one at 5f, always confirmed, `BLOCKED` transitions nothing but requires a blocker comment, never past `TESTED`, every hop AND skip recorded in `summary.json.status_transitions[]`). **Also serves as the independent per-step verifier in `/qa-test`** (§Verifier Mode): a fresh, gate-scoped instance — never the pipeline's inline orchestrator and never the step's own doer — re-derives evidence from source and returns `APPROVE`/`REJECT`. Delegates any live re-check to a specialist on a **different browser lane** than the doer used. |
+| **qa-lead-orchestrator** | sonnet | Orchestrates testing, delegates to specialists, makes go/no-go decisions. **Sole custodian of ticket STATUS** — a transition is an outward-facing write to a shared board, so no specialist, runner, verifier, doer or sub-agent ever makes one; they report it up (§Status custodian, single source of truth `knowledge/execution/ticket-status-transitions.md`: at most two hops per run — the opening one at `1a` when the `feature-test` route resolves, never confirmed, and the closing one at 5-status, always confirmed, `BLOCKED` transitions nothing but requires a blocker comment, never past `TESTED`, every hop AND skip recorded in `summary.json.status_transitions[]`). **Also serves as the independent per-step verifier in `/qa-test`** (§Verifier Mode): a fresh, gate-scoped instance — never the pipeline's inline orchestrator and never the step's own doer — re-derives evidence from source and returns `APPROVE`/`REJECT`. Delegates any live re-check to a specialist on a **different browser lane** than the doer used. |
 | **qa-frontend-expert** | opus | Customer-facing storefront, user journeys, checkout flows, mobile, cross-browser |
 | **qa-backend-expert** | opus | Platform APIs, GraphQL xAPI, Modules, Admin SPA, background jobs |
 | **qa-testing-expert** | opus | Interactive testing - UI verification, Claude Design spec comparison (Figma is a manual fallback only), debugging |

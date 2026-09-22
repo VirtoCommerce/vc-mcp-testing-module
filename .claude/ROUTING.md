@@ -53,7 +53,6 @@ live counts; they are never transcribed here — `CLAUDE.md` §Where the rules l
 | **Review test-case quality / triangulate staleness** | `/qa-review-tests suite <ID> \| file <path> \| diff \| --triangulate \| --fix` | Skill |
 | **Create Postman collections** | `/qa-postman create <purpose> \| env <profile> \| verify <collection>` | Skill |
 | **Look up VC documentation** | `/vc-docs topic \| module \| concept` | Skill |
-| **Build / smoke-test this repo's own tooling** | `/run-vc-mcp-testing-module` | Skill |
 
 > `/qa-sync-tests` was **removed** — the command file is deleted and there is no redirect or alias.
 > Use `/qa-test-lifecycle PR #NNN \| module <name> \| diff` instead.
@@ -62,7 +61,7 @@ live counts; they are never transcribed here — `CLAUDE.md` §Where the rules l
 
 ### Run Tests (Commands — execute immediately)
 - `/qa-smoke` — Daily smoke (P0 set, GO/NO-GO verdict)
-- `/qa-test` — Test a ticket, feature or PR. Step `1a` routes on **two axes**: the FLOW by ticket type × status (fix-ready Bug → `/qa-verify-fix` inline; hotfix-status Bug → `/qa-hotfix-check`; Sub-task → inherit parent; else `feature-test`), then a **FAST** (checklist-only) or **FULL** (Test Model + authoring + verifiers + promotion) path. The command is the orchestration shell; the `/qa-test` **skill** holds the methodology
+- `/qa-test` — Test a ticket, feature or PR. Step `1a` routes on **two axes**: the FLOW by ticket type × status (fix-ready Bug → `/qa-verify-fix` inline; hotfix-status Bug → `/qa-hotfix-check`; Sub-task → inherit parent; a refactor/migration/dependency bump → the fixed-shape `technical-change` flow; else `feature-test`), then a **FAST** (checklist-only) or **FULL** (Test Model + authoring + verifiers + promotion) path. The command is the orchestration shell; the `/qa-test` **skill** holds the methodology
 - `/qa-regression` — Run suites in parallel. `sprint` resolves the most recent sprint plan → `suitesActivated[]`; `--cases critical` narrows to a priority tier within each suite
 - `/qa-triage-results` — Classify a completed run's FAIL/BLOCKED/SKIPPED into real bug vs test defect vs flaky/env; live-verify, route test fixes, draft bugs. Never files a ticket, never triggers `/qa-fix`
 - `/qa-exploratory` — Scenario-discovery session. `sprint` runs the plan's §5.3 charters (≤5, in series). Lane: any free browser slot (all 3 click since 2026-09-08)
@@ -120,7 +119,6 @@ live counts; they are never transcribed here — `CLAUDE.md` §Where the rules l
 ### Tooling & Diagnostics
 - `/project-init` — Onboard onto a deployment: tracker + code host + auth per axis, derive client-vs-platform, write `project-profile.json` / `.env.<env>` / `.mcp.json`, verify access
 - `/vc-self-check` — Read this session's telemetry + transcript against `.claude/knowledge/diagnostics/skill-expectations.md`; per-finding verdict + severity; `deliver` contributes a consent-gated GitHub Issue upstream
-- `/run-vc-mcp-testing-module` — Build / launch / smoke-test this repo's own tooling
 
 ### VC Knowledge (Skill — auto-invocable)
 - `/vc-docs` — Documentation lookup. **Primary: VirtoOZ MCP** (12 topic-scoped tools); Context7 `/virtocommerce/vc-docs` is the fallback
@@ -202,7 +200,7 @@ cross-product-reuse change) and `.claude/templates/` (`test-model.md`, `qa-test-
 | `/qa-monitoring` | `/qa-bug`, `/qa-fix` | Monitoring drafts confirmed bugs → a human picks them up (monitoring never files a ticket or auto-fixes) |
 | `/qa-test` | `/qa-test` skill, `/qa-test-design`, `/qa-checklist`, `/qa-risk` | Command = the pipeline + its gates; skill = the methodology. The FULL path writes a Test Model before any case exists |
 | `/qa-test` | `/qa-test-cases-generator`, `/qa-review-tests`, `/qa-generate-data` | Step 3 reuses the same skills `/qa-test-lifecycle` Phases 3–4 use, and appends cases as `Draft` straight into `regression/suites/` |
-| `/qa-test` | `/qa-verify-fix`, `/qa-hotfix-check` | Step 1a routes a fix-ready Bug into `/qa-verify-fix` inline and a hotfix-status Bug into `/qa-hotfix-check` |
+| `/qa-test` | `/qa-verify-fix`, `/qa-hotfix-check`, `/qa-regression` | Step 1a routes a fix-ready Bug into `/qa-verify-fix` inline, a hotfix-status Bug into `/qa-hotfix-check`, and a `technical-change` (refactor / migration / dependency bump) into a blast-radius `/qa-regression` with no feature test |
 | `/qa-test-lifecycle` | `/qa-coverage-gap`, `/qa-review-tests` | Unified pipeline: sync + gap analysis + quality review + promotion (Phase 6P) |
 | `/qa-test-plan` | `/qa-regression`, `/qa-risk`, `/qa-exploratory` | Plan maps risk-scored domains to suites (§5.1/§5.2) and derives the exploratory charters (§5.3) |
 | `/qa-verify-fix` | `/qa-investigate`, `/qa-checklist` | Verification uses the investigation flow + the Bug Fix Verification checklist |
