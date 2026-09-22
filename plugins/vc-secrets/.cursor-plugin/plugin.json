@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "homepage": "https://github.com/VirtoCommerce/vc-mcp-testing-module",
   "repository": "https://github.com/VirtoCommerce/vc-mcp-testing-module",
-  "license": "TBD-internal",
+  "license": "SEE LICENSE IN LICENSE",
   "skills": "./skills/",
   "hooks": "./hooks/hooks-cursor.json"
 }

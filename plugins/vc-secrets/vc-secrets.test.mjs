@@ -4879,6 +4879,8 @@ const CLAUDE_HOOKS = fileURLToPath(new URL("./hooks/hooks.json", import.meta.url
 const CLAUDE_MANIFEST = fileURLToPath(new URL("./.claude-plugin/plugin.json", import.meta.url));
 const CURSOR_MANIFEST = fileURLToPath(new URL("./.cursor-plugin/plugin.json", import.meta.url));
 const CODEX_MANIFEST = fileURLToPath(new URL("./.codex-plugin/plugin.json", import.meta.url));
+// The fourth copy of the description, and the only one outside this package.
+const MARKETPLACE = fileURLToPath(new URL("../../.claude-plugin/marketplace.json", import.meta.url));
 
 test("manifests: three per-client, and no root one", () => {
     for (const p of [CLAUDE_MANIFEST, CURSOR_MANIFEST, CODEX_MANIFEST]) {
@@ -4894,10 +4896,29 @@ test("manifests: the shared identity fields cannot drift", () => {
     const claude = JSON.parse(fs.readFileSync(CLAUDE_MANIFEST, "utf8"));
     for (const p of [CURSOR_MANIFEST, CODEX_MANIFEST]) {
         const other = JSON.parse(fs.readFileSync(p, "utf8"));
-        for (const key of ["name", "version", "homepage", "repository", "license"]) {
+        // `description` is here for a measured reason, not for tidiness. It used to be free per
+        // manifest, and the long copies -- the Claude manifest and the marketplace card -- drifted into
+        // a closed enumeration of the env-value kinds, "secret: or literal:", which stayed behind when
+        // `oauth:` became a third. The Cursor and Codex copies were the ones that stayed correct,
+        // precisely because they enumerate nothing. Comparing the files to each other pins no literal:
+        // the expected value is read from a sibling, so this cannot become a transcribed constant.
+        for (const key of ["name", "version", "homepage", "repository", "license", "description"]) {
             assert.equal(other[key], claude[key], `${p}: ${key}`);
         }
     }
+});
+
+test("manifests: the marketplace card repeats the manifest description exactly", () => {
+    // The fourth copy, and the one a customer reads BEFORE installing -- so a wrong claim here is the
+    // most expensive of the four. It has already gone wrong once: a review found the card asserting an
+    // isolation property the code does not have. It lives outside this package, which is why the three
+    // manifests agreeing with each other is not enough to catch it.
+    const claude = JSON.parse(fs.readFileSync(CLAUDE_MANIFEST, "utf8"));
+    const card = JSON.parse(fs.readFileSync(MARKETPLACE, "utf8"));
+    const entry = card.plugins.find((x) => x.name === claude.name);
+
+    assert.ok(entry, `no ${claude.name} entry in the marketplace catalog`);
+    assert.equal(entry.description, claude.description);
 });
 
 test("manifests: only Cursor names a hooks file; Codex relies on the default path", () => {
