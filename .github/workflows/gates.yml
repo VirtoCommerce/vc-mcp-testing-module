@@ -45,6 +45,8 @@ jobs:
       # This is the gate that stops the 2026-09 re-tiering from growing back.
       - name: context:check — always-loaded budget + doc ratchet
         run: npm run context:check
+      - name: findings:lint — docs/repo-findings-backlog.md B-NN uniqueness
+        run: npm run findings:lint
       - name: qa-test:doclint — /qa-test command↔skill integrity
         run: npm run qa-test:doclint
       - name: suites:lint — manifest ↔ CSV sync, global case IDs, XREF-001
