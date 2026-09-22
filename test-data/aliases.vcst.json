@@ -9,9 +9,13 @@
     "pricelistId": "3dd9ceb1-7b28-4b6e-9d6b-2b90c56a7894",
     "fields": {
       "id": "id",
-      "pricelistId": "pricelistId"
+      "pricelistId": "pricelistId",
+      "slug": "slug",
+      "url": "url"
     },
-    "_notes": "VCST-5103 per-env runtime GUIDs for the 1-PTS divisor product (moved out of base aliases.json per the multi-env rule). These are the last-known vcst values; `npm run seed:loyalty-fixtures` overwrites them with freshly-resolved ids on its live run (fixing any post-restore drift)."
+    "_notes": "VCST-5103 per-env runtime GUIDs for the 1-PTS divisor product (moved out of base aliases.json per the multi-env rule). These are the last-known vcst values; `npm run seed:loyalty-fixtures` overwrites them with freshly-resolved ids on its live run (fixing any post-restore drift). 2026-09-17: .slug + .url added for 083e's [NAV] deep-links, READ BACK from the platform's own seoInfos (product + category) exactly as resolveStorefrontPath() does — never composed locally. The vcst product predates loyaltySlug(), so its slugs are the legacy agent-test-/seed-loyalty-fixtures- forms rather than localhost's loyalty-* ones; the seeder only sets a slug on CREATE and reads it back otherwise, so a live re-seed would write these same two values. Verified live 2026-09-17 on vcst: the path renders the PDP (h1 \"AGENT-TEST PTS Unit Divisor\", SKU #AGENT-TEST-PTS-UNIT-001, Price PTS1), not a soft-404.",
+    "slug": "agent-test-pts-unit-divisor",
+    "url": "/loyalty-catalog/seed-loyalty-fixtures/agent-test-pts-unit-divisor"
   },
   "LOYALTY_VIP_USER": {
     "_inline": true,
@@ -25,134 +29,134 @@
   },
   "WL_ELECTRONICS_PLATFORM_ID": {
     "_inline": true,
-    "id": "23b672d6-c27e-49a9-8741-4489960058d9",
+    "id": "bf8538bd-ecf5-421b-b7c2-b6380c01b324",
     "fields": {
       "id": "id"
     }
   },
   "WL_FASHION_PLATFORM_ID": {
     "_inline": true,
-    "id": "bf48ab7c-fc68-447d-afba-a8b2b302c008",
+    "id": "c3618c26-2e67-4c46-8734-025306201e93",
     "fields": {
       "id": "id"
     }
   },
   "WL_DEFAULT_PLATFORM_ID": {
     "_inline": true,
-    "id": "94f014b8-326f-4606-9dc5-3491e376c696",
+    "id": "90307ef8-c79a-4cc0-b13d-6a77c2c59da5",
     "fields": {
       "id": "id"
     }
   },
   "WL_MENU_ONLY_PLATFORM_ID": {
     "_inline": true,
-    "id": "bab6848b-0023-49cc-a65b-897e252ca2e7",
+    "id": "97b4f509-7e06-438f-b54e-bf87788f4276",
     "fields": {
       "id": "id"
     }
   },
   "WL_FOOTER_ONLY_PLATFORM_ID": {
     "_inline": true,
-    "id": "0cefa0d2-61aa-49a8-9406-eaf0c00de17c",
+    "id": "f0c69434-043b-4732-8ec0-7312732705ea",
     "fields": {
       "id": "id"
     }
   },
   "WL_USER_ELECTRONICS_PLATFORM_ID": {
     "_inline": true,
-    "id": "4c18a609-22e3-4f68-a2ea-308877647447",
+    "id": "cd3cf667-6777-4e8d-8c23-1828c68ed7e9",
     "fields": {
       "id": "id"
     }
   },
   "WL_USER_FASHION_PLATFORM_ID": {
     "_inline": true,
-    "id": "8c08de10-5923-4f76-996e-cfee21c7131d",
+    "id": "c446cbd1-3ea6-42dc-a669-6a954faa940d",
     "fields": {
       "id": "id"
     }
   },
   "WL_USER_DEFAULT_PLATFORM_ID": {
     "_inline": true,
-    "id": "3b9bf870-a6ee-4577-9655-4af21b95b577",
+    "id": "1fce2baa-f002-48bb-a7ca-9c8661f7ed8d",
     "fields": {
       "id": "id"
     }
   },
   "WL_USER_MULTI_PLATFORM_ID": {
     "_inline": true,
-    "id": "705845b6-29d5-4581-8116-292b051da2d6",
+    "id": "d75ce476-d744-4cae-90a5-91009a03fb5e",
     "fields": {
       "id": "id"
     }
   },
   "WL_USER_MENU_ONLY_PLATFORM_ID": {
     "_inline": true,
-    "id": "27acd245-f08c-46b4-b33b-bd85d08a4a7d",
+    "id": "f745018d-29cd-4faa-aff3-9c9904a626ae",
     "fields": {
       "id": "id"
     }
   },
   "WL_USER_FOOTER_ONLY_PLATFORM_ID": {
     "_inline": true,
-    "id": "5e903d4f-680b-42a0-9ac6-feba3f85c99b",
+    "id": "582843f2-7ad5-4d11-b72c-e780c6c71a65",
     "fields": {
       "id": "id"
     }
   },
   "ACME_ADMIN": {
-    "platform_id": "61ef67a6-3c90-4bb8-a1a4-7a559d55be03"
+    "platform_id": "2d73a81f-7b84-4c6d-9579-fba8c1cc13f0"
   },
   "ACME_BUYER": {
-    "platform_id": "b4f106de-9d0f-4beb-8e88-98f8c4aa3b6f"
+    "platform_id": "599f8cf1-e324-4145-aa00-f4fa475db3cc"
   },
   "ACME_VIEWER": {
-    "platform_id": "b7241e80-1640-43f2-a89b-fac35aca0617"
+    "platform_id": "57919bac-b668-4e8b-93ec-b79834b4b940"
   },
   "ACME_BUYER2": {
-    "platform_id": "63ff72c4-f47f-4eca-b109-283b79999e47"
+    "platform_id": "2f333533-b949-41cb-bac9-08ca83721122"
   },
   "TECHFLOW_ADMIN": {
-    "platform_id": "68fed13a-6946-4bc0-93a0-9dc9c970d4b0"
+    "platform_id": "852c8fcc-9b29-45c3-8328-021a01537659"
   },
   "TECHFLOW_BUYER": {
-    "platform_id": "557dee63-a7ea-4932-9ef2-3635f353e7a2"
+    "platform_id": "2f917069-fea7-4a6a-8d80-0899aa0a0586"
   },
   "BUILDRIGHT_ADMIN": {
-    "platform_id": "7194fb2c-0660-4738-9692-4db20b5cec10"
+    "platform_id": "1702e815-1cb0-4539-bfe2-1bacf9a7e128"
   },
   "ACMEWEST_ADMIN": {
-    "platform_id": "75e7edda-ff40-4ba3-b46f-af952b62a13e"
+    "platform_id": "23237b18-0665-42ef-b1e6-d72662d17a6b"
   },
   "EU_ADMIN": {
-    "platform_id": "589cbeac-61cf-435c-8cb6-1d0eb24cfbaa"
+    "platform_id": "eb81750a-d7b1-4a9f-bb50-08cddcea0193"
   },
   "SUPPORT_AGENT": {
-    "userId": "61ef67a6-3c90-4bb8-a1a4-7a559d55be03"
+    "userId": "2d73a81f-7b84-4c6d-9579-fba8c1cc13f0"
   },
   "NO_IMPERSONATE_OPERATOR": {
-    "userId": "92e91bc6-4748-4b13-80fe-73e474c460f2"
+    "userId": "208b7637-53ed-4ef8-bc25-d05004396307"
   },
   "IMPERSONATE_TARGET": {
-    "userId": "557dee63-a7ea-4932-9ef2-3635f353e7a2"
+    "userId": "2f917069-fea7-4a6a-8d80-0899aa0a0586"
   },
   "IMPERSONATION_ADMIN": {
-    "userId": "8e25e574-18e5-441d-8d52-6512035ac186"
+    "userId": "344bf0ec-910e-40ba-8816-60b0b1c7fd63"
   },
   "OTHER_ORG_USER": {
-    "userId": "7194fb2c-0660-4738-9692-4db20b5cec10"
+    "userId": "1702e815-1cb0-4539-bfe2-1bacf9a7e128"
   },
   "USER_EUR": {
-    "platform_id": "589cbeac-61cf-435c-8cb6-1d0eb24cfbaa"
+    "platform_id": "eb81750a-d7b1-4a9f-bb50-08cddcea0193"
   },
   "IMPERSONATE_TARGET_MANY_ORGS": {
-    "userId": "901c2e29-7449-4253-ba10-b06edbd07439"
+    "userId": "0a8bd753-753b-4816-84ce-3cd631eda96e"
   },
   "IMPERSONATE_TARGET_BLOCKED": {
-    "userId": "7bc13fe1-fd17-4182-a83c-983189dff115"
+    "userId": "7721691a-54c4-4f8d-be3b-a29eee0a33c1"
   },
   "IMPERSONATE_TARGET_INVITED": {
-    "userId": "232c2d6a-fda0-4650-81f9-6dcdd1141f99"
+    "userId": "58fb02d6-a4b9-4294-b162-74edf5cf9822"
   },
   "CFG_LAPTOP": {
     "id": "fecfe693-f555-40aa-bac7-751ee9b5d6c9"
@@ -556,40 +560,40 @@
     "storeOriginalCatalog": "fc596540864a41bf8ab78734ee7353a3"
   },
   "SR_REP_PRIMARY": {
-    "id": "796b58cc-a090-4bb5-9b76-5f214aeeec76",
-    "user_id": "9d20792d-dd0b-4d6f-a2d9-2cd4d335d3da"
+    "id": "969269c4-9766-41e4-b538-b7ba68157dd0",
+    "user_id": "31c6feef-f7b2-46ae-a965-1b94280e7ef0"
   },
   "SR_REP_SECOND_STORE": {
-    "id": "2039203a-158b-41f2-ba3d-31acdfe80a16",
-    "user_id": "2addd963-8f50-4641-be6e-c1f87ae7e61c"
+    "id": "34a0474a-6579-44c8-8d42-007dcceb5db0",
+    "user_id": "515ab5a2-948f-48ad-8830-6c82db04b904"
   },
   "SR_REP_BLOCKED": {
-    "id": "022a77c5-4a08-4802-bcbe-d2861838b5f1",
-    "user_id": "9a975bf8-b813-4915-8615-2aaf580ac28d"
+    "id": "694b8c8a-ae5d-4f7d-810f-e717f8626aef",
+    "user_id": "46189ac1-747b-48c4-9b05-07b6823bc9fb"
   },
   "SR_REP_LOCKED": {
-    "id": "4e8c1726-6c24-4d6f-893d-ab265415a74f",
-    "user_id": "26d6d359-4f30-4486-856c-f7393887fed0",
-    "membership_locked_id": "507d0578-b6e4-40f0-90b1-ab3e7e1dac79"
+    "id": "617ff3ab-cb8a-4e67-9547-8f926d0aba10",
+    "user_id": "2efbfc2d-ad02-400d-9b2d-a63fab4265c2",
+    "membership_locked_id": "41d85601-467c-4ae8-94db-03bfea14498d"
   },
   "SR_REP_EXCLUSIVE_TECHFLOW": {
-    "id": "7e0c7921-ab76-4e5c-8027-04f65e3c197f",
-    "user_id": "f0891e71-b6d2-4101-a375-e1a903e371be"
+    "id": "005ec00c-417e-4224-ad1a-cd9530ec8db2",
+    "user_id": "b911e559-c195-403d-b3c0-c67a9338ecd1"
   },
   "SR_REP_ACME2": {
-    "id": "58096657-94bb-4651-b4dd-9b0f203a4109",
-    "user_id": "6b627ebf-c167-43fb-8976-0950eba057d3"
+    "id": "0139cc48-7218-4a77-9697-95e98c235abd",
+    "user_id": "dc879343-0e9f-44a8-b04c-8e2614c660a7"
   },
   "SR_REP_NOCUSTOMERS": {
-    "id": "2f00fbeb-fad6-45f5-92fc-5d79017f8be0",
-    "user_id": "2db13fbf-0ce7-4c5e-a91a-c14e2474c813"
+    "id": "9406a11b-56ab-40d8-b775-5375fa9a41f7",
+    "user_id": "a0a7b684-d475-43bb-8bdc-28f903644051"
   },
   "SR_REP_PAGING": {
-    "id": "618de734-f7e4-4d44-beb5-537e17afe10d",
-    "user_id": "62ac88aa-3cf4-4217-a57c-513ffc1e7953"
+    "id": "3f2fbeb0-a122-4640-a409-ce43c1d93936",
+    "user_id": "281beb5a-b753-48cd-a884-fa429c0ad997"
   },
   "SR_OWNER_ACME": {
-    "id": "5a961c37-bc80-4076-8055-2d470c43d7c5"
+    "id": "5c357a1c-af00-4865-82b0-ac12a41897a0"
   },
   "COMPLETED_ORDER": {
     "id": "51cc5eb9-23d4-47fe-b46d-36e03dc53b2f",
@@ -721,14 +725,14 @@
     "productId": "f4f27033-d688-4d22-ade7-5106f4748add"
   },
   "LOYALTY_NOBAL_USER": {
-    "memberId": "31399071-7589-42a8-9013-75f805dfd48b",
-    "securityAccountId": "5a216728-c49f-4c4b-b611-227757f071c1"
+    "memberId": "83bcb310-9856-47a0-8e68-c4e34a143dce",
+    "securityAccountId": "e383066c-56dc-4ff2-8e92-3c5a3a1329bd"
   },
   "MULTI_ORG_TF_BR": {
-    "id": "85d1aeea-ee57-4041-9c18-c16431fe23ec",
-    "userId": "5a0acc93-a0b9-4a6d-9904-f3c9a91c0411",
-    "techflow_membership_id": "65f9e33ea90b4bbfbea94ac6a7b2725c",
-    "buildright_membership_id": "4b1a9cd9160245969cdf3c3ce2ceb242"
+    "id": "83637bb5-6c0f-4e8d-b5ea-dff81d69fd38",
+    "userId": "7b2e4258-498a-49c8-b483-92df9da59807",
+    "techflow_membership_id": "a44e7c12-c80c-4314-b8eb-eeca8cf3f19a",
+    "buildright_membership_id": "f60c7a58-233a-458c-b2f4-c01200f53b01"
   },
   "BUYABLE_SIBLING_B2B": {
     "id": "eae298de-0997-44d2-8b35-88e5512dbbe2"
@@ -763,8 +767,8 @@
     "variation_white_id": "2cf1b2ae-68e0-40c2-ae87-f95d55268caa"
   },
   "LOYALTY_WHOLESALE_USER": {
-    "memberId": "47db2112-34a7-4fc1-9783-95523284ae10",
-    "securityAccountId": "3aaada1a-6c1b-417e-8cb3-d074258016a3"
+    "memberId": "0554b16e-1989-46ee-9944-b639289e7c95",
+    "securityAccountId": "fa360b8f-aab2-43eb-828e-9edb9c451d15"
   },
   "CATALOG_LINK_RESTRICTED": {
     "_inline": true,
@@ -797,8 +801,8 @@
     "role_id": "AGENT-TEST-SalesRep-Full"
   },
   "SR_REP_ACME3": {
-    "id": "a31c108f-9601-4e28-812c-1424d28dc634",
-    "user_id": "567c91a6-8df0-48e3-9249-df486dd6faec"
+    "id": "e8f2eee6-6396-47e5-b340-498ddd2a6ee4",
+    "user_id": "5badccfa-b4f9-45c4-80e8-379e4870c75c"
   },
   "CATALOG_READ_ONLY": {
     "_inline": true,
@@ -807,43 +811,808 @@
     "role_id": "AGENT-TEST-Catalog-Read-Only"
   },
   "MULTI_ORG_TF_BR_ALT": {
-    "id": "00c67615-6c74-4d9c-86a2-a524f789d5d0",
-    "userId": "76c999e3-cb45-49d9-b128-880a553706df",
-    "techflow_membership_id": "9fbdf17a-4909-41b7-a5a7-9318c3b9977b",
-    "buildright_membership_id": "a051055a-cc64-4c53-ba7a-556cefae51d7"
+    "id": "bdbfa831-273e-4a99-8c4c-b78e4a2fc095",
+    "userId": "10e89afb-7bdd-4839-a332-fc67f7f41f62",
+    "techflow_membership_id": "a4e709c6-712a-46d3-bc85-ff80cf3f7cac",
+    "buildright_membership_id": "c7d7bf08-5239-4b78-88b9-bd41e84d4596"
   },
   "ORG_TF_ONLY_INVITEE": {
-    "id": "2478ecf7-8758-403b-bd6e-29e6eb8c5918",
-    "userId": "676bcb98-326f-412c-98a1-a5e9f7c3106f",
-    "techflow_membership_id": "f3fa0bfc-9bc9-4934-9e49-c75ec07d7921"
+    "id": "15042700-2fc5-485f-9ce5-9cb0cd489eec",
+    "userId": "2e5c7b95-68b6-4dbf-879b-430810ad4c40",
+    "techflow_membership_id": "88472c89-1696-44c6-b6aa-92e06c1faee1"
   },
   "ORG_TF_ONLY_STATUS": {
-    "id": "99d292cf-5e77-45d0-867f-177104b725d6",
-    "userId": "78ab9180-95d2-42e1-a8f6-813ef5afe537",
-    "techflow_membership_id": "5341de0d-9ae8-4f12-97df-8baa9d1653ee"
+    "id": "1330aead-4419-42be-a412-56dba4c81965",
+    "userId": "8f40b03e-0002-40bf-89d9-014010e34ef7",
+    "techflow_membership_id": "4991e16d-a3cf-4c1a-be3a-3e70b47a0c74"
   },
   "ORG_ASSOC_ONLY_NO_GLOBAL": {
-    "userId": "8e6be1f3-9e3d-44ae-afdb-cc62808288d0",
-    "contactId": "ef12937d-acff-47bd-8da6-722d4f83bfee"
+    "userId": "5b3365b0-7389-42db-b46a-8f53fa17df50",
+    "contactId": "1058e31b-6283-41a3-a576-f9d66e1482e0"
   },
   "ORG_TF_MBR_INVITED": {
-    "id": "99fecdc7-4837-4c54-b87c-dc414d029196",
-    "userId": "396573f8-b196-49bd-b212-60375280395b",
-    "techflow_membership_id": "86fc6337-ace6-4e39-af86-56681175e107"
+    "id": "b03ae73f-2bfc-4c83-8dfa-7d058e8e54a9",
+    "userId": "4349a2f9-0000-4210-aac0-b9500c41ea38",
+    "techflow_membership_id": "a2102fcc-c753-40c8-85e0-59780ab69dec"
   },
   "ORG_TF_MBR_REJECTED": {
-    "id": "97fa0167-76ac-4a98-a9cb-d6555b6ae7a0",
-    "userId": "909646c5-9441-428a-83a9-7079678b6e84",
-    "techflow_membership_id": "a39cf40d-53dd-45d5-8b63-6dcb5ca6cdbf"
+    "id": "772c3505-cf3e-4969-850d-ef975b49cada",
+    "userId": "b8619a21-c856-4fcb-b00b-c1f3428c55ed",
+    "techflow_membership_id": "4ea2fe3b-71ce-4c4b-ba44-5a8e252c505b"
   },
   "ORG_TF_MBR_DELETED": {
-    "id": "fcf45a2e-ab76-4ec1-a052-6a942abbe0b6",
-    "userId": "7bf5e44b-7fbd-4e12-9234-fc921098abbc",
-    "techflow_membership_id": "0016c3c6-a927-4fbe-98f0-978b7033425a"
+    "id": "6290a083-1579-44d6-b731-24766325f06c",
+    "userId": "f64b52b2-ffd5-42c3-a924-e6e0b762d660",
+    "techflow_membership_id": "108f48d7-7a19-4d10-badf-11185fcee61b"
+  },
+  "SR_REP_LAYOUT": {
+    "id": "f7ab0294-bbda-41ca-918b-027d725e3a71",
+    "user_id": "adda6ecd-d25d-43ab-ae70-c23f051b003d"
+  },
+  "SR_STATS_TOPSELLER_ORDER": {
+    "id": "3f732df3-9fc0-4861-8e99-882d7bf265f6",
+    "number": "AGENT-TEST-SRO-STATS-TOPSELLERS"
+  },
+  "SR_STATS_CART_ACME": {
+    "id": "54f8d2f6-7c18-41e4-b15c-2578dfeba0e2",
+    "name": "AGENT-TEST-SR-CART-ACME"
+  },
+  "SR_STATS_CART_WEST": {
+    "id": "c6626374-2688-4d99-9d98-6cb6069561a9",
+    "name": "AGENT-TEST-SR-CART-WEST"
   },
   "LOYALTY_ZERO_USER": {
-    "memberId": "",
-    "securityAccountId": "",
-    "email": ""
+    "memberId": "ed9ab58e-13db-4489-80ed-d15c78e4bf17",
+    "securityAccountId": "ffa6ea09-8b8e-4a7e-8d4c-769f901c9537",
+    "email": "AGENT-TEST-loyzero-20260910114015-4a9a@test-agent.com"
+  },
+  "REV_VAR_MATRIX": {
+    "id": "08c33cfc9f664426a52fac8882da2df0",
+    "name": "Canon Imageclass WiFi MF232W Monochrome Laser Printer/Scanner/Copier",
+    "slug": "printers/multifunction-printers/laser-monochrome/canon-imageclass-wifi-mf232w-monochrome-laser-printerscannercopier-color-black",
+    "approved_count": 8
+  },
+  "REV_VAR_ONE_STAR": {
+    "id": "4b729fae613046448aaba7c265bb4f2d",
+    "name": "Xerox WorkCentre 3335DNI Mono Laser Multifunction Printer/Copier/Scanner/Fax Machine",
+    "slug": "printers/multifunction-printers/laser-monochrome/xerox-workcentre-3335dni-mono-laser-multifunction-printercopierscannerfax-machine-color-blue-gray",
+    "approved_count": 1
+  },
+  "REV_VAR_FIVE_STAR": {
+    "id": "ca255c81f8254865956c1d714f2ef457",
+    "name": "Epson Expression Premium XP-830 All-In-One Wireless Printer",
+    "slug": "printers/all-in-one/paper-crafts/epson-expression-premium-xp-830-all-in-one-wireless-printer-color-black",
+    "approved_count": 1
+  },
+  "INV_VARIATION_STOCKED": {
+    "id": "010ff6d8-73ac-4269-b2f3-57d346fb33ae",
+    "masterId": "7539b47a-0670-41ab-8d5b-d35c7847cce1",
+    "ffcId": "8989f3a5-e25a-4a3e-afe0-473385734ed3"
+  },
+  "INV_VARIATION_MASTER": {
+    "id": "7539b47a-0670-41ab-8d5b-d35c7847cce1"
+  },
+  "FC_EAST": {
+    "id": "8989f3a5-e25a-4a3e-afe0-473385734ed3"
+  },
+  "WISH_TWO_STORE_CUSTOMER": {
+    "storeAId": "B2B-store",
+    "storeBId": "Electronics",
+    "storeAWishlistId": "2756d2b7-86ca-4737-a0e4-be03c2b371f0",
+    "storeBWishlistId": "cdab5b2b-1ecb-42a3-aa43-fb194f553d9c",
+    "customerId": "96029166-25f0-419b-8984-a7527188cb82",
+    "userId": "96029166-25f0-419b-8984-a7527188cb82",
+    "contactId": "089afd9f-fefc-43cb-9219-8f42b45047c0"
+  },
+  "SR_ORDER_ACME_WIN_NEW": {
+    "id": "ca493165-1408-4bf3-87ba-3019cec0bec4",
+    "createdDate": "2026-09-18T10:23:57.3488015Z"
+  },
+  "SR_ORDER_ACME_WIN_PROC": {
+    "id": "206682b6-4184-4c51-a5eb-07428289a88c",
+    "createdDate": "2026-09-18T10:24:16.4959849Z"
+  },
+  "CAT_EMPTY": {
+    "id": "ccb46dbd-c966-4159-8093-9c5a2f264603",
+    "catalogId": "fc596540864a41bf8ab78734ee7353a3"
+  },
+  "PROD_ORG_EXCLUDED": {
+    "id": "72814aed-3917-40bc-946a-e3bd63e2f066",
+    "catalogId": "8a55771b-16d6-41f9-8dcd-329099233c8f"
+  },
+  "PROD_SEO_CONFIGURED": {
+    "id": "07003400-b77c-4286-956c-6fe8bfa7d409",
+    "catalogId": "3b0e9125-8c5b-41ce-9ff8-6a470e5aaf8f",
+    "categoryId": "05db57be-7c71-4bc4-a8c7-acb3f214e8e9",
+    "url": "/seed-test-fixtures/agent-test-seo-configured-product"
+  },
+  "SR_ORDER_ACME_ELEC": {
+    "id": "2e28e846-88e3-4837-bc90-a82b90734912",
+    "createdDate": "2026-09-18T10:24:30.5455928Z"
+  },
+  "MSN_ORDERVALUE": {
+    "id": "91ec8c28-d73a-4df9-8045-5171cd3a504b",
+    "goal_currency": "USD",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-value.svg",
+    "accrued_value_at_seed": "116.5",
+    "progress_status_at_seed": "Completed",
+    "progress_percent_at_seed": "100"
+  },
+  "MSN_ORDERVALUE_ALTCURRENCY": {
+    "id": "309ae4c3-b823-49ca-8add-79776d09cf34",
+    "goal_currency": "AUD",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-value.svg",
+    "accrued_value_at_seed": "",
+    "progress_status_at_seed": "",
+    "progress_percent_at_seed": ""
+  },
+  "MSN_ORDERCOUNT": {
+    "id": "30f27bf4-fd44-4bf7-a8cd-1ba743fe5593",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
+  },
+  "MSN_PERSKU_ALL": {
+    "id": "a0206d2e-7034-48c0-8b0d-70d61e2abf68",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-per-sku.svg",
+    "locale_default": "en-US"
+  },
+  "MSN_PERSKU_ANY": {
+    "id": "014fc3b4-9cd2-41a0-949a-25bba0badbbd",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-per-sku.svg"
+  },
+  "MSN_PUBLISHED_PRIVATE": {
+    "id": "147e5e85-d37c-494b-9da2-9ef5295749bd",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
+  },
+  "MSN_ZEROTARGET": {
+    "id": "b8d2928a-e591-45db-a1ee-f666a825cf83",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
+  },
+  "MSN_ZEROREWARD": {
+    "id": "77d41bd0-b7fa-4bea-a66f-f776c151f917",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
+  },
+  "MSN_LOCALIZED": {
+    "id": "d2587dd9-6a71-4de9-b5de-1afa95443b75",
+    "locale_default": "en-US",
+    "locale_alternate": "de-DE",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
+  },
+  "MSN_DRAFT": {
+    "id": "2a4c02f1-02f8-4826-9886-efacca6c4768",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
+  },
+  "MSN_PERSKU_PRODUCT_A": {
+    "productId": "7bd305cb-55ef-440a-8488-1aa9b777c70a",
+    "catalogId": "6032bd3c-77dc-4035-a94f-6f60ee5abb4e",
+    "currency": "USD"
+  },
+  "MSN_PERSKU_PRODUCT_B": {
+    "productId": "e908c979-d79e-4cea-ad8b-57907b1c4f37",
+    "catalogId": "6032bd3c-77dc-4035-a94f-6f60ee5abb4e",
+    "currency": "USD"
+  },
+  "MSN_STORE_SETTINGS": {
+    "missions_enabled": "true",
+    "base_loyalty_enabled": "true",
+    "store_id": "B2B-store"
+  },
+  "MSN_EXPIRED": {
+    "id": "c5419b1b-7357-4ea1-ad1b-9828ebc66604",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
+  },
+  "MSN_ENDING_SOON": {
+    "id": "1e2dcbd9-5cbd-40df-bfdb-4b763ee5e79c",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
+  },
+  "MSN_PROGRESS_PARTIAL": {
+    "id": "34c2ed6e-1f20-4f54-8235-866c08d83960",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-per-sku.svg"
+  },
+  "MSN_PROGRESS_COMPLETED": {
+    "id": "aa95ccee-4676-4a53-8e05-2918f9fe56a2",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-per-sku.svg"
+  },
+  "MSN_PROGRESS_ORDER": {
+    "id": "f009ba62-2f6b-4562-a33e-091614f141d4",
+    "user_id": "f194c370-b7b0-4b88-8fc5-edc9ca80ee1c",
+    "user_email": "mutykovaelena@gmail.com",
+    "store_id": "B2B-store",
+    "currency": "USD",
+    "observed_sub_total": "102.5",
+    "observed_discount_total": "10.5",
+    "observed_shipping_total": "24.5",
+    "observed_tax_total": "0",
+    "observed_total": "116.5"
+  },
+  "MSN_GROUP_VIP": {
+    "id": "4f98020c-33bc-4b34-af0b-a8fe5c1906a1",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
+  },
+  "MSN_GROUP_AUDIENCE": {
+    "member_email": "AGENT-TEST-vip@test.virtocommerce.com",
+    "member_user_id": "95a30901-9b99-4269-a855-109607378479",
+    "member_groups": "VIP",
+    "nonmember_email": "AGENT-TEST-wholesale@test.virtocommerce.com",
+    "nonmember_user_id": "fa360b8f-aab2-43eb-828e-9edb9c451d15",
+    "nonmember_groups": "Wholesale"
+  },
+  "MSN_GROUP_VIP_PRIVATE": {
+    "id": "a6a61bd0-b8fc-438e-956e-368d026d0d1e",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
+  },
+  "MSN_OPEN_ENDED": {
+    "id": "6d4abcaf-acc7-47b9-aaaf-0481f01f291a",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-count.svg"
+  },
+  "MSN_PERSKU_OOS": {
+    "id": "cc667659-a6ac-4916-8d17-6a64bbb697b7",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-per-sku.svg"
+  },
+  "MSN_ZEROSTOCK_PRODUCT": {
+    "productId": "0491db2b-6041-4ec0-9766-2570ae42bc4b",
+    "catalogId": "6032bd3c-77dc-4035-a94f-6f60ee5abb4e",
+    "currency": "USD"
+  },
+  "MSN_E2E_RUN": {
+    "run_id": "20260910114018-8e82",
+    "seeded_at": "2026-09-10T11:40:18.509Z",
+    "store_id": "B2B-store",
+    "catalog_id": "3b0e9125-8c5b-41ce-9ff8-6a470e5aaf8f",
+    "category_id": "b48c4e86-3e3c-4a84-800b-def13dad5ffc"
+  },
+  "MSN_E2E_REWARD_USER": {
+    "email": "AGENT-TEST-loyzero-20260910114015-4a9a@test-agent.com",
+    "user_id": "ffa6ea09-8b8e-4a7e-8d4c-769f901c9537",
+    "member_id": "ed9ab58e-13db-4489-80ed-d15c78e4bf17",
+    "balance_at_seed": "0"
+  },
+  "MSN_E2E_ORDERVALUE": {
+    "id": "558400bd-57bb-4a67-92df-8c9a28df3357",
+    "name": "AGENT-TEST-MSN-E2E-20260910114018-8e82-ORDERVALUE",
+    "run_id": "20260910114018-8e82",
+    "goal_currency": "USD",
+    "progress_status_at_seed": "InProgress",
+    "progress_percent_at_seed": "0"
+  },
+  "MSN_E2E_ORDERCOUNT": {
+    "id": "f0cd9550-77b8-43f2-ab7e-ca47dc802125",
+    "name": "AGENT-TEST-MSN-E2E-20260910114018-8e82-ORDERCOUNT",
+    "run_id": "20260910114018-8e82",
+    "goal_currency": "",
+    "progress_status_at_seed": "InProgress",
+    "progress_percent_at_seed": "0",
+    "order_shipping_max": "unbounded",
+    "available_shipping": "BuyOnlinePickupInStore/Pickup=0; FixedRate/Ground=150; FixedRate/Air=250",
+    "measured_subtotal": "15",
+    "measured_discount": "0",
+    "measured_tax": "3",
+    "measured_shipping": "0",
+    "measured_total": "18",
+    "reading_values": "netMerchandise=15; grossMerchandise=15; orderTotal=18; totalPlusPoints=18",
+    "order1_co_missions": "AGENT-TEST-MSN-E2E-20260910114018-8e82-ORDERVALUE-008=508; AGENT-TEST-MSN-E2E-20260910113721-1ecf-ORDERVALUE-008=508; AGENT-TEST-MSN-E2E-20260910105616-3436-ORDERVALUE-008=508; AGENT-TEST-MSN-LOCALIZED=250; AGENT-TEST-MSN-ZEROREWARD=0; AGENT-TEST-MSN-ZEROTARGET=200; AGENT-TEST-MSN-PUBLISHED-PRIVATE=100",
+    "order1_expected_delta": "2074",
+    "co_completing_missions": "AGENT-TEST-MSN-E2E-20260910114018-8e82-ORDERVALUE-006=506; AGENT-TEST-MSN-E2E-20260910113721-1ecf-ORDERVALUE-006=506; AGENT-TEST-MSN-E2E-20260910113721-1ecf-ORDERCOUNT=501; AGENT-TEST-MSN-E2E-20260910105616-3436-ORDERVALUE-006=506; AGENT-TEST-MSN-E2E-20260910105616-3436-ORDERCOUNT=501; AGENT-TEST-MSN-ORDERCOUNT=300",
+    "reward_expected_total": "3321"
+  },
+  "MSN_E2E_PERSKU": {
+    "id": "5e03f4f5-ed60-433f-b9aa-de818bf7c6ba",
+    "name": "AGENT-TEST-MSN-E2E-20260910114018-8e82-PERSKU",
+    "run_id": "20260910114018-8e82",
+    "goal_currency": "",
+    "progress_status_at_seed": "InProgress",
+    "progress_percent_at_seed": "0"
+  },
+  "MSN_E2E_PERSKU_PTS": {
+    "id": "f6a38d19-f1fe-4b06-9c13-9b8e0ef0cc2d",
+    "name": "AGENT-TEST-MSN-E2E-20260910114018-8e82-PERSKU-PTS",
+    "run_id": "20260910114018-8e82",
+    "goal_currency": "",
+    "progress_status_at_seed": "InProgress",
+    "progress_percent_at_seed": "0"
+  },
+  "MSN_E2E_ORDERVALUE_003": {
+    "id": "c8148c40-f691-40fd-b659-21ad6fbe6a86",
+    "name": "AGENT-TEST-MSN-E2E-20260910114018-8e82-ORDERVALUE-003",
+    "run_id": "20260910114018-8e82",
+    "goal_currency": "USD",
+    "goal_target": "49.5",
+    "progress_status_at_seed": "InProgress",
+    "progress_percent_at_seed": "0",
+    "order_shipping_max": "unbounded",
+    "available_shipping": "BuyOnlinePickupInStore/Pickup=0; FixedRate/Ground=150; FixedRate/Air=250",
+    "measured_subtotal": "45",
+    "measured_discount": "0",
+    "measured_tax": "9",
+    "measured_shipping": "0",
+    "measured_total": "54",
+    "measured_total_undiscounted": "",
+    "reading_values": "netMerchandise=45; grossMerchandise=45; orderTotal=54; totalPlusPoints=54",
+    "separates_below": "45",
+    "separates_above": "54",
+    "separation_margin": "4.5",
+    "co_completing_missions": "",
+    "reward_expected_total": ""
+  },
+  "MSN_E2E_USER_003": {
+    "email": "AGENT-TEST-msne2e-20260910114044-b246@test-agent.com",
+    "user_id": "bd177777-6ecb-4e7b-b805-1766ad13d833",
+    "member_id": "58322da0-bb4f-4e3a-ac54-9eae71a8c67b",
+    "handle": "AGENT-TEST-msne2e-20260910114044-b246",
+    "balance_at_seed": "0",
+    "groups_at_seed": ""
+  },
+  "MSN_E2E_ORDERVALUE_005": {
+    "id": "209b12c7-a638-4684-abd2-d9c94fbd9e1f",
+    "name": "AGENT-TEST-MSN-E2E-20260910114018-8e82-ORDERVALUE-005",
+    "run_id": "20260910114018-8e82",
+    "goal_currency": "USD",
+    "goal_target": "54",
+    "progress_status_at_seed": "InProgress",
+    "progress_percent_at_seed": "0",
+    "order_shipping_max": "5",
+    "available_shipping": "BuyOnlinePickupInStore/Pickup=0; FixedRate/Ground=150; FixedRate/Air=250",
+    "measured_subtotal": "50",
+    "measured_discount": "10",
+    "measured_tax": "8",
+    "measured_shipping": "0",
+    "measured_total": "48",
+    "measured_total_undiscounted": "60",
+    "reading_values": "netMerchandise=40; grossMerchandise=50; orderTotal=48; totalPlusPoints=48",
+    "separates_below": "48",
+    "separates_above": "60",
+    "separation_margin": "6",
+    "co_completing_missions": "",
+    "reward_expected_total": ""
+  },
+  "MSN_E2E_USER_005": {
+    "email": "AGENT-TEST-msne2e-20260910114047-6392@test-agent.com",
+    "user_id": "55a485d1-aaad-4ffe-b15c-8817c4ce6abe",
+    "member_id": "bf01dd98-ff00-4e36-a154-05109bff3531",
+    "handle": "AGENT-TEST-msne2e-20260910114047-6392",
+    "balance_at_seed": "0",
+    "groups_at_seed": ""
+  },
+  "MSN_E2E_ORDERVALUE_006": {
+    "id": "7c499974-9fab-4e58-90a9-a9dfa35adc94",
+    "name": "AGENT-TEST-MSN-E2E-20260910114018-8e82-ORDERVALUE-006",
+    "run_id": "20260910114018-8e82",
+    "goal_currency": "USD",
+    "goal_target": "36",
+    "progress_status_at_seed": "InProgress",
+    "progress_percent_at_seed": "0",
+    "order_shipping_max": "unbounded",
+    "available_shipping": "BuyOnlinePickupInStore/Pickup=0; FixedRate/Ground=150; FixedRate/Air=250",
+    "measured_subtotal": "60",
+    "measured_discount": "0",
+    "measured_tax": "12",
+    "measured_shipping": "0",
+    "measured_total": "72",
+    "measured_total_undiscounted": "",
+    "reading_values": "netMerchandise=60; grossMerchandise=60; orderTotal=72; totalPlusPoints=72",
+    "separates_below": "0",
+    "separates_above": "60",
+    "separation_margin": "24",
+    "co_completing_missions": "",
+    "reward_expected_total": ""
+  },
+  "MSN_E2E_USER_006": {
+    "email": "AGENT-TEST-msne2e-20260910114050-177a@test-agent.com",
+    "user_id": "b0290f44-2c62-425a-bcd6-85731aeb69b9",
+    "member_id": "87b6be33-1910-4417-8a69-cc50fc9c43b5",
+    "handle": "AGENT-TEST-msne2e-20260910114050-177a",
+    "balance_at_seed": "0",
+    "groups_at_seed": ""
+  },
+  "MSN_E2E_ORDERVALUE_008": {
+    "id": "7f62cee7-05d1-4c41-ba6b-583db7b5b615",
+    "name": "AGENT-TEST-MSN-E2E-20260910114018-8e82-ORDERVALUE-008",
+    "run_id": "20260910114018-8e82",
+    "goal_currency": "USD",
+    "goal_target": "12",
+    "progress_status_at_seed": "InProgress",
+    "progress_percent_at_seed": "0",
+    "order_shipping_max": "10",
+    "available_shipping": "BuyOnlinePickupInStore/Pickup=0; FixedRate/Ground=150; FixedRate/Air=250",
+    "measured_subtotal": "20",
+    "measured_discount": "0",
+    "measured_tax": "4",
+    "measured_shipping": "0",
+    "measured_total": "24",
+    "measured_total_undiscounted": "",
+    "reading_values": "netMerchandise=20; grossMerchandise=20; orderTotal=24; totalPlusPoints=24",
+    "separates_below": "0",
+    "separates_above": "20",
+    "separation_margin": "8",
+    "co_completing_missions": "AGENT-TEST-MSN-E2E-20260910113721-1ecf-ORDERVALUE-008=508; AGENT-TEST-MSN-E2E-20260910105616-3436-ORDERVALUE-008=508; AGENT-TEST-MSN-LOCALIZED=250; AGENT-TEST-MSN-ZEROREWARD=0; AGENT-TEST-MSN-ZEROTARGET=200; AGENT-TEST-MSN-PUBLISHED-PRIVATE=100",
+    "reward_expected_total": "2074"
+  },
+  "MSN_E2E_USER_008": {
+    "email": "AGENT-TEST-msne2e-20260910114052-cea8@test-agent.com",
+    "user_id": "08c78de4-c88b-4c81-b3fd-dce001e51567",
+    "member_id": "bb28f4ac-fd58-44fc-9de4-94549e8fdc32",
+    "handle": "AGENT-TEST-msne2e-20260910114052-cea8",
+    "balance_at_seed": "0",
+    "groups_at_seed": ""
+  },
+  "MSN_E2E_PRODUCT_UNIT": {
+    "productId": "5328ea25-55d8-4202-bb0d-75c9708f7b75",
+    "catalogId": "3b0e9125-8c5b-41ce-9ff8-6a470e5aaf8f",
+    "currency": "USD",
+    "slug": "seed-loyalty-missions-e2e/agent-test-msn-e2e-unit",
+    "url": "/seed-loyalty-missions-e2e/agent-test-msn-e2e-unit"
+  },
+  "MSN_E2E_PRODUCT_A": {
+    "productId": "06efa17c-e648-4796-b951-bf6cb3db8f31",
+    "catalogId": "3b0e9125-8c5b-41ce-9ff8-6a470e5aaf8f",
+    "currency": "USD",
+    "slug": "seed-loyalty-missions-e2e/agent-test-msn-e2e-persku-a",
+    "url": "/seed-loyalty-missions-e2e/agent-test-msn-e2e-persku-a",
+    "currency_secondary": "EUR"
+  },
+  "MSN_E2E_PRODUCT_B": {
+    "productId": "4e520dd3-c93e-4b62-b4da-755b8389be70",
+    "catalogId": "3b0e9125-8c5b-41ce-9ff8-6a470e5aaf8f",
+    "currency": "USD",
+    "slug": "seed-loyalty-missions-e2e/agent-test-msn-e2e-persku-b",
+    "url": "/seed-loyalty-missions-e2e/agent-test-msn-e2e-persku-b"
+  },
+  "MSN_E2E_PRODUCT_PTS": {
+    "productId": "03943ac2-e88c-4879-a865-11fff300d0b9",
+    "catalogId": "3b0e9125-8c5b-41ce-9ff8-6a470e5aaf8f",
+    "currency": "PTS",
+    "slug": "seed-loyalty-missions-e2e/agent-test-msn-e2e-persku-pts",
+    "url": "/seed-loyalty-missions-e2e/agent-test-msn-e2e-persku-pts"
+  },
+  "MSN_E2E_TGT_CONTROL": {
+    "id": "8e5374e2-f8f4-43a2-96bf-3dc6fd47698d",
+    "name": "AGENT-TEST-MSN-E2E-20260910114018-8e82-TGT-CONTROL",
+    "run_id": "20260910114018-8e82",
+    "goal_currency": "USD",
+    "goal_target": "7200",
+    "progress_status_at_seed": "InProgress",
+    "progress_percent_at_seed": "0",
+    "observed_visibility": "MSN_E2E_USER_TGTMEMBER=visible; MSN_E2E_USER_TGTOUTSIDER=visible"
+  },
+  "MSN_E2E_TGT_GROUP": {
+    "id": "2b97b89c-a000-46f8-b981-9068da08381b",
+    "name": "AGENT-TEST-MSN-E2E-20260910114018-8e82-TGT-GROUP",
+    "run_id": "20260910114018-8e82",
+    "goal_currency": "USD",
+    "goal_target": "7200",
+    "progress_status_at_seed": "InProgress",
+    "progress_percent_at_seed": "0",
+    "observed_visibility": "MSN_E2E_USER_TGTMEMBER=visible; MSN_E2E_USER_TGTOUTSIDER=absent"
+  },
+  "MSN_E2E_TGT_PRIVATE": {
+    "id": "33267f6a-3b2d-46ba-94db-0e4b95315aa3",
+    "name": "AGENT-TEST-MSN-E2E-20260910114018-8e82-TGT-PRIVATE",
+    "run_id": "20260910114018-8e82",
+    "goal_currency": "USD",
+    "goal_target": "7200",
+    "progress_status_at_seed": "InProgress",
+    "progress_percent_at_seed": "0",
+    "observed_visibility": "MSN_E2E_USER_TGTMEMBER=visible; MSN_E2E_USER_TGTOUTSIDER=visible"
+  },
+  "MSN_E2E_USER_001": {
+    "email": "AGENT-TEST-msne2e-20260910114036-d8e1@test-agent.com",
+    "user_id": "d7c42206-cf70-485f-8f1a-8c40b0cf8b38",
+    "member_id": "b7f3a4e0-9702-47bf-be95-345fba56e7f9",
+    "handle": "AGENT-TEST-msne2e-20260910114036-d8e1",
+    "balance_at_seed": "0",
+    "groups_at_seed": ""
+  },
+  "MSN_E2E_USER_TGTMEMBER": {
+    "email": "AGENT-TEST-msne2e-20260910114055-2d55@test-agent.com",
+    "user_id": "8d8ea654-5ba1-4cbd-a651-c483a3cd5e65",
+    "member_id": "a6317baf-40fb-447b-8473-eb5dfba1ca60",
+    "handle": "AGENT-TEST-msne2e-20260910114055-2d55",
+    "balance_at_seed": "0",
+    "groups_at_seed": "VIP"
+  },
+  "MSN_E2E_USER_TGTOUTSIDER": {
+    "email": "AGENT-TEST-msne2e-20260910114058-9c38@test-agent.com",
+    "user_id": "55031067-ee0e-44af-aa1e-085ecad4cb5c",
+    "member_id": "af8230c4-85b8-4856-b79a-78ecc3088649",
+    "handle": "AGENT-TEST-msne2e-20260910114058-9c38",
+    "balance_at_seed": "0",
+    "groups_at_seed": ""
+  },
+  "MSN_E2E_USER_PTSSPEND": {
+    "email": "AGENT-TEST-msne2e-20260910114041-4056@test-agent.com",
+    "user_id": "c9a4cc11-706d-442b-9c15-ffc46f37c8ec",
+    "member_id": "8a175d2f-99f9-4361-9ae4-44ee354a89c7",
+    "handle": "AGENT-TEST-msne2e-20260910114041-4056",
+    "balance_at_seed": "36394",
+    "groups_at_seed": "",
+    "pts_line_cost": "1",
+    "funding_program": "AGENT-TEST PP Single-SKU Laptop (pri 80, factor 500 × 60)",
+    "funding_order": "CO260910-00013",
+    "funding_points_per_unit": "30000",
+    "pts_progress_status_at_seed": "InProgress",
+    "pts_is_started_at_seed": "false",
+    "pts_current_quantity_at_seed": "0"
+  },
+  "MSN_POINTS_ORDER": {
+    "id": "3c20b2c4-2a21-4c46-a6ac-c7f29102bc74",
+    "user_id": "f194c370-b7b0-4b88-8fc5-edc9ca80ee1c",
+    "store_id": "B2B-store",
+    "currency": "PTS",
+    "observed_line_value": "500",
+    "observed_total": "500"
+  },
+  "MSN_REWARD_SPEND": {
+    "reward": "500",
+    "unit_price": "1",
+    "currency": "PTS",
+    "reward_buys_units": "500"
+  },
+  "MSN_POINTS_PRODUCT": {
+    "productId": "9ecf8fed-1ec0-440b-9db1-5a06c0f6a988",
+    "catalogId": "3b0e9125-8c5b-41ce-9ff8-6a470e5aaf8f",
+    "sku": "AGENT-TEST-PTS-UNIT-001",
+    "currency": "PTS"
+  },
+  "MSN_ORDERVALUE_NET": {
+    "id": "e7a99c19-f6a1-42ff-b269-ad27a2b687c4",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-value.svg",
+    "goal_currency": "USD",
+    "accrued_value_at_seed": "116.5",
+    "progress_status_at_seed": "Completed",
+    "progress_percent_at_seed": "100"
+  },
+  "MSN_ORDERVALUE_POINTS": {
+    "id": "ea87e94f-ffc6-495d-bb8f-4b5e0f775b6a",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-order-value.svg",
+    "goal_currency": "USD",
+    "accrued_value_at_seed": "116.5",
+    "progress_status_at_seed": "InProgress",
+    "progress_percent_at_seed": "31.7872"
+  },
+  "MSN_PERSKU_PTS": {
+    "id": "2cd353cc-2d5f-43d8-a8a3-bf7f03a6249d",
+    "banner_url": "https://vcst-qa.govirto.com/cms-content/assets/agent-test/loyalty-missions/msn-banner-per-sku.svg"
+  },
+  "ORDER_REP_PLACED": {
+    "id": "a037c69d-7b41-41a3-ba90-15817f19a553",
+    "createdDate": "2026-09-02T15:52:19.8822992Z",
+    "customerId": "31c6feef-f7b2-46ae-a965-1b94280e7ef0"
+  },
+  "ORDER_BUYER_PLACED": {
+    "id": "2d1ff582-9b63-4509-9c5f-ea9ed57cb2c5",
+    "createdDate": "2026-09-19T08:53:08.4636076Z",
+    "customerId": "2f917069-fea7-4a6a-8d80-0899aa0a0586"
+  },
+  "ORDER_NOT_SERVED": {
+    "id": "d0af627e-373a-42db-b156-c6dbab15f40f",
+    "createdDate": "2026-09-02T15:52:28.2422314Z",
+    "customerId": "31c6feef-f7b2-46ae-a965-1b94280e7ef0"
+  },
+  "SR_REP_LOCKABLE": {
+    "id": "85b99e4d-517c-4143-85b2-616eceddd545",
+    "user_id": "2461c44f-b3a2-42d8-a910-e4eb5377fb03"
+  },
+  "PROD_CMP_A": {
+    "id": "b2c64e9c-62f6-4538-87f8-71acf42f9e4e"
+  },
+  "PROD_CMP_B": {
+    "id": "74f75fa4-4fe7-4052-9b24-bcc8678a4d84"
+  },
+  "PROD_PROP_PRICE": {
+    "id": "64feae37-d2cb-45ff-a319-c2172fb69bcc"
+  },
+  "PROD_LONGNAME": {
+    "id": "5cc421f6-d629-487f-a591-7caa91530026"
+  },
+  "PROD_CMP_FILL_1": {
+    "id": "84cd9d11-99ce-4eb5-8119-51a3aa93303d"
+  },
+  "PROD_CMP_FILL_2": {
+    "id": "29875701-7aa3-41c3-86f4-b3d660ccba44"
+  },
+  "PROD_MOQ": {
+    "id": "06f663b7-9bde-4fc5-bb6c-94c4a3d58a34"
+  },
+  "PROD_PACK": {
+    "id": "2666922f-e94e-46fe-aa3f-c0e3131ab11c"
+  },
+  "PROD_CMP_C": {
+    "id": "f305d153-a7ef-45db-bf4d-94a2821e3ae8"
+  },
+  "PROD_CMP_PARENT": {
+    "id": "ab1384e5-9e94-4f1f-a353-b455a8d7dd68"
+  },
+  "PROD_CMP_CHILD": {
+    "id": "6b254d6a-5c8b-4522-84f6-78b1c9b4ca7d"
+  },
+  "PROD_CMP_NOCAT": {
+    "id": "26264b9b-3241-4255-a5e3-62875afa4a0f"
+  },
+  "CFG_DUPLABEL": {
+    "id": "6836b85c-398c-42b1-9b89-c867fa460f2c"
+  },
+  "PROD_CMP_VARIATIONS": {
+    "id": "56d839e7-c86c-49a2-a32e-5add2766b742"
+  },
+  "ORG_LOY_A": {
+    "userId": "8e31d1d9-d7c1-4514-93c7-92376aac423a",
+    "contactId": "8fcfbd67-8f16-4ad3-80ed-4a5ac0e3b8e4",
+    "org_id": "12b52a61-6dc0-4aa7-9e62-a5eb57e12d4f",
+    "sibling_org_id": "23525b44-f0d0-43a4-b45e-b162080a4d29",
+    "earn_points_expected": "30000",
+    "balance_at_seed": "0"
+  },
+  "ORG_LOY_B": {
+    "userId": "71297bdc-28cc-4568-94cd-d4e729553f7b",
+    "contactId": "94f5696a-9bfb-4fd4-869b-8892a55e9a0c",
+    "org_id": "12b52a61-6dc0-4aa7-9e62-a5eb57e12d4f",
+    "earn_points_expected": "90000",
+    "balance_at_seed": "0"
+  },
+  "ORG_LOY_LOCKED": {
+    "userId": "762105ea-f1f4-4968-adab-a91735710aea",
+    "contactId": "dbcb0c07-db61-44b4-a4f7-cf2e40b26a3c",
+    "org_id": "12b52a61-6dc0-4aa7-9e62-a5eb57e12d4f",
+    "balance_at_seed": "0",
+    "membershipId": "fe542ef3-b817-4bdd-aba0-0aaede66a0b8"
+  },
+  "LOY_PERSONAL_NOORG": {
+    "userId": "2cdf9bb1-bfef-424c-a68f-b371e37f1bc1",
+    "contactId": "3f846e76-a40e-446c-aa71-662f95b002dd",
+    "balance_at_seed": "38916",
+    "cheapest_pts_sku": "AGENT-TEST-MSN-E2E-PERSKU-PTS",
+    "cheapest_pts_price": "1",
+    "dearest_pts_sku": "md351822",
+    "dearest_pts_price": "552"
+  },
+  "ORG_LOY_MISSION": {
+    "id": "ba383695-d833-40d9-a920-ee565d3283c6",
+    "name": "AGENT-TEST-MSN-ORGLOY-20260914092256-79fa",
+    "run_id": "20260914092256-79fa",
+    "seeded_at": "2026-09-14T09:22:57.588Z"
+  },
+  "ORG_LOY_MISSION_2": {
+    "id": "c2c3dffb-fef2-43aa-9238-df6760965c8b",
+    "name": "AGENT-TEST-MSN-ORGLOY-M2-20260914092256-84e5",
+    "run_id": "20260914092256-84e5",
+    "seeded_at": "2026-09-14T09:22:57.588Z"
+  },
+  "ORG_LOY_MISSION_PARTIAL": {
+    "id": "7d30cc17-df1c-4dc3-ab52-52f1e74dfee7",
+    "name": "AGENT-TEST-MSN-ORGLOY-P2-20260914092257-69ac",
+    "run_id": "20260914092257-69ac",
+    "seeded_at": "2026-09-14T09:22:57.588Z"
+  },
+  "MULTI_ORG_LOY_POOLS": {
+    "user_email": "agent-test-multiorg-alt-20260803@yopmail.com",
+    "user_id": "76c999e3-cb45-49d9-b128-880a553706df",
+    "techflow_org_id": "96f109a7-9010-4691-b6a1-bef25cca3d04",
+    "buildright_org_id": "23525b44-f0d0-43a4-b45e-b162080a4d29",
+    "techflow_balance_at_seed": "98916",
+    "buildright_balance_at_seed": "219416",
+    "user_balance_at_seed": "68916",
+    "techflow_earn_qty": "3",
+    "buildright_earn_qty": "7",
+    "user_earn_qty": "2",
+    "earn_points_per_unit": "30000",
+    "earn_sku": "QA-LOY-PRIO-001",
+    "store_mode_at_seed": "Customer",
+    "seeded_at": "2026-09-14T10:22:42.746Z"
+  },
+  "SR_REP_DOCS": {
+    "id": "3df3ccbc-fd3b-4422-bb53-6da186f8306f",
+    "user_id": "168063e4-a35c-457f-af4e-f99a202e988a"
+  },
+  "SR_REP_DOCS_WRITER": {
+    "id": "cde12dab-6d79-467c-a945-7048fefad6e6",
+    "user_id": "a15ca448-3bf5-4937-8a28-19e1828e3521"
+  },
+  "SR_DOC_PDF": {
+    "id": "d97e880c-0eda-4a34-8b15-5687b98584b2",
+    "file_id": "bfbd8f79fd3f4084b9160116a6f12902",
+    "url": "/api/files/bfbd8f79fd3f4084b9160116a6f12902"
+  },
+  "SR_DOC_DOCX": {
+    "id": "22ae1d8a-2029-4f55-a703-65fb97d3a2fa",
+    "file_id": "5e63e587a59f4a46955f3c90d5021ac3",
+    "url": "/api/files/5e63e587a59f4a46955f3c90d5021ac3"
+  },
+  "SR_DOC_XLSX": {
+    "id": "cc88a190-8ffc-4aeb-94aa-87958aaaf6f7",
+    "file_id": "074aeaf88b2d4eef8e26742461ed644f",
+    "url": "/api/files/074aeaf88b2d4eef8e26742461ed644f"
+  },
+  "SR_DOC_TXT": {
+    "id": "037f321c-d950-4ccd-b2c9-6c6f8c5f3ab7",
+    "file_id": "179a6787daad4488baf514e18d3f912b",
+    "url": "/api/files/179a6787daad4488baf514e18d3f912b"
+  },
+  "SR_DOC_PNG": {
+    "id": "b4d09afb-d8e1-45c5-a289-e984870382af",
+    "file_id": "c3a386fecc7041cab6c5b62b9ca4fd6d",
+    "url": "/api/files/c3a386fecc7041cab6c5b62b9ca4fd6d"
+  },
+  "SR_DOC_JPG": {
+    "id": "e29e6c5d-18c0-4429-ad95-d1eae2eb732e",
+    "file_id": "fa12819540924ca185f6e6c5da220043",
+    "url": "/api/files/fa12819540924ca185f6e6c5da220043"
+  },
+  "SR_DOC_UNKNOWN_EXT": {
+    "id": "0eee6c97-3007-4655-a12d-ca5c5611e681",
+    "file_id": "66cbdee7a4a2450bbe29a4ab1a18b3db",
+    "url": "/api/files/66cbdee7a4a2450bbe29a4ab1a18b3db"
+  },
+  "SR_DOC_UNICODE": {
+    "id": "7e23304e-9af8-46b2-88ff-2154a9dace26",
+    "file_id": "4b4402467e414a48a2aa584822deb11c",
+    "url": "/api/files/4b4402467e414a48a2aa584822deb11c"
+  },
+  "SR_DOC_LARGE": {
+    "id": "387d0b91-cfe3-4679-a7c6-3b46f275217b",
+    "file_id": "ba02f5eba52c46d6a9bb071e16aeb109",
+    "url": "/api/files/ba02f5eba52c46d6a9bb071e16aeb109"
+  },
+  "SR_DOC_FILLER_01": {
+    "id": "df789a88-2e38-4066-8440-5a2705b11d25",
+    "file_id": "713abad6a0424f43ac239a6bc6ecb5b5",
+    "url": "/api/files/713abad6a0424f43ac239a6bc6ecb5b5"
+  },
+  "SR_DOC_FILLER_02": {
+    "id": "858be15a-d11c-41a6-9a19-a8bc87304913",
+    "file_id": "1c466c3f20bb4ddfb25fc7fe3d0b34c4",
+    "url": "/api/files/1c466c3f20bb4ddfb25fc7fe3d0b34c4"
+  },
+  "SR_DOC_FILLER_03": {
+    "id": "210ad1e1-a0ff-4286-851b-132a862134f8",
+    "file_id": "94b373d3a0484e77bc26d5f0001297ee",
+    "url": "/api/files/94b373d3a0484e77bc26d5f0001297ee"
+  },
+  "SR_DOC_FILLER_04": {
+    "id": "78de74c0-2aa3-441d-b61f-85a44986dc52",
+    "file_id": "585b86aa83084c958d4ec0f26fffb7e1",
+    "url": "/api/files/585b86aa83084c958d4ec0f26fffb7e1"
+  },
+  "SR_DOC_FILLER_05": {
+    "id": "c2d3ac1a-293a-4e36-b127-f53877f6dfe6",
+    "file_id": "24b455ea8cb44a64a588ce6672d0c57f",
+    "url": "/api/files/24b455ea8cb44a64a588ce6672d0c57f"
+  },
+  "SR_DOC_FILLER_06": {
+    "id": "b5c31202-cfcd-4504-b787-3d0b0cba3f80",
+    "file_id": "1e59a2ac34084ff0bb271fd37153af0a",
+    "url": "/api/files/1e59a2ac34084ff0bb271fd37153af0a"
+  },
+  "SR_DOC_FILLER_07": {
+    "id": "9eeca812-707b-4f4d-a1f6-56848e89c881",
+    "file_id": "086c10c9551c400193f5a9ec9f931017",
+    "url": "/api/files/086c10c9551c400193f5a9ec9f931017"
+  },
+  "SR_ROWCAP_ORDER_ACME_NEW": {
+    "id": "a7681963-5c71-4c5e-8099-2a4f4e06c83b",
+    "number": "AGENT-TEST-SRO-ROWCAP-ACME-01"
+  },
+  "SR_ROWCAP_ORDER_ACME_CANCELLED": {
+    "id": "82c45d4a-e306-4593-9266-4956dd81c216",
+    "number": "AGENT-TEST-SRO-ROWCAP-ACME-07"
+  },
+  "SR_ROWCAP_ORDER_TECH_COMPLETED": {
+    "id": "3c13de67-a784-42bb-a612-c3f14d5392ad",
+    "number": "AGENT-TEST-SRO-ROWCAP-TECH-04"
+  },
+  "SR_I18N_SINGULAR_ORDER": {
+    "id": "620db19d-0ca1-4e88-bcde-4fc564003771",
+    "number": "AGENT-TEST-SRO-I18N-ACME3"
+  },
+  "SR_I18N_SINGULAR_CART": {
+    "id": "e37c4c44-23fb-406f-a16f-f8d05a23f408",
+    "name": "AGENT-TEST-SR-CART-I18N-ACME3"
+  },
+  "B2B_STORE_MEMBERSHIP_ROLES": {
+    "pre_state": "[\"Organization employee\"]",
+    "captured_at": "2026-09-18T18:54:32.537Z",
+    "seeded_values": "Organization employee;Purchasing agent;Organization maintainer;Sales Representative;Advanced Sales Representative",
+    "sales_rep_roles": "Sales Representative;Advanced Sales Representative",
+    "seeded_values_json": "[\"Organization employee\",\"Purchasing agent\",\"Organization maintainer\",\"Sales Representative\",\"Advanced Sales Representative\"]",
+    "narrowed_values": "[\"Organization employee\",\"Organization maintainer\",\"Sales Representative\",\"Advanced Sales Representative\"]",
+    "narrowed_omitted_role": "Purchasing agent"
   }
 }

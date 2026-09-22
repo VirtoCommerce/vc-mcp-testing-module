@@ -50,7 +50,6 @@ These are the artifacts customers will reference in their own docs, training, an
 
 | Artifact | Contract |
 |----------|----------|
-| `skills/qa-process/test-process-lifecycle.md` | The 7 phases, their entry/exit criteria, and the phase-to-skill mapping table. |
 | `skills/qa-test-cases-generator/test-case-template.md` | The 15-column Enriched CSV format. Column names, semantics, order. |
 | `skills/qa-evidence/evidence-capture-policy.md` | Evidence capture rules, retention, naming. |
 | `skills/qa-defect/defect-lifecycle-workflow.md` | JIRA Bug Workflow states + transitions, severity-to-priority mapping. |
@@ -59,6 +58,8 @@ These are the artifacts customers will reference in their own docs, training, an
 | `.claude/rules/test-data.md` | `@td()` syntax, no-hardcode rule, four data layers. |
 | `knowledge/agents/qa/shared-instructions.md` | Four-layer agent architecture, PASS/FAIL/AMBIGUOUS classifier, evidence standards. |
 | BL ID convention | `BL-{DOMAIN}-{NNN}` format. Severity tags. |
+
+> **Removed from this lock 2026-09-08:** `skills/qa-process/test-process-lifecycle.md` (zero inbound consumers). Recorded as `**BREAKING:** **Tier A:**` in [`CHANGELOG.md`](../CHANGELOG.md) §Component consolidation, with the phase → command migration; no version bump because the `vc-qa` surface currently ships as project-scoped components, not as a versioned plugin.
 | Severity tags | `[P0-revenue]`, `[P0-security]`, `[P1-data]`, `[P1-ux]`, `[P2-ux]`. |
 
 ## Changelog Discipline
@@ -74,11 +75,12 @@ The plugin auto-updates through the Claude Code plugin manager. To bound upgrade
 
 - Customers **pin a version range**, not a specific version. Recommended: `^1.0` (any 1.x, no major bumps).
 - Customers can opt into prereleases with `1.x-beta` ranges.
-- The distributed plugin's version is the single source of truth in [`plugins/vc-fix/.claude-plugin/plugin.json`](../plugins/vc-fix/.claude-plugin/plugin.json) and the marketplace [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json) (mirrored in `package.json`); the Claude Code plugin manager tracks the installed version against the pinned range.
+- **Each plugin carries its own version** in its own [`plugins/<name>/.claude-plugin/plugin.json`](../plugins/) — that file is the single source of truth for that plugin, and the Claude Code plugin manager tracks the installed version against the pinned range. `vc-fix` and `vc-perf` version independently.
+- **The marketplace's top-level `version` in [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json) is the CATALOG's own version, not a plugin's** — it is bumped when the listing itself changes (a plugin added/removed, a description or source path edited). It is *not* required to equal any plugin's version, and did not need to be once the catalog listed more than one plugin. `package.json` `version` is the repo/toolset line (tagged `vX.Y.Z`); nothing reads it programmatically, and it is **not** a mirror of any plugin version.
 
 ## Pre-v1.0 Status
 
-**Currently:** v0.6.0, developed on `main` and distributed via the `vc-tools` marketplace (`/plugin install vc-fix@vc-tools` — currently the only listed plugin; `vc-qa`'s fuller content lives in this repo but isn't marketplace-listed). Nothing is frozen yet. Tier A artifacts are still being finalized — they get the v1.0 freeze stamp once the standardization contract is locked.
+**Currently:** developed on `main` and distributed via the `vc-tools` marketplace (catalog `0.9.4`), which lists **two** plugins — `vc-fix` (`0.9.0`, `/plugin install vc-fix@vc-tools`) and `vc-perf` (`0.2.7`, depends on `vc-fix >= 0.7.0`). `vc-qa`'s fuller content lives in this repo under `.claude/` as project-scoped components and isn't marketplace-listed. Nothing is frozen yet. Tier A artifacts are still being finalized — they get the v1.0 freeze stamp once the standardization contract is locked.
 
 Until then: any consumer of this repo should expect frequent changes and pin to a specific commit, not a branch tip.
 

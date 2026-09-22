@@ -5,9 +5,9 @@ Automated regression and test lifecycle management for Virto Commerce via GitHub
 ## Architecture
 
 ```
-GitHub Actions
+GitHub Actions / CLI / Docker
   │
-  ├── regression.yml ──── ci/run-regression.ts ──── Execute test suites
+  ├── npm run ci:regression ─ ci/run-regression.ts ─ Execute test suites
   │                             ├── Reads suite CSVs from regression/suites/
   │                             ├── Reads agent defs from ci/agents/
   │                             ├── Calls Agent SDK query() with Playwright MCP
@@ -69,19 +69,19 @@ docker run --rm \
 ### Run via GitHub Actions
 
 1. Go to **Actions** tab
-2. Select **Regression Tests** or **Full Test Cycle**
+2. Select **Full Test Cycle** (there is no Regression workflow — removed 2026-09-08; see below)
 3. Click **Run workflow** and configure inputs
 
 ## Pipelines
 
-### Regression Only (`regression.yml`)
+### Regression Only (`npm run ci:regression`)
 
 Executes test suites against the live environment.
 
-**Triggers:**
-- Manual (`workflow_dispatch`)
-- Daily smoke: Mon-Fri 6:00 AM UTC (suite 042, $5 budget)
-- Weekly full: Sunday 2:00 AM UTC (all 110 suites, $80 budget)
+**Invoked by:** the CLI alias, the Docker image above, or `full-cycle.yml` Phase 3 (Regression). There is **no
+regression GitHub Actions workflow** — `regression.yml` was removed 2026-09-08 after one run in its
+lifetime (2026-02-11, scheduled, failed in 72 s). Nothing scheduled or manual triggers a regression
+run today; a run is something a person or an agent starts.
 
 ### Full Cycle (`full-cycle.yml`)
 
@@ -181,8 +181,8 @@ npm run ci:fix
 
 | Selection | Suites | Description |
 |-----------|--------|-------------|
-| `smoke` | 042, 078 | Daily pre-deploy validation |
-| `critical` | 042, 078, 039, 044, 049 | P0 revenue-critical suites |
+| `smoke` | 042, 078, 078b, 078c, 078d | Daily pre-deploy validation |
+| `critical` | 042, 078, 078b, 078c, 078d, 039, 044, 049 | P0 revenue-critical suites |
 | `sprint` | Plan-driven (`sprint-*-summary.json`) | Before sprint release |
 | `full` | All 110 suites | Before production release |
 | `frontend` | All `Frontend/` suites (50) | Frontend only |
@@ -195,8 +195,8 @@ Selection groups are defined in `config/test-suites.json` (`selections`) and loa
 
 ```bash
 npm run ci:regression          # Run regression (set SUITE_SELECTION env var)
-npm run ci:smoke               # Smoke tests (042, 078)
-npm run ci:critical            # P0 suites (042, 078, 039, 044, 049)
+npm run ci:smoke               # Smoke tests (042, 078, 078b-d)
+npm run ci:critical            # P0 suites (042, 078, 078b-d, 039, 044, 049)
 npm run ci:frontend            # Frontend suites
 npm run ci:backend             # Backend suites
 npm run ci:full                # All 110 suites ($80 budget)

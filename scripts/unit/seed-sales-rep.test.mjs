@@ -10,11 +10,9 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resetSecurityPassword } from '../../scripts/lib/seed-common.mjs';
 import { resolveRole, roleByKey } from '../../scripts/lib/user-roles.mjs';
-import { roleUsers } from '../../scripts/lib/user-provision.mjs';
+import { roleUsers, hasStaleLockout } from '../../scripts/lib/user-provision.mjs';
 import {
-  LAYOUT_REP, MIN_SERVED_ORGS_FOR_LAYOUT, DISPOSABLE_LAYOUT_REP_KEYS, isDisposableLayoutRep,
-  LAYOUT_PREF_PREFIX, LAYOUT_SCOPES, layoutPreferenceName, isLayoutPreference,
-  parseServedOrgs, SALES_REPS_COLUMNS, RUNTIME_ID_COLUMNS, GUID_RE, REP_EMAIL_RE,
+  LAYOUT_REP, LAYOUT_PREF_PREFIX, LAYOUT_SCOPES, layoutPreferenceName, isLayoutPreference, GUID_RE, repFixtureStatus,
 } from '../../scripts/seed-data/sales-rep/sales-rep-layout-specs.mjs';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -87,19 +85,6 @@ test('the SR org-roles are NOT provisioned by the generic personal-user seeder (
 
 // ── VCST-5367 saved-layout fixture (sales-rep-layout-specs.mjs) ───────────────
 
-test('the disposable-layout allowlist contains ONLY SR_REP_LAYOUT — never a shared rep', () => {
-  assert.deepEqual(DISPOSABLE_LAYOUT_REP_KEYS, ['SR_REP_LAYOUT']);
-  assert.equal(isDisposableLayoutRep('SR_REP_LAYOUT'), true);
-  for (const shared of ['SR_REP_PRIMARY', 'SR_REP_ACME2', 'SR_REP_LOCKED', 'SR_REP_BLOCKED',
-    'SR_REP_EXCLUSIVE_TECHFLOW', 'SR_REP_NOCUSTOMERS', 'SR_REP_PAGING', 'SR_REP_SECOND_STORE']) {
-    assert.equal(isDisposableLayoutRep(shared), false,
-      `${shared} must not be wiped — SR_REP_PRIMARY's never-saved (null) layout baseline backs ~40 cases`);
-  }
-  assert.equal(isDisposableLayoutRep(''), false);
-  assert.equal(isDisposableLayoutRep(undefined), false);
-  assert.equal(isDisposableLayoutRep(' SR_REP_LAYOUT '), true, 'tolerates CSV whitespace');
-});
-
 test('layoutPreferenceName builds SalesRepLayout.{scope}[.{storeId}]', () => {
   assert.equal(layoutPreferenceName('dashboard'), 'SalesRepLayout.dashboard');
   assert.equal(layoutPreferenceName('customerProfile', 'B2B-store'), 'SalesRepLayout.customerProfile.B2B-store');
@@ -119,32 +104,6 @@ test('isLayoutPreference sweeps every layout key shape and nothing else', () => 
   for (const foreign of ['SalesRepLayoutOther', 'Layout.dashboard', 'PersistedGridState', '', null]) {
     assert.equal(isLayoutPreference(foreign), false, `must not match ${JSON.stringify(foreign)}`);
   }
-});
-
-test('parseServedOrgs splits org keys and the PAGING:N form', () => {
-  assert.deepEqual(parseServedOrgs('ORG-001;ORG-002'), { orgKeys: ['ORG-001', 'ORG-002'], pagingCount: 0 });
-  assert.deepEqual(parseServedOrgs(' ORG-001 ; ORG-002 ;'), { orgKeys: ['ORG-001', 'ORG-002'], pagingCount: 0 });
-  assert.deepEqual(parseServedOrgs(''), { orgKeys: [], pagingCount: 0 }, 'SR_REP_NOCUSTOMERS serves nothing');
-  assert.deepEqual(parseServedOrgs('PAGING:12'), { orgKeys: [], pagingCount: 12 });
-  assert.deepEqual(parseServedOrgs('PAGING:'), { orgKeys: [], pagingCount: 12 }, 'defaults to 12');
-});
-
-test('SR_REP_LAYOUT is present in the committed CSV, GUID-free, and serves enough orgs', () => {
-  assert.deepEqual(repRows.head, SALES_REPS_COLUMNS, 'CSV column contract');
-  const row = repRows.rows.find((r) => r.rep_key === LAYOUT_REP.repKey);
-  assert.ok(row, `${LAYOUT_REP.repKey} row exists`);
-  assert.equal(row.email, LAYOUT_REP.email);
-  assert.equal(row.store, LAYOUT_REP.store);
-  assert.equal(row.seeded, 'true');
-  assert.equal(row.is_locked, 'false');
-  assert.equal(row.lock_membership_org, '');
-  assert.ok(REP_EMAIL_RE.test(row.email), 'AGENT-TEST- sweep convention (agent-test-*@example.com)');
-  assert.equal(row.full_name, `${row.first_name} ${row.last_name}`, 'the seeder looks the rep up BY full_name');
-  const served = parseServedOrgs(row.served_orgs).orgKeys;
-  assert.ok(new Set(served).size >= MIN_SERVED_ORGS_FOR_LAYOUT,
-    'customerProfile scope needs a customer to open AND the scope-wide case needs a second one');
-  assert.deepEqual(served, LAYOUT_REP.servedOrgKeys);
-  for (const col of RUNTIME_ID_COLUMNS) assert.equal(row[col], '', `${col} stays empty — runtime GUIDs live in aliases.<env>.json`);
 });
 
 test('no committed rep row carries a runtime platform GUID or a password literal', () => {
@@ -169,4 +128,43 @@ test('SR_REP_LAYOUT is registered as a CSV-backed @td alias with id -> contact_i
   for (const [k, v] of Object.entries(def)) {
     if (typeof v === 'string') assert.ok(!GUID_RE.test(v.trim()), `${LAYOUT_REP.aliasName}.${k} must not pin a GUID in the committed base (DV-021)`);
   }
+});
+
+// --- Stale-lockout self-heal (REG-2026-08-24-1806) -------------------------------------------
+// A password reset does NOT clear LockoutEnd/accessFailedCount, so a rep repaired by a reseed can
+// still be unauthenticable. seed-sales-rep.mjs now clears it, delegating the "may I clear this?"
+// decision to repFixtureStatus() + user-provision's hasStaleLockout() — tested here in composition,
+// because the bug this prevents is a WRONG DECISION (clearing SR_REP_BLOCKED's deliberate lockout,
+// or skipping a real one), not a wrong HTTP call.
+
+test('repFixtureStatus: only is_locked=true declares Locked; loose CSV booleans match csvBool', () => {
+  assert.equal(repFixtureStatus({ is_locked: 'true' }), 'Locked');
+  for (const v of ['TRUE', 'Yes', 'y', '1']) assert.equal(repFixtureStatus({ is_locked: v }), 'Locked', `"${v}" is truthy for csvBool`);
+  for (const v of ['false', 'No', '', '0', undefined, null]) assert.equal(repFixtureStatus({ is_locked: v }), 'Approved', `"${v}" must not be read as Locked`);
+});
+
+test('repFixtureStatus: SR_REP_BLOCKED is the ONLY rep row declaring Locked', () => {
+  const locked = repRows.rows.filter((r) => repFixtureStatus(r) === 'Locked').map((r) => r.rep_key);
+  assert.deepEqual(locked, ['SR_REP_BLOCKED'],
+    'a second Locked rep would be silently un-authenticable; a zero-Locked set would mean the blocked fixture stopped being blocked');
+});
+
+test('stale-lockout decision: cleared for a normal rep, NEVER for the deliberately-blocked one', () => {
+  const blocked = repRows.rows.find((r) => r.rep_key === 'SR_REP_BLOCKED');
+  const primary = repRows.rows.find((r) => r.rep_key === 'SR_REP_PRIMARY');
+  const future = new Date(Date.now() + 3_600_000).toISOString();
+
+  // The exact live shapes observed on vcst before the repair.
+  assert.equal(hasStaleLockout({ lockoutEnd: future, accessFailedCount: 2 }, repFixtureStatus(primary)), true);
+  assert.equal(hasStaleLockout({ lockoutEnd: null, accessFailedCount: 1 }, repFixtureStatus(primary)), true,
+    'a failed-attempt counter with no lockout window still burns the account toward one');
+
+  // SR_REP_BLOCKED's 9999 lockout IS the fixture — clearing it would silently delete the
+  // "blocked rep is excluded from customerSalesReps" coverage (VCST-4907 #5).
+  assert.equal(hasStaleLockout({ lockoutEnd: '9999-12-31T23:59:59Z', accessFailedCount: 0 }, repFixtureStatus(blocked)), false);
+
+  // A clean account is a no-op, so the seeder stays idempotent.
+  assert.equal(hasStaleLockout({ lockoutEnd: null, accessFailedCount: 0 }, repFixtureStatus(primary)), false);
+  assert.equal(hasStaleLockout({ lockoutEnd: '2020-01-01T00:00:00Z', accessFailedCount: 0 }, repFixtureStatus(primary)), false,
+    'an EXPIRED lockout window is inert — rewriting it would be a pointless live write');
 });

@@ -1,34 +1,45 @@
 # Agents Reference
 
-19 agents as flat `agents/*.md` files at the plugin root, across three teams (QA, BA, Developers). Plugin agent discovery is non-recursive, so agents are NOT nested in team subfolders; the per-team `shared-instructions.md` and the agents README live under `knowledge/agents/` (a plain reference dir, not scanned as components). See `knowledge/agents/README.md` for full documentation. QA agents use a **four-layer prompt architecture** — business logic (invariants), domain knowledge (judgment), skill set (technique), and design decisions (constraints).
+Agents are flat `.claude/agents/*.md` files (`ls` them for the roster), across three teams (QA, BA, Developers). Agent discovery is non-recursive, so agents are NOT nested in team subfolders; the per-team `shared-instructions.md` and the agents README live under `knowledge/agents/` (a plain reference dir, not scanned as components). See `knowledge/agents/README.md` for full documentation. QA agents use a **four-layer prompt architecture** — business logic (invariants), domain knowledge (judgment), skill set (technique), and design decisions (constraints).
 
-**Shared knowledge bases** — `ls .claude/knowledge/` for the current inventory; each file opens with its own scope. Grouped by directory: `api/` (api-auth, graphiql-interaction, graphql-schema, graphql-test-cases-runner, order-creation-matrix, platform-patterns) · `architecture/` (vc-frontend-architecture, vc-module-architecture) · `automation/` (browser-quirks, storefront-config-flags, storefront-selectors) · `ba/` (virto-doc-style) · `diagnostics/` (skill-expectations) · `domain/` (catalog, products, sitemap, store-settings, white-labeling) · `execution/` (debugging-signals, live-discovery, module-suite-map, performance-thresholds, test-data-authoring, test-execution-preflight, test-runner-tags, ticket-routing, tracker-ops) · `oracles/` (business-logic, critical-ui-scope, e-commerce-edge-cases-library, vc-bug-catalog).
+Knowledge-base inventory and the read-before-you-write rules (`graphql-schema.md`, `release-ledger.md`, …): [`.claude/ROUTING.md`](../ROUTING.md) §Knowledge bases.
 
-**Non-obvious read-before-you-write rules** (these do NOT follow from the filenames):
-- `api/graphql-schema.md` — MUST be consulted before writing or reviewing any GraphQL query/mutation (field names drift; verify against live introspection).
-- `api/graphql-test-cases-runner.md` — the **canonical authoring contract** for runner-native GraphQL test cases (`scripts/graphql/graphql-runner.ts`): full tag grammar, predicate shapes, `@td()` resolver, capture chaining. Every agent that writes/reviews/migrates GraphQL cases MUST read it first; gold-standard reference suite: `regression/suites/Backend/graphql/050i-graphql-configurations.csv`.
-- `execution/live-discovery.md` — read before authoring any test naming a product / address / cart / coupon entity that may drift between seeds.
-- `oracles/critical-ui-scope.md` — **currently UNCOVERED** (its only covering suite `048b` was removed 2026-07-25, so every applicable cell is `GAP`); it is the scope definition + `/qa-design` audit reference, not a regression gate.
-- `oracles/vc-bug-catalog.md` — the "Familiar Problems" oracle (HICCUPPS-F) for exploratory sessions + Bad Neighborhood Tours.
-- Note: `test-case-template.md` (enriched CSV column spec) lives in `skills/qa-test-cases-generator/`, NOT in `knowledge/`.
+## MCP servers & browser essentials
 
-## QA Team (11 agents + shared-instructions)
+Project `.mcp.json` (gitignored, per machine): `playwright-chrome` / `playwright-firefox` / `playwright-edge` (`config/mcp-playwright-*.config.json`), `postman`, `github`, `context7`; user/IDE level: Chrome DevTools, Azure, Atlassian, Figma, Microsoft Learn, **VirtoOZ** (primary VC docs via `/vc-docs`). Browser login secrets go through Playwright MCP `--secrets .env.playwright.local` — type the **bare key name** (`ORG_USER_PASSWORD`), never `{{VAR}}`: the miss is silent and hook-blocked. **Chrome DevTools MCP has no `--secrets`**; a DevTools brief must name its auth path (persistent profile / mint an account / delegate to a Playwright lane). Full server table, `--secrets` setup and the DevTools auth options: [`knowledge/execution/browser-lanes.md`](../knowledge/execution/browser-lanes.md).
+
+**Unclear product behaviour ⇒ ask VirtoOZ first.** Any agent, any task: when what the platform or the storefront is *supposed* to do is not clear, query VirtoOZ via `/vc-docs` before acting on a guess — the rule and its 3-source caveat live in [`../../CLAUDE.md`](../../CLAUDE.md) §Essential Rules → *Product context*.
+
+**But a doc is authoritative for MECHANISM, not SURFACE** — exact UI strings, control types, layout and counts are `{OBSERVED}`, never `{DOC}` (a user guide paraphrases labels by design); a documented rule binds only to the surface the doc names; and docs contradicting an existing case, suite or knowledge file is a trigger to OBSERVE, never a licence to overwrite it. **Delegation teeth, which is this file's business: a dispatch brief must never instruct a subagent to prefer a doc over the artifact it is about to edit** — the artifact may be the only source written from the screen, and the subagent cannot re-check the brief's premise. Full rule, the enforceable quote test and the measured incident (VCST-5959: a doc-first brief put two nonexistent UI labels into a suite that had them right): [`../knowledge/agents/qa/shared-instructions.md`](../knowledge/agents/qa/shared-instructions.md) §What VirtoOZ is authoritative FOR.
+
+## Browser Automation Rules
+
+- Install browsers: `npx playwright install chromium firefox` (Edge uses the system-installed `msedge` channel).
+- Default to `chromium` (not `chrome`) for Playwright MCP browser launches. WebKit is NOT supported on Windows — fall back to Edge or Chrome immediately without attempting installation.
+- Always verify MCP server config uses correct browser engine names: `chromium`, `firefox`, `webkit` (not `chrome`, `edge`).
+- After any MCP config change, remind the user that a server restart is required before the new config takes effect.
+- Browser configs set viewport to 1920x1080, isolated contexts, HAR capture, and **video capture — which
+  records ALWAYS, not on failure** (`recordVideo` is a browser-context option; `retain-on-failure` is a
+  *test-runner* setting and does not exist here). Videos land in `test-results/<browser>/video/`
+  (gitignored, pruned with the rest of `test-results/`). Added 2026-09-11 — before that the three configs
+  carried **no** video setting at all while this line claimed "video on failure", so a reader who needed a
+  recording found none. **A config change needs an MCP server restart before it takes effect.**
+
+## QA Team (+ shared-instructions)
 
 | Agent | Model | Purpose |
 |-------|-------|---------|
-| **qa-lead-orchestrator** | sonnet | Orchestrates testing, delegates to specialists, manages JIRA workflow, makes go/no-go decisions. **Also serves as the independent per-step verifier in `/qa-test`** (§Verifier Mode): a fresh, gate-scoped instance — never the pipeline's inline orchestrator and never the step's own doer — re-derives evidence from source and returns `APPROVE`/`REJECT`. Delegates any live re-check to a specialist on a **different browser lane** than the doer used. |
+| **qa-lead-orchestrator** | sonnet | Orchestrates testing, delegates to specialists, makes go/no-go decisions. **Sole custodian of ticket STATUS** — a transition is an outward-facing write to a shared board, so no specialist, runner, verifier, doer or sub-agent ever makes one; they report it up (§Status custodian, single source of truth `knowledge/execution/ticket-status-transitions.md`: at most two hops per run — the opening one at `1a` when the `feature-test` route resolves, never confirmed, and the closing one at 5-status, always confirmed, `BLOCKED` transitions nothing but requires a blocker comment, never past `TESTED`, every hop AND skip recorded in `summary.json.status_transitions[]`). **Also serves as the independent per-step verifier in `/qa-test`** (§Verifier Mode): a fresh, gate-scoped instance — never the pipeline's inline orchestrator and never the step's own doer — re-derives evidence from source and returns `APPROVE`/`REJECT`. Delegates any live re-check to a specialist on a **different browser lane** than the doer used. |
 | **qa-frontend-expert** | opus | Customer-facing storefront, user journeys, checkout flows, mobile, cross-browser |
 | **qa-backend-expert** | opus | Platform APIs, GraphQL xAPI, Modules, Admin SPA, background jobs |
-| **qa-testing-expert** | opus | Interactive testing - UI verification, Figma comparison, debugging |
-| **test-management-specialist** | sonnet | Test planning, test case writing, coverage tracking, TestRail artifacts |
+| **qa-testing-expert** | opus | Interactive testing - UI verification, Claude Design spec comparison (Figma is a manual fallback only), debugging |
+| **test-management-specialist** | sonnet | Test planning, test case writing, coverage tracking, TestRail artifacts. **Sole owner of `/qa-test`'s corpus step (Artifact A)** — ONE dispatch covering BOTH phases: `2a` triages the existing corpus and applies the `REPAIR` edits, *then* the same agent authors only the surviving gaps. Merged 2026-09-11 so the run keeps a single writer on `regression/suites/**` ([`../skills/qa-test/coverage-triage.md`](../skills/qa-test/coverage-triage.md) §2a-own) |
 | **test-data-engineer** | opus | Owns test-data end-to-end: designs cross-entity combinations, **authors** the seeders / fixtures / `@td()` aliases / drift-guard validators + their unit tests, **AND RUNS them live** — real seed/teardown against a non-prod env + `td:reconcile` (Node + Platform-API, no browser) (`/qa-generate-data` + `/qa-seed-data`). Write-capable in THIS repo only (`scripts/seed-data/`, `test-data/`); no external repos. Canonical owner — `test-management-specialist` delegates fixture authoring here; `qa-backend/frontend-expert` do only the **browser** confirmation (storefront/Admin-SPA render + suite run) the engineer can't. See `knowledge/execution/test-data-authoring.md`. |
-| **ui-ux-expert** | sonnet | Storybook component testing, WCAG 2.1 AA accessibility, design system |
+| **ui-ux-expert** | sonnet | Storybook component testing, WCAG 2.2 AA accessibility, design system, and the **`vs. DESIGN` axis** — diffing declared tokens / control geometry / icon name→glyph parity against a Claude Design project (`DesignSync` → `scripts/lib/verify-design-spec.ts`, methodology `skills/qa-design/claude-design-verification.md`). Runs by default against the project **the ticket's own Prototype link names** (no global default — `DESIGN_SYSTEM_PROJECT_ID` removed 2026-09-03; no design link ⇒ `SKIPPED`); precedence `BL-UI invariant > design spec > UX heuristic`; reports `SKIPPED`, never PASS, where `/design-consent` is unavailable (web sessions, CI), and `KNOWN_DIVERGENCE` — advisory, never filed — for a mismatch the spec itself declares unshipped |
 | **regression-orchestrator** | sonnet | Parallel regression + smoke mode, retries, browser fallback, consolidated reports |
-| **autonomous-regression-orchestrator** | sonnet | Agent Teams regression: token bucket, exponential backoff, failure recovery, JIRA integration |
-| **autonomous-test-runner** | sonnet | Parameterized template for Agent Teams mode suite execution (used by autonomous-regression-orchestrator) |
-| **test-runner-agent** | sonnet | Parameterized template for standard suite execution (used by regression-orchestrator) |
+| **test-runner-agent** | sonnet | Parameterized template for standard suite execution — runs a bounded batch of suites on one slot (used by regression-orchestrator) |
 
-## BA Team (4 agents + shared-instructions)
+## BA Team (+ shared-instructions)
 
 Team framework: `knowledge/agents/ba/shared-instructions.md` (VirtoOZ-first sourcing, the four documentation audiences, no-hardcode, external-write discipline, output policy).
 
@@ -45,20 +56,20 @@ Team framework: `knowledge/agents/ba/shared-instructions.md` (VirtoOZ-first sour
 - `ba-story-writer` consumes other agents' output (no browser/GitHub); `ba-doc-writer` uses a browser **only** to capture real screenshots for Customer/Admin docs
 - **Documentation audiences:** `ba-doc-writer` writes for four audiences — Customer (StorefrontUserGuide style), Admin (PlatformUserGuide style), Developer (PlatformDeveloperGuide style), and **Sales** (virtocommerce.com benefit-led marketing). Invoked via `/ba-analyze docs [audience]`. Virto's customers/partners are B2B enterprise organizations — see `reference_virto_customer_base` memory.
 
-## Developers Team (4 agents + shared-instructions)
+## Developers Team (+ shared-instructions)
 
 The **only write-capable team** — clone / branch / commit / push / open PR on external VirtoCommerce
 product repos via local `git`/`gh`. QA agents stay read-only on GitHub; write scope is isolated here.
 Driven by `/qa-fix` (interactive twin of `ci/run-fix-cycle.ts`), reusing `ci/config/fix-repos.json` +
 `ci/lib/repo-router.ts` + `ci/lib/module-registry.ts`. One developer + one reviewer **per repo kind**,
-picked by the routed repo's `kind`. Gate ladder + no-auto-merge: `.claude/rules/quality-gates.md`.
+picked by the routed repo's `kind`. Gate ladder + no-auto-merge: `.claude/knowledge/execution/quality-gates.md`.
 
 | Agent | Model | Purpose |
 |-------|-------|---------|
 | **fullstack-backend** | opus | Fixes ONE `vc-module-*` / `vc-platform` repo (.NET 10 / C# + the module's Admin SPA Angular). Reproduce-as-test → minimal fix → open PR. Interactive twin of `ci/agents/fix-backend-agent.md`. Skills: `/dotnet-unit-test`, `/dotnet-fix`, `/angular-admin`. |
-| **backend-reviewer** | opus | Gate-4 reviewer of the C#/Angular local diff before the PR: single-repo, no test edits, no breaking changes, BL-* preserved, minimal & idiomatic. |
+| **backend-reviewer** | sonnet | Gate-4 reviewer of the C#/Angular local diff before the PR: single-repo, no test edits, no breaking changes, BL-* preserved, minimal & idiomatic. |
 | **fullstack-frontend** | opus | Fixes the `vc-frontend` storefront (Vue 3 / TS / Vite + in-repo UI kit + Storybook), **and** a `module` repo's declared embedded frontend sub-app on the same stack (e.g. `vc-module-pagebuilder`'s `src/VirtoCommerce.PageBuilderModule.Web/Apps/page-builder-shell/`), scoped to the sub-app path within that module's single-repo checkout. Reproduce-as-vitest-test (or, for a module sub-app, its own `tsx --test`/ephemeral harness) → minimal fix → open PR. Interactive twin of `ci/agents/fix-frontend-agent.md`. Skills: `/vue-unit-test`, `/vue-fix` (`/storybook-test` optional), `/vc-shell-fix` (module-embedded sub-app). |
-| **frontend-reviewer** | opus | Gate-4 reviewer of the Vue/TS local diff before the PR: single-repo (or single-sub-app scope for a module-embedded fix), no test/story edits, no leaked scratch-harness tooling, no breaking prop/event/slot or GraphQL contract, BL-UI preserved, minimal & idiomatic. |
+| **frontend-reviewer** | sonnet | Gate-4 reviewer of the Vue/TS local diff before the PR: single-repo (or single-sub-app scope for a module-embedded fix), no test/story edits, no leaked scratch-harness tooling, no breaking prop/event/slot or GraphQL contract, BL-UI preserved, minimal & idiomatic. |
 
 **Developer team tools & constraints:**
 - **No browser.** Code only; E2E verification (Gate 6) is delegated back to `qa-backend-expert` / `qa-frontend-expert` via `/qa-regression`.
@@ -70,30 +81,25 @@ picked by the routed repo's `kind`. Gate ladder + no-auto-merge: `.claude/rules/
 
 Each agent MUST use its own separate browser session. Agents sharing a browser will interfere with each other (navigation, cookies, state).
 
-> **⚠️ `playwright-firefox` CANNOT CLICK on this storefront or the AngularJS Admin SPA.** `browser_click`
-> resolves the element and then times out on Playwright's *"visible, enabled and stable"* actionability
-> gate — on fully-visible, non-moving elements (verified NOT a layout/CLS bug: CLS=0, fixed bounding box).
-> `browser_type` and navigation work fine; it is **clicking specifically** that fails.
-> **Rule: never schedule a click-driven suite on firefox** — cart, checkout, merge, PDP interaction,
-> sign-in, or **any** Admin SPA suite. If both Chromium slots are busy, **QUEUE** for the next free
-> chrome/edge slot; a firefox placement costs a *whole wasted attempt*, not a degraded one.
-> Firefox remains fine for read-only / navigation-light passes.
+> **`playwright-firefox` is a full click-capable slot (2026-09-08; re-verified live 2026-09-11) — two prerequisites.**
+> **(1) The MCP server must have been restarted after `config/mcp-playwright-firefox.config.json`
+> gained `widget.windows.window_occlusion_tracking.enabled=false`.** The config is read at server start;
+> without the restart this lane still fails exactly as before. **(2) `@playwright/mcp` must stay PINNED
+> in `.mcp.json`** — an `@latest` entry swaps the server binary that reads that config.
 >
-> Confirmed independently **6×** — 2026-06-01, 06-24 (whole Admin SPA), 07-25, 07-27 ×2, and 2026-08-05
-> (`REG-2026-08-05-1942` attempt 1 lost suite 002 to it). `config/test-suites.json`
-> `defaults.fallbackChain` was reordered to **chrome → edge → firefox** on 2026-08-05 because firefox sat
-> *second*, so any suite whose first attempt failed fell straight onto the one lane that cannot click.
-> **Root cause is in the `@playwright/mcp` layer, not Firefox/Playwright** — raw `playwright-core` +
-> firefox clicks the same reproducer fine headed *and* headless, with and without the MCP's
-> `recordHar`/viewport/locale context options (probed 2026-08-05); a browser-revision re-install was
-> tried and did **not** fix it. Detail: `feedback_firefox_cart_dropdown_quirk` memory.
+> **Rollback, if clicks time out on this lane again:** check the MCP restart first, then set
+> `defaults.firefoxClickOk: false` in `config/test-suites.json` — one line, no code change, and every
+> consumer re-denies click-driven suites through `browserDenyListFor` in `ci/lib/suite-manifest.ts`.
+> Root cause (dead `requestAnimationFrame` under Windows occlusion tracking vs Playwright's 5-tick stable
+> check), the sticky-stall finding, the probe and the run tables:
+> [`knowledge/automation/browser-quirks.md`](../knowledge/automation/browser-quirks.md) §Firefox.
 
 ### QA Team Browsers
 | Agent | Playwright MCP Server | Alternative |
 |-------|----------------------|-------------|
 | **qa-frontend-expert** | `playwright-chrome` | |
 | **qa-backend-expert** | `playwright-edge` | or `Chrome DevTools MCP` for Admin SPA |
-| **qa-testing-expert** | `playwright-firefox` | |
+| **qa-testing-expert** | `playwright-firefox` | click-capable again since 2026-09-08 — see the box above for the one prerequisite and the rollback |
 | **ui-ux-expert** | `Chrome DevTools MCP` | (no webkit on Windows) |
 | **test-management-specialist** | `playwright-chrome` (sequential, not parallel with frontend) | |
 | **test-data-engineer** | none — authors AND runs seeders live (Node + Platform-API); delegates only browser-based storefront/suite verification to qa-backend/frontend-expert | |
@@ -111,3 +117,4 @@ Each agent MUST use its own separate browser session. Agents sharing a browser w
 - When delegating to sub-agents/specialist agents, verify the agent has the required tool permissions BEFORE dispatching.
 - If a delegated agent fails with an internal error (e.g., classifyHandoffIfNeeded), immediately fall back to working directly rather than retrying the same broken delegation.
 - For multi-suite regression runs, plan for rate limits: batch in groups of 3 (matching browser pool slots) rather than launching all simultaneously.
+- **Independent operations go out in ONE message; the unit you are saving is a round-trip, not a second.** Deterministic scripts here cost 1–2 s, so batching turns beats optimising script wall-clock by a wide margin. **But parallelism has a measured cost too, so it is a per-case judgment, never a default** — two writers on one suite CSV, two suites on one disposable fixture set, and a verifier beside its own doer each lose work. Reordering something that costs milliseconds to look concurrent is churn. The measured timings, the worked dependency waves and the full never-parallelise table: [`.claude/skills/qa-test/SKILL.md`](../skills/qa-test/SKILL.md) §Concurrency.

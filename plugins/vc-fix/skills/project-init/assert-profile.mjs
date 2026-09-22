@@ -105,6 +105,17 @@ export function profileViolations(profile) {
     add("client_repos_empty", "projectType:client but repos.client is empty — /qa-fix Gate 1 has no client repo to route a bug to");
   }
 
+  // ─── client MODULE with an UNVERIFIED name (#216 / VCST-5702) ────────────────
+  // discover-repos could NOT resolve this module's id (no ProjectUrl) to a repo in the client's
+  // live listing, so it left `name: null` (never an invented `vc-module-*` name) and no clone URL —
+  // /qa-fix Gate 1 has nothing to route to until the operator completes repos.client.
+  for (const r of clientRepos) {
+    if (r?.nameUnverified) {
+      const label = r.name || (r.moduleId ? `module '${r.moduleId}'` : "a client module");
+      add("client_repo_unverified", `${label} has an UNVERIFIED repo (its module id matched no repo in the client's live listing; name:${r.name === null ? "null" : `'${r.name}'`}) — set name + repoId from the listing in repos.client before /qa-fix routes a bug to it`);
+    }
+  }
+
   // ─── frontend fork: the Gate-1b provenance anchor ────────────────────────────
   for (const r of clientRepos) {
     if (r?.kind !== "frontend" || !r?.upstream) continue;

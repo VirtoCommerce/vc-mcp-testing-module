@@ -59,6 +59,32 @@ Real examples from recent reports (BUG-IMP-049 at 315 lines vs 150 target; BA-VC
 
 ## 5. Screenshot Rules
 
+### 5.0 MANDATORY — a tracker comment that makes a UI claim carries its screenshots INLINE
+
+If a comment asserts something a human LOOKS AT — a screen, a label, a control, a state, a rendered
+value — the evidence is **embedded in that comment**. A reader must never have to open a repo path or
+an evidence folder to see what the comment describes. This binds bug reports (`/qa-bug`), fix
+verification (`/qa-verify-fix`) and any documentation comment alike.
+
+**Two things that are NOT delivery, and both post `200 OK`:** a Markdown image reference
+(`![alt](path)` — repo path, relative path or bare filename), which the Markdown→ADF conversion drops
+with no error; and naming the file in prose (*"Screenshot: `foo.png`"*), which leaves the reader
+unable to see it. A path is a reference, not a screenshot.
+
+**Mechanism, per tracker — cited, never restated here:** see the screenshot carve-out in
+[`knowledge/execution/tracker-ops.md`](../../knowledge/execution/tracker-ops.md). Jira: attach via
+REST, then `!filename.png|width=700!` through the **v2** comment API (the whole body becomes wiki
+markup). Azure Boards: `ado.mjs upload-attachment --file <path>` → `{ url }`, then an inline
+`<img src="{url}">`.
+
+**Verification is part of the posting step; a status code is not verification.** For Jira, read
+`GET /rest/api/3/issue/<KEY>/comment/<id>?expand=renderedBody` and require one
+`<img src=…/attachment/content/<id>>` per image, **zero** surviving literal `!….png!`, and **zero**
+`<span class="error">`. Do not gate on `file-preview-id` — it is absent from a working wiki render.
+
+**A claim with no capturable screenshot says so explicitly**, so a reader can tell *"nothing to show"*
+from *"the evidence was dropped"*.
+
 **Always capture:** test FAILs, confirmed bugs (annotated), visual regressions (before/after), final state of critical flows (checkout confirmation, order created), Figma deviations, error states (console error, 500 toast).
 
 **Skip:** every navigation step in a passing test, loading spinners, login page (unless testing auth), successful form fills mid-flow, same page across browsers when all pass, redundant confirmations of the same bug.
@@ -74,6 +100,35 @@ Real examples from recent reports (BUG-IMP-049 at 315 lines vs 150 target; BA-VC
 | Exploratory session | anomalies only | 10 |
 
 **Retention:** Regression/test-lifecycle/coverage screenshots under `reports/regression/REG-*/`, `reports/test-lifecycle/TLC-*/`, `reports/coverage/COV-*/` are gitignored — disposable artifacts referenced from the permanent markdown. Bug evidence (`reports/bugs/screenshots/`) and per-ticket evidence (`reports/tickets/SprintXX-XX/VCST-XXXX/screenshots/`, `reports/tickets/VCST-XXXX/screenshots/`) stay tracked.
+
+### 5.2 Motion evidence — a GIF when the defect IS the transition
+
+**Conditional, not blanket.** A still answers *"what does this screen look like"*. Some defects are
+not in a frame at all — they are in the **change between two frames**, and a reader handed two PNGs
+has to take the author's word that one followed the other in one session.
+
+| Defect shape | Evidence |
+|---|---|
+| One session reads one value then acts on a different one (a balance shown, then refused as zero) | **GIF** + the stills that carry the numbers |
+| A state transition wrong only in sequence — a control enables then re-disables, a toast swallowed, a value reset on navigate-back | **GIF** + the stills |
+| A race or ordering bug, a spinner that never resolves, a flash of wrong content before hydration | **GIF** + the stills |
+| Wrong label, colour, spacing, a misplaced control, a 500 toast, an empty list | **Stills only** |
+| An API-only or non-visual claim | Neither; label it as such (§5.0) |
+
+**A GIF NEVER replaces the stills.** A reader cannot pause it to read a value, zoom it, or quote it
+into a ticket. The GIF proves *the sequence happened*; the stills carry *the values*.
+
+**Budget:** at most **1** GIF per bug, ≤ 8 frames, ≥ 1.5 s per frame, width ≤ 960, ≤ 5 MB — counting
+as one item against the screenshot budget above. A second GIF usually means it is two bugs.
+
+**Mechanism — nothing new.** An animated GIF attaches and embeds exactly like a PNG: same attachment
+upload, same `!filename.gif|width=700!` through the v2 comment API, same three-signal `renderedBody`
+check as §5.0. Measured 2026-09-14 — one `<img src=…/attachment/content/<id>>`, one ADF `media` node
+with a 36-char UUID, zero literal `!….gif!`, and Jira animates it inline.
+
+**Video is an attachment, not an embed.** Attach a `.webm` only when the defect is a timing property
+a few GIF frames cannot carry, and always alongside the GIF or stills that make the claim. Whether
+`!file.webm!` renders inline is **UNMEASURED** — do not write a comment that depends on it.
 
 ## 6. Console & Network Evidence
 

@@ -2,9 +2,11 @@
 
 How to cut a release of the `vc-qa` plugin. Companion to [`versioning.md`](versioning.md) (the *what*) — this doc is the *how*.
 
-> **Note:** `vc-qa` is not currently listed in `.claude-plugin/marketplace.json` — only `vc-fix` is (see
-> `plugins/vc-fix/`). This process still applies to cutting a `vc-fix` release; substitute `vc-fix`
-> wherever this doc says `vc-qa`, until/unless `vc-qa` is re-listed.
+> **Note:** `.claude-plugin/marketplace.json` lists **two** plugins — `vc-fix` (`plugins/vc-fix/`) and
+> `vc-perf` (`plugins/vc-perf/`). `vc-qa` is **not** listed: its full surface now lives under `.claude/`
+> as project-scoped components, auto-discovered in this repo with no plugin manifest. This process
+> applies per plugin — substitute the plugin being released wherever this doc says `vc-qa`, and note
+> that each plugin versions and tags independently (Step 1, Step 5a).
 
 > **Audience:** Maintainers cutting releases. Not customers (customers read [`onboarding.md`](onboarding.md) and pin to a tagged version per [`versioning.md` § Customer Upgrade Path](versioning.md#customer-upgrade-path)).
 
@@ -27,7 +29,7 @@ How to cut a release of the `vc-qa` plugin. Companion to [`versioning.md`](versi
 | **Approval reviewer** | At least one non-owner reviewer signs off on the release PR. Catches changelog-vs-diff drift. |
 | **Pilot liaison** (post-Phase 2) | When a release ships during an active pilot, the liaison communicates the change to the pilot customer with a 1-line summary + the changelog link. |
 
-**Currently:** Release owner is the maintainer working on `main`. Approval reviewer is open — will be named when [`docs/support-runbook.md`](support-runbook.md) Tier 1 owner is decided.
+**Currently:** Release owner is the maintainer working on `main`. Approval reviewer is open — to be named.
 
 ## What Triggers a Release
 
@@ -49,12 +51,17 @@ These are deterministic — no judgment calls. Anyone with maintainer rights can
 
 ### Step 1 — Bump version numbers
 
-Update **both** to the new version:
+**Bump the released plugin's own manifest:**
 
-- `.claude-plugin/plugin.json` `"version": "x.y.z"`
-- `.claude-plugin/marketplace.json` `"version": "x.y.z"`
+- `plugins/<name>/.claude-plugin/plugin.json` `"version": "x.y.z"` — the single source of truth for that plugin. Claude Code's plugin loader reads this file, and Step 5a derives the `{name}--v{version}` tag from it.
 
-These two MUST match — Claude Code's plugin loader reads `plugin.json`, the marketplace listing reads `marketplace.json`. Drift = customers see one version and run another.
+**`.claude-plugin/marketplace.json` `"version"` is the CATALOG's version, not a plugin's.** Bump it only when the listing itself changes — a plugin added or removed, a description, source path, or owner edited. It does **not** have to equal any plugin's version.
+
+> **This rule changed when the catalog grew a second plugin.** It used to read "`plugin.json` and `marketplace.json` MUST match", which was true while `vc-fix` was the only listing and the repo *was* the plugin. With `vc-fix` and `vc-perf` versioning independently, one shared number cannot track both — the catalog now versions itself. Current state: catalog `0.9.4`, `vc-fix` `0.9.0`, `vc-perf` `0.2.7`. **That is not drift; do not "fix" it by forcing them equal.**
+
+**Also update the plugin's own component counts** in its `marketplace.json` description and `plugin.json`, if agents/skills/commands were added or removed — a stale count there is what customers read before installing.
+
+`package.json` `"version"` is the repo/toolset line (the whole-repo `vX.Y.Z` tags from Step 5). Nothing reads it programmatically and it does **not** mirror a plugin version.
 
 ### Step 2 — Finalize the changelog entry
 
@@ -75,12 +82,33 @@ npm install
 npm run env:check
 npm run verify:multi-env
 npm run suites:lint
-npx tsx scripts/test-data/validate-td-refs.ts
-npm run env:check
-node skills/run-vc-mcp-testing-module/driver.mjs
+npm run td:validate
+npm run scope:validate
+npm run td:validate:b2b
+npm run seed:dry-run
+npm run graphql:fixtures:validate
+npm run graphql:lint-labels
 ```
 
-All seven must exit 0. If any don't, fix and re-verify before continuing.
+Every command must exit 0 before continuing, with **one documented exception**:
+`graphql:fixtures:validate` exits **1** when a fixture has drifted from the cached schema — those are
+findings to read, not a crash. Anything else non-zero: fix and re-verify.
+
+**Two prerequisites, or you will hit exits that look like failures and are not:**
+
+- `env:check` and `seed:dry-run` need the secrets in `.env.local` (gitignored). Without
+  `ADMIN_PASSWORD` / `USER_PASSWORD` both exit 1 with `Missing CORE environment variables`. Run
+  `/project-init`, or write them by hand.
+- `graphql:fixtures:validate` needs the GraphQL schema cache, `scripts/.graphql-schema.cache.json`
+  (~1.4 MB, **not** tracked by git). A fresh clone has none and the command exits **2** with
+  `Schema cache missing … Run with --refresh first`. Regenerate with
+  `npm run graphql:fixtures:validate:refresh`, which needs `BACK_URL` pointing at a live platform.
+  Note the exit codes differ on purpose: 1 is drift findings, 2 is no cache to compare against.
+
+> The last six commands were previously run as one aggregate, via a `run-vc-mcp-testing-module`
+> skill removed on 2026-09-19. It wrapped these same `npm run` aliases and added no logic of its
+> own, so the checks are listed directly here instead. The duplicate `npm run env:check` the old
+> block carried is also gone.
 
 ### Step 4 — Open the release PR
 
@@ -99,15 +127,18 @@ PR description template:
 - [x] `npm run env:check` green
 - [x] `npm run verify:multi-env` exits 0
 - [x] `npm run suites:lint` exits 0
-- [x] `npx tsx scripts/test-data/validate-td-refs.ts` exits 0
-- [x] `npm run env:check` green
-- [x] `node skills/run-vc-mcp-testing-module/driver.mjs` 7/7 checks pass
+- [x] `npm run td:validate` exits 0
+- [x] `npm run scope:validate` exits 0
+- [x] `npm run td:validate:b2b` exits 0
+- [x] `npm run seed:dry-run` exits 0
+- [x] `npm run graphql:fixtures:validate` reviewed (exit 1 = drift findings, not a crash)
+- [x] `npm run graphql:lint-labels` exits 0
 
 ### Changelog
 See `CHANGELOG.md` [vX.Y.Z] section.
 
 ### Migration notes (only for major releases)
-N/A | See `docs/migrations/vN.md`
+N/A | or a migration note written with the release itself (there is no standing migrations/ directory)
 ```
 
 Get one non-owner approval. Merge.
@@ -196,7 +227,7 @@ A hotfix is a patch release against an already-tagged version (e.g. `v0.3.0` shi
 | 1 | Open the issue with a `Bug` label + cite the affected version |
 | 2 | Branch from the **tagged commit**, not from `main`. `git checkout -b hotfix/v0.3.1 v0.3.0` |
 | 3 | Fix the bug. Add a `[Fixed]` entry to `CHANGELOG.md` under a new `[0.3.1]` section |
-| 4 | Bump `plugin.json` and `marketplace.json` to `0.3.1` |
+| 4 | Bump the plugin's own `plugin.json` to `0.3.1` (catalog `marketplace.json` only if the listing itself changed) |
 | 5 | Run the same Step 3 verification battery |
 | 6 | Open PR `hotfix/v0.3.1 → main`. Get approval. Merge. |
 | 7 | Tag `v0.3.1` per Step 5 |
@@ -227,7 +258,8 @@ Tracks: plugin version × Claude Code version × required VC platform version. C
 
 | Don't | Why |
 |-------|-----|
-| Tag without bumping `plugin.json` + `marketplace.json` | Customers see the new tag but the manifest still shows the old version. Confusing + breaks Claude Code's version pin behavior. |
+| Tag without bumping the plugin's own `plugin.json` | Customers see the new tag but the manifest still shows the old version. Confusing + breaks Claude Code's version pin behavior. |
+| Force the catalog `marketplace.json` `version` to equal a plugin's version | They are different things — the catalog versions the *listing*, each plugin versions itself. With two plugins listed, one number cannot track both, and "correcting" the catalog to match one plugin silently misreports the other. |
 | Bump a plugin's version without pushing its `{plugin-name}--v{version}` tag (Step 5a), when another plugin depends on it | Silently strands every dependent plugin's installer on the last tagged content — `plugin.json` claims the new version but nothing resolvable backs it. |
 | Skip the verification battery "because the change was small" | Small changes are how `@td()` refs and manifest schemas silently break. Every release runs the full battery. |
 | Amend a published tag | Once `git push origin vX.Y.Z` lands, the tag is immutable in customer lockfiles. To fix a bad release, cut a new patch — never re-tag. |

@@ -27,9 +27,27 @@ Your prompt is structured as four synergistic layers — business logic (invaria
 
 ## Business Logic Reference
 
-> **Reference:** `knowledge/oracles/business-logic.md` — testable business invariants across 17 domains, 108 rules.
+> **Reference:** `knowledge/oracles/business-logic.md` — testable business invariants, grouped into `## Domain N: … (BL-X)` sections (`npm run bl:extract:list` prints the domains and their sizes; counts are derived, never transcribed).
 
-When a test result is ambiguous, check business-logic.md before classifying. If observed behavior violates a business invariant, it is a FAIL regardless of whether a JIRA spec explicitly covers it.
+When a test result is ambiguous, check the invariants before classifying. If observed behavior violates a business invariant, it is a FAIL regardless of whether a JIRA spec explicitly covers it.
+
+**IF YOUR BRIEF ALREADY CONTAINS THE RULES, DO NOT RE-READ THE ORACLE.** A dispatching orchestrator can
+paste the relevant scope in as text — `npm run bl:extract -- --domain <d>` for invariants,
+`npm run ecl:extract -- --domain <d>` (or `--chapter <n>`) for edge-case patterns. An extract is the
+oracle's own markdown, sliced verbatim, and carries a header saying so. Re-opening the source file to
+re-read what you were handed costs most of your context and adds nothing — the extract IS the source,
+character for character. The same applies to every other item a brief supplies as text rather than as a
+path (matrix rows, the journey case, schema fragments): that is the **dispatch pack**, and what may and
+may not travel in one is [`skills/qa-test/dispatch-pack.md`](../../skills/qa-test/dispatch-pack.md).
+Three conditions, all real:
+
+- **An extract is a SUBSET.** It states which ids it contains. If the work turns out to touch a domain
+  or chapter it does not cover, ask for that scope (or read the oracle) rather than concluding no rule
+  applies — "not in my extract" is never evidence that no invariant or edge case exists.
+- **No extract in the brief ⇒ read the file**, scoped to the domains your task touches.
+- **A packed fragment that carries a rev is only as current as that rev.** A schema or selector fragment
+  stamped `UNKNOWN` grounds nothing; treat what you take from it as a hypothesis, exactly as you would
+  from an unrefreshed snapshot.
 
 ## Judge — Pass/Fail Classification
 
@@ -70,7 +88,7 @@ Ambiguous examples: label text changed (intentional?), new console warning (harm
 
 **This does NOT lower the bar for what counts as a bug.** The Live-Verification Policy below still governs filing: a disabled control is validation working (not a bug), an API-only repro is not a UI-layer defect, and by-design / config-gated behavior is verified at the source before filing. Notice everything; **verify before you file.** Continuous observation widens what you *look at* — it does not widen what you *call a defect*.
 
-**Discovery pass — ticket / feature / PR testing only (NOT bulk regression).** When testing a ticket, feature, or PR (i.e. not executing a pre-built regression suite), spend a short focused block — ~5–10 min — on active discovery beyond the scripted cases: surprise-seeking plus one adversarial tour or persona lens. Aim to surface at least one scenario the existing cases don't cover. Bulk-regression runs (`test-runner-agent` / `autonomous-test-runner` executing a CSV suite) skip this timed pass and rely on the continuous-observation reflex above. Full methodology: `/qa-exploratory` (discovery-first command) and `/qa-sbtm` (charters, CRISP/SFDPOT, Whittaker tours, personas). Read the VC bug catalog (`knowledge/oracles/vc-bug-catalog.md`) to avoid re-discovering known patterns.
+**Discovery pass — ticket / feature / PR testing only (NOT bulk regression).** When testing a ticket, feature, or PR (i.e. not executing a pre-built regression suite), spend a short focused block — ~5–10 min — on active discovery beyond the scripted cases: surprise-seeking plus one adversarial tour or persona lens. Aim to surface at least one scenario the existing cases don't cover. Bulk-regression runs (`test-runner-agent` executing a CSV suite) skip this timed pass and rely on the continuous-observation reflex above. Full methodology: `/qa-exploratory` (discovery-first command) and `/qa-sbtm` (charters, CRISP/SFDPOT, Whittaker tours, personas). Read the VC bug catalog (`knowledge/oracles/vc-bug-catalog.md`) to avoid re-discovering known patterns.
 
 ## Self-Check & Verify Work (MANDATORY, every agent, every run)
 
@@ -120,22 +138,96 @@ Reference files — read on-demand before each testing area, not all upfront:
 
 | Area | File |
 |------|------|
-| Business Logic Invariants | `knowledge/oracles/business-logic.md` |
+| Business Logic Invariants | `knowledge/oracles/business-logic.md` — **or the extract already in your brief** (`bl:extract`, see §Business Logic Reference) |
+| Edge-case patterns | `knowledge/oracles/e-commerce-edge-cases-library.md` — **or the extract already in your brief** (`ecl:extract`, same rule) |
 | Platform Patterns | `knowledge/api/platform-patterns.md` |
 | Performance Thresholds | `knowledge/execution/performance-thresholds.md` |
 | Browser Quirks | `knowledge/automation/browser-quirks.md` |
 | Debugging Signals | `knowledge/execution/debugging-signals.md` |
-| Catalog Reference | `knowledge/domain/catalog.md` |
-| Products (types, xAPI fields, configurable sections) | `knowledge/domain/products.md` |
-| Storefront Sitemap (URLs, nav, categories, account pages) | `knowledge/domain/sitemap.md` |
-| Store Settings | `knowledge/domain/store-settings.md` |
-| White Labeling | `knowledge/domain/white-labeling.md` |
+| **Domain maps — what a domain IS** | `knowledge/domain/` — one `<slug>.md` per domain. **`ls` it for the roster; never work from a list written elsewhere** |
 | Test Data Generation | `knowledge/test-data-generation.md` |
 | GraphQL xAPI Schema | `knowledge/api/graphql-schema.md` |
 | **Authoring Runner-Native GraphQL Cases** | `knowledge/api/graphql-test-cases-runner.md` |
 | **Live Test-Data Discovery** | `knowledge/execution/live-discovery.md` |
 
+**Testing a feature? Read its domain map BEFORE anything else you read.** `knowledge/domain/<slug>.md`
+is the feature-scoped, persistent answer to *"what is this thing and where are its surfaces"* — actors,
+value chain, surface inventory per layer (back office / storefront / API), **where the layers DISAGREE**,
+the shape of existing QA coverage, and the open gaps. It is what stops a run inheriting the ticket's
+narrowness: the ticket names one control, the map names the whole surface that control sits in.
+
+- **Find one:** `ls knowledge/domain/` — the directory IS the roster (catalog, products, sitemap, store
+  settings, white labeling and the rest all live there). Do not work from a file list transcribed elsewhere.
+- **No map for your domain?** Say so in your report and proceed from the ticket + live enumeration, then
+  ask the orchestrator to run `/qa-domain-map <slug>`. Do not author one inline mid-run.
+- **Stale map?** `npm run domain:check` reports freshness. A map that contradicts the live environment is
+  a finding, not a licence to guess: the live observation wins for THIS run, the map gets refreshed after.
+- **Shape / how one is built:** `knowledge/domain/domain-map.md` (the fill-in shape, not a map itself);
+  reference implementation `knowledge/domain/b2b-organizations.md`.
+
 **Authoring or reviewing GraphQL test cases? Read `graphql-test-cases-runner.md` first.** It is the canonical contract for the `Steps` / `Assertions` / `Cleanup` grammar used by `scripts/graphql/graphql-runner.ts` (tag list, predicate shapes, path syntax, `@td()` + capture rules, schema validation, common failure modes, authoring checklist). Do not invent tags, predicate shapes, or path syntax not documented there.
+
+## Product behaviour — ask VirtoOZ, never guess (MANDATORY, every agent, every run)
+
+Applies to any question of how the platform or the storefront is **supposed** to behave. Grounding order:
+
+1. **This repo's knowledge first** — the domain map (`knowledge/domain/<slug>.md`), the oracles (`BL-*`, `ECL-*`), `.claude/ROUTING.md` §Knowledge bases. Free, already triangulated, and often already carrying the verbatim doc quote.
+2. **VirtoOZ next** — `/vc-docs`, topic-scoped tool (the topic→tool table is `knowledge/agents/ba/shared-instructions.md` §Documentation source — VirtoOZ first, always). Context7 `/virtocommerce/vc-docs` is the fallback only.
+3. **Live / source last** — what the environment actually does.
+
+**Never substitute memory, a plausible inference, or "the code looked like it" for documented behaviour.** A doc claim carried into a report, a case or a verdict is a **verbatim quote with its URL**, or it is not evidence. A PASS, a bug or an assertion built on a guessed product rule is wrong in the one direction nobody re-checks — it reads as confident.
+
+Docs are ONE source: a `BL-*`/`ECL-*` promotion still needs its 3-source bar (docs + live + source), and **live behaviour that contradicts the docs is a FINDING** — live wins for this run, report the divergence, never silently route around it.
+
+**Close the loop.** Anything you had to ask VirtoOZ that this repo should already have known goes back into the right knowledge file per `.claude/ROUTING.md` read-before-you-write rules — and if there is no domain map for what you tested, say so in your report and ask the orchestrator to run `/qa-domain-map <slug>`. Never author a map inline mid-run.
+
+**Which source is authoritative depends on the feature's MATURITY — and a missing doc is itself a result:**
+
+| The feature is… | Authoritative source | When it isn't there |
+|---|---|---|
+| **Released / existing** | VirtoOZ **+** this repo's domain maps and oracles — provenance `{DOC}` / `{BL}` | **A released feature VirtoOZ does not document, or documents wrongly, is a FINDING** — a doc gap / doc drift, reported with the verbatim quote + URL beside the live observation. Then fall through to source + live for this run. **Never read documentation silence as "no requirement"** |
+| **New / unreleased** | the ticket's AC `{SPEC}` + source + **live on the deployed build** `{OBSERVED}` | there is no VirtoOZ page yet and often no source snapshot — live is the primary ground truth, and the assertion is confirmed live before promotion (§5 below, Dimension 10 / `GRD-*`) |
+
+Doc drift is normal here and is measured, not hypothetical: `knowledge/domain/sales-rep.md` §D1 (the published API reference lists 13 queries + 1 mutation; live introspection returns 21 + 2) and §D10 (the guide claims store scoping the live schema does not enforce). So **a VirtoOZ answer for a released feature is triangulated against live, never substituted for it** — and when they disagree, both go in the report.
+
+### What VirtoOZ is authoritative FOR — split the CLAIM, not the source
+
+The rule above says docs and live are triangulated. This one says **which half of a doc page to lean on**,
+because the two fail at very different rates:
+
+| Claim type | Authoritative source | Tag |
+|---|---|---|
+| Mechanism, gating, semantics, what-causes-what, required-vs-optional, lifecycle | VirtoOZ | `{DOC}` |
+| **Exact UI strings, control types (field vs dropdown vs toggle), layout, counts, ordering** | **live observation only** | `{OBSERVED}` |
+
+**A user guide is prose written for humans about what the product does. It paraphrases labels by design**
+— "click **Fixed points**" reads better than the real control, `Earn fixed amount of points per order`. It
+is not a UI string table and never tried to be. So a label, a widget type or an on-screen count carried
+into a case as `{DOC}` is a paraphrase promoted to a specification.
+
+**A documented rule binds to the SURFACE the doc names, and nowhere else.** Carrying it to a sibling field,
+column or blade is extrapolation wearing a citation's clothes — it manufactures a `{DOC}` tag on a claim no
+document makes, which is strictly worse than an honest `{HYPOTHESIS}`. The enforceable test, and the
+corollary to the verbatim-quote rule above: **if you cannot paste the sentence stating THIS claim about THIS
+surface, it is not `{DOC}`.** A quote about a neighbouring surface is not a quote about yours.
+
+**Docs contradicting an existing case, suite or knowledge file is a trigger to OBSERVE — never a licence to
+overwrite.** The artifact may be the only source in the room written from the screen. Cheap tell: when the
+older artifact is *more specific* than the doc, specificity usually means someone transcribed rather than
+paraphrased, and the artifact wins until live says otherwise.
+
+**Why this earns a rule rather than a code review:** it fails silently and INVERTED. A wrong label does not
+break the run — it makes a **correct product fail the test**, so the cost lands on whoever triages the
+phantom failure, not on whoever authored it. That is the GOLDEN RULE's transcribed-constant failure mode
+(`.claude/rules/test-data.md`), reached from a different direction, and it spreads the same way: by the next
+author copying neighbouring style.
+
+Measured 2026-09-17 (VCST-5959, suite `075-loyalty` re-author, platform 3.1071.0-pr-3108). A doc-first
+rewrite replaced two live-correct reward labels with the guide's shorthand (`'Fixed points'`, which exists
+nowhere in the UI), restated a searchable dropdown as a typed field, and transferred the Product-factors
+negative-value rejection onto an Order-loyalty reward value — where live showed `-5.00` is accepted, saved
+and read back unchanged. All three shipped past a green linter; only `--verify` caught them, and the
+pre-rewrite file had two of the three right.
 
 ## Live-Verification Policy
 
@@ -159,9 +251,11 @@ Full decision tree, JS recipes, and CSV-runner recipes: `knowledge/execution/liv
 ### 2. Validate GraphQL against the live schema
 
 Before authoring or reviewing any query/mutation:
-- Consult `knowledge/api/graphql-schema.md` (live introspection snapshot — 86 queries / 134 mutations / 36 types as of last refresh).
+- Consult `knowledge/api/graphql-schema.md` — the live introspection snapshot. **Read its own header for the rev and the counts; do not trust a count written here.** This line used to transcribe "86 queries / 134 mutations / 36 types"; the live schema reads **108 / 140 / 54** (probed 2026-09-02), so the transcription was wrong by 22 queries, 6 mutations and 18 types — the `.claude/rules/test-data.md` §GOLDEN RULE failure in its purest form, and a working demonstration of exactly the drift this section is about.
 - For ad-hoc inline checks: `npx tsx scripts/graphql/graphql-runner.ts --query "<inline>"`.
-- Schema is refreshed via `npm run schema:refresh`; fixtures are bumped/renamed via `npm run graphql:fixtures:update`; CI gate is `npm run graphql:fixtures:validate`.
+- **Two artifacts go stale independently, and one command does not refresh both.** `npm run schema:refresh` rewrites `knowledge/api/graphql-schema.md` (what YOU read) and nothing else. `npm run graphql:fixtures:validate:refresh` re-introspects, rewrites `scripts/.graphql-schema.cache.json` (what the RUNNER reads) and validates the 74 fixtures, exiting non-zero on drift. Fixtures are bumped/renamed via `npm run graphql:fixtures:update`.
+- **`npm run graphql:fixtures:validate` without `--refresh` is not a freshness check.** `loadSchemaCache` has no age check, so it passes clean against an arbitrarily old cache — and the cache is a single shared file, not one per env, so it may hold a different environment's contract (`test-data/graphql/index.json` records the `backUrl` + `lastValidated` it was built from — read them). `npm run schema:check` is a liveness check, never a drift gate.
+- **Never judge the snapshot's staleness from the snapshot.** A caller that refreshed it hands you the rev; with no rev, treat it as UNKNOWN age. Spec: `.claude/skills/qa-test/contract-refresh.md`.
 - The canonical runner is `scripts/graphql/graphql-runner.ts` — **never write custom JS to execute CSV-defined GraphQL cases.**
 
 ### 3. Verify selectors & state against the live UI
@@ -320,6 +414,8 @@ See [`.claude/rules/reports.md`](../../../rules/reports.md) — the single sourc
 ## Browser Interaction — Mandatory Real-User Behavior
 
 **Hook-enforced.** A `PreToolUse` hook (`hooks/enforce-real-user.mjs`) blocks `browser_evaluate`, `browser_run_code_unsafe`, and `evaluate_script` MCP calls unless the JS payload matches the narrow auto-allow regex list (GraphiQL JWT `execCommand('insertText')`, `dataLayer`/`gtag()`, cross-origin iframe inspection). Do not try to bypass — if your case fits an exception but was blocked, extend the regex.
+
+**Typing a password — the token is the BARE KEY NAME.** On a Playwright lane, `browser_type(text="ORG_USER_PASSWORD")`; the MCP substitutes the value from `--secrets` and redacts it everywhere. **Never `{{ORG_USER_PASSWORD}}`** — the repo's `{{VAR}}` test-data convention does not apply to this flag, the lookup misses, and the miss is SILENT (the literal string is typed; the form just says "Login attempt failed"). Confirm the hit from the response's *Ran Playwright code* line: `fill(process.env['NAME'])` = hit, `fill('NAME')` = miss. A second `PreToolUse` hook (`hooks/enforce-secret-token.mjs`) blocks a placeholder, an unknown credential-shaped key, and a plaintext secret before the keystroke. Chrome DevTools MCP has **no** `--secrets` — that brief must name its own auth path. Contract: [`../../execution/browser-lanes.md`](../../execution/browser-lanes.md) §Browser login secrets.
 
 You MUST drive the browser like a real customer:
 

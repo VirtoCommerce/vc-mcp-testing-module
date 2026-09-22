@@ -31,7 +31,7 @@ Manages the full defect lifecycle from detection through triage, classification,
    - `workflow` → JIRA Bug Workflow diagram + transition table
    - `metrics` → defect process health indicators
 3. **For triage:** Fetch ticket via Atlassian MCP → validate report completeness (12-item checklist) → check for duplicates (JQL: `summary ~ "keyword" AND status != Cancelled`) → classify defect type + root cause → assess severity + priority (reference `/qa-risk`) → route to owner via triage matrix → set JIRA fields + recommend transition.
-4. **For verify:** Fetch ticket + linked PR via Atlassian MCP → confirm fix is deployed → execute original STR verbatim (must pass 3 consecutive times) → run 2-3 adjacent regression checks → check for side effects (console errors, network failures) → decision: all pass → transition TESTED → DONE; any fail → transition TESTED → REOPEN with new evidence.
+4. **For verify:** Fetch ticket + linked PR via Atlassian MCP → confirm fix is deployed → execute original STR verbatim (must pass 3 consecutive times) → run 2-3 adjacent regression checks → check for side effects (console errors, network failures) → decision: all pass → transition to TESTED and **stop there** (a QA flow never sets `DONE` — `knowledge/execution/ticket-status-transitions.md` §9.5); any fail → transition TESTED → REOPEN with new evidence.
 5. **For classify:** Show defect type taxonomy (8 types) and root cause categories (6 categories) from `defect-lifecycle-workflow.md` section 6. Suggest classification for the given bug based on symptoms.
 6. **For workflow:** Show JIRA Bug Workflow ASCII diagram and full transition table from `defect-lifecycle-workflow.md` sections 1-3. Highlight QA-owned transitions.
 7. **For metrics:** Compute defect process health indicators from JIRA data using JQL queries. Report aging, MTTR, reopen rate, escape rate, density, and verification pass rate against targets.
@@ -45,8 +45,8 @@ Manages the full defect lifecycle from detection through triage, classification,
 | Upstream | `/qa-evidence` | Evidence capture standards used in report validation |
 | Upstream | `/qa-risk` | Severity/Priority classification (independent dimensions) |
 | Upstream | `/qa-bug` (command) | Bug filing creates the JIRA ticket this skill manages |
+| Optional | `/qa-postman bug-evidence` | For an API/GraphQL defect whose finding is a **disagreement**, or needs ≥2 controls to be non-vacuous: a reproduction collection attached to the ticket, red while the defect is open and green on the fix — so `verify` re-runs it instead of re-deriving the repro. Skip it for every other defect class, which is most of them ([bug-evidence.md](../qa-postman/bug-evidence.md) §1) |
 | Downstream | `/qa-metrics` | Defect counts, escape rates, reopen rates feed quality gates |
-| Downstream | `/qa-process` | Defect data feeds into Report phase and Close phase retrospectives |
 
 ## Rules
 

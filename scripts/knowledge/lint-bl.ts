@@ -56,12 +56,14 @@ const REQUIRED_FIELDS = ["Rule", "Verify", "Violation signal", "Agents"] as cons
 // (BL-B2B-006), and a heading may carry MORE than one bracket tag (e.g.
 // `[P1-ux]` `[GOLDEN RULE]`) — so capture the whole title+tags tail and extract
 // the severity from any bracket token below (BLL-002 flags a genuinely absent one).
-const ENTRY_RE = /^###\s+(BL-[A-Z0-9]+-\d+[A-Z]?)\s*:\s*(.*)$/;
-const DOMAIN_RE = /^##\s+Domain\s+\S+\s*:.*$/;
+// Exported so `extract-bl.ts` slices the SAME entries this gate parses — one definition of "what a
+// BL entry is", per the GOLDEN RULE. Both are non-global, so `.test()` carries no `lastIndex` state.
+export const ENTRY_RE = /^###\s+(BL-[A-Z0-9]+-\d+[A-Z]?)\s*:\s*(.*)$/;
+export const DOMAIN_RE = /^##\s+Domain\s+\S+\s*:.*$/;
 const BL_TOKEN_RE = /\bBL-[A-Z0-9]+-\d+[A-Z]?\b/g;
 const BRACKET_TAG_RE = /`\[([^\]]+)\]`/g;
 
-interface Invariant {
+export interface Invariant {
   id: string;
   domainPrefix: string; // e.g. "BL-CART"
   seq: number;
@@ -79,6 +81,50 @@ interface Finding {
   id: string;
   message: string;
 }
+
+/**
+ * BLC-002 burn-down baseline: the dangling BL ids that already existed when the ratchet
+ * was added, with their citing-case counts. A RATCHET, not an exemption — the same shape
+ * and the same reason as `XREF_BASELINE` in sync-test-suites.ts.
+ *
+ * 46 ids across 213 citing cases were in the corpus on 2026-09-14. They accumulated because
+ * nothing could WRITE a `Business_Rule` cell on an existing row until `npm run bl:remap`
+ * existed, and BLC-002 is Medium so no gate ever failed. Hard-failing on day one would mean
+ * everyone runs the lint at a lower gate and the signal dies.
+ *
+ * An id NOT listed here is NEW drift and is reported HIGH. A listed id may never GROW.
+ * An id that stops dangling is reported as a stale entry — delete it. Goal: keep this empty.
+ * Burn down with `npm run bl:remap` (--from/--to to remap onto an existing invariant,
+ * --propose for an ADD candidate awaiting triangulation, --drop for a ref that is wrong).
+ *
+ * REGENERATE FROM THIS LINT'S OWN OUTPUT, never from a second parser. The counts below come
+ * from `npm run bl:lint`'s "cited in Business_Rule of N case(s)". A hand-written parser was
+ * tried first and disagreed — it missed a `"BL-CHK-001; BL-SEC-001"` two-ids-in-one-cell
+ * citation that the canonical `parseSuite` finds, undercounting by 2 ids and 15 cases. The
+ * ratchet caught it on the first run, which is exactly what it is for.
+ */
+export const BLC_002_BASELINE: Record<string, number> = {
+  // Shrunk 2026-09-19 (REG-2026-09-19-1035 follow-up). 36 entries removed:
+  // BL-GA4-001..004 were PROMOTED into the oracle (Domain 26) and their 33 citations are now real;
+  // the rest were converted to declared forward-references with `npm run bl:remap --propose`,
+  // which lint-bl.ts exempts from BLC-002 by design. Per BLC-002: fix + de-baseline, never widen.
+  // Remaining entries are the BL-SEC-* family, whose citing rows in suite 044 are still unauthored —
+  // relabelling those would hide the debt rather than pay it.
+  "BL-SEC-001": 3, "BL-SEC-002": 1, "BL-SEC-003": 8, "BL-SEC-004": 5,
+  "BL-SEC-005": 2,
+  // BL-CFG-003/004/007/008 REMOVED 2026-09-19 — the tool bug that stranded them is fixed.
+  // They were briefly restored here because `npm run bl:remap --propose` reported "0 case(s) in
+  // 0 file(s)" for all four while THIS lint reported 4/1/4/5 citing cases in 072e. The cause was
+  // in bl:remap, not in the data: it read suites with `readFileSync(f, "utf8")`, which does not
+  // strip a UTF-8 BOM, so the first header cell parsed as "﻿ID", `indexOf("ID")` returned
+  // -1, and its `if (ci < 0 || ii < 0) continue;` guard dropped all 13 BOM-carrying suites
+  // silently. Same class as the bug that taught `parseSuite` `bom: true` (see buildCoverage).
+  // bl:remap now strips/restores the BOM and REPORTS every suite it skips; the 14 citations were
+  // converted by the sanctioned path and both tools now agree id-for-id and case-for-case.
+  // BL-SEC-001 (6→3) and BL-SEC-002 (3→1) are also tightened to their measured counts. The old
+  // numbers predated the 044 authoring pass; the ratchet accepts a shrink silently, so an
+  // entry left above its real count is headroom the next drift can grow into unnoticed.
+};
 
 const find = (rule: string, severity: Severity, id: string, message: string): Finding => ({ rule, severity, id, message });
 
@@ -206,7 +252,7 @@ export function extractReferencedBlIds(cell: string): string[] {
  * completeness claim, so an unreadable input has to be surfaced rather than
  * quietly reducing the denominator.
  */
-function buildCoverage(suitesRoot: string): {
+export function buildCoverage(suitesRoot: string): {
   byBl: Map<string, string[]>;
   referenced: Set<string>;
   unparsed: string[];
@@ -308,11 +354,41 @@ export function lint(
   // BLC-002 suite references a non-existent BL ID (Medium — matches the canonical
   // Dim-6 BL-002 severity in review-criteria.md; keeps the default High gate green
   // on the large pre-existing suite↔oracle drift while still surfacing every case).
+  //
+  // RATCHET (added 2026-09-14). The Medium above is deliberate, but on its own it let
+  // false traceability accumulate unchecked: nothing in the repo could WRITE a
+  // Business_Rule cell until `npm run bl:remap` existed, and Medium fails no gate, so
+  // 48 dangling ids across 230 citing cases built up unnoticed. BLC_002_BASELINE keeps
+  // the pre-existing drift at Medium (the gate stays green, the signal survives) while
+  // making any NEW dangling citation High — the same shape and the same reason as
+  // XREF_BASELINE in sync-test-suites.ts.
   for (const ref of coverage.referenced) {
     if (!oracleIds.has(ref)) {
       const cases = coverage.byBl.get(ref) ?? [];
-      f.push(find("BLC-002", "Medium", ref, `cited in Business_Rule of ${truncate(cases.join(", "), 60)} but no such invariant exists in the oracle (false traceability)`));
+      const allowed = BLC_002_BASELINE[ref] ?? 0;
+      const isNew = allowed === 0;
+      const grew = !isNew && cases.length > allowed;
+      const sev = isNew || grew ? "High" : "Medium";
+      const why = isNew
+        ? "NEW dangling citation — not in the BLC-002 baseline. Point it at an existing invariant, cite it as PROPOSED-BL-… while its ADD candidate awaits triangulation, or drop it: `npm run bl:remap`"
+        : grew
+          ? `baselined at ${allowed} citing case(s) but now ${cases.length} — a baselined id may never grow`
+          : "false traceability";
+      // The citing list is truncated for readability, so the COUNT is printed explicitly —
+      // without it the BLC_002_BASELINE below cannot be regenerated from this output, and a
+      // second parser written to recover it will disagree (measured: a hand parser missed a
+      // `BL-CHK-001; BL-SEC-001` two-ids-in-one-cell citation the canonical parseSuite finds).
+      f.push(find("BLC-002", sev, ref, `cited in Business_Rule of ${cases.length} case(s): ${truncate(cases.join(", "), 60)} — no such invariant exists in the oracle (${why})`));
     }
+  }
+
+  // A baselined id that is no longer dangling (remapped, proposed away, or the invariant
+  // was finally written) must be DELETED from the baseline — otherwise the ratchet
+  // silently loosens. Same "stale baseline entry" discipline as CSV_LINT_BASELINE.
+  for (const ref of Object.keys(BLC_002_BASELINE)) {
+    const stillDangling = coverage.referenced.has?.(ref) ?? [...coverage.referenced].includes(ref);
+    if (oracleIds.has(ref) || !stillDangling)
+      f.push(find("BLC-002", "Informational", ref, "stale BLC-002 baseline entry — no longer dangling; delete it from BLC_002_BASELINE to shrink the ratchet"));
   }
 
   return f;

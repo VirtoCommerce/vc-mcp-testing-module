@@ -37,6 +37,7 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { resolve } from "path";
 import { PROFILE_DEFAULTS } from "../../scripts/lib/project-profile.mjs";
 import { outputRoot, resolveOutPath } from "./lib/paths.mjs";
+import { ensureProjectIgnores } from "./lib/gitignore.mjs";
 
 // A work-item field whose VALUE is time-varying (a sprint/area NODE id: System.IterationId /
 // System.AreaId). Persisting it as a fieldDefaults constant silently files future bugs into a
@@ -217,6 +218,10 @@ function main() {
       if (t.crossLinkToken !== undefined) set("tracker.crossLinkToken", t.crossLinkToken);
       if (t.apiBase) set("tracker.azure.apiBase", t.apiBase);
       if (t.projectId) set("tracker.azure.projectId", t.projectId);
+      // The date-validated team whose current sprint /qa-bug stamps (VCST). Empty ⇒ the project
+      // default team; the runtime resolver (ado.mjs) re-validates and can still auto-select a team
+      // at create time, so an unset team is safe — just less specific.
+      if (t.team) set("tracker.azure.team", t.team);
       if (t.workItemTypes) set("tracker.azure.workItemTypes", t.workItemTypes);
       if (t.roleStates) set("tracker.azure.roleStates", t.roleStates);
       // Bake the fix-side completeness as a CANONICAL boolean under tracker.azure.* (the same
@@ -240,6 +245,13 @@ function main() {
       // hardcoded Custom.* set of one org. `tracker.fieldMap` stays an OPERATOR-owned override
       // (never written from the scan) and is applied on top at create time.
       if (t.fields && Object.keys(t.fields).length) set("tracker.fields", t.fields);
+      // Per-type FORM LAYOUT (VCST-5702 ITEM 0): { <Type>: { htmlControls: [ref, …] } }. The create
+      // path binds the `body` slot to a form-visible html control instead of assuming
+      // System.Description (which may be off-form → an invisible body). Empty ⇒ legacy behaviour.
+      if (t.formLayout && Object.keys(t.formLayout).length) set("tracker.formLayout", t.formLayout);
+      // Per-type rule-filter accounting (VCST-5702 ITEM 0b) — scanned/kept/dropped/required, so a
+      // slim persisted contract is explained rather than looking lossy. Surfaced by create-workitem.
+      if (t.fieldsMeta && Object.keys(t.fieldsMeta).length) set("tracker.fieldsMeta", t.fieldsMeta);
       // A3 — a fieldDefaults carried by the scan is FILTERED: a time-varying sprint/area node id
       // (System.IterationId / System.AreaId) is never persisted (see ILLEGAL_FIELDDEFAULT_REF). The
       // guard mirrors reconcile-profile's `--set` guard so neither write path can plant the time bomb.
@@ -287,6 +299,10 @@ function main() {
     ...profile,
   };
 
+  // Protect BEFORE creating — the fourth and last writer of a generated local file. It is also the
+  // one that turns self-diagnostics ON, so `.vc-fix/` starts filling right after (VCST-5774 #4).
+  const ignored = ensureProjectIgnores(outputRoot());
+  if (ignored.length) console.log(`[gen-profile] .gitignore += ${ignored.join(", ")}`);
   writeFileSync(outPath, JSON.stringify(withMeta, null, 2) + "\n");
   console.log(`[gen-profile] wrote ${outPath}`);
   console.log(

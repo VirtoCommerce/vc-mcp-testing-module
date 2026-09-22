@@ -3,7 +3,7 @@
 `vc-fix` ships a narrow slice of the full `vc-qa` agent crew, scoped to five workflows: project
 setup (`/project-init`), bug filing (`/qa-bug`), bug fixing (`/qa-fix` + its dev team), bug
 verification (`/qa-verify-fix`), online bug monitoring (`/qa-monitoring`), and plugin
-self-diagnostics (`/vc-self-check`) + direct feedback (`/vc-feedback`). **8 agents, 8 commands, 16 skills** — no regression
+self-diagnostics (`/vc-self-check`) + direct feedback (`/vc-feedback`). **10 agents, 8 commands, 16 skills** — no regression
 orchestration, no BA team, no Storybook/a11y/design-system tooling. Those live only in the full
 `vc-qa` plugin (not shipped here).
 
@@ -21,7 +21,7 @@ orchestration, no BA team, no Storybook/a11y/design-system tooling. Those live o
 
 ---
 
-## Agent Inventory (8 agents)
+## Agent Inventory (10 agents)
 
 ### QA specialists (4) — read-only, no shared-instructions file
 
@@ -44,19 +44,25 @@ auto-merges.** No browser.
 | Agent | Model | Purpose |
 |-------|-------|---------|
 | **fullstack-backend** | opus | Fixes a single `vc-module-*` / `vc-platform` repo — .NET 10 / C# + the module's Admin SPA (Angular). Reproduce-as-test → minimal fix → PR. Skills: `/dotnet-unit-test`, `/dotnet-fix`, `/angular-admin`. |
-| **backend-reviewer** | opus | Reviews the C#/Angular local diff before the PR (Gate 4): single-repo, no test edits, no breaking changes, BL-* preserved, minimal & idiomatic. |
+| **backend-reviewer** | sonnet | Reviews the C#/Angular local diff before the PR (Gate 4): single-repo, no test edits, no breaking changes, BL-* preserved, minimal & idiomatic. |
 | **fullstack-frontend** | opus | Fixes the `vc-frontend` storefront — Vue 3 / TS / Vite + the in-repo UI kit + Storybook — **and** a `module` repo's declared embedded frontend sub-app on the same stack (e.g. `vc-module-pagebuilder`'s Vue 3 shell), scoped to the sub-app path within that module's single-repo checkout. Reproduce-as-vitest-test (or, for a module sub-app, its own `tsx --test`/ephemeral harness) → minimal fix → PR. Skills: `/vue-unit-test`, `/vue-fix`, `/vc-shell-fix` (module-embedded sub-app). |
-| **frontend-reviewer** | opus | Reviews the Vue/TS local diff before the PR (Gate 4): single-repo, no test/story edits, no breaking prop/event/slot or GraphQL contract, BL-UI preserved, minimal & idiomatic. |
+| **frontend-reviewer** | sonnet | Reviews the Vue/TS local diff before the PR (Gate 4): single-repo, no test/story edits, no breaking prop/event/slot or GraphQL contract, BL-UI preserved, minimal & idiomatic. |
 
 **Dropped from the full `vc-qa` crew** (not shipped in `vc-fix`): `qa-lead-orchestrator` (its
 Gate-0/1 triage role is spelled out inline in `qa-fix.md`/`qa-bug.md`/`quality-gates.md` — the
 top-level session performs it directly), `ui-ux-expert`, `regression-orchestrator`,
-`autonomous-regression-orchestrator`, `test-runner-agent`, `autonomous-test-runner`,
-`test-management-specialist`, and all 4 `ba-*` agents.
+`test-runner-agent`, `test-management-specialist`, and all 4 `ba-*` agents.
+
+### Self-diagnostics (2) — read-only, invoked by `/vc-self-check`
+
+| Agent | Model | Purpose |
+|-------|-------|---------|
+| **self-check-diagnostician** | sonnet | Tier-2 diagnostician of the client→vendor feedback loop: given one session id, reads its telemetry jsonl + transcript + the `skill-expectations.md` oracle, and returns ONLY a validated finding STRUCT (verdict + severity + evidence + root-cause + proposed fix + vendor-provenance fields). Writes no files, sends nothing. |
+| **self-check-deliverer** | sonnet | Non-interactive deliverer: given the validated finding STRUCT and the operator's single consent, owns the whole delivery (dedup lookup, route selection, body composition, leak scan, sending, telemetry retention) by running `deliver.mjs`. Asks nothing further; the only thing it ever sends is a GitHub Issue/comment on `VirtoCommerce/vc-mcp-testing-module`. |
 
 ---
 
-## Slash Commands (7)
+## Slash Commands (8)
 
 | Command | Purpose |
 |---------|---------|
@@ -67,12 +73,12 @@ top-level session performs it directly), `ui-ux-expert`, `regression-orchestrato
 | `/qa-monitoring [layer]` | Online bug monitoring from App Insights: query → dedup (fingerprint) → triage → live repro → report. Detect-and-report only — never files a ticket or auto-fixes |
 | `/qa-env-check` | Validate env vars, endpoints, MCP servers |
 | `/vc-self-check` | Self-diagnostics (Tier B): read this session's passive telemetry (`hooks/session-telemetry.mjs` → `.vc-fix/diagnostics/`) + transcript + the `knowledge/diagnostics/skill-expectations.md` oracle → per-skill verdict + severity + proposed fix → LOCAL `DIAG-*.md`. `deliver` sub-step contributes a scrubbed, consent-gated PR/issue to VirtoCommerce. Never modifies the install; model-invocable (no `disable-model-invocation`) so the end-of-turn tail-trigger can auto-run it silently; recursion blocked by span-drop + `selfCheckSeen` + per-signature dedup |
+| `/vc-feedback` | Attach an explicit 👍/👎 verdict (with optional note) to the current session's telemetry trace — the main detector of SILENT failures (a task done wrong with no error). Local + silent: recorded by the `UserPromptSubmit` hook; nothing is sent until the separate consent-gated `deliver` step |
 
 **Dropped from the full `vc-qa` crew:** `/qa-smoke`, `/qa-test`, `/qa-regression`,
-`/qa-coverage-generation`, `/qa-test-lifecycle`, `/qa-test-plan`, `/qa-sync-tests`,
+`/qa-coverage-gap`, `/qa-test-lifecycle`, `/qa-test-plan`, `/qa-sync-tests`,
 `/qa-seed-data`, `/qa-design`, `/qa-exploratory`, `/qa-status`,
-`/qa-onboarding`, `/qa-hotfix`, `/qa-bundle-check`, `/qa-local-env`, `/ba-analyze`,
-`/ba-stories` — full `vc-qa` plugin only, not shipped here.
+`/qa-onboarding`, `/qa-hotfix`, `/qa-bundle-check`, `/qa-local-env`, `/ba-analyze` — the in-repo `vc-qa` toolset only, not shipped here.
 
 ---
 

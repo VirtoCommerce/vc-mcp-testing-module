@@ -72,11 +72,26 @@ tests/screenshots/**/*.png
 !reports/bugs/screenshots/*.png
 !reports/bugs/screenshots/**/*.png
 
+# Per-ticket QA evidence screenshots ARE tracked deliverables (reports.md §5) —
+# re-include them past the blanket *.png ignore above. Covers both layouts the
+# policy names: reports/tickets/<Sprint>/<TICKET>/screenshots/ and
+# reports/tickets/<TICKET>/screenshots/. Run-scoped evidence (reports/regression/,
+# reports/test-lifecycle/, reports/coverage/) stays ignored — it is disposable.
+!reports/tickets/**/screenshots/*.png
+
 # Playwright MCP accessibility snapshots — dropped at repo root by browser MCPs
 # during exploratory sessions. Transient working state, not deliverables.
 # (No tracked YAML at repo root, so the bare-yml pattern is safe.)
 /*.yml
 /*.yaml
+
+# Ad-hoc investigation scratch — one-off probe scripts, API dumps, downloaded
+# build bundles and run-scoped working files. Disposable by construction: each
+# file's value lives in the run that produced it, and whatever must survive
+# belongs in a suite CSV, a seeder, or a report. Ignored because these routinely
+# hold live tokens (a /connect/token response saved next to the probe that used
+# it), and this repo is public — an untracked .scratch/ rides along on `git add -A`.
+.scratch/
 
 # Local environment (qa-local-env / start-local) — Docker checkout + generated
 # manifest are transient working state, never committed.
@@ -120,7 +135,24 @@ reports/monitoring/.seen-fingerprints.json
 reports/monitoring/MONITOR-*/**/*.png
 reports/monitoring/MONITOR-*/**/*.har
 reports/monitoring/MONITOR-*/**/*.jpg
-reports/regression
+
+# Regression run artifacts are ephemeral local working state (screenshots, HARs, traces,
+# resolved CSVs, per-suite results) — they only ever exist on whoever ran them.
+# NOTE the trailing `/*`: git cannot re-include a file whose PARENT DIRECTORY is excluded, so
+# the bare `reports/regression` this replaced made the negations below dead lines.
+reports/regression/*
+# ...EXCEPT the two rolling history files. These are small, append-only, 90-day-windowed and
+# carry no evidence — and without them `scripts/regression/compute-metrics.ts` is starved:
+# `appendToHistory` / `npm run triage:history` DO write them, but the whole directory was
+# ignored and the CI container is ephemeral, so nothing ever survived a run. Its flaky rule
+# (n >= 4 && crossings >= 3) could therefore never fire. Un-ignoring them is half the fix; the
+# other half is the workflow restoring and committing them across runs.
+!reports/regression/history.json
+!reports/regression/history-ci-runs.json
+# test-run-status.json is deliberately tracked (the interactive run interlock + the
+# reap-stalled-run backstop read it), so name it explicitly rather than relying on the fact
+# that an already-tracked file ignores .gitignore.
+!reports/regression/test-run-status.json
 # Seed run results — disposable local working state. The modular seed-*.mjs seeders no longer
 # write these (runtime GUIDs now go to test-data/aliases.{env}.json); only seed-test-data.js's
 # teardown-recovery dump remains. Recursive so nested dumps never get committed again.
@@ -136,3 +168,16 @@ reports/vc-fix-plugin-diagnosis.md
 # Serena (semantic code navigation): the shared .serena/project.yml + .serena/.gitignore
 # ARE committed so every teammate gets the same project config. The machine-specific parts
 # (cache/, logs/, project.local.yml) are excluded by .serena/.gitignore itself.
+
+# === vc-fix (/project-init) — browser evidence landing zone ===
+# The Playwright MCP servers write raw captures here; /qa-bug moves the ones it keeps
+# into reports/bugs/screenshots/<bug-slug>/. Nothing here is evidence of record.
+reports/bugs/screenshots/_incoming/
+
+# Tracker comment ledger — one comment per ticket per run (tracker-ops.md §0)
+.tracker-comments.json
+# Session scratch (ad-hoc probes, staged CSV drafts, one-off scripts) — never committed
+.scratch/
+
+# Tracker attachments downloaded as run INPUT (not a report category, reports.md 1) — kept local
+reports/tickets/**/attachments/

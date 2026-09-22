@@ -1,6 +1,6 @@
 ---
 name: project-init
-description: Initialize / onboard this agentic-QA plugin onto a deployment. Installs deps, then asks the operator only what genuinely shapes the config — the environment NAME, the bug tracker (Jira / Azure Boards), the code host (GitHub / Azure Repos), and an auth preference per axis (PAT recommended, else browser/CLI login). Everything else — whether it is a native-platform or a CLIENT project, the client org, the contribution mode, the fork account — is DERIVED from the token + the filled env + a live module/repo scan. Writes project-profile.json + .env.<env> + .env.local + .mcp.json and verifies access. The whole point is to make /qa-fix route each bug to the RIGHT repo (client custom code vs native platform) and file to the RIGHT tracker. Use when standing the plugin up on a new machine or for a new customer. Day-2 modes skip the interview: `--add-env` adds another environment (URLs + per-env access keys) to an already-onboarded project; `--check` reconciles an existing profile to the current schema then verifies.
+description: "Initialize / onboard this agentic-QA plugin onto a deployment. Installs deps, then asks the operator only what genuinely shapes the config — the environment NAME, the bug tracker (Jira / Azure Boards), the code host (GitHub / Azure Repos), and an auth preference per axis (PAT recommended, else browser/CLI login). Everything else — whether it is a native-platform or a CLIENT project, the client org, the contribution mode, the fork account — is DERIVED from the token + the filled env + a live module/repo scan. Writes project-profile.json + .env.<env> + .env.local + .mcp.json and verifies access. The whole point is to make /qa-fix route each bug to the RIGHT repo (client custom code vs native platform) and file to the RIGHT tracker. Use when standing the plugin up on a new machine or for a new customer. Day-2 modes skip the interview: `--add-env` adds another environment (URLs + per-env access keys) to an already-onboarded project; `--check` reconciles an existing profile to the current schema then verifies."
 ---
 
 # /project-init — deploy & wire this QA plugin for a customer
@@ -542,10 +542,17 @@ for Jira (transitions are discovered live at runtime; the scan would add nothing
 # Azure Boards:
 node "$CLAUDE_PLUGIN_ROOT/skills/project-init/discover-tracker.mjs" \
   --tracker azure --org "$ADO_ORG" --project "$ADO_PROJECT" \
-  --types "Bug,Task,User story" --out .local-env/tracker.json --print
+  --types "Bug,Task,User story" [--team "<team>"] --out .local-env/tracker.json --print
 # Jira (format facts only — no state scan needed):
 node "$CLAUDE_PLUGIN_ROOT/skills/project-init/discover-tracker.mjs" --tracker jira --out .local-env/tracker.json
 ```
+
+The Azure scan also DISCOVERS the `team` whose current sprint `/qa-bug` will stamp (`tracker.azure.team`):
+it enumerates the project's teams and picks the one that owns a **date-valid** current sprint (the
+project's DEFAULT team is often dormant — its `timeFrame:"current"` flag points at a long-dead sprint).
+Pass **`--team "<name>"`** to override the discovery (or to disambiguate when several teams have a
+current sprint — the scan leaves the team unset and asks for one). An unset team is safe: the runtime
+resolver in `ado.mjs` re-validates and can still auto-select the right team at bug-create time.
 
 It writes `.local-env/tracker.json`: `{ kind, ticketKeyFormat, crossLinkToken, apiBase,
 projectId, workItemTypes:{<Type>:{states:[…]}}, roleStates:{in-progress,in-review,
@@ -556,22 +563,43 @@ transition). Step 6 ingests it via `--tracker-json`.
 
 **Reporting — scale it to whether the operator has anything to decide:**
 
-- **`roleStatesComplete: true`** (every role mapped) → **ONE line, no table**:
-  `Board states mapped: Active → On Review → Ready for QA → … → Closed (custom process, 14 Bug
-  states). Transitions will be silent.` The full role→state grid is `/qa-fix` plumbing — correct
-  by construction, nothing to approve. State counts per work-item type, `apiBase`, `projectId`,
-  `ticketKeyFormat` and the cross-link token are internals: **do not print them.**
-- **A role is MISSING or looks wrong** → *then* show a table, of the affected roles only, and ask.
-  This is the case worth the operator's attention, and it stands out precisely because the happy
-  path was one line.
+- **`roleStatesComplete: true` (every role mapped) → render the role→state grid as a TABLE and
+  CONFIRM it** with `AskUserQuestion` (options: **"Accept as scanned"** / **"Correct a role"**) — the
+  same shape §4a already mandates for the repo map. `roleStatesComplete: true` only means every role
+  got *a* state, **not** that the picks match this team's workflow. Because step 6 flips
+  `transitionPolicy=auto`, a mis-picked role moves real customer work items **silently, with no
+  further prompt** — so a custom process's mapping is exactly the kind of fact the operator must be
+  able to see and approve (D4). Render one row per role → picked `System.State`, and add a context
+  line listing the **unused** states — the alternatives the operator is implicitly approving against,
+  e.g. `Unused: New, On Dev, On hold, HotFixed, Resolved, On UAT`. On **"Correct a role"**, ask which
+  role, offer that board's states, and persist with
+  `reconcile-profile.mjs --write --set 'tracker.azure.roleStates.<role>=<state>'`.
+  - **Exception — the one-liner is fine ONLY when the picks are unambiguous:** the board's state set
+    is the STOCK one (New/Active/Resolved/Closed) with **no unused candidate state** a role could
+    plausibly have taken instead. Then: `Board states mapped (stock process, no ambiguity).
+    Transitions will be silent.` State counts per work-item type, `apiBase`, `projectId`,
+    `ticketKeyFormat` and the cross-link token stay internals: **do not print them.**
+- **A role is MISSING or looks wrong** → show the table of the affected roles only and ask (as
+  above). A MISSING role is the one that must be resolved before `/qa-fix` can transition by it; a
+  complete-but-custom map is confirmed, not blocked.
 
 Correct a mismapped role by hand-editing `.local-env/tracker.json` (or the profile) before
 continuing.
 
 Also captured here: the **bug FIELD CONTRACT** per work-item type (VCST-5582 E-a) —
-`tracker.fields.<Type>[]`. Report it the same way: one line on the happy path
-(`Bug field contract: 13 fields, 5 required — all mapped`), a table + a question only when a
-required field has no semantic slot.
+`tracker.fields.<Type>[]` — plus the two lists that drive the FIRST bug creation:
+**`operatorQuestions`** (every required field the operator must supply a value for, whether or not it
+maps to a semantic slot) and **`unmappedRequired`** (only the subset that maps to no slot). **The
+happy-path one-liner MUST state the TOTAL number of first-run questions — `operatorQuestions.length`
+— and name them**, e.g. `Bug field contract: 16 fields, 8 required — /qa-bug's first run will ask 3
+values (Environment, Reported by, Type of bug), then persist them`. Do **NOT** report only
+`unmappedRequired`: on a live run it showed "1 question" (Value Area) while `operatorQuestions` held
+3 more that were never surfaced, so the operator was told to expect 1 and got 4. A field the board
+already answers — a `defaultValue` that is a member of a closed `allowedValues` set — is filled from
+that default and is **not** a question (D1); it appears in neither list. **Surface the
+`operatorQuestions` list to the operator now — never silently defer it to `/qa-bug`.** Show a table
+only when `unmappedRequired` is non-empty (a required field with no semantic slot — a genuine mapping
+gap to review).
 
 `--out` is optional (accepts `--out <path>`; the default flag set here writes it so step 6 can
 read it). If you omit `--out`, capture the printed JSON and pass its path to step 6 another way.
@@ -678,11 +706,36 @@ resolves `$pluginRoot` = the ACTIVE (enabled) install at call time via `claude p
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/project-init/gen-mcp.mjs" --tracker jira --client-vcs github \
-  --with context7            # add postman,figma,devtools as needed
+  --with context7 --warm-cache   # add postman,figma,devtools as needed
 ```
+`--warm-cache` pre-fetches the pinned npx packages into the npm cache (with an IPv4-first
+DNS hint) so the first MCP start doesn't pay a registry round-trip — the #220 startup-timeout
+guard. Best-effort + timeboxed; drop it to skip the network step.
 Enables playwright×3 + github + the tracker's MCP (atlassian for Jira; azure-mcp
-for Azure). **Remind the operator to restart the MCP servers** (reload the IDE)
-for the new config to take effect.
+for Azure). A `--with` extra whose API key is an OPTIONAL placeholder the operator left blank
+(`postman`, `context7`) is **defined but NOT enabled** — the same "blank ⇒ stays disabled"
+contract `scaffold-secrets.mjs` states, so passing `--with context7` unconditionally (as above) is
+safe: it enables the server only once the key exists. gen-mcp prints one info line per dormant
+extra; filling the key in `.env.local` and re-running enables it. **Remind the operator to restart
+the MCP servers** (reload the IDE) for the new config to take effect.
+
+**Secrets never land in `.mcp.json` (VCST-5774).** A resolved credential is written there as a
+`${VAR}` **indirection**; the VALUE goes into `.claude/settings.local.json` `env`, which Claude
+Code applies to every session and its subprocesses — and that is what feeds `${VAR}` expansion in
+`.mcp.json` `headers`/`env`. So `.mcp.json` is safe to read, diff and share. Before writing
+anything, gen-mcp adds `.mcp.json`, `.claude/settings.local.json`, `.env.local`, `.env.*.local`,
+`project-profile.json` and `.vc-fix/` to the project's `.gitignore` (creating it if absent), so
+the file never exists un-ignored even briefly. There is **no `gh auth token` fallback** — with no
+PAT the placeholder stays unresolved and the github server drops the header and uses interactive
+OAuth, rather than persisting the operator's CLI session to disk.
+
+Two consequences worth stating to the operator:
+- The value being in settings `env` means it is exported to **every** session subprocess, not just
+  the one MCP client. That is the mechanism, not an accident — treat `.claude/settings.local.json`
+  as a secret file.
+- **`--inline-secrets`** restores the legacy literal substitution into `.mcp.json` (and then writes
+  no second copy to settings). Opt-in only, for a host that cannot apply settings `env`. It makes
+  `.mcp.json` itself a secret; the §8 hygiene rows will say so.
 
 ## 8. Verify access — full readiness checkup
 
@@ -701,7 +754,8 @@ Checks (PASS / FAIL / WARN / SKIP): deployment profile · **plugin root** (`clau
 resolves the active vc-fix install and `skills/qa-fix-routing/ado.mjs` is present under it;
 WARN if the `claude` CLI isn't on PATH) · core env vars · storefront
 URL · admin/platform URL · **admin login** (real `POST {BACK_URL}/connect/token`
-password grant) · storefront user login (soft WARN) · tracker token (Jira `GET /myself`
+password grant) · storefront user login (the REAL store-scoped OAuth grant → PASS/FAIL, not a
+"verify manually" WARN) · tracker token (Jira `GET /myself`
 or a **real ADO org probe**) · **GitHub fix token / gh session** (validates the token and
 its permission on the upstream — shared with the derive block via `probe-lib.mjs`, so
 what verify reports and what the profile stored can't drift) · **client repos** (for a
@@ -732,9 +786,42 @@ too heavy — the WARN explains exactly what to grant, the operator grants it be
 `/qa-fix`, and `/qa-fix` Gate 1 re-checks the ACTUAL routed repo anyway. The `To resolve:` block
 names the exact scopes — **Azure: Work Items (Read & Write) + Code (Read & Write) + Pull Request
 (contribute); GitHub: repo/PR write** — and never prints the token. Only **fundamentals** FAIL →
-NOT READY (missing core env, unreachable `FRONT_URL`/`BACK_URL`, bad admin login, or a totally
-absent/rejected credential that can't even reach the resource); **WARN** is non-blocking; **SKIP**
-means a feature isn't configured.
+NOT READY (missing core env, unreachable `FRONT_URL`/`BACK_URL`, bad admin login, a totally
+absent/rejected credential that can't even reach the resource, or an **exposed credential** — see
+the hygiene rows below); **WARN** is non-blocking; **SKIP** means a feature isn't configured.
+
+**Secret-hygiene rows (VCST-5774).** Two rows — `Secret hygiene — .mcp.json` and
+`Secret hygiene — .claude/settings.local.json` — audit the files §7 generated. Both are checked,
+because the redesign MOVED the credential: guarding only `.mcp.json` would leave the value's new
+home unguarded. The walk covers the whole server def — `headers`, `env`, `args[]`, `url`, nested
+bags — because the generator substitutes placeholders at every leaf. It reports KEY PATHS only; a
+credential value never reaches the table or the telemetry.
+
+**Two nets, two confidence levels**, and that split is what keeps the row honest:
+
+- **CERTAIN** — the known-token-shape matcher shared with `hooks/redact.mjs` (`ghp_`, `glpat-`,
+  `AKIA`, JWT, …). A hit is a credential whatever key it hides under, so it may block readiness.
+- **SUSPECTED** — a credential-shaped key (or a `--api-key`-style flag, or a URL with inline
+  credentials) whose value is opaque. This is the net that catches a token type nobody has invented
+  yet, but it cannot tell a secret from a filename — so it **only ever WARNs**. That ceiling is
+  what lets the key vocabulary stay wide instead of being narrowed until real names fall out of it.
+  Obvious non-credentials (a path, a filename, a bare number, a short enum word) are filtered out.
+
+Grading is by **actual exposure**:
+
+| Situation | Row |
+|---|---|
+| **Certain** credential **and** the file is committable (not gitignored, **or already tracked**) | **FAIL** — blocks readiness, names the fix and says to rotate |
+| **Suspected** credential, however exposed | **WARN** — never blocks; says it may equally be a filename or an id |
+| Certain literal in `.mcp.json`, file not committable | WARN — re-run `/project-init`, or keep it via `--inline-secrets` |
+| Certain credential in `settings.local.json`, file not committable | **PASS** — that is the target state |
+| Clean but committable, or unparsable JSON | WARN |
+| Outside a git repo | never FAIL on ignore-state — there is nothing to commit to |
+
+An **already-tracked** file is the case to read carefully: `git check-ignore` reports a tracked
+path as NOT ignored, and adding a `.gitignore` rule does not untrack it — so that FAIL tells the
+operator to `git rm --cached <file>` and commit, then rotate. Re-running `/project-init` would not
+fix it.
 
 **Session auth is really probed, not assumed.** For an `az-login` / `gh-cli` axis the
 check mints a real token and hits the org / upstream — an active session that is not a
@@ -1014,8 +1101,9 @@ Gate 1b reconstructs a resolvable ref on the fly. A `/project-init` re-run (or j
 
 | Script | Role |
 |--------|------|
-| `scaffold-env.mjs` | write a commented `.env.<env>` **template** (non-secret URL/identifier/tracker placeholders + what/example comments); topology-driven, idempotent |
-| `scaffold-secrets.mjs` | write a commented `.env.local` **template** (secret placeholders + what/why/where per secret); topology-driven, idempotent |
+| `scaffold-env.mjs` | write a commented `.env.<env>` **template** (non-secret URL/identifier/tracker placeholders + what/example comments); topology-driven, idempotent. **Calls `lib/gitignore.mjs` `ensureProjectIgnores()` BEFORE it writes**, so the file it is about to create is already covered (VCST-5774). |
+| `scaffold-secrets.mjs` | write a commented `.env.local` **template** (secret placeholders + what/why/where per secret); topology-driven, idempotent. **Calls `lib/gitignore.mjs` `ensureProjectIgnores()` BEFORE it writes**, so the file it is about to create is already covered (VCST-5774). |
+| `lib/gitignore.mjs` | the ONE list of what onboarding generates that must never be committed, plus the append-only writer. Shared because FOUR scripts create such files at four different steps and each must protect its own **before** creating it — while only `gen-mcp` (§7) wrote the block, `.env.local` (§3b) sat unignored through the operator's fill-in pause and through any run that aborted before §7. Idempotent, so four calls cost one read and produce one block |
 | `normalize-env.mjs` | **run on the operator's "done" (§3d) and in `--check` Step C** — normalize the hand-filled `.env.<env>` IN PLACE (quotes / padding / **all** trailing slashes; a pasted `dev.azure.com/<org>` → the bare slug) and validate it: exit 1 on an unfilled placeholder, a URL with no `http(s)://`, or a path-shaped `ADO_ORG`/`ADO_PROJECT`; WARN on a path component in `FRONT_URL`/`BACK_URL`. Prints every fix. Rules come from `scaffold-env.mjs` `CATALOG` (`type` + no-`def`), never a private copy |
 | `write-env.mjs` | (non-interactive helper) write `.env.<env>` / `.env.local` from a JSON answer object on STDIN when values ARE known programmatically; idempotent |
 | `discover-repos.mjs` | ALWAYS-run scan: Platform API modules → client/platform split, client-host scan for the storefront repo, and **derives projectType + clientOrg**; bakes per-repo `contribution`/`integrationBranch`/`toolchain`/`localVerify`; emits `{ projectType, clientOrg, client, platform }` |
@@ -1024,9 +1112,9 @@ Gate 1b reconstructs a resolvable ref on the fly. A `/project-init` re-run (or j
 | `probe-lib.mjs` | shared side-effect-free probes (GitHub-upstream permission, ADO tenant/auth) used by BOTH `verify-access` and `derive-context` so their results can't drift |
 | `gen-profile.mjs` | write/merge `project-profile.json` from the repos-json (projectType/clientOrg/repos) + derived flags (operator/contributionMode/upstream-account/vcs-auth) + tracker connection |
 | `reconcile-profile.mjs` | **`--check` migration**: diff an existing profile against the current `PROFILE_DEFAULTS` schema → JSON report of `added` (safe-default) / `removed` (obsolete, open-maps+arrays preserved) / `pending` (operator-decision fields with `question`+`options`, e.g. `selfDiagnostics`) / `rescan` (re-derive live). Deterministic, dry-run by default; `--write` applies structural changes + `--set path=value` decisions. Idempotent. Mirrors `gen-profile`'s `tracker.azure`/`vcs.azure` discriminated pruning |
-| `gen-mcp.mjs` | write `.mcp.json` (OS-aware) into the project + enable servers for the tracker/VCS. Playwright servers are flags-only (`--browser` / `--isolated` / `--viewport-size` / `--output-dir`) — no config files; only `playwright-chrome` is enabled by default |
+| `gen-mcp.mjs` | write `.mcp.json` (OS-aware) into the project + enable servers for the tracker/VCS. **Credentials are written as `${VAR}` refs; the VALUE goes to `.claude/settings.local.json` `env`. `--inline-secrets` opts back into a literal (and `--inline-secrets false` correctly turns it OFF). Refuses to write at all when the settings file is unparsable or already git-tracked — a rewrite would delete the operator's keys, and no `.gitignore` rule can untrack a tracked file (VCST-5774).** Playwright servers are flags-only (`--browser` / `--isolated` / `--viewport-size` / `--output-dir`) — no config files; only `playwright-chrome` is enabled by default |
 | `lib/paths.mjs` | shared path helper — `outputRoot()` (`VC_FIX_HOME` \|\| `process.cwd()`, where generated state goes) + `pluginRoot()` (`CLAUDE_PLUGIN_ROOT` \|\| resolved from `import.meta.url`, used by a running script to find its own read-only plugin assets). Keeps every generator writing to the project and reading templates from the plugin. (Commands resolve their launch path via `claude plugin list --json` — see `knowledge/execution/plugin-root.md`.) |
-| `verify-access.mjs` | full `/qa-fix` readiness table + verdict; prints an untruncated "To resolve" block (incl. an auto-discovered `az login --tenant <guid>`). Also **reports every non-PASS row as self-diagnostics telemetry** (`lib/diag-obs.mjs` → the collector's `obs` subcommand) — the table used to be rendered and discarded, so a WARN the operator could plainly read was invisible to `/vc-self-check` and the run self-diagnosed "no plugin issues detected" (VCST-5582 H). Exit code is unchanged: 0 unless a hard FAIL |
+| `verify-access.mjs` | full `/qa-fix` readiness table + verdict, incl. the two **secret-hygiene** rows that audit `.mcp.json` + `.claude/settings.local.json` for an exposed credential (graded by committability: tracked/not-ignored ⇒ FAIL); prints an untruncated "To resolve" block (incl. an auto-discovered `az login --tenant <guid>`). Also **reports every non-PASS row as self-diagnostics telemetry** (`lib/diag-obs.mjs` → the collector's `obs` subcommand) — the table used to be rendered and discarded, so a WARN the operator could plainly read was invisible to `/vc-self-check` and the run self-diagnosed "no plugin issues detected" (VCST-5582 H). Exit code is unchanged: 0 unless a hard FAIL |
 | `assert-profile.mjs` | asserts the **SHAPE** of the profile just written and records each degradation as a `degraded_artifact` observation: empty `tracker.fields` (⇒ `/qa-bug` sends "unverified defaults"), `roleStatesComplete:false`, unmapped required fields, empty `repos.client` on a client project, an unresolved storefront `upstreamRef`, `githubForkCapable != "yes"` while the upstream path is needed. Complements `verify-access` (which probes ACCESS): a scan can return empty with no HTTP error, and what `/qa-fix` reads at runtime is the persisted shape. Read-only, **always exits 0** — a diagnostic, not a second readiness gate |
 | `ensure-session.mjs` | establish the browser-login sessions WITHOUT hand-crafted commands: auto-discovers the ADO org tenant and drives `az login --tenant <guid>` / `gh auth login --web`; `--check` probes only. Run in the background (the login blocks on the browser). |
 

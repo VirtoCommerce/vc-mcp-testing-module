@@ -13,8 +13,13 @@
       "locale": "en-US",
       "recordHar": {
         "path": "./test-results/chrome/har/session.har",
-        "omitContent": true
-      }
+        "content": "embed"
+      },
+      "deviceScaleFactor": 2,
+      "permissions": [
+        "clipboard-read",
+        "clipboard-write"
+      ]
     }
   },
   "outputDir": "./test-results/chrome",

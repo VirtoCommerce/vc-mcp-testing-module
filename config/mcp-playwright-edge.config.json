@@ -14,8 +14,9 @@
       "locale": "en-US",
       "recordHar": {
         "path": "./test-results/edge/har/session.har",
-        "omitContent": true
-      }
+        "content": "embed"
+      },
+      "deviceScaleFactor": 2
     }
   },
   "outputDir": "./test-results/edge",

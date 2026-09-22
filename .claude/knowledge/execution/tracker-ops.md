@@ -12,6 +12,72 @@ apply the same matrix by reading the profile.
 > is not exported that way — instead read `project-profile.json` directly (it's gitignored,
 > present only on a configured deployment) or infer the defaults when absent.
 
+## 0. GOLDEN RULE — ONE comment per ticket per run. Amend it; never append to it.
+
+**A tracker ticket is a shared inbox, not a work log.** Every comment notifies the assignee, the
+reporter and every watcher. A run that posts five times has interrupted those people five times to
+deliver one conclusion — and left them to reconcile which version is current.
+
+**The rule, and it is absolute:**
+
+1. **One comment per ticket per run.** Compose it locally, post it once, at close-out.
+2. **A correction EDITS that comment — it never becomes a second one.** `PUT /rest/api/3/issue/{key}/comment/{id}`
+   (§0a). New evidence, a retraction, a severity change, a formatting fix: all are edits.
+3. **Nothing is posted mid-run** "so they know sooner". Findings live in chat and in the local
+   report until close-out. If the operator explicitly says *post now*, that post becomes **the**
+   comment for the run and everything later amends it.
+4. **A second comment requires the operator to ask for one**, for a reason they state. Not because
+   the run learned something new — a run always learns something new.
+
+**Why this is mechanical and not a judgment call.** The failure mode is that every individual
+comment is defensible while the aggregate is spam, so judgment-in-the-moment cannot catch it — the
+judgment is what failed. The comment id is therefore recorded in `summary.json.tracker.comment_id`
+at first post, and its presence is what makes every later write an edit. **No id recorded ⇒ you have
+not posted yet. Id recorded ⇒ you may not POST, only PUT.**
+
+**Measured 2026-09-17, VCST-5378:** one run posted **five** comments in about one hour — a root-cause
+comment, a results comment correcting it, a delta measurement, a malformed wiki-markup comment, and a
+consolidated report superseding the first three. The fifth contained the other four. Teammates had
+already acted on the superseded ones.
+
+### 0a. How to amend (Jira)
+
+The Atlassian MCP exposes only `addCommentToJiraIssue` — **there is no edit or delete tool**, which is
+precisely why corrections turned into new comments.
+
+**Use the helper — it makes amending as cheap as posting, and keeps the ledger for you:**
+
+```bash
+npm run tracker:comment -- --ticket VCST-1234 --body-file body.md              # post (once)
+npm run tracker:comment -- --ticket VCST-1234 --amend 109824 --body-file body.md
+npm run tracker:comment -- --ticket VCST-1234 --get 109824                     # read it back
+npm run tracker:comment -- --ticket VCST-1234 --delete 109823
+npm run tracker:comment -- --ticket VCST-1234 --body-file body.md --force-new "<reason>"
+```
+
+It refuses a second `--post` for a ticket in the same run, rejects a wiki-markup body (§5a), writes
+`.tracker-comments.json` and mirrors the id into `summary.json.tracker.comment_id`. Two hooks close the
+loop for comments posted straight through the MCP: `.claude/hooks/record-tracker-comment.mjs` (PostToolUse)
+records the first id, `.claude/hooks/enforce-one-tracker-comment.mjs` (PreToolUse) blocks the second and
+prints the amend command. Both fail **open**. Behaviour is pinned by
+`scripts/unit/tracker-comment-guard.test.mjs`.
+
+**Raw REST**, if you are outside this repo (the plugin ships no `scripts/`):
+
+```bash
+# edit an existing comment (auth: JIRA_EMAIL + JIRA_API_TOKEN from .env.local)
+curl -sk -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -X PUT \
+  -H "Content-Type: application/json" \
+  --data @body.json \
+  "https://<site>.atlassian.net/rest/api/3/issue/<KEY>/comment/<COMMENT_ID>"
+```
+
+Deleting is `DELETE` on the same URL. **Azure Boards:** `PATCH` the work item's comment endpoint
+(`/comments/{id}`, api-version 7.1-preview.4).
+
+**If you cannot authenticate for a PUT, you do not get to fall back to a new comment.** Say so, hand
+the operator the corrected body, and let them decide.
+
 ## 1. Which tracker / host am I on?
 
 | Profile field | Values | Drives |
@@ -127,11 +193,13 @@ guessing custom-field ids.
   before the `PATCH`.
 - The on-disk `reports/bugs/*.md` file stays plain Markdown regardless — this rule is only about
   what you push into a **tracker field**.
+- **One carve-out, and only one:** a comment that must **display screenshots** cannot be Markdown —
+  see §5c. Prose stays Markdown everywhere else.
 
 ## 5b. Bug-filing relationship — Sub-task vs Link vs Standalone
 
-`/qa-test` Step 5d files a confirmed bug with one of three relationships to the ticket under test, set by
-that finding's **provenance** (5a). This is the contract `/qa-bug` follows when invoked with a relationship
+`/qa-test` Step 5-file files a confirmed bug with one of three relationships to the ticket under test, set by
+that finding's **provenance** (5-triage). This is the contract `/qa-bug` follows when invoked with a relationship
 context (`sub-task-of:<ticket-key>` / `link-only:<existing-bug-key>`); a standalone `/qa-bug` call
 (no relationship context) is unaffected and keeps creating an ordinary Bug as today.
 
@@ -157,9 +225,143 @@ note) MUST be:
   matters. No investigation logs, no step-by-step narration, no restating the whole ticket.
 - **Understandable to a human skimming on a deadline.** Reference evidence (PR link, screenshot,
   `@td` alias, BL-* id), don't inline it. Obey the size discipline in `.claude/rules/reports.md`.
-- **Rendered Markdown, not raw markup.** Verify the comment renders (bold/lists/code actually
-  format) — a literal `**` / `| … |` wall means you sent the wrong dialect (Jira wiki instead of
-  Markdown, or Markdown into an Azure HTML field). Fix and re-post.
+- **Rendered, not raw markup.** Verify the comment renders (bold/lists/code actually format) — a
+  literal `**` / `| … |` wall means you sent the wrong dialect (Jira wiki instead of Markdown, or
+  Markdown into an Azure HTML field). Fix and re-post. The inverse holds for the §5c
+  screenshot carve-out: there the body is wiki markup on purpose, and a literal `h2.` / `||` wall
+  means you sent *Markdown* into the v2 endpoint. Whichever dialect you chose, read the posted
+  comment back before calling it done.
+
+## 5c. Screenshots in a Jira comment — attach first, then wiki markup (2026-08-07)
+
+> **This section is the MECHANISM. That screenshots MUST be embedded inline is policy — `.claude/rules/reports.md` §5.0 — and it binds documentation, bug reports and fix verification alike. Posting a UI claim with no inline image, or with a Markdown/prose file reference, is a non-delivery, not a cosmetic miss. The `?expand=renderedBody` check below is part of the posting step, not an optional follow-up.**
+
+A Markdown image reference in a Jira comment **silently renders as nothing**. `![alt](path)` pointing
+at a repo path, or at a bare filename, is dropped by the Markdown→ADF conversion with no error and no
+warning — the comment posts `200 OK` and simply has no image. Naming the file in prose ("Screenshot:
+`foo.png`") is not a substitute: the reader still cannot see it. This cost a full round trip on
+VCST-5281, where two complete guides were posted with twelve invisible screenshots.
+
+Images live in a Jira comment only if **both** steps happen:
+
+1. **Attach the file to the issue.** The Atlassian MCP has **no attachment tool** — use the REST
+   endpoint directly with `JIRA_EMAIL` + `JIRA_API_TOKEN` from `.env.local`:
+   ```bash
+   curl -sk -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H "X-Atlassian-Token: no-check" \
+     -F "file=@path/to/shot.png" [-F "file=@path/to/second.png" ...] \
+     "https://<site>.atlassian.net/rest/api/3/issue/<KEY>/attachments"
+   ```
+   Multiple `-F file=@…` in one request is fine. **Check what already landed before retrying** — a
+   failed output pipe does not mean the upload failed, and a blind retry duplicates every attachment
+   (`GET /rest/api/3/issue/<KEY>?fields=attachment`).
+2. **Reference it as wiki markup, via the v2 comment API.** `POST`/`PUT`
+   `/rest/api/2/issue/<KEY>/comment[/<id>]` with a plain-string `body` containing
+   `!filename.png|width=700!`. Jira resolves the filename against the issue's attachments and
+   converts it to a real ADF media node. The whole comment body must then be wiki markup —
+   `h2.` headings, `*bold*`, `_italic_`, `{{mono}}`, `||header||` / `|cell|` tables, `#` numbered and
+   `*` bulleted lists, `[text|url]` links, `{panel:title=…}…{panel}` for admonitions.
+
+**An animated GIF travels this same path unchanged** — same attachment endpoint, same
+`!clip.gif|width=700!` through the v2 API — and Jira animates it inline. Measured 2026-09-14 on
+VCST-5024 (attachment `83962`, 5 frames, 960×540): one `<img src=…/attachment/content/…>`, one `media`
+node with a 36-char UUID, zero literal `!….gif!`. `.webm`/`.mp4` are a different question and are
+**measured 2026-09-17 and they DO NOT WORK** — see below. WHEN a bug needs motion evidence at all is
+`reports-policy.md` §5.2.
+
+**`.mp4` / `.webm` do not embed — a video reference renders a DEAD PLUGIN OBJECT (measured 2026-09-17,
+VCST-5378).** `!clip.mp4|width=700!` through the v2 API posts `200 OK` and produces neither an `<img>`
+nor a `<video>`; `?expand=renderedBody` returns:
+
+```html
+<div class="embeddedObject"><object classid="clsid:02BF25D5-8C17-4B23-BC80-D3488ABDDC6B"
+  codebase="https://www.apple.com/qtactivex/qtplugin.cab" type="video/mp4" width="700" height="380">
+  <embed pluginspage="https://www.apple.com/quicktime/download/" type="video/mp4" …/></object></div>
+```
+
+That is the **QuickTime ActiveX / NPAPI** embed. ActiveX died with IE11 and NPAPI was removed from Chrome
+in 2015, so the buyer-facing result in any current browser is an empty box. The file is still attached and
+downloadable from the attachments panel — but it is **not inline evidence**, and because it posts `200 OK`
+with zero `<span class="error">`, a run that stops at the status code will believe it worked. **Use an
+animated GIF** (`npm run gif`), which renders as a real media node and animates inline.
+
+Raw Playwright video is impractical anyway: a short session records **~84 MB** of VP8 `.webm`
+(`test-results/<lane>/video/`) and Playwright exposes no bitrate control — `recordVideo.size` sets frame
+dimensions only. Transcoding is not available on the QA machines (no `ffmpeg`).
+
+**The positive signal per media type**, all from `?expand=renderedBody`:
+
+| Attached | Renders as | Verdict |
+|---|---|---|
+| `.png` | `<span class="image-wrap"><img src="…/attachment/content/<id>" width="700">` | inline image |
+| `.gif` | same shape, animates | **the motion-evidence format** |
+| `.mp4` / `.webm` | `<div class="embeddedObject"><object classid="clsid:02BF25D5…">` | **dead — do not use** |
+
+**Read the `<img>`, never the filename.** The rendered `src` carries the numeric **attachment id**, not the
+file name, so "is the filename present in the HTML" is not a success test — it was wrong in the first cut of
+`scripts/tracker/comment.mjs` and reported two correctly-rendered images as failures. The reliable per-file
+signal is that no literal `!name!` survived. `npm run tracker:comment -- --attach <file>` performs the
+upload, the v2 embed and this whole check in one step.
+
+**Do not** hand-build an ADF `media` node with the numeric attachment id — Jira rejects it with
+`400 ATTACHMENT_VALIDATION_ERROR`. The `media.attrs.id` must be a media-service **UUID**, which the
+attachment REST API does not expose; the wiki-markup path is what resolves it for you.
+
+**The three ADF dead ends, measured 2026-09-02 on VCST-5319 — do not re-probe them:**
+
+| Attempt | Result |
+|---|---|
+| `media.attrs` `{type:"file", id:"<attachmentId>", collection:""}` | `400 ATTACHMENT_VALIDATION_ERROR` |
+| same, `collection` omitted | `400 INVALID_INPUT` — the field is required |
+| same, `collection:"jira-attachments"` | `400 ATTACHMENT_VALIDATION_ERROR` |
+| `media.attrs` `{type:"external", url:"…/attachment/content/<id>"}` | **`201 Created`, then renders `Can only create thumbnails for attached images`** |
+
+The last one is the trap: it is the only variant that *posts successfully*, so a run that stops at the
+status code concludes it worked. `GET /rest/api/3/issue/<KEY>/comment/<id>?expand=renderedBody` is what
+distinguishes them — a rendered `<span class="error">` means the images are invisible whatever the POST
+returned.
+
+**Read the POSITIVE signal off the `<img>`, not off `file-preview-id`.** That attribute was the marker on
+the 2026-09-02 VCST-5319 measurement and it does **not** appear on a working wiki render: verified
+2026-09-03 on VCST-5868, where a correct `!file.png|width=700!` renders as
+`<span class="image-wrap"><img src=".../rest/api/3/attachment/content/<attachmentId>" width=…>` with
+**zero** `file-preview-id` occurrences. A check gated on that attribute would have called three correctly
+rendered images a failure. The three signals that did hold: one `<img src=…/attachment/content/…>` per
+image in `renderedBody`; via the v3 read below, one ADF `media` node per image whose `attrs.id` is a
+36-char UUID with `type: "file"`; and **zero** surviving literal `!…png!` in `renderedBody`, which proves
+the wiki markup was converted rather than printed.
+
+**Probe on a throwaway comment, never on the deliverable.** Post a one-line test comment, iterate the
+variants against it, then write the real comment once with the form that rendered — and delete the probe
+(`DELETE /rest/api/2/issue/<KEY>/comment/<id>` → `204`). Iterating on the deliverable itself means
+repeatedly overwriting a comment other people may already be reading.
+
+**Verify, don't assume.** Re-read the comment through the **v3** API and confirm each `media` node's
+`attrs.id` is a 36-char UUID:
+```bash
+curl -sk -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
+  "https://<site>.atlassian.net/rest/api/3/issue/<KEY>/comment/<id>"
+```
+Zero media nodes means the images are invisible, whatever the POST returned.
+
+Azure Boards is unaffected — its fields are HTML, so `<img src="…">` against an uploaded attachment
+URL works normally.
+
+## 5d. Publishing a deliverable to a ticket means the deliverable
+
+When asked to push a report, guide, analysis, or test model **to a ticket**, post the **artifact
+itself**, in full, in the comment body. A summary plus a repo path is not a delivery:
+
+- **Repo paths are not readable by ticket readers.** A path is only resolvable by someone with that
+  checkout, at that commit — and if the file is uncommitted, by literally no one but the author.
+  Never cite a working-tree path as if it were a link.
+- **Summarize only when explicitly asked to.** "Push it to the ticket" means the content.
+- **An oversized artifact is still ONE comment** (§0). Do not split it across several — that is the
+  noise the GOLDEN RULE forbids, and it was licensed here until 2026-09-17. If it genuinely will not
+  fit, attach it as a file to the same ticket and reference the attachment from the single comment,
+  or ask the operator which half they want inline. Never shrink it to an abstract, and never serialise
+  it into a comment thread.
+- **A pointer is legitimate only when the target is reachable** — a merged-and-pushed GitHub URL, a
+  PR link, an attachment on that same ticket.
 
 ## 5. Build-version verification is platform-only
 

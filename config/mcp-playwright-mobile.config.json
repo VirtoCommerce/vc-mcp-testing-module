@@ -15,9 +15,13 @@
       "hasTouch": true,
       "locale": "en-US",
       "recordHar": {
-        "path": "./test-results/mobile/har",
-        "omitContent": true
-      }
+        "path": "./test-results/mobile/har/session.har",
+        "content": "embed"
+      },
+      "permissions": [
+        "clipboard-read",
+        "clipboard-write"
+      ]
     }
   },
   "outputDir": "./test-results/mobile",

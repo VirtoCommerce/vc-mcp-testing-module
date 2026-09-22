@@ -15,9 +15,9 @@ Three agent teams for the Virto Commerce platform: **QA** (quality assurance), *
 
 ---
 
-## Agent Inventory (19 agents + per-team shared instructions)
+## Agent Inventory (17 agents + per-team shared instructions)
 
-### QA Team (11 agents + shared-instructions)
+### QA Team (9 agents + shared-instructions)
 
 | Agent | Model | Color | Purpose |
 |-------|-------|-------|---------|
@@ -29,8 +29,6 @@ Three agent teams for the Virto Commerce platform: **QA** (quality assurance), *
 | **test-management-specialist** | sonnet | purple | Test planning, case writing, coverage tracking |
 | **test-data-engineer** | opus | teal | Authors seeders / fixtures / `@td()` aliases / validators + unit tests (`/qa-generate-data` + `/qa-seed-data`); write-capable in this repo only, no browser |
 | **regression-orchestrator** | sonnet | orange | Parallel regression + smoke mode, retries, reports |
-| **autonomous-regression-orchestrator** | sonnet | orange | Agent Teams regression: token bucket, failure recovery, JIRA integration |
-| **autonomous-test-runner** | sonnet | orange | Standalone autonomous test execution agent |
 | **test-runner-agent** | sonnet | orange | Parameterized suite runner (used by regression orchestrator) |
 
 ### BA Team (4 agents + shared-instructions)
@@ -50,20 +48,20 @@ The **only write-capable team** (clone / branch / commit / push / open PR via lo
 team stays read-only on GitHub. Driven by `/qa-fix` (interactive twin of `ci/run-fix-cycle.ts`); reuses
 `ci/config/fix-repos.json` + `ci/lib/repo-router.ts` + `ci/lib/module-registry.ts`. **One developer +
 one reviewer per repo kind**, picked by the routed repo's `kind`. Gate ladder:
-`.claude/rules/quality-gates.md`. **Never auto-merges.** No browser.
+`.claude/knowledge/execution/quality-gates.md`. **Never auto-merges.** No browser.
 
 | Agent | Model | Color | Purpose |
 |-------|-------|-------|---------|
 | **fullstack-backend** | opus | green | Fixes a single `vc-module-*` / `vc-platform` repo — .NET 10 / C# + the module's Admin SPA (Angular). Reproduce-as-test → minimal fix → PR. Interactive twin of `ci/agents/fix-backend-agent.md`. Skills: `/dotnet-unit-test`, `/dotnet-fix`, `/angular-admin`. |
-| **backend-reviewer** | opus | blue | Reviews the C#/Angular local diff before the PR (Gate 4): single-repo, no test edits, no breaking changes, BL-* preserved, minimal & idiomatic. |
+| **backend-reviewer** | sonnet | blue | Reviews the C#/Angular local diff before the PR (Gate 4): single-repo, no test edits, no breaking changes, BL-* preserved, minimal & idiomatic. |
 | **fullstack-frontend** | opus | cyan | Fixes the `vc-frontend` storefront — Vue 3 / TS / Vite + the in-repo UI kit + Storybook — **and** a `vc-module-*` repo's declared embedded Vue 3 frontend sub-app (e.g. `vc-module-pagebuilder`'s page-builder shell, scoped to the sub-app path). Reproduce-as-vitest-test (or the sub-app's own `tsx --test`/ephemeral harness) → minimal fix → PR. Interactive twin of `ci/agents/fix-frontend-agent.md`. Skills: `/vue-unit-test`, `/vue-fix`, `/vc-shell-fix` (`/storybook-test` optional). |
-| **frontend-reviewer** | opus | blue | Reviews the Vue/TS local diff before the PR (Gate 4): single-repo, no test/story edits, no breaking prop/event/slot or GraphQL contract, BL-UI preserved, minimal & idiomatic. |
+| **frontend-reviewer** | sonnet | blue | Reviews the Vue/TS local diff before the PR (Gate 4): single-repo, no test/story edits, no breaking prop/event/slot or GraphQL contract, BL-UI preserved, minimal & idiomatic. |
 
 ---
 
 ## Slash Commands (28)
 
-Full argument reference: [`.claude/rules/skills-commands.md`](../../rules/skills-commands.md).
+Full argument reference: each command and skill file's own frontmatter (`description` + `argument-hint`), which the harness renders as the `/` menu.
 
 ### QA & Setup Commands
 
@@ -74,7 +72,8 @@ Full argument reference: [`.claude/rules/skills-commands.md`](../../rules/skills
 | `/qa-test VCST-XXXX` | Test a JIRA ticket, feature, or PR | varies |
 | `/qa-regression [scope]` | Run regression suites (smoke/critical/sprint/full) | varies |
 | `/qa-triage-results [RUN_ID]` | Triage a completed run's FAILs: classify real-bug vs test-defect vs flaky, live-verify, route fixes (never files a ticket) | varies |
-| `/qa-coverage-generation [scope]` | Orchestrated parallel coverage generation with CI support | varies |
+| `/qa-coverage-gap [scope]` | Coverage gap analysis + generation (single-agent) | varies |
+| `/code-review-full` | Full multi-dimension code review of the working diff | varies |
 | `/qa-test-lifecycle` | Unified pipeline: sync stale cases + analyze gaps + generate + review + verify (PR, module, diff, suite, domain) | varies |
 | `/qa-test-plan [sprint]` | Build a sprint test plan from JIRA + merged PRs in the sprint window | varies |
 | `/qa-verify-fix VCST-XXXX` | Verify a bug fix with regression checks | varies |
@@ -92,7 +91,6 @@ Full argument reference: [`.claude/rules/skills-commands.md`](../../rules/skills
 | `/qa-sitemap` | Refresh `knowledge/domain/sitemap.md` from the live storefront (diff-gated xAPI crawler) | varies |
 | `/qa-env-check` | Validate env vars, endpoints, MCP servers, test infra | < 30 sec |
 | `/qa-onboarding [env]` | Customer onboarding flow: install → first green smoke run + first bug filed | varies |
-| `/code-review-full` | Full multi-dimension code review of the working diff | varies |
 | `/vc-self-check [session]` | Self-diagnose the plugin from this session's telemetry → local `DIAG-*.md` (never modifies the install, never sends) | varies |
 | ~~`/qa-sync-tests`~~ | _(**removed** — file deleted, no redirect. Use `/qa-test-lifecycle PR #NNN \| module <name> \| diff`)_ | — |
 
@@ -101,7 +99,7 @@ Full argument reference: [`.claude/rules/skills-commands.md`](../../rules/skills
 | Command | Purpose | Speed |
 |---------|---------|-------|
 | `/ba-analyze [scope]` | Full business analysis (flows/api/docs/stories) | varies |
-| `/ba-stories [feature]` | Generate Agile user stories with BDD criteria | ~5 min |
+| `/ba-analyze stories [feature \| --review VCST-XXXX]` | Generate Agile user stories with BDD criteria, or review an existing story's ACs | ~5 min |
 
 ---
 
@@ -119,7 +117,7 @@ Full argument reference: [`.claude/rules/skills-commands.md`](../../rules/skills
          │                │        ├── ba-story-writer (sequential)
     ┌────┼────┐      spawns 3      └── ba-doc-writer (last)
     │    │    │      sub-agents
-  front back test   per batch        Output → docs/ba-output/
+  front back test   per batch        Output → reports/ba/
   expert expert expert
     │    │    │
   chrome edge firefox
@@ -153,14 +151,18 @@ Splits into 2 parallel tracks: storefront (chrome) + admin (edge). Delivers GO/N
 Reads JIRA ticket, maps to affected components, dispatches specialists, reports with pass/fail per AC.
 
 ### 3. Regression (`/qa-regression [scope]`)
-Reads `config/test-suites.json`, dispatches sub-agents in batches of 3, retries with browser fallback chain.
+Gets its plan from `npm run regression:plan` (lane split, longest-first dispatch order, per-suite
+caps, browser constraints), then dispatches sub-agents with **continuous refill** — a freed slot
+takes the next eligible suite immediately rather than waiting for a batch. Retries climb a
+30s→60s ladder along `defaults.fallbackChain`, never onto a server the suite is denied.
 
-**Autonomous mode** (`/qa-regression [scope] --autonomous`): Uses `autonomous-regression-orchestrator` with Agent Teams for enhanced orchestration — 3+1 token bucket, exponential backoff (30s→60s→120s), persistent failure tracking, consolidated reporting via `scripts/regression/reporting.ts`, and auto-JIRA ticket creation. Results in `results/{RUN_ID}/`.
+There is one orchestrator. A second `--autonomous` (Agent Teams) mode was removed 2026-08-26 —
+see the tombstone in `.claude/rules/regression.md` §3 for why.
 
 | Selection | Suites | Use Case |
 |-----------|--------|----------|
-| `smoke` | 042, 078 | Daily pre-deploy |
-| `critical` | 042, 078, 039, 044, 049 | P0 gate |
+| `smoke` | 042, 078, 078b, 078c, 078d | Daily pre-deploy |
+| `critical` | 042, 078, 078b, 078c, 078d, 039, 044, 049 | P0 gate |
 | `sprint` | Plan-driven (sprint-*-summary.json) | Sprint release |
 | `full` | All 110 | Production release |
 | `frontend` | All Frontend/ suites | Frontend only |
@@ -191,7 +193,7 @@ Runs all 4 agents in pipeline: analyzer+api in parallel, then story-writer, then
 /ba-analyze module Catalog   # Focus on one VC module
 ```
 
-**Output directory:** `docs/ba-output/`
+**Output directory:** `reports/ba/` (the agents refuse a `ba-output` directory under `docs/`)
 
 ---
 
@@ -210,13 +212,13 @@ Shared knowledge files in `knowledge/` (28 files) — full annotated list in `.c
 
 ## Customizing Agents
 
-All 19 agents are flat `.md` files at the plugin root `agents/` (plugin agent discovery is non-recursive — no team subfolders): 11 QA + 4 BA + 4 Developers. The three per-team `shared-instructions.md` files and this README live under `knowledge/agents/` (a plain reference dir, not scanned as components). Shared knowledge files are in `knowledge/` (28 files). Each agent is a Markdown file with YAML frontmatter (name, description, model, color). Edit the `.md` file to customize behavior.
+All agents are flat `.md` files under `.claude/agents/` (agent discovery is non-recursive — no team subfolders); the roster and the QA / BA / Developers split are the tables above, and `ls .claude/agents` is the count. The three per-team `shared-instructions.md` files and this README live under `knowledge/agents/` (a plain reference dir, not scanned as components). Shared knowledge files are in `knowledge/` (28 files). Each agent is a Markdown file with YAML frontmatter (name, description, model, color). Edit the `.md` file to customize behavior.
 
 ---
 
 ## Documentation Sources (all agents)
 
-For any Virto Commerce platform / module / API / storefront / deployment / B2B question, **all agents must query VirtoOZ MCP first** via the `/vc-docs` skill. VirtoOZ exposes 12 topic-scoped retrieval tools — pick the narrowest one (e.g. `PlatformDeveloperGuide` for backend API questions, `StorefrontDeveloperGuide` for vc-frontend, `B2BExperts` for B2B-specific guidance, `*SourceCode` tools for code-level questions). Context7 (`/virtocommerce/vc-docs`) is the fallback when VirtoOZ returns thin results or for non-VC libraries. Full tool list and routing rules in `skills/vc-docs/SKILL.md` and `.claude/rules/mcp-browsers.md`.
+For any Virto Commerce platform / module / API / storefront / deployment / B2B question, **all agents must query VirtoOZ MCP first** via the `/vc-docs` skill. VirtoOZ exposes 12 topic-scoped retrieval tools — pick the narrowest one (e.g. `PlatformDeveloperGuide` for backend API questions, `StorefrontDeveloperGuide` for vc-frontend, `B2BExperts` for B2B-specific guidance, `*SourceCode` tools for code-level questions). Context7 (`/virtocommerce/vc-docs`) is the fallback when VirtoOZ returns thin results or for non-VC libraries. Full tool list and routing rules in `skills/vc-docs/SKILL.md` and `.claude/knowledge/execution/browser-lanes.md`.
 
 ## Requirements
 

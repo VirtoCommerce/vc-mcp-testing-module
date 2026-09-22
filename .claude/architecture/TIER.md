@@ -28,9 +28,7 @@ Companion to `~/.claude/plans/functional-singing-cosmos.md` (the strategic plan)
 | `shared-instructions.md` | **A** | Four-layer architecture, PASS/FAIL/AMBIGUOUS classifier, evidence rules. Promote to `vc-qa-core/methodology/shared-instructions.md` as v1.0 contract. |
 | `qa-lead-orchestrator.md` | **A** | Orchestration role is product-agnostic. Examples are storefront — sanitize. |
 | `regression-orchestrator.md` | **B** | Already template-shaped with `{{SUITE_ID}}`, `{{BROWSER_SERVER}}` substitution. |
-| `autonomous-regression-orchestrator.md` | **B** | Agent Teams token-bucket logic is generic. |
 | `test-runner-agent.md` | **B** | Parameterized template; the canonical example of how Tier B should look. |
-| `autonomous-test-runner.md` | **B** | Same. |
 | `test-management-specialist.md` | **B** | Test planning skill set is generic; examples are storefront. |
 | `qa-frontend-expert.md` | **C** | LAYER 1 hardcodes BL-CHK-003, BL-PRICE-001, BL-CROSS-002. LAYER 2 is Vue.js + storefront payment iframes. **Becomes the template** for per-product `qa-{product}-expert.md`. |
 | `qa-backend-expert.md` | **C** | Same coupling pattern. Storefront xAPI, Admin SPA hardcoded. |
@@ -83,7 +81,7 @@ Companion to `~/.claude/plans/functional-singing-cosmos.md` (the strategic plan)
 
 | File | Tier | Notes |
 |------|------|-------|
-| `qa-process/` | **A** | ISTQB 7-phase lifecycle. |
+| ~~`qa-process/`~~ | — | **Removed 2026-09-08** — a 30 KB ISTQB essay with zero consumers. |
 | `qa-test-design/` | **A** | EP, BVA, decision tables, state, pairwise. |
 | `qa-risk/` | **A** | 5×5 risk matrix. |
 | `qa-defect/` | **A** | Defect lifecycle + JIRA workflow. |
@@ -121,21 +119,21 @@ Companion to `~/.claude/plans/functional-singing-cosmos.md` (the strategic plan)
 | File | Tier | Notes |
 |------|------|-------|
 | `qa-status.md` | **A** | Read-only dashboard. Generic. |
-| `qa-env-check.md` | **A** | Env validation. Generic — driven by `.env` schema. |
-| `qa-bug.md` | **A** | Bug reproduction + JIRA. Generic. |
-| `qa-verify-fix.md` | **A** | Fix verification workflow. Generic. |
+| `qa-env-check.md` | **A** | Env validation. Generic — driven by `.env` schema. **Ships in `plugins/vc-fix/commands/` only** — the stale `.claude/` copy was removed 2026-09-08 (audit D1). |
+| `qa-bug.md` | **A** | Bug reproduction + tracker filing (Jira / Azure Boards). Generic. **`plugins/vc-fix/commands/` only** (2026-09-08, D1). |
+| `qa-verify-fix.md` | **A** | Fix verification workflow. Generic. **`plugins/vc-fix/commands/` only** (2026-09-08, D1). |
 | `qa-exploratory.md` | **B** | SBTM session entry. Examples are storefront domains. |
 | `qa-test.md` | **B** | Generic test entry for JIRA/feature/PR. |
 | `qa-test-lifecycle.md` | **B** | Unified pipeline — generic stages. |
 | `qa-regression.md` | **B** | Generic regression runner — argument hints are storefront groups. |
-| `qa-coverage-generation.md` | **B** | Generic pipeline; domains are storefront. |
+| ~~`qa-coverage-generation.md`~~ | — | **Removed 2026-09-08** — zero recorded runs; `/qa-coverage-gap` (skill) is the one coverage pipeline. |
 | `qa-test-plan.md` | **B** | Sprint test plan — generic shape, storefront sprint plans. |
 | ~~`qa-sync-tests.md`~~ | **B** | **Removed** — file deleted, no redirect. Merged into qa-test-lifecycle. |
 | `qa-smoke.md` | **C** | Hardcoded 12 P0 tests for storefront/admin. **Becomes template.** |
 | `qa-design.md` | **C** | Storefront component/page audit. |
 | `qa-seed-data.md` | **C** | Storefront seed presets. |
 | `ba-analyze.md` | **B** | Generic BA analysis entry. |
-| `ba-stories.md` | **B** | Generic user-story authoring. |
+| ~~`ba-stories.md`~~ | — | **Merged into `/ba-analyze stories [--review]` 2026-09-08.** |
 
 ---
 
@@ -145,7 +143,7 @@ Companion to `~/.claude/plans/functional-singing-cosmos.md` (the strategic plan)
 |------|------|-------|
 | `agents.md` | **A** | Agent system reference. Some examples storefront. |
 | `regression.md` | **B** | Regression architecture — the four-mode framework is generic. |
-| `skills-commands.md` | **A** | Skills/commands reference. |
+| ~~`skills-commands.md`~~ | — | **Deleted 2026-09-08.** Was a hand-written copy of the menu the harness already renders from command/skill frontmatter; it had drifted (e.g. `/qa-status`). |
 | `mcp-browsers.md` | **A** | MCP server + browser config — generic infrastructure. |
 | `reports.md` | **A** | **THE single source of truth for report categories + size caps. Org-wide standard.** |
 | `test-data.md` | **A** | `@td()` resolver + no-hardcode policy — generic discipline. |
@@ -177,15 +175,18 @@ Companion to `~/.claude/plans/functional-singing-cosmos.md` (the strategic plan)
 | `regression/suites/Frontend/` | **C** | 40 storefront suites. |
 | `regression/suites/Backend/` | **C** | 38 admin/platform suites. |
 | `test-data/aliases.json` | **B** schema / **C** content | Registry shape = B. Entries are storefront. |
-| `test-data/orgs/`, `products/`, `addresses/`, etc. | **C** | All storefront-domain. |
+| `test-data/organizations/`, `products/`, `addresses/`, etc. | **C** | All storefront-domain. |
 | `reports/tickets/SprintXX-XX/` | **C** | Per-ticket evidence — project-local. |
 | `reports/` | **C** | Per-project output. |
-| `docs/prompts/` | **B**/**C** | `story-testing.md` = B, `How to test Builder.io.md` = C. |
+| `vc/shared/docs/prompts/` | **B**/**C** | `story-testing.md` = B, `How to test Builder.io.md` = C. |
 | `vc/shared/docs/Sprint plans/` | **C** | VC sprint plans (cross-env, Layer 2). |
 
 ---
 
 ## Tier D — What's Missing (for plugin distribution)
+
+<!-- doclint:may-not-exist — every path in this section names an artifact that DOES NOT EXIST; that
+     is the section's whole point, so the existence checks must not read them as dangling. -->
 
 These don't exist yet and must be created to ship the plugin to VC customers:
 
@@ -198,13 +199,13 @@ These don't exist yet and must be created to ship the plugin to VC customers:
 | `ENV_RISK` env var | `dev\|test\|staging\|production` — safety-by-config, not by env name. Production-risk envs block admin-write suites by default. | `.env.{env}` |
 | `config.js` cleanup | Drop `vcst` default for `TEST_ENV` (fail-loud if unset); remove `VIRTO_START_*` exports (push to `aliases.json`); validate `TEST_ENV` matches `[a-z0-9_]+` with helpful error for kebab-case; split `requiredVars[]` into core (always) vs feature-gated (Figma/Postman only when their skills run). | `config.js` |
 | Per-env aliases override | Loader picks `test-data/aliases.${TEST_ENV}.json` if present, falls back to `aliases.json`. Best-practice for customers with 3+ envs. | `scripts/lib/test-data-resolver.ts` |
-| Env-var bucketing | Documented split of the 33 vars into **plugin-supplied** / **customer-required** / **customer-optional**, with explicit dual-URL/dual-cred shape (storefront + admin) and multi-env workflow. | `docs/configuration.md` |
+| Env-var bucketing | Documented split of the 33 vars into **plugin-supplied** / **customer-required** / **customer-optional**, with explicit dual-URL/dual-cred shape (storefront + admin) and multi-env workflow. | **DONE** — the bucket table in `plugins/vc-fix/commands/qa-env-check.md` is the definition; there is no separate configuration doc |
 | Payment-processor matrix | Suite 039 generalized; one tagged variant per processor (CyberSource, Skyflow, Authorize.Net, Datatrance). Customer enables via env. | `regression/suites/Frontend/payment/` |
 | JIRA project key parameterization | `JIRA_PROJECT_KEY` env var; `qa-bug` skill reads it instead of vcst-default. | `skills/qa-bug/` + env |
-| PII / secret scanner | Lints `aliases.json` for real-looking emails/phones; scrubs HAR / screenshots before they land in `reports/`. | `scripts/lint-aliases-pii.ts`, `scripts/lib/evidence-sanitizer.ts` |
+| PII / secret scanner | Lints `aliases.json` for real-looking emails/phones; scrubs HAR / screenshots before they land in `reports/`. | **PLANNED — neither script exists yet.** Nearest shipped guard is `td:reconcile`’s secret-hygiene check (fails a bare password literal in a committed CSV) |
 | Distribution decision | Claude Code plugin (agents/skills/commands/knowledge) + npm package (scripts/ci) — confirmed in Phase 2. | `docs/distribution.md` |
 | **Skill→script dependency manifest** | Skills now hard-depend on `scripts/` helpers via `npm run` aliases (`suites:append`, `suites:review`, `metrics:compute`, plus `scripts/lib/axe-runner.ts` imported into snippets). These calls **cross the plugin↔npm-package boundary** — a customer who installs the plugin but not the npm package gets a skill that references a command that doesn't exist. Need: (a) an enumerated list of which `npm run` aliases each skill requires, validated in CI; (b) a graceful-degradation or hard-fail message in each skill when the alias is absent; (c) the `/project-init` step verifies the npm package is present. | `docs/distribution.md` + `skills/project-init/` |
-| Support runbook | Who answers customer questions, SLA, escalation, upgrade guide. | `docs/support-runbook.md` |
+| Support runbook | Who answers customer questions, SLA, escalation, upgrade guide. | **NOT PRESENT** — `docs/support-runbook.md` was removed 2026-09-09 as stale; there is no standing runbook |
 | Versioning + changelog policy | Semver for Tier A (breaking changes forbidden post-v1.0), changelog mandatory on each release. | `CHANGELOG.md` + `docs/versioning.md` |
 
 ---
@@ -216,7 +217,7 @@ Phase 1 deliverables — track here as work lands:
 - [x] Tier classification document (this file)
 - [ ] Frontmatter `tier: A|B|C` added to each agent/skill/command file
 - [ ] `CLAUDE.md` updated with pointer to this file
-- [ ] `npm run audit:tiers` validator script
+- [ ] `npm run audit:tiers` validator script <!-- doclint:may-not-exist -->
 - [ ] Tier A files frozen as v1.0 (no breaking changes during migration)
 
 Phases 2–4: See `~/.claude/plans/functional-singing-cosmos.md`.
@@ -229,6 +230,6 @@ Phases 2–4: See `~/.claude/plans/functional-singing-cosmos.md`.
 - **Reviewing a PR that touches a Tier A file?** Higher bar — every customer using the plugin gets this change.
 - **Refactoring a Tier B file?** Look for vcst-qa-specific values that should become env vars or `aliases.json` entries.
 - **Adding customer-variable behavior to a Tier A/B file?** Stop. Either parameterize via env, or push to a Tier C file the customer can override.
-- **Adding a `npm run` / `scripts/` call to a skill?** The script must be classified here and tier **≥ its highest-tier consumer** (a Tier A skill must not depend on a Tier C script — that violates upward-pointing dependencies and won't ship in the org-wide package). Keep shared helpers in `scripts/` + `scripts/lib/`, invoked through a stable `npm run` alias — **don't co-locate scripts inside a skill folder** unless the script is private to exactly one skill and has no other consumer (the lone precedent is `run-vc-mcp-testing-module/driver.mjs`). Register the new alias in the skill→script dependency manifest (Tier D).
+- **Adding a `npm run` / `scripts/` call to a skill?** The script must be classified here and tier **≥ its highest-tier consumer** (a Tier A skill must not depend on a Tier C script — that violates upward-pointing dependencies and won't ship in the org-wide package). Keep shared helpers in `scripts/` + `scripts/lib/`, invoked through a stable `npm run` alias — **don't co-locate scripts inside a skill folder** unless the script is private to exactly one skill and has no other consumer. There is currently **no such precedent in the tree** — the only one, a `run-vc-mcp-testing-module` skill whose `driver.mjs` wrapped eight `npm run` aliases, was removed 2026-09-19 because the aggregate had no logic of its own and no inbound consumer. Treat a new co-located script as a design smell and reach for a `scripts/` helper behind an `npm run` alias first. Register the new alias in the skill→script dependency manifest (Tier D).
 
 The single design rule: **dependencies point upward** — Tier C may reference Tier A and B; Tier A and B must never reference Tier C.

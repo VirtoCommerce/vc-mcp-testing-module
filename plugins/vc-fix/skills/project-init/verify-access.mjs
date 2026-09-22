@@ -13,7 +13,9 @@
  *   - Storefront URL reachable (FRONT_URL)
  *   - Admin / platform URL reachable (BACK_URL)
  *   - Admin login — real OAuth password grant against {BACK_URL}/connect/token
- *   - Storefront user login — soft probe (WARN, not FAIL: storefront users may auth via xAPI)
+ *   - Storefront user login — the REAL storefront login: a STORE-SCOPED OAuth password grant
+ *     (grant_type=password + storeId), how the storefront/xAPI signs a shopper in. PASS/FAIL on
+ *     that; WARN only when genuinely inconclusive (no STORE_ID to scope to, or endpoint unreachable)
  *   - Jira API token — GET /rest/api/3/myself  (jira tracker; WARN not FAIL — the runtime
  *     path is the Atlassian MCP OAuth, the token is only an optional probe)  OR  Azure DevOps auth present
  *   - Azure Boards WRITE (transition) — non-mutating write-scope probe (PATCH a known item
@@ -39,7 +41,11 @@ import { resolve } from "path";
 import { loadLayeredEnv } from "../../scripts/lib/load-layered-env.mjs";
 import { resolveTestEnv } from "../../scripts/lib/resolve-test-env.js";
 import { loadProjectProfile } from "../../scripts/lib/project-profile.mjs";
-import { pluginRoot } from "./lib/paths.mjs";
+import { outputRoot, pluginRoot } from "./lib/paths.mjs";
+// The SAME distinctive-prefix matcher the telemetry redactor uses. Shared on purpose: this
+// audit used to keep its own shorter copy, so a token type redact.mjs already knew about
+// (glpat-/xoxb-/sk_live_/AKIA/JWT) passed the hygiene check clean.
+import { SECRET_PREFIX_RE } from "../../hooks/redact.mjs";
 // Self-diagnostics CAPTURE channel. This table is the plugin's own structured verdict on the
 // deployment; before VCST-5582 H it was rendered and then discarded (exit 0 unless a hard FAIL),
 // so a WARN the operator could plainly see — e.g. "no field contract scanned for Bug" — was
@@ -53,6 +59,7 @@ import {
 // Slot resolution for the "tracker bug field contract" readiness row (VCST-5582 E-g) — the
 // SAME pure function the create path uses, so the row can't claim a mapping create won't make.
 import { resolveSlots } from "../qa-fix-routing/bug-contract.mjs";
+import { fileURLToPath } from "url";
 
 let TEST_ENV;
 try {
@@ -64,6 +71,232 @@ try {
 
 const BACK = (process.env.BACK_URL || "").replace(/\/+$/, "");
 const FRONT = (process.env.FRONT_URL || "").replace(/\/+$/, "");
+
+/**
+ * The storefront-user login readiness check (D2). A storefront shopper is NOT a platform user, so the
+ * plain platform password grant (no storeId) 400s for them by construction — a right and a wrong
+ * password are then indistinguishable and the row degrades to a "verify manually" WARN, which
+ * resolves nothing (the /project-init §3 S2 anti-pattern). This probes the REAL storefront login: a
+ * STORE-SCOPED OAuth password grant (`grant_type=password` + `storeId`), exactly how the
+ * storefront / xAPI signs a shopper in (knowledge/api/api-auth.md), and reports PASS/FAIL on THAT.
+ * WARN is kept ONLY for the genuinely inconclusive cases: no store to scope to, or the endpoint is
+ * unreachable — never as the terminal state of a probed axis.
+ *
+ * Network is injected via `fetchImpl` so this is unit-testable without a live platform.
+ * @returns {{ status:"PASS"|"FAIL"|"WARN", detail:string }}
+ */
+export async function probeStorefrontLogin({ back, store, email, password, fetchImpl = fetch }) {
+  const grant = (params) => fetchImpl(`${back}/connect/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(params),
+  });
+  const creds = { grant_type: "password", username: email, password, scope: "offline_access" };
+  try {
+    // 1) the plain platform grant — a storefront user who is ALSO a platform user passes here.
+    const r = await grant(creds);
+    if (r.ok) return { status: "PASS", detail: `platform token acquired for '${email}'` };
+    // 2) the real storefront login: a STORE-SCOPED grant. Needs a store to scope to.
+    if (!store) {
+      return { status: "WARN", detail: `platform grant → ${r.status} and STORE_ID unset — set STORE_ID so the store-scoped storefront login check can resolve this axis` };
+    }
+    const rs = await grant({ ...creds, storeId: store });
+    if (rs.ok) return { status: "PASS", detail: `store-scoped token acquired for '${email}' (storeId=${store})` };
+    const body = await rs.text().catch(() => "");
+    const invalid = rs.status === 400 && /invalid_grant/i.test(body);
+    return {
+      status: "FAIL",
+      detail: `store-scoped grant (storeId=${store}) → ${rs.status}${invalid ? " invalid_grant — USER_EMAIL / USER_PASSWORD rejected for the storefront" : " — check USER_EMAIL / USER_PASSWORD / STORE_ID"}`,
+    };
+  } catch (e) {
+    // A transport failure IS the genuinely-inconclusive case — the only remaining WARN.
+    return { status: "WARN", detail: `login endpoint unreachable (${e.message}) — verify storefront login manually` };
+  }
+}
+
+/**
+ * Audit a SHIPPED generated file for a credential sitting in it (VCST-5774 — defect D1 / B4).
+ *
+ * WHY A CHECK AND NOT JUST A FIXED GENERATOR. gen-mcp.mjs now emits `${VAR}` indirections, but
+ * this failure is silent-shaped: a literal token works perfectly, every day, right up until the
+ * day someone commits it. The file on disk may predate the fix, have been hand-edited, or have
+ * been produced with `--inline-secrets`. So verify the ARTIFACT; never trust the producer.
+ *
+ * TWO NETS, TWO CONFIDENCE LEVELS — and that separation is the whole design:
+ *
+ *   - `hits` (CERTAIN) — `SECRET_PREFIX_RE`, shared with hooks/redact.mjs, matched anywhere. A
+ *     `ghp_…`/`glpat-…`/`AKIA…` is a credential no matter what key it hides under, so a hit here
+ *     can block readiness. False positives are effectively impossible.
+ *
+ *   - `weak` (SUSPECTED) — a value under a credential-shaped KEY (or after a `--api-key`-style
+ *     flag, or inline in a URL) that is not a `${VAR}` ref or an unresolved `<PLACEHOLDER>`. This
+ *     is the net that catches a credential type nobody has invented yet — but it is blind to what
+ *     the value MEANS, so it also matches `PASSWD_FILE=/etc/passwd`, `MAX_TOKENS=4096` and
+ *     `--secrets .env.playwright.local` (this repo's own documented Playwright setup, which the
+ *     first version of this check graded as a readiness-blocking FAIL on three servers).
+ *     **A `weak` hit can only ever WARN.** That is what lets the key vocabulary below stay WIDE:
+ *     narrowing it to kill the false positives had silently dropped ~16 real credential names
+ *     (`AccountKey`, `subscriptionKey`, `signingKey`, `licenseKey`, …) that redact.mjs already
+ *     knew about — trading false alarms for false silence, the wrong direction for a detector.
+ *
+ * `looksLikeSecret()` then removes the obviously-not-a-credential values (a path, a filename, a
+ * number, a short enum word) so the WARNs that remain are worth reading. A readiness row that
+ * cries wolf is how a real finding gets scrolled past.
+ *
+ * The walk is RECURSIVE over the whole server def, not just `headers`/`env` — `args[]`, `url`,
+ * `command` and nested bags included — because the generator substitutes placeholders at every
+ * leaf, so anything less means the producer can write a shape the auditor cannot read.
+ *
+ * Returns JSON PATHS (`github.headers.Authorization`, `srv.args[2]`) — key names only, all
+ * plugin- or operator-authored. A credential VALUE never reaches the result, the readiness table,
+ * or the observation evidence.
+ */
+// A credential-shaped key. Deliberately WIDE (see `weak` above): every name hooks/redact.mjs
+// treats as a secret keyword should land here, because the value filter and the WARN-only ceiling
+// — not a narrow vocabulary — are what keep this from crying wolf.
+const CRED_KEY = /^authorization$|KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|SIGNATURE|PAT\b/i;
+// A CLI flag carrying a credential. Split into two flat alternatives with no nested quantifier
+// around the keyword: the earlier `^--?[\w-]*(?:key|token|…)[\w-]*=?$` backtracked quadratically
+// (~18 s on a 192 KB argv element).
+const CRED_FLAG = /^--?(?:[\w-]*[_-])?(?:key|token|secret|pat|password|auth|secrets)(?:[_-][\w-]*)?$/i;
+// A URL carrying the credential inline: `scheme://user:pass@host`, or `?access_token=…`.
+// A `${VAR}` / `<PLACEHOLDER>` value is excluded so an unresolved template URL stays clean.
+const URL_CRED = /:\/\/[^/\s:@]+:([^/\s@]+)@|[?&](?:access_?token|api[_-]?key|token|key|secret|password|sig)=(?!\$\{|<)([^&\s]+)/i;
+const isIndirection = (s) => /^\$\{[A-Za-z0-9_]+\}$/.test(s) || /^<[A-Z0-9_]+>$/.test(s);
+
+/** Could this VALUE plausibly be a credential? Used only to suppress `weak` noise — never to
+ *  dismiss a `SECRET_PREFIX_RE` match, which is certain regardless of shape. Everything here is a
+ *  shape a real opaque credential does not have: a filesystem path, a filename, a bare number, a
+ *  short enum word. Deliberately conservative — when in doubt, keep the WARN. */
+function looksLikeSecret(v) {
+  if (v.length < 8) return false;                                   // too short to be a credential
+  if (/^\d+$/.test(v)) return false;                                // MAX_TOKENS=4096, MIN_LENGTH=8
+  if (/[/\\]/.test(v)) return false;                                // AUTH_KEY_FILE=/etc/key.pem
+  if (/^\.?[\w.-]*\.[a-z0-9]{2,6}$/i.test(v)) return false;         // --secrets .env.playwright.local
+  if (/^(?:true|false|null|none|off|on|auto|env|default|oauth|basic|bearer)$/i.test(v)) return false;
+  return true;
+}
+
+/** Recursive leaf scan. `credKey` = an enclosing key looked credential-shaped — it PROPAGATES into
+ *  nested objects/arrays, so `env.AUTH_TOKEN.value` and `headers["X-Api-Key"][0]` are still seen.
+ *  `prevArg` = the preceding array element, so a `--api-key` flag taints the value after it. */
+function scanLiterals(node, path, out, credKey = false, prevArg = "") {
+  if (typeof node === "string") {
+    if (!node) return;
+    const urlMatch = URL_CRED.exec(node);
+    if (SECRET_PREFIX_RE.test(node)) { out.hits.add(path); return; }
+    // `--api-key=VALUE` as ONE argv token: the flag net only sees the PRECEDING element, so the
+    // fused form used to pass clean. Split it and judge the right-hand side.
+    const fused = /^(--?[\w-]+)=(.+)$/.exec(node);
+    const tainted = credKey || CRED_FLAG.test(prevArg) || (fused && CRED_FLAG.test(fused[1]));
+    const value = fused ? fused[2] : node;
+    if (urlMatch) {
+      const inline = urlMatch[1] ?? urlMatch[2] ?? "";
+      if (looksLikeSecret(inline)) out.weak.add(path);
+      return;
+    }
+    // `Bearer ${VAR}` must read as an indirection; the prefix net above already saw the raw value.
+    const bare = value.replace(/^(?:Bearer|Basic|token)\s+/i, "").trim();
+    if (tainted && !isIndirection(bare) && looksLikeSecret(bare)) out.weak.add(path);
+    return;
+  }
+  if (Array.isArray(node)) {
+    node.forEach((v, i) => scanLiterals(v, `${path}[${i}]`, out, credKey, i > 0 ? node[i - 1] : ""));
+    return;
+  }
+  if (node && typeof node === "object") {
+    for (const [k, v] of Object.entries(node)) scanLiterals(v, `${path}.${k}`, out, credKey || CRED_KEY.test(k));
+  }
+}
+
+/** @returns {{ hits: string[], weak: string[], unparsable: boolean }}
+ *  `hits` = certain (known token shape) · `weak` = suspected (credential-shaped key, opaque value).
+ *  Both empty + parsable ⇒ clean. */
+export function findLiteralSecrets(mcpJsonText) {
+  let doc;
+  try { doc = JSON.parse(mcpJsonText); } catch { return { hits: [], weak: [], unparsable: true }; }
+  const out = { hits: new Set(), weak: new Set() };
+  for (const [name, def] of Object.entries(doc?.mcpServers ?? {})) scanLiterals(def, name, out);
+  return { hits: [...out.hits], weak: [...out.weak].filter((p) => !out.hits.has(p)), unparsable: false };
+}
+
+/** The same audit for `.claude/settings.local.json` — the file the credential VALUE now lives in.
+ *  The STRUCTURAL net is scoped to `env` (the block gen-mcp writes; scanning `permissions` would
+ *  flag ordinary rule strings), but the CERTAIN prefix net runs over the WHOLE document: a token
+ *  pasted into a hook command is exactly what "the file may have been hand-edited" means, and a
+ *  `ghp_…` there cannot be a false positive. */
+export function findSettingsSecrets(settingsJsonText) {
+  let doc;
+  try { doc = JSON.parse(settingsJsonText); } catch { return { hits: [], weak: [], unparsable: true }; }
+  const out = { hits: new Set(), weak: new Set() };
+  scanLiterals(doc?.env ?? {}, "env", out);
+  const whole = { hits: new Set(), weak: new Set() };
+  scanLiterals(doc ?? {}, "", whole);
+  for (const p of whole.hits) out.hits.add(p.replace(/^\./, ""));
+  return { hits: [...out.hits], weak: [...out.weak].filter((p) => !out.hits.has(p)), unparsable: false };
+}
+
+/**
+ * Grade one generated file's secret hygiene. PURE — the caller does all the I/O, so every branch
+ * is table-testable. The first version of this logic lived inline in main() and was therefore
+ * untestable; its "outside a git repo" branch was wrong (see `exposed` below).
+ *
+ * `exposed` is the only exposure axis that matters, and it is NOT `!ignored`:
+ *   - outside a repo there is nothing to `git add`, so ignore-state is not a finding at all. The
+ *     old code graded a literal in a non-repo project as FAIL and explained it with "one
+ *     `git add -A` publishes it" — and 4 of the 5 leaking projects VCST-5774 found on disk were
+ *     exactly that shape, so the loudest, least accurate branch was also the most-hit one;
+ *   - a file git already TRACKS stays committable however many .gitignore rules match it —
+ *     `git check-ignore` returns 1 for a tracked path, so adding the rule is a no-op and
+ *     "re-run /project-init" is not a fix. That case gets its own remediation line.
+ *
+ * Only a CERTAIN hit can FAIL. A `weak` (suspected) hit caps at WARN however exposed the file is,
+ * because that net is value-blind: it cannot tell a credential from `--secrets .env.local`, and a
+ * readiness gate that blocks onboarding over a filename would teach operators to ignore the row.
+ *
+ * `kind` distinguishes what a hit MEANS:
+ *   "mcp"      — a credential here is a defect in itself; the file is meant to hold `${VAR}` refs.
+ *   "settings" — a credential here is BY DESIGN (this is the value's new home), so only EXPOSURE
+ *                is a finding. A secret at rest in an ignored, untracked file is the target state.
+ */
+export function gradeSecretHygiene({ kind, file, hits, weak = [], unparsable, inRepo, ignored, tracked }) {
+  const exposed = inRepo && (tracked || !ignored);
+  const why = tracked ? "tracked by git" : "not gitignored";
+  // NAME THE COMMAND, don't say "re-run /project-init" (VCST-5774 review #7). The documented path
+  // for an EXISTING install is `/project-init --check`, whose Step C runs normalize-env →
+  // verify-access → assert-profile and never calls gen-mcp.mjs — so the row an operator hits after
+  // upgrading pointed them at a flow that reports the problem and cannot fix it. The generator is
+  // what rewrites the file, so the remediation is the generator.
+  const REGEN = 'node "$CLAUDE_PLUGIN_ROOT/skills/project-init/gen-mcp.mjs" --tracker <jira|azure> --client-vcs <github|azure-repos>';
+  const fix = tracked
+    ? `\`git rm --cached ${file}\` + commit (a .gitignore rule CANNOT untrack it), then rotate the credential`
+    : `run \`${REGEN}\` (rewrites the file with a \${VAR} reference and adds the ignore entry — \`--check\` alone will NOT do this), then rotate the credential`;
+
+  if (unparsable) {
+    return { status: "WARN", detail: `${file} is not valid JSON — could not audit it for credentials${exposed ? ` (and it is ${why})` : ""}` };
+  }
+  if (hits.length && exposed) {
+    return { status: "FAIL", detail: `credential in ${hits.join(", ")} AND ${file} is ${why} — one \`git add -A\` publishes it. Fix: ${fix}.` };
+  }
+  if (weak.length && exposed) {
+    return { status: "WARN", detail: `${file} is ${why} and ${weak.join(", ")} may hold a credential (a credential-shaped key with an opaque value — could equally be a filename or an id). Check it; if it is a secret, ${fix}.` };
+  }
+  if (hits.length && kind === "mcp") {
+    return { status: "WARN", detail: `credential written as a literal in ${hits.join(", ")} (${file} is not committable, so not exposed). Run \`${REGEN}\` to replace it with a \${VAR} reference, or keep it deliberately via --inline-secrets.` };
+  }
+  if (weak.length && kind === "mcp") {
+    // Not exposed, and only suspected — but .mcp.json is gitignored in the normal case, so this is
+    // where the structural net earns its keep: staying silent here would make it dead weight.
+    return { status: "WARN", detail: `${weak.join(", ")} may hold a credential literal in ${file} (a credential-shaped key with an opaque value — could equally be a filename or an id). The file is not committable. If it IS a secret, run \`${REGEN}\` to replace it with a \${VAR} reference.` };
+  }
+  if (hits.length) {
+    return { status: "PASS", detail: `${hits.join(", ")} held in ${file} (by design — this is where the value belongs) and the file is not committable` };
+  }
+  if (exposed) {
+    return { status: "WARN", detail: `${file} carries no credential but is ${why} — ${tracked ? `\`git rm --cached ${file}\`` : "add it to .gitignore"}, so a future hand-edit cannot be committed` };
+  }
+  return { status: "PASS", detail: `no exposed credential in ${file}${inRepo ? "" : " (not a git repo)"}` };
+}
 
 const results = [];
 const add = (name, status, detail = "") => results.push({ name, status, detail });
@@ -96,8 +329,8 @@ const statusWidth = (st) => `${MARKER[st] || " "} ${st}`.length;
 const MAXW = Number(process.env.COLUMNS) || process.stdout.columns || 100;
 const truncTo = (s, n) => (s.length > n ? s.slice(0, Math.max(1, n - 1)) + "…" : s);
 
-function tryCmd(cmd) {
-  try { execSync(cmd, { stdio: ["ignore", "pipe", "ignore"] }); return true; } catch { return false; }
+function tryCmd(cmd, opts = {}) {
+  try { execSync(cmd, { stdio: ["ignore", "pipe", "ignore"], ...opts }); return true; } catch { return false; }
 }
 async function httpStatus(url) {
   if (!url) return 0;
@@ -142,13 +375,41 @@ async function main() {
   //    `profile ? PASS : FAIL` was ALWAYS PASS: a silently-failed profile write read as green with
   //    default platform/jira values. Detect the file EXPLICITLY (mirror loadProjectProfile's path
   //    logic) and FAIL when it's missing; the loaded defaults still drive the detail string.
-  const profilePath = process.env.PROJECT_PROFILE_PATH || resolve(process.cwd(), "project-profile.json");
+  const profilePath = process.env.PROJECT_PROFILE_PATH || resolve(outputRoot(), "project-profile.json");
   const profileExists = existsSync(profilePath);
-  const profile = loadProjectProfile();
+  const profile = loadProjectProfile(outputRoot());
   add("Deployment profile", profileExists ? "PASS" : "FAIL",
     profileExists
       ? `type=${profile.projectType} tracker=${profile.tracker.kind} vcs=${profile.vcs.clientHost} upstream=${profile.upstream.org}/${profile.upstream.contributionMode}`
       : `no project-profile.json at ${profilePath} — run /project-init to create it (falling back to platform/jira/github defaults meanwhile)`);
+
+  // 1a. Secret hygiene of the files /project-init generates (VCST-5774). Two things can go wrong
+  //     and each is invisible until it is too late: a credential written where it does not belong
+  //     (D1), and the file holding it being committable (D2). BOTH generated files are audited —
+  //     `.mcp.json`, which must carry only `${VAR}` refs, and `.claude/settings.local.json`, which
+  //     is where the VALUE now lives. Auditing only the first would have left the fix's own new
+  //     secret location completely unguarded. Grading is the pure gradeSecretHygiene() above.
+  const projectRoot = outputRoot();
+  const inRepo = tryCmd("git rev-parse --is-inside-work-tree", { cwd: projectRoot });
+  for (const { kind, rel, scan } of [
+    { kind: "mcp", rel: ".mcp.json", scan: findLiteralSecrets },
+    { kind: "settings", rel: ".claude/settings.local.json", scan: findSettingsSecrets },
+  ]) {
+    const label = `Secret hygiene — ${rel}`;
+    const abs = resolve(projectRoot, rel);
+    if (!existsSync(abs)) {
+      add(label, "SKIP", `no ${rel} in this project — run /project-init to generate one`);
+      continue;
+    }
+    const { hits, weak, unparsable } = scan(readFileSync(abs, "utf-8"));
+    // Both probes run in the PROJECT root, not the process cwd, and both are needed:
+    // check-ignore answers "would a new file be ignored", ls-files answers "is it already
+    // committed" — and a tracked file reports NOT-ignored, so neither alone is sufficient.
+    const ignored = inRepo && tryCmd(`git check-ignore -q -- "${rel}"`, { cwd: projectRoot });
+    const tracked = inRepo && tryCmd(`git ls-files --error-unmatch -- "${rel}"`, { cwd: projectRoot });
+    const { status, detail } = gradeSecretHygiene({ kind, file: rel, hits, weak, unparsable, inRepo, ignored, tracked });
+    add(label, status, detail);
+  }
 
   // 1b. The ACTIVE plugin install resolves at runtime + the routing helper is present.
   //     /qa-fix / /qa-bug launch `node "$pluginRoot/skills/qa-fix-routing/ado.mjs" …` where
@@ -206,16 +467,14 @@ async function main() {
     } catch (e) { add("Admin login (ADMIN_PASSWORD)", "FAIL", e.message); }
   } else add("Admin login (ADMIN_PASSWORD)", "SKIP", "BACK_URL / ADMIN / ADMIN_PASSWORD not all set");
 
-  // 6. Storefront user login — soft probe (platform grant may not apply to storefront users)
+  // 6. Storefront user login — the REAL storefront login (store-scoped OAuth), not a soft
+  //    "verify manually" WARN. See probeStorefrontLogin (D2).
   if (BACK && process.env.USER_EMAIL && process.env.USER_PASSWORD) {
-    try {
-      const r = await fetch(`${BACK}/connect/token`, {
-        method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ grant_type: "password", username: process.env.USER_EMAIL, password: process.env.USER_PASSWORD, scope: "offline_access" }),
-      });
-      add("Storefront user login (USER_PASSWORD)", r.ok ? "PASS" : "WARN",
-        r.ok ? `token acquired for '${process.env.USER_EMAIL}'` : `platform grant → ${r.status}; storefront users may auth via xAPI — verify manually`);
-    } catch (e) { add("Storefront user login (USER_PASSWORD)", "WARN", e.message); }
+    const v = await probeStorefrontLogin({
+      back: BACK, store: process.env.STORE_ID || "",
+      email: process.env.USER_EMAIL, password: process.env.USER_PASSWORD,
+    });
+    add("Storefront user login (USER_PASSWORD)", v.status, v.detail);
   } else add("Storefront user login (USER_PASSWORD)", "SKIP", "USER_EMAIL / USER_PASSWORD not set");
 
   // 7. Tracker
@@ -400,7 +659,17 @@ async function main() {
           const url = `${apiBase}/_apis/git/repositories/${encodeURIComponent(name)}?api-version=7.1`;
           const res = await fetch(url, { headers: { Authorization: ado.header, Accept: "application/json" } });
           const okJson = res.ok && (res.headers.get("content-type") || "").includes("application/json");
-          if (!okJson) { add(label, "FAIL", `→ ${res.status} (${ado.via} not accepted — check PAT Code R/W or az tenant)`); continue; }
+          if (!okJson) {
+            // #217 — distinguish a missing/misnamed repo (404) from an auth failure (401/403):
+            // they have different remedies, so don't report every non-OK as a PAT/tenant problem.
+            const why =
+              res.status === 404 ? `repo '${name}' not found in ${org}/${project} — check repos.client name / project`
+              : res.status === 401 || res.status === 403 ? `${ado.via} not accepted — check ADO PAT Code (Read) scope or az tenant`
+              : res.status < 400 ? `${ado.via} not accepted (non-JSON response, likely an ADO sign-in page — a 203 or a followed redirect) — check ADO PAT Code (Read) scope or az tenant`
+              : `unexpected response — ${ado.via} probe to ${org}/${project}`;
+            add(label, "FAIL", `→ ${res.status} (${why})`);
+            continue;
+          }
           // Reachable — now confirm PUSH scope (the /qa-fix operation), not just read. This is
           // the LEO gap: get-repo 200 but push 401. Non-mutating: empty push body → 400 when
           // authorized, 401/403 when Code-write scope is absent.
@@ -604,7 +873,12 @@ function renderTable(rows) {
 // become an unhandled rejection. We do NOT fire the completion marker on a crash — a crash is not a
 // clean terminal step (the clean line stays withheld, the safe direction). A total-config-load
 // failure is already handled by the early `process.exit(1)` above.
-main().catch((err) => {
-  console.error(`[verify-access] ${err?.stack || err?.message || err}`);
-  process.exit(1);
-});
+// Run the readiness scan ONLY as a CLI (`node verify-access.mjs`) — guarded so the pure
+// probeStorefrontLogin export can be imported by a unit test without triggering the network scan +
+// process.exit (repo-standard main-guard, matching ado.mjs / discover-tracker.mjs).
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error(`[verify-access] ${err?.stack || err?.message || err}`);
+    process.exit(1);
+  });
+}
