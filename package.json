@@ -85,6 +85,8 @@
     "seed:sales-rep-tasks": "node scripts/seed-data/sales-rep/seed-sales-rep-tasks.mjs",
     "seed:sales-rep-tasks:teardown": "node scripts/seed-data/sales-rep/seed-sales-rep-tasks.mjs --teardown",
     "sales-rep:stats": "node scripts/seed-data/sales-rep/probe-sales-rep-statistics.mjs",
+    "seed:sales-rep-demo": "node scripts/seed-data/sales-rep/seed-sales-rep-demo.mjs",
+    "seed:sales-rep-demo:teardown": "node scripts/seed-data/sales-rep/seed-sales-rep-demo.mjs --teardown",
     "seed:sales-rep-family": "node scripts/seed-data/sales-rep/seed-sales-rep-family.mjs",
     "seed:sales-rep-family:teardown": "node scripts/seed-data/sales-rep/seed-sales-rep-family.mjs --teardown",
     "sr:inventory": "node scripts/seed-data/sales-rep/inventory-sales-rep.mjs",
