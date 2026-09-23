@@ -80,6 +80,14 @@ function readLedger() {
   }
 }
 
+/**
+ * The id this seeder recorded for (type, key) on a previous run, or null. Read ONCE at module scope
+ * so a run that rewrites the ledger mid-way still resolves against the state it started from.
+ */
+const PRIOR_LEDGER = readLedger();
+const priorId = (type, key) =>
+  (PRIOR_LEDGER.entities || []).find((e) => e.type === type && e.key === key)?.id || null;
+
 function writeLedger(entities) {
   writeEnvAliasOverride({
     [LEDGER_KEY]: {
@@ -180,10 +188,34 @@ async function resolveReps() {
 
 // ---- members ---------------------------------------------------------------
 
-async function findByMarker(memberType, marker, name) {
+/**
+ * LEDGER FIRST, search second — and the order is the whole point.
+ *
+ * `/api/members/search` is INDEX-backed, so a member created moments (or, as measured on
+ * virtostart 2026-09-23, hours) earlier can come back as zero rows while the entity is perfectly
+ * alive. Idempotency built on that search is not idempotency: every re-seed fails to find what it
+ * made and creates it again. Four re-runs produced FIVE of every demo buyer — visible to anyone
+ * opening Company members, each duplicate with no account and no membership, because only the
+ * newest row got those.
+ *
+ * The ledger is the authority: it records the id this seeder actually created. A GET by id is
+ * index-free and answers truthfully. The search is kept only as the fallback for a lost or reverted
+ * overlay, and it is the reason a stale ledger entry cannot strand an entity either.
+ */
+async function findExisting(memberType, marker, name, ledgerId) {
+  if (ledgerId) {
+    const byId = await api('GET', `/api/members/${ledgerId}`, null, { expectStatus: [200, 404] });
+    // memberType is checked because an id could in principle be reused by another entity type.
+    if (byId?.id && String(byId.memberType || memberType) === memberType) return byId;
+    verbose(`ledger id ${ledgerId} for ${name} is gone — falling back to search`);
+  }
   const res = await api('POST', '/api/members/search', { memberType, keyword: name, take: 20, deep: true }, { expectStatus: [200, 201] });
   const rows = res?.results || [];
-  return rows.find((m) => m.outerId === marker) || rows.find((m) => m.name === name) || null;
+  const hit = rows.find((m) => m.outerId === marker) || rows.find((m) => m.name === name) || null;
+  if (!hit && !ledgerId) {
+    verbose(`no ${memberType} found for "${name}" by marker or name — will CREATE`);
+  }
+  return hit;
 }
 
 /** Organizations. Idempotent on the hidden marker first, then the display name. */
@@ -192,7 +224,7 @@ async function ensureOrgs() {
   for (const spec of DEMO_ORGS) {
     if (!only(spec.key)) continue;
     const marker = demoMarker('ORG', spec.key);
-    const found = await findByMarker('Organization', marker, spec.name);
+    const found = await findExisting('Organization', marker, spec.name, priorId('organization', spec.key));
     if (found?.id) {
       if (found.outerId !== marker) {
         // Backfill: an org created before the marker existed, or by an interrupted run. Only ever
@@ -238,7 +270,7 @@ async function ensureContacts(orgs) {
     if (!org) { verbose(`contact ${spec.key}: org ${spec.org} not in scope, skip`); continue; }
     const fullName = `${spec.firstName} ${spec.lastName}`;
     const marker = demoMarker('CT', spec.key);
-    const found = await findByMarker('Contact', marker, fullName);
+    const found = await findExisting('Contact', marker, fullName, priorId('contact', spec.key));
     if (found?.id) {
       if (!found.outerId) await api('PUT', '/api/members', { ...found, outerId: marker });
       out[spec.key] = { id: found.id, name: fullName };
