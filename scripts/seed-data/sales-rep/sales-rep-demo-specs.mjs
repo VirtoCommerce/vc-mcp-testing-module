@@ -510,6 +510,41 @@ export function visibleStrings() {
 }
 
 /**
+ * SHARED LISTS — a buyer's saved list, scoped to their ORGANIZATION so every member of that
+ * customer sees it. `scope: "Organization"` on `createWishlist` is what makes it shared; the
+ * default is private to the creator.
+ *
+ * Two things this models that a private list cannot. First, **collaboration inside one customer**:
+ * each org's list is created by one named member and is visible to the other, which is the whole
+ * point of the shared scope. Second, **a standing reorder**, which is what a B2B list actually is
+ * in the field — the same fasteners every quarter, the approved printer fleet, the plant's backup
+ * power kit.
+ *
+ * `owner` is the DEMO_CONTACTS key whose account creates it, so the list carries a real person's
+ * name as its author. `items` draws from the OWNING ORG's product pool, so a Northwind list holds
+ * fasteners and a Wingtip list holds cable — the same coherence rule as the orders.
+ *
+ * NOT rep-owned, deliberately: a list is a BUYER surface (Purchasing → Lists), and the Sales Rep
+ * hub has no list of its own. A rep sees a customer's shared list by switching into that customer's
+ * organization, which is exactly the journey the demo should show.
+ */
+export const DEMO_LISTS = [
+  { key: 'DLIST-NW-1', org: 'DORG-NORTHWIND', owner: 'DCT-NW-1', name: 'Q4 Reorder — Fasteners', description: 'Standing quarterly reorder for the Seattle yard. Reviewed by Margaret before each release.', items: 5 },
+  { key: 'DLIST-NW-2', org: 'DORG-NORTHWIND', owner: 'DCT-NW-2', name: 'Site Consumables — Seattle', description: 'Everyday consumables kept on the shelf; top up when the bin is half empty.', items: 3 },
+  { key: 'DLIST-CN-1', org: 'DORG-CONTOSO', owner: 'DCT-CN-1', name: 'Approved Printer Fleet', description: 'Models procurement has approved for the Columbus plant. Anything else needs sign-off.', items: 4 },
+  { key: 'DLIST-CN-2', org: 'DORG-CONTOSO', owner: 'DCT-CN-2', name: 'Print Room Standing Order', description: 'Monthly consumables for the print room.', items: 3 },
+  { key: 'DLIST-FB-1', org: 'DORG-FABRIKAM', owner: 'DCT-FB-1', name: 'Backup Power — Plant 2', description: 'Portable power kit held for line-side outages. Reviewed after each incident.', items: 4 },
+  { key: 'DLIST-WT-1', org: 'DORG-WINGTIP', owner: 'DCT-WT-1', name: 'Cable & Connector Restock', description: 'Van stock for the field crews; restocked every two weeks.', items: 3 },
+];
+
+/** Total products a shared list needs from each org's pool, so discovery asks for enough. */
+export function listProductNeedByOrg(lists = DEMO_LISTS) {
+  const need = {};
+  for (const l of lists) need[l.org] = (need[l.org] || 0) + l.items;
+  return need;
+}
+
+/**
  * Every way this dataset could be wrong in a way no other guard catches. Two classes:
  * PRESENTATION (a family prefix or a raw GUID reaching a screen) and NON-VACUITY — a fixture set
  * that satisfies every structural check and still makes the feature's central question
@@ -555,6 +590,28 @@ export function demoProblems() {
   // this gate catches the DECLARATION that makes disjointness impossible.
   const phrases = DEMO_ORGS.map((o) => o.productSearch);
   for (const o of DEMO_ORGS) if (!o.productSearch) problems.push(`org ${o.key} declares no productSearch — its orders would draw from an arbitrary catalog slice`);
+  for (const l of DEMO_LISTS) {
+    const org = DEMO_ORGS.find((o) => o.key === l.org);
+    const owner = DEMO_CONTACTS.find((c) => c.key === l.owner);
+    if (!org) problems.push(`list ${l.key}: org "${l.org}" is not declared`);
+    if (!owner) problems.push(`list ${l.key}: owner "${l.owner}" is not declared`);
+    else if (owner.org !== l.org) {
+      problems.push(`list ${l.key} is owned by ${owner.key}, who belongs to ${owner.org}, not ${l.org} — `
+        + 'a list is shared with the OWNING organization, so it would appear under the wrong customer');
+    }
+    if (!(l.items > 0)) problems.push(`list ${l.key}: declares ${l.items} item(s) — an empty shared list demonstrates nothing`);
+  }
+  // Shared-ness is the point: at least one organization must hold a list its OTHER member can see.
+  {
+    const byOrg = {};
+    for (const l of DEMO_LISTS) byOrg[l.org] = (byOrg[l.org] || 0) + 1;
+    const multi = DEMO_ORGS.filter((o) => (byOrg[o.key] || 0) > 1
+      && DEMO_CONTACTS.filter((c) => c.org === o.key).length > 1);
+    if (DEMO_LISTS.length && !multi.length) {
+      problems.push('no organization has two members AND more than one shared list — nothing on screen '
+        + 'would show a list authored by one colleague and read by another, which is what "shared" means');
+    }
+  }
   for (const d of DEMO_DOCUMENTS) {
     if (typeof d.sourceFile === 'string' && d.sourceFile.startsWith(`${DEMO_ASSET_SUBDIR}/`)
       && d.sourceFile !== `${DEMO_ASSET_SUBDIR}/${d.fileName}`) {

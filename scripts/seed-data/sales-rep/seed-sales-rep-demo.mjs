@@ -53,6 +53,7 @@ import {
   buildDemoFileBytes, buildDemoDocumentRequest, buildDemoOrderBody,
   demoOrderNumber, ordersInPostOrder, productNeedByOrg, isDemoSafeProduct,
   orgByKey, contactByKey, roleSeesDocuments, SALES_REP_ROLE_ADVANCED, documentSourceRel,
+  DEMO_LISTS, listProductNeedByOrg,
 } from './sales-rep-demo-specs.mjs';
 
 const TEST_ENV = process.env.TEST_ENV || 'vcst';
@@ -402,9 +403,10 @@ async function attachServedOrgs(reps, orgs) {
  * Returns {} under --dry-run: `discoverCatalogProducts` is hard-gated on DRY_RUN and returns []
  * there, so a shortfall warning in a dry run would describe the stub, not the catalog.
  */
-async function discoverProductPools() {
+// `need` lets a second consumer (the shared lists) ask for its own per-org counts. The claim set
+// is per CALL, so lists and orders draw independently — two callers are not meant to share a pool.
+async function discoverProductPools(need = productNeedByOrg()) {
   if (DRY_RUN) return {};
-  const need = productNeedByOrg();
   const claimed = new Set();
   const pools = {};
   for (const org of DEMO_ORGS) {
@@ -717,6 +719,101 @@ async function teardown() {
   log('Teardown complete.');
 }
 
+/**
+ * SHARED LISTS, created BY THE BUYER and scoped to their organization.
+ *
+ * Two deliberate choices. The list is created with the OWNER own token, not an admin one, so the
+ * storefront shows a real colleague as its author rather than "virto-admin". And scope
+ * "Organization" is what makes it visible to the customer other members — the default scope is
+ * private to the creator, which would put the list on exactly one screen and demonstrate nothing.
+ *
+ * Idempotent the way everything else here now is: the ledger id first, then a name match among the
+ * owner own lists. The name check is a FALLBACK for a lost overlay, never the primary key — a list
+ * the seeder made and then failed to find would be silently duplicated on the next run, which is
+ * precisely how five of every demo buyer once appeared in Company members.
+ */
+async function ensureSharedLists(orgs, contacts, pools) {
+  const created = [];
+  if (!DEMO_LISTS.length) return created;
+  const password = resolvePassword("{{SR_DEMO_BUYER_PASSWORD}}");
+  const cursor = {};
+  const tokens = new Map();
+
+  for (const spec of DEMO_LISTS) {
+    if (!only(spec.key)) continue;
+    const org = orgs[spec.org];
+    const ownerSpec = contactByKey(spec.owner);
+    if (!org || !ownerSpec) { verbose(`list ${spec.key}: org or owner not in scope, skip`); continue; }
+    if (DRY_RUN) { log(`[DRY] would create shared list "${spec.name}" (${spec.items} item(s)) as ${ownerSpec.email} @ ${org.name}`); continue; }
+
+    const user = await api("GET", `/api/platform/security/users/${encodeURIComponent(ownerSpec.email)}`, null, { expectStatus: [200, 404] });
+    if (!user?.id) { log(`  SKIP list ${spec.key} — no account for ${ownerSpec.email}`); continue; }
+
+    if (!tokens.has(ownerSpec.email)) tokens.set(ownerSpec.email, await storefrontToken(ownerSpec.email, password));
+    const token = tokens.get(ownerSpec.email);
+    if (!token) { log(`  SKIP list ${spec.key} — ${ownerSpec.email} could not obtain a storefront token`); continue; }
+    const gql = storefrontGql(token);
+
+    let listId = priorId("list", spec.key);
+    if (listId) {
+      const alive = await gql(`query { wishlist(listId: "${listId}") { id name itemsCount } }`);
+      if (!alive?.wishlist?.id) { verbose(`list ${spec.key}: ledger id ${listId} is gone`); listId = null; }
+    }
+    if (!listId) {
+      const mine = await gql(`query { wishlists(storeId: "${STORE_ID}", userId: "${user.id}", first: 50) { items { id name scope itemsCount } } }`);
+      listId = (mine?.wishlists?.items || []).find((w) => w.name === spec.name)?.id || null;
+      if (listId) verbose(`list ${spec.key}: matched an existing list by name`);
+    }
+    if (!listId) {
+      const res = await gql(`mutation { createWishlist(command: { storeId: "${STORE_ID}" userId: "${user.id}" listName: "${esc(spec.name)}" description: "${esc(spec.description)}" scope: "Organization" }) { id name scope } }`);
+      listId = res?.createWishlist?.id;
+      if (!listId) { log(`  WARN list ${spec.key}: createWishlist returned no id`); continue; }
+      log(`shared list created: "${spec.name}" by ${ownerSpec.firstName} ${ownerSpec.lastName} @ ${org.name} (scope=${res.createWishlist.scope})`);
+    } else {
+      verbose(`list ${spec.key} exists (${listId})`);
+    }
+
+    // Fill from the OWNING org pool, taking a fresh window so two lists never hold the same rows.
+    const pool = pools[spec.org] || [];
+    const start = cursor[spec.org] || 0;
+    const window = pool.slice(start, start + spec.items);
+    cursor[spec.org] = start + spec.items;
+    let count = 0;
+    for (const product of window) {
+      const r = await gql(`mutation { addWishlistItem(command: { listId: "${listId}" productId: "${product.id}" quantity: 2 }) { id itemsCount } }`);
+      const n = r?.addWishlistItem?.itemsCount ?? 0;
+      if (n > count) count = n;
+    }
+    if (count < spec.items) log(`  NOTE list "${spec.name}": ${count}/${spec.items} item(s) — the org pool ran short or a product is unavailable.`);
+    created.push({ type: "list", key: spec.key, id: listId, name: spec.name, ownerEmail: ownerSpec.email, org: spec.org, itemsCount: count });
+  }
+  return created;
+}
+
+/** A storefront (customer-facing) bearer for one buyer. Never written to disk. */
+async function storefrontToken(username, password) {
+  const res = await fetch(`${BACK_URL}/connect/token`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ grant_type: "password", username, password, scope: "offline_access", storeId: STORE_ID }),
+  });
+  if (!res.ok) { log(`  WARN token for ${username}: ${res.status}`); return null; }
+  return (await res.json()).access_token;
+}
+
+/** The customer-facing /graphql endpoint; seed-common own bearer is an ADMIN one and is private. */
+const storefrontGql = (token) => async (query) => {
+  const res = await fetch(`${BACK_URL}/graphql`, {
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ query }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (body.errors?.length) log(`  gql: ${body.errors.map((e) => e.message).slice(0, 2).join(" | ").slice(0, 160)}`);
+  return body.data;
+};
+
+const esc = (v) => String(v ?? "").split(BSLASH).join(BSLASH + BSLASH).split(DQ).join(BSLASH + DQ);
+const BSLASH = String.fromCharCode(92);
+const DQ = String.fromCharCode(34);
 // ---- main ------------------------------------------------------------------
 
 async function main() {
@@ -749,20 +846,22 @@ async function main() {
   const accounts = await ensureBuyerAccounts(orgs, contacts);
   const attachments = await attachServedOrgs(reps, orgs);
   const orders = await ensureOrders(orgs, reps);
+  const lists = await ensureSharedLists(orgs, contacts, await discoverProductPools(listProductNeedByOrg()));
   const documents = await ensureDocuments();
   const tasks = await ensureTasks(reps);
 
   const entities = [
     ...Object.entries(orgs).map(([key, v]) => ({ type: 'organization', key, id: v.id, name: v.name, marker: demoMarker('ORG', key) })),
     ...Object.entries(contacts).map(([key, v]) => ({ type: 'contact', key, id: v.id, name: v.name, marker: demoMarker('CT', key) })),
-    ...accounts, ...orders, ...documents, ...tasks, ...attachments,
+    ...accounts, ...orders, ...documents, ...tasks, ...attachments, ...lists,
   ];
   writeLedger(entities);
 
   const skipped = reps.filter((r) => r.skipped);
   log('');
   log(`Demo seeded: ${Object.keys(orgs).length} org(s), ${Object.keys(contacts).length} contact(s), `
-    + `${orders.length} order(s), ${documents.length} document(s), ${tasks.length} task(s), ${usable.length} rep(s).`);
+    + `${orders.length} order(s), ${documents.length} document(s), ${lists.length} shared list(s), `
+    + `${tasks.length} task(s), ${usable.length} rep(s).`);
   if (skipped.length) log(`${skipped.length} rep(s) skipped — see the SKIP lines above; re-run after fixing to fill them in.`);
   log(DRY_RUN ? 'DRY RUN — no writes were made.' : `Ledger → test-data/aliases.${TEST_ENV}.json[${LEDGER_KEY}]. Commit it.`);
 }

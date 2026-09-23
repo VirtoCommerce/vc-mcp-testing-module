@@ -192,7 +192,7 @@
     "profile": "sales-rep-demo",
     "env": "virtostart",
     "marker": "DEMO-SR",
-    "generated": "2026-09-23T19:31:02.496Z",
+    "generated": "2026-09-23T20:11:01.104Z",
     "entities": [
       {
         "type": "organization",
@@ -505,6 +505,60 @@
           "d5162a8a-ceae-4a79-9c17-28813b5c2e59",
           "52c9ca25-0fae-47f6-b6c6-b963c8d3eb01"
         ]
+      },
+      {
+        "type": "list",
+        "key": "DLIST-NW-1",
+        "id": "3e3e44df-bea5-4515-b595-4187b8c0ac7a",
+        "name": "Q4 Reorder — Fasteners",
+        "ownerEmail": "m.hale@northwindtraders.example",
+        "org": "DORG-NORTHWIND",
+        "itemsCount": 4
+      },
+      {
+        "type": "list",
+        "key": "DLIST-NW-2",
+        "id": "9cd12488-10a1-41eb-8314-5a6d10136a34",
+        "name": "Site Consumables — Seattle",
+        "ownerEmail": "d.okafor@northwindtraders.example",
+        "org": "DORG-NORTHWIND",
+        "itemsCount": 3
+      },
+      {
+        "type": "list",
+        "key": "DLIST-CN-1",
+        "id": "0081052a-a93f-458a-a14c-03293aee1749",
+        "name": "Approved Printer Fleet",
+        "ownerEmail": "p.raman@contoso-mfg.example",
+        "org": "DORG-CONTOSO",
+        "itemsCount": 4
+      },
+      {
+        "type": "list",
+        "key": "DLIST-CN-2",
+        "id": "c0262695-4a6c-4ba5-9689-11d29db9f227",
+        "name": "Print Room Standing Order",
+        "ownerEmail": "t.bergmann@contoso-mfg.example",
+        "org": "DORG-CONTOSO",
+        "itemsCount": 3
+      },
+      {
+        "type": "list",
+        "key": "DLIST-FB-1",
+        "id": "5891694f-7241-4bdc-b3db-985a86ecf312",
+        "name": "Backup Power — Plant 2",
+        "ownerEmail": "e.duarte@fabrikam-industrial.example",
+        "org": "DORG-FABRIKAM",
+        "itemsCount": 4
+      },
+      {
+        "type": "list",
+        "key": "DLIST-WT-1",
+        "id": "df65a407-4ecf-41ec-8bcf-666a91963133",
+        "name": "Cable & Connector Restock",
+        "ownerEmail": "j.whitfield@wingtip-electrical.example",
+        "org": "DORG-WINGTIP",
+        "itemsCount": 3
       }
     ]
   }
