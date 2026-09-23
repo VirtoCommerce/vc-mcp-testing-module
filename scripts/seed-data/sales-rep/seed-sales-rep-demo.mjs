@@ -41,6 +41,10 @@ import {
   assertSafeTarget, auth, api, log, verbose, idsParam, verifyRemoved,
   writeEnvAliasOverride, discoverCatalogProducts, uploadScopedFile,
 } from '../../lib/seed-common.mjs';
+import {
+  __setApi, ensureSecurityAccount, findRole, searchMemberships, ensureOrgMembership,
+  stripSeededGlobalRoles, deleteUserByEmail, resolvePassword,
+} from '../../lib/user-provision.mjs';
 import { orgAlreadyServed, appendServedOrg, removeServedOrg } from './rep-only-org-specs.mjs';
 import { UPLOAD_SCOPE } from './sales-rep-docs-specs.mjs';
 import {
@@ -226,6 +230,66 @@ async function ensureContacts(orgs) {
     log(`contact created: ${fullName} @ ${org.name}`);
   }
   return out;
+}
+
+// ---- buyer accounts + org roles --------------------------------------------
+
+/**
+ * Give each buyer contact a login and an ORGANIZATION MEMBERSHIP carrying its declared role.
+ *
+ * Without this the `role` on a contact is decoration: a Contact with no ApplicationUser and no
+ * membership has no role anywhere in the platform, so the org's member list shows people with no
+ * permissions and the demo misrepresents the very model it is meant to show.
+ *
+ * THE ROLE IS ORG-SCOPED, NEVER GLOBAL (VCST-5028). A B2B role granted globally would apply to
+ * every organization the account touches, which is not what "Purchasing agent at Northwind" means.
+ * `stripSeededGlobalRoles` removes any B2B role that leaked onto the account itself, and the grant
+ * rides the membership — the same discipline `provisionContactLogins` already enforces for the b2b
+ * fixture family.
+ *
+ * These accounts ARE ours — invented buyers at fictional companies — so unlike the reps, creating
+ * them and setting their password is legitimate. The password is a `{{VAR}}` token resolved from
+ * the environment, never a literal.
+ */
+async function ensureBuyerAccounts(orgs, contacts) {
+  // user-provision carries its own module-level TOKEN (null here), so hand it our authenticated client.
+  __setApi(api);
+  const password = resolvePassword('{{SR_DEMO_BUYER_PASSWORD}}');
+  const roleCache = new Map();
+  const created = [];
+
+  for (const spec of DEMO_CONTACTS) {
+    if (!only(spec.key)) continue;
+    const contact = contacts[spec.key];
+    const org = orgs[spec.org];
+    if (!contact || !org) continue;
+    if (String(contact.id).startsWith('dry-') || String(org.id).startsWith('dry-')) {
+      log(`[DRY] would grant ${spec.email} "${spec.role}" at ${org.name}`);
+      continue;
+    }
+
+    if (!roleCache.has(spec.role)) roleCache.set(spec.role, await findRole({ role_name: spec.role }));
+    const role = roleCache.get(spec.role);
+    if (!role?.id) {
+      // Loud, because the symptom is a member who silently has no permissions.
+      log(`  WARN: platform role "${spec.role}" not found — ${spec.email} gets a login but NO role.`);
+      continue;
+    }
+
+    const userId = await ensureSecurityAccount(spec.email, password, contact.id, 'Approved');
+    if (!userId || String(userId).startsWith('dry-')) continue;
+
+    await stripSeededGlobalRoles(spec.email);
+    const existing = await searchMemberships(userId);
+    await ensureOrgMembership(userId, org.id, org.name, role.id, existing, false, spec.email, 'Approved');
+
+    created.push({
+      type: 'account', key: spec.key, id: userId, email: spec.email,
+      role: spec.role, roleId: role.id, orgId: org.id, orgName: org.name,
+    });
+    log(`account: ${spec.email} → "${spec.role}" at ${org.name}`);
+  }
+  return created;
 }
 
 // ---- rep attachment --------------------------------------------------------
@@ -520,6 +584,19 @@ async function teardown() {
     log(`  rep ${a.key}: detached ${(a.addedOrgIds || []).length} demo org(s); ${a.priorOrganizations.length} pre-existing restored`);
   }
 
+  // 4b. Buyer accounts + their org memberships. Before the contacts, because the account is what
+  //     holds the membership and the contact is its member record — deleting the contact first
+  //     leaves an account pointing at nothing. deleteUserByEmail removes membership + account
+  //     (+ the contact), so the contact pass below finds these already gone and is a no-op for them.
+  const accounts = ent('account');
+  if (accounts.length && !DRY_RUN) {
+    __setApi(api);
+    for (const a of accounts) {
+      await deleteUserByEmail(a.email).catch((e) => log(`  WARN account ${a.email}: ${e.message}`));
+    }
+    log(`  buyer accounts: deleted ${accounts.length} (with their org memberships)`);
+  } else if (accounts.length) log(`[DRY] buyer accounts: would delete ${accounts.length}`);
+
   // 5. Contacts then organizations (children before parents), ledger + marker sweep.
   for (const [type, marker, path] of [['contact', 'CT', '/api/members'], ['organization', 'ORG', '/api/members']]) {
     const fromLedger = ent(type).map((e) => e.id);
@@ -588,6 +665,7 @@ async function main() {
 
   const orgs = await ensureOrgs();
   const contacts = await ensureContacts(orgs);
+  const accounts = await ensureBuyerAccounts(orgs, contacts);
   const attachments = await attachServedOrgs(reps, orgs);
   const orders = await ensureOrders(orgs, reps);
   const documents = await ensureDocuments();
@@ -596,7 +674,7 @@ async function main() {
   const entities = [
     ...Object.entries(orgs).map(([key, v]) => ({ type: 'organization', key, id: v.id, name: v.name, marker: demoMarker('ORG', key) })),
     ...Object.entries(contacts).map(([key, v]) => ({ type: 'contact', key, id: v.id, name: v.name, marker: demoMarker('CT', key) })),
-    ...orders, ...documents, ...tasks, ...attachments,
+    ...accounts, ...orders, ...documents, ...tasks, ...attachments,
   ];
   writeLedger(entities);
 
