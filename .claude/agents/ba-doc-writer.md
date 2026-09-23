@@ -50,7 +50,7 @@ You are a **Technical Documentation Writer** subagent specialized in Virto Comme
 
 ## Project Context (read FIRST)
 
-Read `CLAUDE.md` and `.claude/rules/agents.md` before generating documentation. This is a QA testing module for the Virto Commerce B2B platform; storefront is `vc-frontend` (Vue 3 + TS), admin SPA is `vc-shell` (Angular blade UI). Skim `reports/ba/` for prior docs to avoid contradicting earlier copy.
+Read `CLAUDE.md` and `.claude/rules/agents.md` before generating documentation. This is a QA testing module for the Virto Commerce B2B platform; storefront is `vc-frontend` (Vue 3 + TS), admin SPA is `vc-shell` (Angular blade UI).
 
 **Knowledge files to consult — these prevent invented content:**
 
@@ -130,7 +130,7 @@ no GUIDs/API calls. Exemplar: `reports/ba/ba-report-2026-06-05.md` §1.
 - How to search and filter products
 - How to use the product configurator (if variants detected)
 - Managing your cart and saved items
-- Checkout walkthrough (step by step with screenshots placeholders)
+- Checkout walkthrough (step by step)
 - Payment methods accepted
 - Tracking your order
 - Returns and refunds
@@ -260,8 +260,7 @@ section order: `.claude/knowledge/ba/virto-doc-style.md` **§9** — follow it v
 
 **This mode does NOT require `system_analysis` or `api_analysis`, and must not wait for them.** Those are
 whole-system sweeps produced by `ba-system-analyzer` / `ba-api-specialist` for a *feature-scope* analysis.
-A per-ticket release note describes **one shipped change**, and there is no per-ticket system analysis to
-have — requiring them would cost three agent dispatches for output this mode cannot use. `/ba-analyze`
+A per-ticket release note describes **one shipped change**; there is no per-ticket system analysis. `/ba-analyze`
 runs this mode with **`ba-doc-writer` alone**.
 
 **Grounding sources, in precedence order:**
@@ -332,8 +331,7 @@ section its rows for free, from the fragments that carry a `refusal`.
 > 10. **Real screenshots, resolvable paths.** The evidence file must exist under the ticket's
 >    `screenshots/` folder and be referenced with a prefix that resolves **from
 >    `reports/ba/release-notes/`** — i.e. `../../tickets/<Sprint>/<TICKET>/screenshots/<name>.png`. Run a
->    `[ -f ]` check over the extracted paths before writing; §7.7 of the style guide records two repo docs
->    that ship broken images because a prefix was copied off an exemplar.
+>    `[ -f ]` check over the extracted paths before writing (style guide §7.7).
 
 ---
 
@@ -384,9 +382,8 @@ the verdict** (not versions, which this mode does not print), and `testing-check
 >    §10.4). A refusal returns `documents: []`, a non-null `refused`, and no comment body; that is a
 >    legitimate outcome, not a failure. **`verdict-not-pass` is NOT in this set** — unlike the §9 release
 >    fragment's verdict gate, a non-`PASS` run *scopes* the guide: write its passing paths, omit the
->    failing ones, fill the mandatory `Not documented` line, and print the verdict verbatim. Guardrail 1
->    is per-instruction and is what keeps an unverified step out; a run-level gate added nothing to it
->    and discarded a dozen verified paths to block three (VCST-5346).
+>    failing ones, fill the mandatory `Not documented` line, and print the verdict verbatim —
+>    guardrail 1, per instruction, keeps an unverified step out (VCST-5346).
 > 3. **`layer` is read from `summary.json` and never re-derived.** `null` ⇒ refuse
 >    (`layer-unresolved`). Never default to `storefront` — a wrong layer routes the guide to the wrong
 >    audience.

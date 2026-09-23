@@ -32,7 +32,7 @@ If `existing_story` is present (or `mode: "review"`), run **Mode B** (jump to th
 
 ## Project Context (read FIRST)
 
-Read `CLAUDE.md`, `.claude/rules/agents.md`, and the most recent `vc/shared/docs/Sprint plans/sprint-XX-XX-summary.json` for active sprint scope. Skim `reports/ba/` for prior stories on the same feature to avoid contradicting earlier ACs. Knowledge files to consult before writing ACs/test scenarios:
+Read `CLAUDE.md`, `.claude/rules/agents.md`, and the most recent `vc/shared/docs/Sprint plans/sprint-XX-XX-summary.json` for active sprint scope. Knowledge files to consult before writing ACs/test scenarios:
 
 - `.claude/knowledge/oracles/business-logic.md` — `BL-DOMAIN-NNN` invariants. Map every story to ≥1 `BL-*` ID; if a story exposes a NEW invariant not in the catalog, surface it as a `proposed_bl` entry rather than inventing one silently.
 - `.claude/knowledge/oracles/e-commerce-edge-cases-library.md` — `ECL-*` edge case patterns. Use these IDs in negative ACs and the test-scenario matrix so the QA team can cross-reference.
@@ -155,7 +155,7 @@ Standard DoD that every story must meet — customize per project:
 - [ ] Integration/E2E test added for primary happy path; GraphQL operations covered by runner-native test in `regression/suites/Backend/graphql/`
 - [ ] Code reviewed and approved by 1+ team member
 - [ ] No new console errors or warnings introduced
-- [ ] Accessibility: keyboard navigable, ARIA labels present (Coffee and Red are the WCAG-gated themes — see memory `feedback_a11y_gated_themes.md`)
+- [ ] Accessibility: keyboard navigable, ARIA labels present (Coffee and Red are the WCAG-gated themes)
 - [ ] Localization: all strings use i18n keys, no hardcoded text
 - [ ] Documentation updated (if user-facing feature)
 - [ ] BA sign-off on acceptance criteria; BL-* mapping recorded in story header
@@ -210,7 +210,7 @@ Security considerations:
 
 When the story touches **GraphQL xAPI** queries/mutations:
 - Reference exact field/argument names from `.claude/knowledge/api/graphql-schema.md` (live introspection snapshot) — not paraphrased names
-- Note that QA will write tests against this story in **runner-native format** (`scripts/graphql/graphql-runner.ts`) — see `.claude/knowledge/api/graphql-test-cases-runner.md`. Acceptance Criteria for GraphQL behavior should be falsifiable against `errors[]`, response field paths, or counts so the test author can map them directly to `[ERRORS]` / `[DATA]` / `[COUNT]` assertions without rewriting.
+- Note that QA will write tests against this story in **runner-native format** (`scripts/graphql/graphql-runner.ts`) — see `.claude/knowledge/api/graphql-test-cases-runner.md`. Acceptance Criteria for GraphQL behavior should be falsifiable against `errors[]`, response field paths, or counts (`[ERRORS]` / `[DATA]` / `[COUNT]`).
 
 ### 10. Test Scenarios
 Complement ACs with a test scenario matrix:
@@ -225,7 +225,7 @@ Complement ACs with a test scenario matrix:
 | GraphQL mutation success | Valid input | `errors[] empty`, expected field values | GraphQL (runner-native) |
 | GraphQL mutation invalid input | Missing required field | `errors[] non-empty` with descriptive message | GraphQL (runner-native) |
 
-**Test type "GraphQL (runner-native)"** denotes a test the QA team will execute via `scripts/graphql/graphql-runner.ts` using the contract in `.claude/knowledge/api/graphql-test-cases-runner.md`. When the story includes GraphQL xAPI changes, prefer this test type over generic "Integration" for any scenario that exercises a query/mutation directly — it's faster, schema-validated, and produces structured evidence.
+**Test type "GraphQL (runner-native)"** denotes a test the QA team will execute via `scripts/graphql/graphql-runner.ts` using the contract in `.claude/knowledge/api/graphql-test-cases-runner.md`. When the story includes GraphQL xAPI changes, prefer this test type over generic "Integration" for any scenario that exercises a query/mutation directly.
 
 ---
 
@@ -318,7 +318,7 @@ Before finalizing, check for these anti-patterns:
 | Gold plating | ACs with 20+ items | Split the story |
 | Passive voice in ACs | "The data should be saved" | "The system saves the data" |
 | **No BL-* mapping** | Story header has empty `Business_Rule` for a non-trivial feature | Map ≥1 invariant from `business-logic.md`, or surface a `proposed_bl` if the rule is genuinely new |
-| **Hardcoded env-dependent values** | AC quotes a literal SKU, GUID, price, or URL host | Reference `{{TEST_SKU}}`, `@td(ALIAS.field)`, or assert structural invariants — see memory `feedback_flexible_test_cases.md` |
+| **Hardcoded env-dependent values** | AC quotes a literal SKU, GUID, price, or URL host | Reference `{{TEST_SKU}}`, `@td(ALIAS.field)`, or assert structural invariants |
 | **GraphQL AC not falsifiable** | "the API returns the right data" | Specify path + predicate: "`data.cart.subTotal.amount > 0`" or "`errors[]` is empty" so it maps to runner `[DATA]/[ERRORS]` |
 
 ---
@@ -381,7 +381,7 @@ This table is the spine: QA maps each condition to a test case, and a PASS verdi
 ### Review-mode rules
 - **Do not invent business rules.** A gap-AC must map to an existing `BL-*`/`ECL-*`, or be surfaced as `proposed_bl` (never silently minted) — same rule as Mode A.
 - **Advisory, not blocking.** You report weak ACs, gaps, and implementation drift; you never decide to stop a test. The orchestrator folds gap-ACs into scope and keeps testing.
-- **Diff is a hypothesis, live is truth.** A NOT-FOUND/DRIFT from the static `pr_diff` is a *suspicion* to verify live — never a confirmed defect on its own. Only a `live_behavior` CONTRADICTS is filing-grade. (Mirrors the project rule: never report an API/diff-only signal as a confirmed defect.)
+- **Diff is a hypothesis, live is truth.** A NOT-FOUND/DRIFT from the static `pr_diff` is a *suspicion* to verify live — never a confirmed defect on its own. Only a `live_behavior` CONTRADICTS is filing-grade.
 - **Real-user phrasing** on every rewritten and gap AC (per the REAL-USER rule above).
 - **No external writes.** Return the review; never comment on JIRA or edit the ticket unless explicitly asked.
 
