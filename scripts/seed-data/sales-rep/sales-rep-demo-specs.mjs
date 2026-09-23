@@ -75,6 +75,17 @@ export function markerSweepInScope(outerId, only) {
 /** The dataset flag written to `_meta.dataset_profile`; the fixtures profile is its counterpart. */
 export const DEMO_PROFILE = 'sales-rep-demo';
 
+/**
+ * The overlay key the demo id ledger lives under. Declared HERE rather than in the seeder because
+ * three files need it — the seeder WRITES it, `td:reconcile` check [12] READS it, and
+ * `validate-sales-rep-demo-data.mjs` ASSERTS its shape — and a transcribed copy fails silently:
+ * rename it in one place and reconcile reports "no ledger" forever while the seed still runs green.
+ * The leading `_` is load-bearing: `selectProbeTargets()` in overlay-specs.mjs skips underscore
+ * keys, which is the only thing keeping check [11] from member-probing every order and file GUID
+ * the ledger holds and reporting each one STALE.
+ */
+export const DEMO_LEDGER_KEY = '_demo_sales_rep_ledger';
+
 // ---- the narrative ---------------------------------------------------------
 
 export const DEMO_STORE = 'B2B-store';

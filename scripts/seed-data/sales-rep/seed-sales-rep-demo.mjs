@@ -48,7 +48,7 @@ import {
 import { orgAlreadyServed, appendServedOrg, removeServedOrg } from './rep-only-org-specs.mjs';
 import { UPLOAD_SCOPE } from './sales-rep-docs-specs.mjs';
 import {
-  DEMO_ORGS, DEMO_CONTACTS, DEMO_REPS, DEMO_DOCUMENTS, DEMO_TASKS, DEMO_PROFILE,
+  DEMO_ORGS, DEMO_CONTACTS, DEMO_REPS, DEMO_DOCUMENTS, DEMO_TASKS, DEMO_PROFILE, DEMO_LEDGER_KEY,
   demoMarker, isDemoMarker, markerSweepInScope, demoProblems,
   buildDemoFileBytes, buildDemoDocumentRequest, buildDemoOrderBody,
   demoOrderNumber, ordersInPostOrder, productNeedByOrg, isDemoSafeProduct,
@@ -56,7 +56,9 @@ import {
 } from './sales-rep-demo-specs.mjs';
 
 const TEST_ENV = process.env.TEST_ENV || 'vcst';
-const LEDGER_KEY = '_demo_sales_rep_ledger';
+// Re-exported under the local name the rest of this file already uses. The literal lives in the
+// spec module because reconcile check [12] and the drift guard read it too.
+const LEDGER_KEY = DEMO_LEDGER_KEY;
 const only = (key) => !ONLY || key === ONLY;
 
 // ---- ledger ----------------------------------------------------------------
