@@ -37,7 +37,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  ROOT, BACK_URL, STORE_ID, DRY_RUN, TEARDOWN, ONLY,
+  ROOT, BACK_URL, FRONT_URL, STORE_ID, DRY_RUN, TEARDOWN, ONLY,
   assertSafeTarget, auth, api, log, verbose, idsParam, verifyRemoved,
   writeEnvAliasOverride, discoverCatalogProducts, uploadScopedFile,
 } from '../../lib/seed-common.mjs';
@@ -53,7 +53,7 @@ import {
   buildDemoFileBytes, buildDemoDocumentRequest, buildDemoOrderBody,
   demoOrderNumber, ordersInPostOrder, productNeedByOrg, isDemoSafeProduct,
   orgByKey, contactByKey, roleSeesDocuments, SALES_REP_ROLE_ADVANCED, documentSourceRel,
-  DEMO_LISTS, listProductNeedByOrg,
+  DEMO_LISTS, listProductNeedByOrg, DEMO_LIST_SCOPE,
 } from './sales-rep-demo-specs.mjs';
 
 const TEST_ENV = process.env.TEST_ENV || 'vcst';
@@ -643,6 +643,15 @@ async function teardown() {
     }
   }
 
+  // 1b. Shared lists — a list is a CART row, so it must go before the members that own it, and it
+  //     cannot be swept by marker (a wishlist carries no outerId of ours). Ledger only. Deleted with
+  //     the ADMIN cart API rather than the storefront mutation, because the author is sometimes a real
+  //     person whose token this seeder does not hold at teardown time.
+  const lists = ent('list');
+  if (lists.length && !DRY_RUN) {
+    await api('DELETE', `/api/carts?${idsParam(lists.map((l) => l.id))}`, null, { expectStatus: [200, 204, 404] });
+    log(`  shared lists: deleted ${lists.length}`);
+  } else if (lists.length) log(`[DRY] shared lists: would delete ${lists.length}`);
   // 2. Orders — before the members they reference.
   const orders = ent('order');
   if (orders.length && !DRY_RUN) {
@@ -720,60 +729,86 @@ async function teardown() {
 }
 
 /**
- * SHARED LISTS, created BY THE BUYER and scoped to their organization.
+ * SHARED LISTS, both scopes. See DEMO_LISTS in the spec module for what each one means and for the
+ * live evidence behind it; the short version is that an Organization list is authored by a BUYER for
+ * their colleagues, and a Customer list is authored by the REP for one customer and reached through
+ * a share link rather than the customer's own Lists page.
  *
- * Two deliberate choices. The list is created with the OWNER own token, not an admin one, so the
- * storefront shows a real colleague as its author rather than "virto-admin". And scope
- * "Organization" is what makes it visible to the customer other members — the default scope is
- * private to the creator, which would put the list on exactly one screen and demonstrate nothing.
+ * Each list is created with its AUTHOR's own token, never an admin one, so the storefront shows a
+ * real person rather than "virto-admin". A Customer list additionally needs the author to be IN the
+ * target organization when it is created, which is the same org-switch the storefront switcher does.
  *
- * Idempotent the way everything else here now is: the ledger id first, then a name match among the
- * owner own lists. The name check is a FALLBACK for a lost overlay, never the primary key — a list
- * the seeder made and then failed to find would be silently duplicated on the next run, which is
- * precisely how five of every demo buyer once appeared in Company members.
+ * Idempotent ledger-first, like every other entity here: the recorded id, then a name match among
+ * the author's own lists as the fallback for a lost overlay. Never name-first — that is how five of
+ * every demo buyer once appeared in Company members.
  */
-async function ensureSharedLists(orgs, contacts, pools) {
+async function ensureSharedLists(orgs, contacts, pools, reps) {
   const created = [];
   if (!DEMO_LISTS.length) return created;
-  const password = resolvePassword("{{SR_DEMO_BUYER_PASSWORD}}");
+  const buyerPassword = resolvePassword("{{SR_DEMO_BUYER_PASSWORD}}");
   const cursor = {};
-  const tokens = new Map();
+  const tokenCache = new Map();
 
   for (const spec of DEMO_LISTS) {
     if (!only(spec.key)) continue;
     const org = orgs[spec.org];
-    const ownerSpec = contactByKey(spec.owner);
-    if (!org || !ownerSpec) { verbose(`list ${spec.key}: org or owner not in scope, skip`); continue; }
-    if (DRY_RUN) { log(`[DRY] would create shared list "${spec.name}" (${spec.items} item(s)) as ${ownerSpec.email} @ ${org.name}`); continue; }
+    if (!org) { verbose(`list ${spec.key}: org not in scope, skip`); continue; }
+    const isCustomerScope = spec.scope === DEMO_LIST_SCOPE.CUSTOMER;
 
-    const user = await api("GET", `/api/platform/security/users/${encodeURIComponent(ownerSpec.email)}`, null, { expectStatus: [200, 404] });
-    if (!user?.id) { log(`  SKIP list ${spec.key} — no account for ${ownerSpec.email}`); continue; }
+    if (DRY_RUN) {
+      log(`[DRY] would create ${spec.scope} list "${spec.name}" (${spec.items} item(s)) for ${org.name}`);
+      continue;
+    }
 
-    if (!tokens.has(ownerSpec.email)) tokens.set(ownerSpec.email, await storefrontToken(ownerSpec.email, password));
-    const token = tokens.get(ownerSpec.email);
-    if (!token) { log(`  SKIP list ${spec.key} — ${ownerSpec.email} could not obtain a storefront token`); continue; }
+    // --- resolve the author and a token that can act as them -----------------
+    let authorLabel = spec.author;
+    let userId = null;
+    let token = null;
+    if (isCustomerScope) {
+      const r = (reps || []).find((x) => !x.skipped && x.spec.key === spec.author);
+      if (!r) { log(`  SKIP list ${spec.key} — rep ${spec.author} is not available on this environment`); continue; }
+      authorLabel = r.spec.fullName;
+      userId = r.rep.userId;
+      const cacheKey = `${userId}:${org.id}`;
+      if (!tokenCache.has(cacheKey)) tokenCache.set(cacheKey, await repTokenInOrg(r, org.id));
+      token = tokenCache.get(cacheKey);
+      if (!token) { log(`  SKIP list ${spec.key} — could not obtain a rep token for ${authorLabel} in ${org.name}`); continue; }
+    } else {
+      const ownerSpec = contactByKey(spec.author);
+      if (!ownerSpec) { verbose(`list ${spec.key}: author not declared, skip`); continue; }
+      authorLabel = `${ownerSpec.firstName} ${ownerSpec.lastName}`;
+      const user = await api("GET", `/api/platform/security/users/${encodeURIComponent(ownerSpec.email)}`, null, { expectStatus: [200, 404] });
+      if (!user?.id) { log(`  SKIP list ${spec.key} — no account for ${ownerSpec.email}`); continue; }
+      userId = user.id;
+      if (!tokenCache.has(ownerSpec.email)) tokenCache.set(ownerSpec.email, await storefrontToken(ownerSpec.email, buyerPassword));
+      token = tokenCache.get(ownerSpec.email);
+      if (!token) { log(`  SKIP list ${spec.key} — ${ownerSpec.email} could not obtain a storefront token`); continue; }
+    }
     const gql = storefrontGql(token);
 
+    // --- reuse before create -------------------------------------------------
     let listId = priorId("list", spec.key);
     if (listId) {
-      const alive = await gql(`query { wishlist(listId: "${listId}") { id name itemsCount } }`);
+      const alive = await gql(`query { wishlist(listId: "${listId}") { id name } }`);
       if (!alive?.wishlist?.id) { verbose(`list ${spec.key}: ledger id ${listId} is gone`); listId = null; }
     }
     if (!listId) {
-      const mine = await gql(`query { wishlists(storeId: "${STORE_ID}", userId: "${user.id}", first: 50) { items { id name scope itemsCount } } }`);
+      const scopeArg = isCustomerScope ? `, scope: "${spec.scope}"` : "";
+      const mine = await gql(`query { wishlists(storeId: "${STORE_ID}", userId: "${userId}", first: 50${scopeArg}) { items { id name } } }`);
       listId = (mine?.wishlists?.items || []).find((w) => w.name === spec.name)?.id || null;
       if (listId) verbose(`list ${spec.key}: matched an existing list by name`);
     }
     if (!listId) {
-      const res = await gql(`mutation { createWishlist(command: { storeId: "${STORE_ID}" userId: "${user.id}" listName: "${esc(spec.name)}" description: "${esc(spec.description)}" scope: "Organization" }) { id name scope } }`);
+      const sharedWith = isCustomerScope ? ` sharedWithId: "${org.id}"` : "";
+      const res = await gql(`mutation { createWishlist(command: { storeId: "${STORE_ID}" userId: "${userId}" listName: "${esc(spec.name)}" description: "${esc(spec.description)}" scope: "${spec.scope}"${sharedWith} }) { id name scope } }`);
       listId = res?.createWishlist?.id;
       if (!listId) { log(`  WARN list ${spec.key}: createWishlist returned no id`); continue; }
-      log(`shared list created: "${spec.name}" by ${ownerSpec.firstName} ${ownerSpec.lastName} @ ${org.name} (scope=${res.createWishlist.scope})`);
+      log(`${spec.scope} list created: "${spec.name}" by ${authorLabel}${isCustomerScope ? ` FOR ${org.name}` : ` @ ${org.name}`}`);
     } else {
       verbose(`list ${spec.key} exists (${listId})`);
     }
 
-    // Fill from the OWNING org pool, taking a fresh window so two lists never hold the same rows.
+    // --- fill from the org's own pool ---------------------------------------
     const pool = pools[spec.org] || [];
     const start = cursor[spec.org] || 0;
     const window = pool.slice(start, start + spec.items);
@@ -785,21 +820,74 @@ async function ensureSharedLists(orgs, contacts, pools) {
       if (n > count) count = n;
     }
     if (count < spec.items) log(`  NOTE list "${spec.name}": ${count}/${spec.items} item(s) — the org pool ran short or a product is unavailable.`);
-    created.push({ type: "list", key: spec.key, id: listId, name: spec.name, ownerEmail: ownerSpec.email, org: spec.org, itemsCount: count });
+
+    // The share link is the ONLY way a customer reaches a Customer-scoped list, so record it: a demo
+    // script that cannot hand out the URL cannot show the feature at all.
+    const info = await gql(`query { wishlist(listId: "${listId}") { id sharingSetting { id scope sharedWithId access } } }`);
+    const setting = info?.wishlist?.sharingSetting || null;
+    const shareUrl = setting?.id ? `${FRONT_URL}/shared-list/${setting.id}` : null;
+    if (shareUrl && isCustomerScope) log(`    share link: ${shareUrl}`);
+    created.push({ type: "list", key: spec.key, id: listId, name: spec.name, scope: spec.scope, org: spec.org, author: authorLabel, itemsCount: count, shareUrl });
   }
   return created;
 }
 
-/** A storefront (customer-facing) bearer for one buyer. Never written to disk. */
-async function storefrontToken(username, password) {
-  const res = await fetch(`${BACK_URL}/connect/token`, {
-    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ grant_type: "password", username, password, scope: "offline_access", storeId: STORE_ID }),
-  });
-  if (!res.ok) { log(`  WARN token for ${username}: ${res.status}`); return null; }
-  return (await res.json()).access_token;
+/**
+ * A storefront token that acts as the REP, inside one served organization.
+ *
+ * Two paths, because a demo environment rarely has both. If the rep's own password is set we use it.
+ * Otherwise an OPERATOR holding platform:security:loginOnBehalf impersonates them — which is how a
+ * human would do this from the storefront, and it means the demo does not need a real colleague's
+ * password just to curate a list. Either way the org switch is the same call the storefront's own
+ * organization switcher makes, and it matters: a list created under the wrong active organization
+ * cannot be shared with the right customer.
+ */
+async function repTokenInOrg(resolved, organizationId) {
+  const envKey = `${resolved.spec.passwordVar}_${TEST_ENV.toUpperCase()}`;
+  const direct = process.env[envKey] || process.env[resolved.spec.passwordVar];
+  let tokens = null;
+  if (direct) {
+    tokens = await tokenRequest({ grant_type: "password", username: resolved.email, password: direct, scope: "offline_access", storeId: STORE_ID });
+    if (!tokens?.access_token) log(`  NOTE ${resolved.spec.key}: ${envKey} did not authenticate; falling back to the operator path.`);
+  }
+  if (!tokens?.access_token) {
+    const opEmail = process.env.SR_DEMO_OPERATOR_EMAIL || process.env.USER2_EMAIL;
+    const opPassword = process.env.SR_DEMO_OPERATOR_PASSWORD || process.env.USER2_PASSWORD;
+    if (!opEmail || !opPassword) {
+      log(`  NOTE no rep password and no operator (SR_DEMO_OPERATOR_EMAIL/_PASSWORD, or USER2_*) — cannot act as ${resolved.spec.fullName}.`);
+      return null;
+    }
+    const op = await tokenRequest({ grant_type: "password", username: opEmail, password: opPassword, scope: "offline_access", storeId: STORE_ID });
+    if (!op?.access_token) { log(`  NOTE operator ${opEmail} could not sign in.`); return null; }
+    tokens = await tokenRequest({ grant_type: "impersonate", user_id: resolved.rep.userId, scope: "offline_access" }, op.access_token);
+    if (!tokens?.access_token) { log(`  NOTE operator ${opEmail} cannot log in on behalf of ${resolved.spec.fullName} (needs platform:security:loginOnBehalf).`); return null; }
+  }
+  if (tokens.refresh_token) {
+    const switched = await tokenRequest({ grant_type: "refresh_token", refresh_token: tokens.refresh_token, organization_id: organizationId, scope: "offline_access" });
+    if (switched?.access_token) return switched.access_token;
+    log("  NOTE could not switch the rep into the target organization; the list would attach to the wrong one.");
+    return null;
+  }
+  return tokens.access_token;
 }
 
+/** A storefront bearer for one BUYER. Never written to disk. */
+async function storefrontToken(username, password) {
+  const t = await tokenRequest({ grant_type: 'password', username, password, scope: 'offline_access', storeId: STORE_ID });
+  if (!t?.access_token) log(`  WARN token for ${username}: sign-in failed`);
+  return t?.access_token || null;
+}
+
+/** One /connect/token call. Returns the parsed body, or null. Nothing is written to disk. */
+async function tokenRequest(body, bearer = null) {
+  const res = await fetch(`${BACK_URL}/connect/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}) },
+    body: new URLSearchParams(body),
+  });
+  if (!res.ok) return null;
+  return res.json().catch(() => null);
+}
 /** The customer-facing /graphql endpoint; seed-common own bearer is an ADMIN one and is private. */
 const storefrontGql = (token) => async (query) => {
   const res = await fetch(`${BACK_URL}/graphql`, {
@@ -846,7 +934,7 @@ async function main() {
   const accounts = await ensureBuyerAccounts(orgs, contacts);
   const attachments = await attachServedOrgs(reps, orgs);
   const orders = await ensureOrders(orgs, reps);
-  const lists = await ensureSharedLists(orgs, contacts, await discoverProductPools(listProductNeedByOrg()));
+  const lists = await ensureSharedLists(orgs, contacts, await discoverProductPools(listProductNeedByOrg()), reps);
   const documents = await ensureDocuments();
   const tasks = await ensureTasks(reps);
 

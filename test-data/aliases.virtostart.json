@@ -192,7 +192,7 @@
     "profile": "sales-rep-demo",
     "env": "virtostart",
     "marker": "DEMO-SR",
-    "generated": "2026-09-23T20:11:01.104Z",
+    "generated": "2026-09-23T20:43:17.791Z",
     "entities": [
       {
         "type": "organization",
@@ -508,57 +508,69 @@
       },
       {
         "type": "list",
-        "key": "DLIST-NW-1",
-        "id": "3e3e44df-bea5-4515-b595-4187b8c0ac7a",
-        "name": "Q4 Reorder — Fasteners",
-        "ownerEmail": "m.hale@northwindtraders.example",
+        "key": "DLIST-NW-REP",
+        "id": "399bf660-80c4-419f-b1e2-2fdf83283b7d",
+        "name": "Q1 Stock Up — Fasteners",
+        "scope": "Customer",
         "org": "DORG-NORTHWIND",
-        "itemsCount": 4
+        "author": "Alla Volkova",
+        "itemsCount": 4,
+        "shareUrl": "https://virtostart-demo-store.govirto.com/shared-list/3d334d69-c8cc-479e-9d0f-27e55fe74f8a"
       },
       {
         "type": "list",
-        "key": "DLIST-NW-2",
-        "id": "9cd12488-10a1-41eb-8314-5a6d10136a34",
-        "name": "Site Consumables — Seattle",
-        "ownerEmail": "d.okafor@northwindtraders.example",
-        "org": "DORG-NORTHWIND",
-        "itemsCount": 3
-      },
-      {
-        "type": "list",
-        "key": "DLIST-CN-1",
-        "id": "0081052a-a93f-458a-a14c-03293aee1749",
-        "name": "Approved Printer Fleet",
-        "ownerEmail": "p.raman@contoso-mfg.example",
+        "key": "DLIST-CN-REP",
+        "id": "68f214e5-4b7b-4701-a1ef-03a2db06b1ba",
+        "name": "Printer Fleet Refresh",
+        "scope": "Customer",
         "org": "DORG-CONTOSO",
-        "itemsCount": 4
+        "author": "Alla Volkova",
+        "itemsCount": 4,
+        "shareUrl": "https://virtostart-demo-store.govirto.com/shared-list/6ba96235-4cdc-4e5c-9733-0b802f10adcf"
       },
       {
         "type": "list",
-        "key": "DLIST-CN-2",
-        "id": "c0262695-4a6c-4ba5-9689-11d29db9f227",
-        "name": "Print Room Standing Order",
-        "ownerEmail": "t.bergmann@contoso-mfg.example",
-        "org": "DORG-CONTOSO",
-        "itemsCount": 3
-      },
-      {
-        "type": "list",
-        "key": "DLIST-FB-1",
-        "id": "5891694f-7241-4bdc-b3db-985a86ecf312",
-        "name": "Backup Power — Plant 2",
-        "ownerEmail": "e.duarte@fabrikam-industrial.example",
+        "key": "DLIST-FB-REP",
+        "id": "2d7972f7-b5dd-4c89-b39e-95afd5bacff0",
+        "name": "Backup Power Proposal",
+        "scope": "Customer",
         "org": "DORG-FABRIKAM",
-        "itemsCount": 4
+        "author": "Alla Volkova",
+        "itemsCount": 4,
+        "shareUrl": "https://virtostart-demo-store.govirto.com/shared-list/3b80c071-4b64-4ff3-8633-830db1d936b8"
       },
       {
         "type": "list",
-        "key": "DLIST-WT-1",
-        "id": "df65a407-4ecf-41ec-8bcf-666a91963133",
-        "name": "Cable & Connector Restock",
-        "ownerEmail": "j.whitfield@wingtip-electrical.example",
+        "key": "DLIST-WT-REP",
+        "id": "667a1fa0-bae1-4f77-b9db-4a6c9d0ab79b",
+        "name": "Van Stock Recommendation",
+        "scope": "Customer",
         "org": "DORG-WINGTIP",
-        "itemsCount": 3
+        "author": "Oleg Zhuk",
+        "itemsCount": 3,
+        "shareUrl": "https://virtostart-demo-store.govirto.com/shared-list/b6b4dba1-a95a-4fe4-a765-995375ad003e"
+      },
+      {
+        "type": "list",
+        "key": "DLIST-NW-ORG",
+        "id": "f2292f5a-d049-46e5-bee3-d23194ea1612",
+        "name": "Site Consumables",
+        "scope": "Organization",
+        "org": "DORG-NORTHWIND",
+        "author": "Daniel Okafor",
+        "itemsCount": 3,
+        "shareUrl": "https://virtostart-demo-store.govirto.com/shared-list/e90db672-3364-4ef2-bba7-1991197a5687"
+      },
+      {
+        "type": "list",
+        "key": "DLIST-CN-ORG",
+        "id": "d316ae0b-ce5d-425d-8522-22d2711a3b85",
+        "name": "Print Room Standing Order",
+        "scope": "Organization",
+        "org": "DORG-CONTOSO",
+        "author": "Thomas Bergmann",
+        "itemsCount": 3,
+        "shareUrl": "https://virtostart-demo-store.govirto.com/shared-list/99cb2bba-155c-4e95-aadb-d91639f89983"
       }
     ]
   }
