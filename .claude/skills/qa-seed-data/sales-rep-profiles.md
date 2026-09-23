@@ -156,6 +156,48 @@ suffix must match `TEST_ENV` exactly — a re-arranged name is never promoted an
 
 ---
 
+### One Contact can have TWO login accounts — and only one of them is the rep
+
+**The trap that will cost the most time, measured live on virtostart 2026-09-23.** A Contact carries a
+list of emails, and the platform will hold a **separate `ApplicationUser` per email** pointing at that
+same Contact. Only one of them is the account the **sales-rep record** uses (`rep.userId`), and
+**organization memberships hang off that account**.
+
+`SalesRepOrganizationAccessService.GetGrantingMembershipsAsync()` filters by the **authenticated user
+id** (`domain/sales-rep.md` §10 A3). So a session signed in as the *other* email gets a token that
+carries `sales-rep:access` — the hub renders in full, Document library and all — over **zero granting
+memberships**: no customers, no orders, every counter 0, and **no error anywhere**. It reads exactly
+like broken seed data.
+
+Measured on the contact *Alla Volkova*, who has both:
+
+| Account | userId | Org memberships | `salesRepCustomers` |
+|---|---|---|---|
+| `alla.volkova@virtoway.com` | `db222b30…` | **0** | **0** |
+| `Alla.Volkova@virtoworks.com` | `27b89463…` = `rep.userId` | **6** | **6** (+ 8 orders) |
+
+Both tokens carry `sales-rep:access`. The only difference is which account the memberships are on.
+
+**Two teeth, because this is invisible from every screen:**
+
+1. `SR_DEMO_REP_*_EMAIL` must name the account the rep record points at, and the seeder **WARNs**
+   when the declared email disagrees with the rep's own `userName`.
+2. Rep lookup matches **every** address a rep answers to (`emails[]`, `email`, `userName`), not just
+   the one the search row happens to surface — a single-key match reported a rep who was plainly
+   there as *"not a sales rep on this environment"*, which sends the reader off to create an account
+   for a real person.
+
+**How to settle it on any environment**, without needing the rep's password: mint an operator token
+for an account holding `platform:security:loginOnBehalf`, `POST /connect/token` with
+`grant_type=impersonate` and `user_id=<the rep's userId>`, then call `salesRepCustomers(storeId:)` on
+the impersonated token. Zero on one account and six on the other is the whole diagnosis. (Do not write
+either token to disk.)
+
+Related and often confused with it — `domain/sales-rep.md` §10 **A4**: `checkPermissions()`
+short-circuits `true` for `isAdministrator`, so **an admin renders the entire hub over empty data**
+too. Same symptom, different cause; check which account the session is actually authenticated as
+before concluding anything about the data.
+
 ## 5a. The document library's files are GENERATED, not borrowed
 
 `test-data/uploads/` holds assets collected for other fixtures — logos, a webp, two mp4s, a photo of

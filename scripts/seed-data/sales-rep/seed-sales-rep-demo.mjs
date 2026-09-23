@@ -110,7 +110,17 @@ async function allReps() {
  */
 async function resolveReps() {
   const live = await allReps();
-  const byEmail = new Map(live.map((r) => [String(r.email || r.userName || '').toLowerCase(), r]));
+  // Index EVERY address a rep answers to, not just the first. A Contact can carry several emails
+  // and a separate login account per email; the search row surfaces only one of them, so a
+  // single-key map silently fails to find a rep who is plainly there — reported as "not a sales rep
+  // on this environment", which sends the reader off to create an account for a real person.
+  const byEmail = new Map();
+  for (const r of live) {
+    for (const e of [...(r.emails || []), r.email, r.userName]) {
+      const key = String(e || '').trim().toLowerCase();
+      if (key && !byEmail.has(key)) byEmail.set(key, r);
+    }
+  }
   const resolved = [];
 
   for (const spec of DEMO_REPS) {
@@ -135,6 +145,23 @@ async function resolveReps() {
     const roleName = full?.roleName || '(unknown)';
     resolved.push({ spec, email, rep: full || hit, roleName });
     log(`rep ${spec.key}: ${spec.fullName} <${email}> → ${hit.id} · role "${roleName}" · serves ${(full?.organizations || []).length} org(s)`);
+
+    // SIGN-IN IDENTITY vs REP IDENTITY. A Contact can carry several emails and the platform will
+    // happily hold a SEPARATE ApplicationUser per email pointing at that same contact. Only ONE of
+    // them is the rep record's account, and organization memberships hang off THAT account's userId
+    // — so signing in with the other email yields a token that carries sales-rep:access (the hub
+    // renders in full) over ZERO granting memberships, i.e. an empty customer list, empty orders and
+    // zero counters, with no error anywhere. Measured live on virtostart 2026-09-23: the contact
+    // "Alla Volkova" has two accounts; the one this variable named had 0 memberships while the rep
+    // record's had 6. Whoever looks at that screen concludes the DATA is broken.
+    const repUserName = String(full?.userName || '').trim().toLowerCase();
+    if (repUserName && repUserName !== email) {
+      log(`  WARN: ${spec.emailVar} names <${email}>, but this rep's account is <${full.userName}>.`);
+      log('        Both resolve to the same Contact, and they are DIFFERENT login accounts. Served-org');
+      log("        memberships belong to the rep record's account, so a session signed in as the other");
+      log('        email sees a fully rendered hub with NO customers, NO orders and zero statistics.');
+      log(`        Point ${spec.emailVar} at <${full.userName}> unless you also mirror the memberships.`);
+    }
 
     // The role is READ and asserted, never written: changing a real person's platform role is not
     // this seeder's business. But a mismatch has to be loud, because its symptom is an ABSENCE —
