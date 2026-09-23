@@ -184,11 +184,15 @@ async function ensureOrgs() {
     const body = {
       memberType: 'Organization', name: spec.name, outerId: marker, status: 'Active',
       emails: [spec.email], phones: [spec.phone],
+      // NOTE: no `isDefault` — the platform rejects a DEFAULT BillingAndShipping address
+      // (POST /api/members -> 400 "BillingAndShipping address cannot be set as default",
+      // measured live 2026-09-23). Every other org/contact in this repo omits it too
+      // (user-provision.mjs). A --dry-run cannot catch this: it POSTs nothing.
       addresses: [{
         addressType: 'BillingAndShipping', line1: spec.line1, city: spec.city,
         regionName: spec.regionName, postalCode: spec.postalCode,
         countryCode: spec.countryCode, countryName: spec.countryName,
-        phone: spec.phone, email: spec.email, isDefault: true,
+        phone: spec.phone, email: spec.email,
       }],
     };
     const created = await api('POST', '/api/members', body);
@@ -224,7 +228,7 @@ async function ensureContacts(orgs) {
         addressType: 'BillingAndShipping', firstName: spec.firstName, lastName: spec.lastName,
         line1: orgSpec.line1, city: orgSpec.city, regionName: orgSpec.regionName,
         postalCode: orgSpec.postalCode, countryCode: orgSpec.countryCode,
-        countryName: orgSpec.countryName, email: spec.email, isDefault: true,
+        countryName: orgSpec.countryName, email: spec.email,
       }],
     };
     const created = await api('POST', '/api/members', body);
@@ -347,13 +351,29 @@ async function discoverProductPools() {
   for (const org of DEMO_ORGS) {
     const want = need[org.key] || 0;
     if (!want) continue;
-    const found = await discoverCatalogProducts(api, want * 4 + 10, { searchPhrase: org.productSearch }).catch(() => []);
-    const usable = found.filter((p) => isDemoSafeProduct(p) && !claimed.has(p.id)).slice(0, want);
+    // Ask for a wide slice, then narrow it THREE ways. The catalog's search is relevance-ordered
+    // but not relevance-bounded (see productMatch in the spec module), it carries near-duplicate
+    // rows for the same physical product, and it still serves this repo's own fixture products.
+    const found = await discoverCatalogProducts(api, want * 8 + 40, { searchPhrase: org.productSearch }).catch(() => []);
+    const seenName = new Set();
+    const usable = [];
+    for (const p of found) {
+      if (!isDemoSafeProduct(p) || claimed.has(p.id)) continue;
+      const name = String(p.name || '').trim();
+      // (a) the name must actually carry the category word — a relevance tail is not a pool;
+      if (org.productMatch && !org.productMatch.test(name)) continue;
+      // (b) one row per distinct product name, or an order shows the same line twice;
+      const nameKey = name.toLowerCase().replace(/s+/g, ' ');
+      if (!nameKey || seenName.has(nameKey)) continue;
+      seenName.add(nameKey);
+      usable.push(p);
+      if (usable.length >= want) break;
+    }
     for (const p of usable) claimed.add(p.id);
     pools[org.key] = usable;
     const rejected = found.filter((p) => !isDemoSafeProduct(p)).length;
     if (usable.length < want) {
-      log(`  WARN ${org.name}: ${usable.length}/${want} product(s) from "${org.productSearch}" — line items will REPEAT within its orders.`);
+      log(`  WARN ${org.name}: only ${usable.length}/${want} distinct product(s) matched ${org.productMatch} within "${org.productSearch}" — line items will REPEAT within its orders. Widen productMatch or lower the order line counts.`);
     } else {
       verbose(`${org.name}: ${usable.length} product(s) from "${org.productSearch}"${rejected ? `, ${rejected} fixture product(s) excluded` : ''}`);
     }

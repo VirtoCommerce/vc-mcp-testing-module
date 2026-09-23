@@ -106,6 +106,7 @@ export const DEMO_ORGS = [
     countryCode: 'USA', countryName: 'United States',
     phone: '+1 206 555 0142', email: 'purchasing@northwindtraders.example',
     productSearch: 'steel',
+    productMatch: /\b(bolt|screw|fastener|washer|nut|steel)\b/i,
   },
   {
     key: 'DORG-CONTOSO',
@@ -115,6 +116,7 @@ export const DEMO_ORGS = [
     countryCode: 'USA', countryName: 'United States',
     phone: '+1 614 555 0118', email: 'procurement@contoso-mfg.example',
     productSearch: 'printer',
+    productMatch: /\b(printer|toner|cartridge|scanner|copier|multifunction)\b/i,
   },
   {
     key: 'DORG-FABRIKAM',
@@ -124,6 +126,7 @@ export const DEMO_ORGS = [
     countryCode: 'USA', countryName: 'United States',
     phone: '+1 313 555 0173', email: 'supply@fabrikam-industrial.example',
     productSearch: 'battery',
+    productMatch: /\b(battery|batteries|power station|power bank|powerbank|solar)\b/i,
   },
   {
     key: 'DORG-WINGTIP',
@@ -133,6 +136,7 @@ export const DEMO_ORGS = [
     countryCode: 'USA', countryName: 'United States',
     phone: '+1 602 555 0129', email: 'orders@wingtip-electrical.example',
     productSearch: 'cable',
+    productMatch: /\b(cable|cord|charger|charging|wire)\b/i,
   },
 ];
 
@@ -254,6 +258,14 @@ export const DEMO_CONTACTS = [
  *
  * Line items come from the organization's OWN product pool, discovered live via its
  * `productSearch` phrase and then claimed globally so no product appears under two customers.
+ *
+ * `productMatch` is the SECOND filter, and it is not redundant. The catalog's search is relevance-
+ * ORDERED but not relevance-BOUNDED: measured live 2026-09-23, "printer" returns 40 hits whose top 3
+ * are printers and whose tail includes a bodycon dress and an autoclave, and "steel" returns a street
+ * address ("1 Hopes Rise, Frankston South, VIC 3199") as a product. Taking the first N hits therefore
+ * puts a dress on a printer manufacturer's order line in front of an audience. `productMatch` keeps
+ * only hits whose NAME actually carries the category word, which is the difference between an order
+ * that reads like a real purchase and one that reads like a random slice of a catalog.
  * Two properties depend on that, and neither survives an arbitrary catalog slice:
  *
  *   COHERENCE — an electrical supplier ordering ski boots reads as fake the moment anyone looks at
@@ -535,6 +547,13 @@ export function demoProblems() {
   // this gate catches the DECLARATION that makes disjointness impossible.
   const phrases = DEMO_ORGS.map((o) => o.productSearch);
   for (const o of DEMO_ORGS) if (!o.productSearch) problems.push(`org ${o.key} declares no productSearch — its orders would draw from an arbitrary catalog slice`);
+  for (const o of DEMO_ORGS) {
+    if (!(o.productMatch instanceof RegExp)) {
+      problems.push(`org ${o.key} declares no productMatch regex — catalog search is relevance-ordered but not relevance-bounded, so its orders would carry whatever the tail of the result set happens to hold`);
+    } else if (!o.productMatch.test(o.productSearch)) {
+      problems.push(`org ${o.key}: productMatch ${o.productMatch} does not match its own productSearch "${o.productSearch}" — the two filters disagree, and the pool would come back empty`);
+    }
+  }
   const dupePhrases = phrases.filter((p, i) => p && phrases.indexOf(p) !== i);
   if (dupePhrases.length) problems.push(`organizations share a productSearch phrase (${[...new Set(dupePhrases)].join(', ')}) — their product sets cannot be disjoint`);
 
