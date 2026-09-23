@@ -170,12 +170,16 @@ const candidates = byProject.length > 0 ? byProject : records;
 // registered project path — the tiebreak must be the VERSION. `lastUpdated` is refreshed
 // independently of any version change, so ordering by it can select an older launcher against newer
 // declarations: exactly the staleness this shim exists to prevent, and silent when it happens.
-// The prerelease suffix is split off rather than parsed with the rest. Without that, "1.0.0-rc.1"
-// splits on dots into ["1","0","0-rc","1"], parseInt("0-rc") is 0, and the extra fourth segment beats
-// the absent one — so a release candidate outranks its own release and runs against production
-// declarations, silently. It is kept OUT of the number array rather than appended to it, because an
-// appended sentinel sits at an index that moves with the segment count, which would then decide
-// between two spellings of the same version.
+// The suffix after the first dash is split off rather than parsed with the rest: a prerelease tag
+// ("1.0.0-rc.1") or a registry's commit stamp ("0.9.0-89c71c99b8da") is not part of the number. A
+// prerelease's dotted parts, parsed as segments, outrank an absent one — a release candidate once beat
+// its own release that way and ran against production declarations, silently. It is kept OUT of the
+// number array rather than appended to it, because an appended sentinel sits at an index that moves
+// with the segment count, which would then decide between two spellings of the same version.
+// A segment is a number only when it is all digits. parseInt reads a numeric PREFIX, so a bare commit
+// hash — what a registry records as the version of a plugin that declares none — would key as
+// whatever digits it starts with. A hash made of digits alone still reads as a number: nothing in
+// the string tells it from a version, and only a heuristic about its length would.
 // The ranking reads two fields of each record as text. String() on the client's value calls that
 // value's own toString, which a hostile record can make a non-function -- a raw TypeError before
 // anything launches, the exact outcome the `records` rule forbids. A field of any other type ranks
@@ -187,7 +191,7 @@ const versionKey = (r) => {
     const core = dash === -1 ? raw : raw.slice(0, dash);
 
     return {
-        core: core.split(".").map((p) => Number.parseInt(p, 10)).map((n) => (Number.isFinite(n) ? n : -1)),
+        core: core.split(".").map((p) => (/^\d+$/.test(p) ? Number(p) : -1)),
         release: dash === -1,
     };
 };

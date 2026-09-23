@@ -41,10 +41,30 @@ const SERVER_DECL_KEYS = ["command", "args", "env"];
 const OAUTH_DECL_KEYS = ["tenantId", "clientId", "scopes", "targetPackage", "binName", "authorized"];
 
 // Env vars that inject code/libraries into any child process we spawn — must never
-// reach a tool we invoke, whether inherited from the operator's shell (sanitizeEnv, below) or
-// declared in vc-secrets.json as a server env key (loadConfig rejects these keys outright —
-// closing the gap for both literal and secret-resolved values, since it's the KEY that matters).
-const DANGEROUS_ENV_VARS = ["NODE_OPTIONS", "LD_PRELOAD", "LD_AUDIT", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH"];
+// reach a tool we invoke, whether inherited from the operator's shell (sanitizeEnv, below, less
+// INHERITED_ENV_KEPT) or declared in vc-secrets.json as a server env key (loadConfig rejects these
+// keys outright — closing the gap for both literal and secret-resolved values, since it's the KEY
+// that matters).
+// A launcher's own hook counts too. Stripping NODE_OPTIONS is undone by `npm exec`, which writes
+// npm_config_node_options back into the node it starts -- and does the same for a `node-options` line
+// in whichever rc file npm_config_userconfig or npm_config_globalconfig names; npm_config_script_shell
+// runs a script of the caller's choosing for a bare `npx` -- all measured. The .NET runtime runs the
+// assemblies DOTNET_STARTUP_HOOKS names, and loads a profiler when CORECLR_ENABLE_PROFILING is set,
+// before any of the tool's own code. A denylist claims no completeness, and one channel is beyond any
+// env key: the `.npmrc` of the project npm finds from the server's working directory -- the nearest
+// ancestor holding a package.json -- is read the same way, so it stays open here.
+const DANGEROUS_ENV_VARS = ["NODE_OPTIONS", "LD_PRELOAD", "LD_AUDIT", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH",
+    "NPM_CONFIG_NODE_OPTIONS", "NPM_CONFIG_USERCONFIG", "NPM_CONFIG_GLOBALCONFIG", "NPM_CONFIG_SCRIPT_SHELL",
+    "DOTNET_STARTUP_HOOKS", "CORECLR_ENABLE_PROFILING"];
+
+// Refused when declared, kept when inherited. These keys do not carry code, they point at rc files --
+// which is also where a scope's registry mapping and a private registry's auth live. When the mapping
+// lives only there, stripping it sends `npx <private-pkg>` to the public registry, which runs whatever
+// is published there under that name: dependency confusion, created by the strip. Keeping them opens
+// nothing new: whatever sets the inherited environment already sets NODE_OPTIONS for this launcher's
+// own node, which applies it before sanitizeEnv runs. The declaration is the one channel the list can
+// close, and loadConfig closes it.
+const INHERITED_ENV_KEPT = ["NPM_CONFIG_USERCONFIG", "NPM_CONFIG_GLOBALCONFIG"];
 
 // Matched without regard to case on every platform, not only where the environment is case-insensitive.
 // A declaration is written once and travels: on Windows `node_options` reaches the child as NODE_OPTIONS,
@@ -56,7 +76,7 @@ function isDangerousEnvKey(key) {
 function sanitizeEnv(env) {
     const out = {};
     for (const [key, value] of Object.entries(env)) {
-        if (!isDangerousEnvKey(key)) {
+        if (!isDangerousEnvKey(key) || INHERITED_ENV_KEPT.includes(key.toUpperCase())) {
             out[key] = value;
         }
     }
@@ -106,11 +126,11 @@ function parseLiteral(value) {
 // strings, and comparing the strings makes every same-file check miss. Falls back to resolve for a path
 // that does not exist yet, where realpath cannot answer.
 //
-// The catch is wider than that reason -- EACCES and ELOOP take the same fallback, and three of the
-// four call sites test existsSync first, so ENOENT cannot even reach them there. Narrowing it to
-// ENOENT was weighed and rejected: it makes this throw at four call sites that never have to, to close a
-// gap that needs the two sides of one comparison to fail ASYMMETRICALLY. When both fall back, both
-// yield the same resolved string and the comparison still answers correctly.
+// The catch is wider than that reason -- EACCES and ELOOP take the same fallback, and where a caller
+// has established presence first ENOENT cannot even reach it. Narrowing it to ENOENT was weighed and
+// rejected: it makes this throw at call sites that never have to, to close a gap that needs the two
+// sides of one comparison to fail ASYMMETRICALLY. When both fall back, both yield the same resolved
+// string and the comparison still answers correctly.
 function canonicalPath(p) {
     try {
         return fs.realpathSync(p);
@@ -118,6 +138,33 @@ function canonicalPath(p) {
         return path.resolve(p);
     }
 }
+
+// The only stat failures that mean "nothing is there". ENOTDIR belongs with ENOENT: a path running
+// through a regular FILE cannot name anything, and it is the ordinary answer when configPaths' walk
+// meets a repository whose `.claude` is a file -- refusing there would stop every launch in it.
+function isAbsentPathError(e) {
+    return e?.code === "ENOENT" || e?.code === "ENOTDIR";
+}
+
+// existsSync answers false for a file that IS there and cannot be stat'd -- an ancestor that lost its
+// search bit, an ACL change above it -- and a caller reads that false as "there is nothing to read".
+// For a declaration that is a launch without its servers; for a keystore file it is a developer
+// retyping a secret that never left the disk. Neither has anything to continue with, so the ambiguous
+// answer is an error that names the path, not a false.
+function pathPresent(p, what) {
+    try {
+        fs.statSync(p);
+
+        return true;
+    } catch (e) {
+        if (isAbsentPathError(e)) {
+            return false;
+        }
+        throw new VcSecretsError(`${what} could not be examined (${e.code ?? e.message})`);
+    }
+}
+
+const keystoreFilePresent = (p) => pathPresent(p, `the keystore file "${p}"`);
 
 // Where each scope's declarations live. The project root is found by walking up from cwd rather
 // than assuming it: the client spawns a server with cwd at the project, but a task or a hand-run
@@ -140,8 +187,13 @@ function configPaths(env = process.env, cwd = process.cwd()) {
     const userClaude = canonicalPath(path.join(home, ".claude"));
     for (;;) {
         const claude = path.join(dir, ".claude");
-        if (fs.existsSync(claude) && canonicalPath(claude) !== userClaude
-            && (fs.existsSync(path.join(claude, CONFIG_NAME)) || fs.existsSync(path.join(claude, LOCAL_CONFIG_NAME)))) {
+        const declared = (name) => {
+            const file = path.join(claude, name);
+
+            return pathPresent(file, `the declaration "${file}"`);
+        };
+        if (pathPresent(claude, `the directory "${claude}"`) && canonicalPath(claude) !== userClaude
+            && (declared(CONFIG_NAME) || declared(LOCAL_CONFIG_NAME))) {
             projectDir = claude;
             break;
         }
@@ -581,7 +633,7 @@ function loadConfig(paths = configPaths()) {
     let registrations = Object.create(null);
     for (const scope of SCOPE_ORDER) {
         const file = paths[scope];
-        if (!file || !fs.existsSync(file)) {
+        if (!file || !pathPresent(file, `the declaration "${file}"`)) {
             continue;
         }
         const realFile = canonicalPath(file);
@@ -955,24 +1007,14 @@ function keyToPath(key, env = process.env) {
     return path.join(secretsDir(env), scope, `${name}.gpg`);
 }
 
-// ENOENT is the only answer that means "no entry", and existsSync could not say so. It answers
-// false for a file that IS there and cannot be stat'd -- a directory that lost its search bit, an
-// ACL change above it -- and all three callers read that false as "nothing is stored". The bill is
-// the same one PS_CRED_READ's ERROR_NOT_FOUND rule prevents on Windows: an interactive sign-in that
-// spends an authorization code and rotates a live refresh token, or a developer retyping a secret
-// that never left the disk. newKeyPresent's own comment demands this distinction outright; gpg was
-// the backend where it did not hold.
+// Only an absent path means "no entry", and existsSync could not say so: its false for a file that
+// cannot be stat'd was read by every caller as "nothing is stored". The bill is the same one
+// PS_CRED_READ's ERROR_NOT_FOUND rule prevents on Windows: an interactive sign-in that spends an
+// authorization code and rotates a live refresh token, or a developer retyping a secret that never
+// left the disk. newKeyPresent's own comment demands this distinction outright; gpg was the backend
+// where it did not hold.
 function gpgEntryPresent(key, env = process.env) {
-    try {
-        fs.statSync(keyToPath(key, env));
-
-        return true;
-    } catch (e) {
-        if (e.code === "ENOENT") {
-            return false;
-        }
-        throw new VcSecretsError(`the keystore entry "${key}" could not be examined (${e.code ?? e.message})`);
-    }
+    return pathPresent(keyToPath(key, env), `the keystore entry "${key}"`);
 }
 
 // Pre-rename storage layout, read-only: cmdMigrate copies a value forward from here into the
@@ -1299,7 +1341,8 @@ function buildLocalDelete(backend, key, env = process.env) {
 
 // One meaning of "already absent" for logout to check, assembled here because each backend
 // signals it differently: the PowerShell branch exits 3 by construction, security(1) answers 44,
-// and gpg entries are files whose absence is ENOENT rather than any exit code at all.
+// and gpg entries are files whose absence is a path error (isAbsentPathError) rather than any exit
+// code at all -- the same test gpgEntryPresent applies, so logout and a presence check agree.
 function deleteEntryIo(backend = detectLocalBackend(), env = process.env, { run = runTool, rm = fs.rmSync } = {}) {
     return async (key) => {
         if (backend === "gpg") {
@@ -1307,7 +1350,7 @@ function deleteEntryIo(backend = detectLocalBackend(), env = process.env, { run 
             try {
                 rm(keyToPath(key, env));
             } catch (e) {
-                if (e.code === "ENOENT") {
+                if (isAbsentPathError(e)) {
                     throw Object.assign(new VcSecretsError(`no stored entry "${key}"`), { toolExitCode: 3 });
                 }
                 throw new VcSecretsError(`could not remove "${key}": ${e.code ?? e.message}`);
@@ -2949,7 +2992,7 @@ async function cmdSet(name, cfg) {
 // before a migration NO secret exists under a new key — so looking only there left the agent cold,
 // and migrate then failed on the very run it was supposed to enable. One decrypt warms the agent for
 // all of them; the first file that exists is enough.
-function unlockTargets(cfg, exists = fs.existsSync) {
+function unlockTargets(cfg, exists = keystoreFilePresent) {
     const files = [];
     for (const [name, decl] of Object.entries(cfg.secrets)) {
         if (decl.backend !== "local") {
@@ -2977,7 +3020,7 @@ function unlockTargets(cfg, exists = fs.existsSync) {
 }
 
 async function cmdUnlock(cfg, opts = {}) {
-    const { exists = fs.existsSync, run = runTool, write = (s) => process.stderr.write(s) } = opts;
+    const { exists, run = runTool, write = (s) => process.stderr.write(s) } = opts;   // exists: unlockTargets' default
     if (detectLocalBackend() !== "gpg") {
         write("vc-secrets: unlock is a no-op on this platform\n");
         return;
@@ -3008,7 +3051,7 @@ async function cmdUnlock(cfg, opts = {}) {
 async function readLegacyLocalValue(backend, name, env = process.env) {
     if (backend === "gpg") {
         const legacyPath = legacyKeyToPath(name, env);
-        if (!fs.existsSync(legacyPath)) {
+        if (!keystoreFilePresent(legacyPath)) {
             return null;
         }
 
@@ -3129,15 +3172,16 @@ function readEnableLists(file, problems = []) {
     try {
         parsed = JSON.parse(fs.readFileSync(file, "utf8"));
     } catch (e) {
-        // Reported when the file EXISTS, exactly as readWiredServers reports its own, and for the
+        // Reported unless the file is absent, exactly as readWiredServers reports its own, and for the
         // same reason: the empty lists returned below are indistinguishable from a file that
         // genuinely enables nothing. They decide which servers count as consuming a secret and
         // which env keys the file contributes, so an unreadable settings.local.json makes doctor
         // quietly answer both questions wrong rather than say it could not look.
         //
         // Absent stays silent -- most projects have no settings.local.json, and a missing optional
-        // file is not a fault.
-        if (fs.existsSync(file)) {
+        // file is not a fault. Decided from the read's own error, not a second probe: existsSync
+        // calls a file it cannot stat absent, which silenced exactly the case this reports.
+        if (!isAbsentPathError(e)) {
             problems.push(`${file}: cannot be read (${readFailureReason(e)}) -- treating it as no enable/disable lists,`
                 + " so the servers reported as consuming a secret may be wrong");
         }
@@ -3191,7 +3235,7 @@ function readWiredServers(mcpJsonPath, userJsonPath = null, projectRoot = null, 
         try {
             return JSON.parse(fs.readFileSync(file, "utf8"));
         } catch (e) {
-            if (fs.existsSync(file)) {
+            if (!isAbsentPathError(e)) {
                 problems.push(`${file}: cannot be read (${readFailureReason(e)}) -- treating it as no wiring, so advice about leftover tokens may be wrong`);
             }
 
@@ -3282,13 +3326,16 @@ function wiredNamesInToml(text) {
 function readWiredElsewhere(paths, seen = [], problems = []) {
     const names = new Set();
     for (const p of paths) {
-        if (!p || !fs.existsSync(p)) {
+        if (!p) {
             continue;
         }
         let text;
         try {
             text = fs.readFileSync(p, "utf8");
         } catch (e) {
+            if (isAbsentPathError(e)) {
+                continue;   // a client that is not installed has no config file
+            }
             // Reported, not swallowed -- the sibling reader does the same for the same condition. A
             // file counted as inspected while nobody could read it makes the advice that rests on it
             // confident and wrong.
@@ -4490,7 +4537,7 @@ export {
     runTool, resolveSpawnCommand, buildSpawnInvocation, makeSecretResolver, cmdRun, cmdTask, cmdLaunch, killProcessTree,
     RENEWAL_TICK_MS,
     validateLaunchables, LEGACY_ENV_VARS, LEGACY_SECRET_ENV_VARS,
-    mapResolveError, applyKeystrokes, promptHidden, cmdSet, cmdUnlock, unlockTargets, cmdDoctor, cmdMigrate, newKeyPresent,
+    mapResolveError, applyKeystrokes, promptHidden, cmdSet, cmdUnlock, unlockTargets, cmdDoctor, cmdMigrate, newKeyPresent, readLegacyLocalValue,
     SECRET_NAME_RE, LAUNCHABLE_NAME_RE, PACKAGE_NAME_RE, BIN_NAME_RE, doctorReport,
     readEnableLists, readWiredServers, readWiredElsewhere, consumedSecrets, DANGEROUS_ENV_VARS, sanitizeEnv,
     consumerShape, shapeDifferences, validateAuthorized, validateVaults, authorizationFor, crossingProblem, own,

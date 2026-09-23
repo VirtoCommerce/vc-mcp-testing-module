@@ -20,6 +20,20 @@ after(() => {
     }
 });
 
+// One path fails the named fs call with EACCES, the way it does under an ancestor that lost its search
+// bit; every other path reaches the real call. Mode bits cannot produce this portably: a run as root
+// ignores them, and Windows has none to take away. Restored when the test `t` ends.
+function denyFs(t, method, denied) {
+    const real = fs[method];
+    t.mock.method(fs, method, (p, ...rest) => {
+        if (String(p) === denied) {
+            throw Object.assign(new Error(`EACCES: permission denied, ${method} '${p}'`), { code: "EACCES" });
+        }
+
+        return real(p, ...rest);
+    });
+}
+
 // Capability probes, run once at load. Each asks a question about the MACHINE, not about the code, and
 // a test whose subject this machine cannot host carries `{ skip: !CAN_X && "<what is missing>" }` --
 // the same shape the socket, lock and channel wrappers use in vc-secrets-oauth.test.mjs. An absent
@@ -1299,21 +1313,17 @@ test("readWiredServers: a documented knob is not wiring, while the documented en
     assert.equal(wired.has("knobOnly"), false, "a documented knob is not a wiring");
 });
 
-test("newKeyPresent on gpg: an entry that cannot be examined is not reported absent", async () => {
+test("newKeyPresent on gpg: an entry that cannot be examined is not reported absent", async (t) => {
     // existsSync said false for both "no such file" and "I could not look", and every caller read
     // that as "nothing is stored". For migrate that is the difference between skipping and writing
     // the pre-rotation value over the current one -- which is exactly what this function's own
     // comment refuses to allow, on a backend where it did not hold.
-    //
-    // The scope directory is made a FILE so the stat fails ENOTDIR rather than ENOENT: deterministic,
-    // and needing no chmod, which a run as root would defeat.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-stat-"));
     tmpDirs.push(dir);
     const env = { XDG_CONFIG_HOME: dir };
-    fs.mkdirSync(path.join(dir, "vc-secrets", "secrets"), { recursive: true });
-    fs.writeFileSync(path.join(dir, "vc-secrets", "secrets", "user"), "not a directory");
-    await assert.rejects(() => m.newKeyPresent("gpg", "vc-secrets:user:ado-pat", env),
-        /could not be examined/);
+    const key = "vc-secrets:user:ado-pat";
+    denyFs(t, "statSync", m.keyToPath(key, env));
+    await assert.rejects(() => m.newKeyPresent("gpg", key, env), /could not be examined/);
 });
 
 test("newKeyPresent on gpg: a genuinely missing entry is still simply absent", async () => {
@@ -1322,6 +1332,78 @@ test("newKeyPresent on gpg: a genuinely missing entry is still simply absent", a
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-stat-absent-"));
     tmpDirs.push(dir);
     assert.equal(await m.newKeyPresent("gpg", "vc-secrets:user:ado-pat", { XDG_CONFIG_HOME: dir }), false);
+});
+
+test("readLegacyLocalValue on gpg: a legacy entry that cannot be examined is not 'no legacy entry'", async (t) => {
+    // Answered null, migrate told the developer to run `set` and retype a secret that never left the
+    // disk. A throw lands in migrate's own "migration failed" line, which names the path.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-legacy-stat-"));
+    tmpDirs.push(dir);
+    const env = { XDG_CONFIG_HOME: dir };
+    denyFs(t, "statSync", m.legacyKeyToPath("ado-pat", env));
+    await assert.rejects(() => m.readLegacyLocalValue("gpg", "ado-pat", env), /could not be examined/);
+});
+
+test("configPaths: a .claude that is a regular file is walked past, not refused", () => {
+    // Nothing can live under a file, so the stat's ENOTDIR is an answer, not a failure. Refused, it
+    // would stop every launch below such a directory, including ones whose project is further up.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-claude-file-"));
+    tmpDirs.push(root);
+    const claudeDir = path.join(root, ".claude");
+    fs.mkdirSync(claudeDir);
+    fs.writeFileSync(path.join(claudeDir, m.CONFIG_NAME), JSON.stringify({ secrets: {}, servers: {} }));
+    const nested = path.join(root, "vendored");
+    fs.mkdirSync(nested);
+    fs.writeFileSync(path.join(nested, ".claude"), "a file, not a directory");
+
+    const paths = m.configPaths({ HOME: "/nonexistent-home" }, nested);
+    assert.equal(paths.project, path.join(claudeDir, m.CONFIG_NAME));
+});
+
+test("configPaths: a .claude or a declaration that cannot be examined is an error, not a directory without one", (t) => {
+    // Read as absent, the walk went on past the project and the launch started with none of its
+    // servers -- a failure that names a missing server instead of the path nobody could look at.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-decl-stat-"));
+    tmpDirs.push(root);
+    const claudeDir = path.join(root, ".claude");
+    fs.mkdirSync(claudeDir);
+    const file = path.join(claudeDir, m.CONFIG_NAME);
+    fs.writeFileSync(file, JSON.stringify({ secrets: {}, servers: {} }));
+    for (const denied of [claudeDir, file]) {
+        denyFs(t, "statSync", denied);
+        assert.throws(() => m.configPaths({ HOME: "/nonexistent-home" }, root), /could not be examined/, denied);
+        t.mock.restoreAll();
+    }
+});
+
+test("loadConfig: a declaration that cannot be examined is an error, not a scope without one", (t) => {
+    const paths = projectPaths({ secrets: {}, servers: { s: { command: "npx", args: [], env: {} } } });
+    denyFs(t, "statSync", paths.project);
+    assert.throws(() => m.loadConfig(paths), /could not be examined/);
+});
+
+test("doctor's readers report a file they could not read, and stay silent on one that is absent", (t) => {
+    // They decide from the read's own error. The existsSync pre-check they used called an unstattable
+    // file absent, which silenced exactly the unreadable case each of them exists to report.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-secrets-doctor-read-"));
+    tmpDirs.push(dir);
+    const denied = path.join(dir, "denied.json");
+    const absent = path.join(dir, "absent.json");
+    denyFs(t, "readFileSync", denied);
+    const readers = {
+        readEnableLists: (file, problems) => m.readEnableLists(file, problems),
+        readWiredServers: (file, problems) => m.readWiredServers(file, null, null, problems),
+        readWiredElsewhere: (file, problems) => m.readWiredElsewhere([file], [], problems),
+    };
+    for (const [name, read] of Object.entries(readers)) {
+        const problems = [];
+        read(denied, problems);
+        assert.equal(problems.length, 1, `${name}: ${JSON.stringify(problems)}`);
+        assert.match(problems[0], /cannot be read/, name);
+        const quiet = [];
+        read(absent, quiet);
+        assert.deepEqual(quiet, [], name);
+    }
 });
 
 test("readEnableLists: a settings.local.json that exists but cannot be read is reported", () => {
@@ -1599,6 +1681,14 @@ test("an already-absent keychain entry is normalised to one exit code, not swall
 
 test("an already-absent gpg entry is normalised to the same exit code", async () => {
     const del = m.deleteEntryIo("gpg", { HOME: "/nonexistent-for-this-test" });
+    await assert.rejects(() => del("vc-secrets:user:oauth-ado-refresh"),
+        (e) => e.toolExitCode === 3);
+});
+
+test("a gpg entry under a path that runs through a file is absent to logout", async () => {
+    // Nothing can live under a regular file. The presence check answers "absent" there, so a logout
+    // that threw instead would call one keystore state empty and broken at once.
+    const del = m.deleteEntryIo("gpg", {}, { rm: () => { throw Object.assign(new Error("x"), { code: "ENOTDIR" }); } });
     await assert.rejects(() => del("vc-secrets:user:oauth-ado-refresh"),
         (e) => e.toolExitCode === 3);
 });
@@ -1941,6 +2031,26 @@ test("unlock reports a count, since naming one entry reads as only that one bein
     const err = [];
     await m.cmdUnlock(cfg, { exists: () => true, run: async () => {}, write: (s) => err.push(s) });
     assert.match(err.join(""), /2 entries/);
+});
+
+test("cmdUnlock: with no exists injected, a keystore file that cannot be examined is an error", async (t) => {
+    // No other unlock test reaches the default the verb runs with on a file it cannot stat. A default
+    // of existsSync dropped that entry, so an unlock whose only entry it was reported nothing stored:
+    // the wrong diagnosis for an entry that is there and could not be examined.
+    // The backend is forced so the test runs on every platform: cmdUnlock returns early on any other.
+    const cfg = { secrets: { a: { backend: "local", scope: "user" } }, oauth: {}, projectId: "p", files: {} };
+    denyFs(t, "statSync", m.keyToPath(m.keyFor("a", cfg.secrets.a, cfg)));
+    const saved = process.env.VC_SECRETS_LOCAL_BACKEND;
+    process.env.VC_SECRETS_LOCAL_BACKEND = "gpg";
+    try {
+        await assert.rejects(() => m.cmdUnlock(cfg, { run: async () => {}, write: () => {} }), /could not be examined/);
+    } finally {
+        if (saved === undefined) {
+            delete process.env.VC_SECRETS_LOCAL_BACKEND;
+        } else {
+            process.env.VC_SECRETS_LOCAL_BACKEND = saved;
+        }
+    }
 });
 
 test("runTool: stdout capture, stdin pass, timeout, redacted stderr, toolExitCode", async () => {
@@ -3487,6 +3597,33 @@ test("a dangerous env key is refused and stripped whatever its case — Windows 
         assert.deepEqual(m.sanitizeEnv({ [key]: "x", PATH: "p" }), { PATH: "p" }, key);
         assert.throws(() => m.loadConfig(projectPaths({
             secrets: {}, servers: { s: { command: "node", args: [], env: { [key]: "--require=/tmp/x.js" } } } })),
+        /code-injection vector/, key);
+    }
+});
+
+test("a launcher's own injection hook is refused and stripped like the loader's", () => {
+    // An approved server shape is its env-key NAMES, so a key the list misses lets the repo change only
+    // the literal behind it. `npm exec` writes npm_config_node_options back into NODE_OPTIONS for the
+    // node it starts, which undoes sanitizeEnv; script_shell picks what a bare `npx` runs; the .NET pair
+    // loads code before the tool's own runs. npm reads either spelling of its keys; the lowercase one
+    // also exercises the case folding.
+    for (const key of ["npm_config_node_options", "npm_config_script_shell", "DOTNET_STARTUP_HOOKS", "CORECLR_ENABLE_PROFILING"]) {
+        assert.deepEqual(m.sanitizeEnv({ [key]: "x", PATH: "p" }), { PATH: "p" }, key);
+        assert.throws(() => m.loadConfig(projectPaths({
+            secrets: {}, servers: { s: { command: "npx", args: [], env: { [key]: "literal:x" } } } })),
+        /code-injection vector/, key);
+    }
+});
+
+test("an npm rc-file pointer is refused when declared, and kept when inherited", () => {
+    // Declared, it lets the repository pick an rc file whose node-options line restores NODE_OPTIONS --
+    // measured. Inherited, it is the user's own file, and often the only place a scope's registry
+    // mapping lives: stripping it sends `npx <private-pkg>` to the public registry, which then runs
+    // whatever is published under that name.
+    for (const key of ["npm_config_userconfig", "NPM_CONFIG_GLOBALCONFIG"]) {
+        assert.deepEqual(m.sanitizeEnv({ [key]: "x", PATH: "p" }), { [key]: "x", PATH: "p" }, key);
+        assert.throws(() => m.loadConfig(projectPaths({
+            secrets: {}, servers: { s: { command: "npx", args: [], env: { [key]: "literal:x" } } } })),
         /code-injection vector/, key);
     }
 });
@@ -5518,6 +5655,17 @@ test("shim: a prerelease does not outrank its own release", () => {
     ] });
     assert.match(r.stderr, /STUB-RAN:release/);
     assert.doesNotMatch(r.stderr, /STUB-RAN:prerelease/);
+});
+
+test("shim: a bare commit hash does not outrank a real release", () => {
+    // A registry records a commit hash as the version of a plugin that declares none. parseInt reads a
+    // numeric prefix, so "34040c9c5685" would key as 34040 and outrank 0.1.0.
+    const r = runShim(["doctor"], { caches: [
+        { client: "codex", version: "0.1.0", label: "release" },
+        { client: "codex", version: "34040c9c5685", label: "hash" },
+    ] });
+    assert.match(r.stderr, /STUB-RAN:release/);
+    assert.doesNotMatch(r.stderr, /STUB-RAN:hash/);
 });
 
 test("shim: a symlinked version directory is a candidate, because a linked install is a real one", { skip: !CAN_SYMLINK && "needs an environment that permits creating a symlink" }, () => {
