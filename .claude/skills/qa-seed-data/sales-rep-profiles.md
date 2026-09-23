@@ -156,6 +156,37 @@ suffix must match `TEST_ENV` exactly — a re-arranged name is never promoted an
 
 ---
 
+## 5a. The document library's files are GENERATED, not borrowed
+
+`test-data/uploads/` holds assets collected for other fixtures — logos, a webp, two mp4s, a photo of
+paper straws. Pointing the demo at them produced documents whose titles, sizes and page counts were
+right and whose CONTENTS were not: *2026 Industrial Catalog* opened a two-page status summary,
+*Memphis Distribution Centre* opened the paper straws, and two files had to be reused twice because
+there was no third PDF. A demo document nobody opens is fine until somebody opens it.
+
+So the bytes are built from the same declarations that describe the documents:
+
+```bash
+npm run sr:gen-doc-assets          # write test-data/uploads/sales-rep-demo/
+npm run sr:gen-doc-assets:check    # regenerate in memory, report drift, write nothing
+```
+
+`generate-demo-doc-assets.mjs` emits a real 148-page catalog, a 22-page GHS safety data sheet, a
+9-page volume pricing agreement, a 6-page terms document, a 2-page site plan drawn with PDF vector
+primitives, a 45-row XLSX price list with tier columns, and two multi-section DOCX forms. **Page
+counts are read from `DEMO_DOCUMENTS[].pageCount`, never restated** — a PDF whose metadata claims 148
+pages and whose body holds 12 is the mismatch a viewer notices first. Output is deterministic (no
+clock, no randomness), which is what makes `--check` meaningful and keeps a re-run out of the diff.
+
+The assets are **committed**, so a fresh clone seeds real documents with no generation step, and
+`demoProblems()` fails when a document's `sourceFile` stops matching its `fileName` — otherwise a
+rename silently falls back to a 562-byte stub. Verified live 2026-09-23: all 8 documents are served
+from the library **byte-identical** to the committed assets.
+
+One deliberate change of type: the Memphis document is a PDF **site plan**, not a photograph. Nothing
+in this repo is an industrial photo, and a readable facility plan is something a rep would actually
+open in front of a customer.
+
 ## 6. Constraints the data cannot design around
 
 **Order dates cannot be backdated.** `createdDate` is server-assigned and silently ignored on `POST`

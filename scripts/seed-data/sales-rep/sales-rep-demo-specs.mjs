@@ -303,14 +303,14 @@ export const DEMO_DOC_CATEGORIES = { CATALOGS: 'Catalogs', PRICING: 'Price Lists
  * make which-one-wins a race rather than a fixture.
  */
 export const DEMO_DOCUMENTS = [
-  { key: 'DDOC-CATALOG', sourceFile: 'newier.pdf', kind: 'pdf', fileName: 'Industrial-Catalog-2026.pdf', contentType: 'application/pdf', name: '2026 Industrial Catalog', category: DEMO_DOC_CATEGORIES.CATALOGS, pinned: true, pageCount: 148, summary: 'Full product catalog for the 2026 season, including the new fastener and abrasives ranges.' },
-  { key: 'DDOC-PRICE-Q4', sourceFile: 'Test.xlsx', kind: 'xlsx', fileName: 'Price-List-Q4-2026.xlsx', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', name: 'Q4 2026 Price List', category: DEMO_DOC_CATEGORIES.PRICING, pinned: false, pageCount: null, summary: 'Quarterly list pricing across all categories, effective 1 October.' },
-  { key: 'DDOC-VOLUME', sourceFile: 'Status-summarry-block#CO240603-00002.pdf', kind: 'pdf', fileName: 'Volume-Pricing-Agreement-Northwind.pdf', contentType: 'application/pdf', name: 'Volume Pricing Agreement — Northwind Traders', category: DEMO_DOC_CATEGORIES.CONTRACTS, pinned: false, pageCount: 9, summary: 'Negotiated tier breaks and annual commitment terms.' },
-  { key: 'DDOC-CREDIT', sourceFile: null, kind: 'docx', fileName: 'Credit-Application.docx', contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', name: 'Credit Application Form', category: DEMO_DOC_CATEGORIES.CONTRACTS, pinned: false, pageCount: 3, summary: 'Standard net-30 credit application for new business accounts.' },
-  { key: 'DDOC-SDS', sourceFile: 'newier.pdf', kind: 'pdf', fileName: 'Safety-Data-Sheet-Lubricants.pdf', contentType: 'application/pdf', name: 'Safety Data Sheet — Industrial Lubricants', category: DEMO_DOC_CATEGORIES.CATALOGS, pinned: false, pageCount: 22, summary: 'GHS-compliant safety data for the industrial lubricant range.' },
-  { key: 'DDOC-TERMS', sourceFile: 'Status-summarry-block#CO240603-00002.pdf', kind: 'pdf', fileName: 'Terms-And-Conditions.pdf', contentType: 'application/pdf', name: 'Terms and Conditions of Sale', category: DEMO_DOC_CATEGORIES.CONTRACTS, pinned: false, pageCount: 6, summary: 'Standard commercial terms applying to all orders.' },
-  { key: 'DDOC-RETURNS', sourceFile: null, kind: 'docx', fileName: 'Returns-Policy.docx', contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', name: 'Returns and Warranty Policy', category: DEMO_DOC_CATEGORIES.CONTRACTS, pinned: false, pageCount: 4, summary: 'RMA process, warranty periods and restocking terms.' },
-  { key: 'DDOC-WAREHOUSE', sourceFile: 'paperstraw.JPg', kind: 'jpg', fileName: 'Distribution-Centre-Memphis.jpg', contentType: 'image/jpeg', name: 'Memphis Distribution Centre', category: DEMO_DOC_CATEGORIES.CATALOGS, pinned: false, pageCount: null, summary: 'Regional distribution facility serving the south-east.' },
+  { key: 'DDOC-CATALOG', sourceFile: 'sales-rep-demo/Industrial-Catalog-2026.pdf', kind: 'pdf', fileName: 'Industrial-Catalog-2026.pdf', contentType: 'application/pdf', name: '2026 Industrial Catalog', category: DEMO_DOC_CATEGORIES.CATALOGS, pinned: true, pageCount: 148, summary: 'Full product catalog for the 2026 season, including the new fastener and abrasives ranges.' },
+  { key: 'DDOC-PRICE-Q4', sourceFile: 'sales-rep-demo/Price-List-Q4-2026.xlsx', kind: 'xlsx', fileName: 'Price-List-Q4-2026.xlsx', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', name: 'Q4 2026 Price List', category: DEMO_DOC_CATEGORIES.PRICING, pinned: false, pageCount: null, summary: 'Quarterly list pricing across all categories, effective 1 October.' },
+  { key: 'DDOC-VOLUME', sourceFile: 'sales-rep-demo/Volume-Pricing-Agreement-Northwind.pdf', kind: 'pdf', fileName: 'Volume-Pricing-Agreement-Northwind.pdf', contentType: 'application/pdf', name: 'Volume Pricing Agreement — Northwind Traders', category: DEMO_DOC_CATEGORIES.CONTRACTS, pinned: false, pageCount: 9, summary: 'Negotiated tier breaks and annual commitment terms.' },
+  { key: 'DDOC-CREDIT', sourceFile: 'sales-rep-demo/Credit-Application.docx', kind: 'docx', fileName: 'Credit-Application.docx', contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', name: 'Credit Application Form', category: DEMO_DOC_CATEGORIES.CONTRACTS, pinned: false, pageCount: 3, summary: 'Standard net-30 credit application for new business accounts.' },
+  { key: 'DDOC-SDS', sourceFile: 'sales-rep-demo/Safety-Data-Sheet-Lubricants.pdf', kind: 'pdf', fileName: 'Safety-Data-Sheet-Lubricants.pdf', contentType: 'application/pdf', name: 'Safety Data Sheet — Industrial Lubricants', category: DEMO_DOC_CATEGORIES.CATALOGS, pinned: false, pageCount: 22, summary: 'GHS-compliant safety data for the industrial lubricant range.' },
+  { key: 'DDOC-TERMS', sourceFile: 'sales-rep-demo/Terms-And-Conditions.pdf', kind: 'pdf', fileName: 'Terms-And-Conditions.pdf', contentType: 'application/pdf', name: 'Terms and Conditions of Sale', category: DEMO_DOC_CATEGORIES.CONTRACTS, pinned: false, pageCount: 6, summary: 'Standard commercial terms applying to all orders.' },
+  { key: 'DDOC-RETURNS', sourceFile: 'sales-rep-demo/Returns-Policy.docx', kind: 'docx', fileName: 'Returns-Policy.docx', contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', name: 'Returns and Warranty Policy', category: DEMO_DOC_CATEGORIES.CONTRACTS, pinned: false, pageCount: 4, summary: 'RMA process, warranty periods and restocking terms.' },
+  { key: 'DDOC-WAREHOUSE', sourceFile: 'sales-rep-demo/Distribution-Centre-Memphis.pdf', kind: 'pdf', fileName: 'Distribution-Centre-Memphis.pdf', contentType: 'application/pdf', name: 'Memphis Distribution Centre', category: DEMO_DOC_CATEGORIES.CATALOGS, pinned: false, pageCount: 2, summary: 'Regional distribution facility serving the south-east.' },
 ];
 
 /**
@@ -325,6 +325,14 @@ export const DEMO_DOCUMENTS = [
  * Returns a repo-relative path, and reads nothing: this module stays side-effect free.
  */
 export const DEMO_UPLOADS_DIR = 'test-data/uploads';
+
+/**
+ * Where the demo's OWN document assets live, under the shared uploads folder. They are generated by
+ * `generate-demo-doc-assets.mjs` from these very declarations and committed, so a fresh clone seeds
+ * real, readable documents with no generation step. Kept separate from the loose files in
+ * `test-data/uploads/` because those belong to other fixtures and are not the demo's to change.
+ */
+export const DEMO_ASSET_SUBDIR = 'sales-rep-demo';
 export const documentSourceRel = (spec) => (spec?.sourceFile ? `${DEMO_UPLOADS_DIR}/${spec.sourceFile}` : null);
 
 /** Tasks. Real business copy — a rep hub whose task list reads "AGENT-TEST-TASK 04" demos nothing. */
@@ -547,6 +555,14 @@ export function demoProblems() {
   // this gate catches the DECLARATION that makes disjointness impossible.
   const phrases = DEMO_ORGS.map((o) => o.productSearch);
   for (const o of DEMO_ORGS) if (!o.productSearch) problems.push(`org ${o.key} declares no productSearch — its orders would draw from an arbitrary catalog slice`);
+  for (const d of DEMO_DOCUMENTS) {
+    if (typeof d.sourceFile === 'string' && d.sourceFile.startsWith(`${DEMO_ASSET_SUBDIR}/`)
+      && d.sourceFile !== `${DEMO_ASSET_SUBDIR}/${d.fileName}`) {
+      problems.push(`document ${d.key}: sourceFile "${d.sourceFile}" does not match its fileName "${d.fileName}" — `
+        + `generate-demo-doc-assets.mjs writes each asset as ${DEMO_ASSET_SUBDIR}/<fileName>, so this one would `
+        + 'silently fall back to a generated stub');
+    }
+  }
   for (const o of DEMO_ORGS) {
     if (!(o.productMatch instanceof RegExp)) {
       problems.push(`org ${o.key} declares no productMatch regex — catalog search is relevance-ordered but not relevance-bounded, so its orders would carry whatever the tail of the result set happens to hold`);
