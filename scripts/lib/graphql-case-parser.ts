@@ -594,7 +594,7 @@ export function validateStepBlocks(blocks: StepBlock[]): string[] {
   //
   // Until now only the GQL family was pair-checked here, so an MCP case got NO structural check at
   // all — a dangling [MCP-EXEC label] or an [MCP-CAPTURE label.path] naming an op that does not
-  // exist reached the runner, which then failed at a step far from the mistake. Worse, suite 101's
+  // exist reached the runner, which then failed at a step far from the mistake. Worse, suite 102's
   // MCP-only cases were not even routed to this validator (lint-test-cases.ts isRunnerGraphql
   // matched [GQL-OP]/[REST-OP] only), so they fell through to the UI rule D-001 and every body line
   // of an [MCP-OP] block — the tool name, the JSON arguments — was flagged "step line lacks a type

@@ -114,7 +114,7 @@ const RUNNER_OP_KINDS = new Set<StepBlock["kind"]>([
   "REST",
   "REST-OP",
   "REST-EXEC",
-  // UCP / MCP JSON-RPC ops. Added 2026-09-22: suite 101 was 29/29 browser lane on EX-010 + EX-011
+  // UCP / MCP JSON-RPC ops. Added 2026-09-22: suite 102 was 29/29 browser lane on EX-010 + EX-011
   // because nothing here spoke JSON-RPC, so 29 deterministic HTTP cases each needed an AGENT.
   "MCP-OP",
   "MCP-EXEC",

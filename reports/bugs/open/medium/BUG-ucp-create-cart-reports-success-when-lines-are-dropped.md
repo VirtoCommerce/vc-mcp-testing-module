@@ -3,7 +3,7 @@
 **Env:** vcst-qa @ Platform `3.1072.0-pr-3108-b6ef`, `VirtoCommerce.UCP` `3.1006.0-pr-7-612c`
 **Surface:** MCP `POST {{FRONT_URL}}/ucp/mcp` → `tools/call` `create_cart` (anonymous, no credential)
 **Found:** 2026-09-23 (SBTM O7, VCST-5378). Three independent causes reproduced the same shape.
-**Case:** `UCPA-025` in suite `101` — it asserts the CURRENT behaviour as `{OBSERVED}`, deliberately, so
+**Case:** `UCPA-025` in suite `102` — it asserts the CURRENT behaviour as `{OBSERVED}`, deliberately, so
 the case passes today and will fail if the contract is tightened. That is a documented observation, not
 an endorsement.
 
@@ -77,6 +77,6 @@ altering `status`.
 ## Evidence
 
 Live probes 2026-09-23, anonymous session, `vcst-qa`. `UCPA-025` in
-`regression/suites/Backend/ucp/101-ucp-agentic-commerce.csv` covers the first two causes and passes
+`regression/suites/Backend/ucp/102-ucp-agentic-commerce.csv` covers the first two causes and passes
 against the current behaviour; the third (stock) is covered by the inventory block added the same day.
 UCP domain map `D16` (`.claude/knowledge/domain/ucp.md`).

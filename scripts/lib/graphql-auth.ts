@@ -41,7 +41,7 @@ export interface AuthOptions {
    * `resource_server` audience. UCP is the first: `/ucp/mcp` validates audience, issuer AND
    * resource path, so a token minted without this returns a flat 401 there even though it is
    * perfectly valid for /graphql. Measured 2026-09-22 — it accounted for 13 of 21 failures on the
-   * first converted run of suite 101.
+   * first converted run of suite 102.
    *
    * The token must also be minted from the host that owns the resource (for UCP, FRONT_URL), which
    * is why callers pass `backUrl` explicitly rather than relying on the default.

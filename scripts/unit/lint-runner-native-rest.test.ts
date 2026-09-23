@@ -144,7 +144,7 @@ test("widening for MCP does not disable D-001 for the browser/Admin cases it pol
   assert.match(findings[0].message, /click the Checkout button/);
 });
 
-test("an MCP case mixed with GraphQL discovery is exempt too — the common suite-101 shape", () => {
+test("an MCP case mixed with GraphQL discovery is exempt too — the common suite-102 shape", () => {
   const steps = [
     "[GQL-OP discover]",
     'query { products(storeId: "{{STORE_ID}}", first: 1) { items { code } } }',

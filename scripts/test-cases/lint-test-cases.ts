@@ -502,7 +502,7 @@ function capturedVars(row: Row): Set<string> {
 // [MCP-OP] added 2026-09-23. An MCP-only case (no GQL/REST op) fell to the ELSE branch of the
 // Determinism check, which is the UI/Admin rule D-001 — "every non-blank step line must carry a
 // tag". An [MCP-OP] block is deliberately multi-line (tool name, then a JSON argument object), so
-// EVERY body line tripped it: 8 green suite-101 cases were held at Draft by tc:promote PR-008 over
+// EVERY body line tripped it: 8 green suite-102 cases were held at Draft by tc:promote PR-008 over
 // a Critical finding about grammar they use correctly. The runner branch delegates to
 // validateStepBlocks, which now pair-checks the MCP family too.
 function isRunnerGraphql(row: Row): boolean {

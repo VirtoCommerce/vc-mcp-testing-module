@@ -609,7 +609,7 @@ test("flakiness is scoped per suite and per case", () => {
 // is where the lane COMES FROM. `machine-lane.ts` wrote `{id, status, evidenceFile, durationMs}`
 // and no per-case `lane`, while `readRunEvidence` derives a missing lane from the envelope's
 // `browser` field — which a machine envelope does not carry. So every machine row arrived as
-// "lane not recorded" and PR-004 held it. Measured on REG-2026-09-23-M7, suite 101: 9 cases green
+// "lane not recorded" and PR-004 held it. Measured on REG-2026-09-23-M7, suite 102: 9 cases green
 // on the machine lane, 0 promotable, and the hold reason named a lane the run had plainly executed.
 //
 // This is the failure mode the file's own header warns about from the other side — a fail-closed
@@ -625,9 +625,9 @@ test("readRunEvidence: a machine envelope's per-case lane survives into the deci
   try {
     // The shape machine-lane.ts writes: no `browser` field anywhere, lane stamped per case.
     writeFileSync(
-      join(dir, "suite-101-results.machine.json"),
+      join(dir, "suite-102-results.machine.json"),
       JSON.stringify({
-        suiteId: "101",
+        suiteId: "102",
         suiteName: "UCP Agentic Commerce",
         lane: "machine",
         environment: "vcst",
@@ -643,8 +643,8 @@ test("readRunEvidence: a machine envelope's per-case lane survives into the deci
       })
     );
     const ev = readRunEvidence(dir);
-    const suite = ev.suites.get("101");
-    assert.ok(suite, "the machine envelope must be read as suite 101");
+    const suite = ev.suites.get("102");
+    assert.ok(suite, "the machine envelope must be read as suite 102");
     assert.equal(
       suite.runCases.get("UCPA-030")?.lane,
       "machine",

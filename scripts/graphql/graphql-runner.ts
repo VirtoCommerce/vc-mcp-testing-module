@@ -916,7 +916,7 @@ async function runCase(
   const failed = results.length - passed;
   // A NULL CAPTURE INVALIDATES THE CASE — it can never be a PASS.
   //
-  // Measured 2026-09-22 (suite 101 / VCST-5378): null captures were printed as a warning and then
+  // Measured 2026-09-22 (suite 102 / VCST-5378): null captures were printed as a warning and then
   // excluded from the verdict, so a case whose `ucp_session` capture produced NOTHING posted an
   // empty token to /restore, got the same 400 a genuinely-expired token gets, and reported **PASS**.
   // The assertion was true; it just wasn't testing anything. That is the vacuous-pass shape the
@@ -1338,7 +1338,7 @@ async function executeBlock(
       // UCP_DEBUG=1 prints the whole response body. Authoring an MCP case means guessing the
       // envelope (create_cart nests under .cart, create_checkout under .checkout, handoff_checkout
       // double-wraps under .result.checkout), and a wrong guess fails as `undefined` with no hint
-      // of the right path — the single largest source of false reds in suite 101.
+      // of the right path — the single largest source of false reds in suite 102.
       if (process.env.UCP_DEBUG) {
         console.log("  ↳ body: " + JSON.stringify(mcpResp.body).slice(0, 4000));
       }
@@ -1498,7 +1498,7 @@ async function executeBlock(
           return;
         }
         // A wait the run cannot afford is REFUSED, never truncated. Before 2026-09-23 the parser
-        // silently clamped to 300 s: suite 101's UCPA-021 asks for 960 s so a 15-minute handoff-token
+        // silently clamped to 300 s: suite 102's UCPA-021 asks for 960 s so a 15-minute handoff-token
         // TTL can elapse, then asserts the expired-token 400 — which an UNEXPIRED token returns too.
         // So it scored PASS in 314 s while never crossing the boundary it exists to test, which is the
         // one failure a green suite cannot surface. Raise the ceiling deliberately, per lane.
