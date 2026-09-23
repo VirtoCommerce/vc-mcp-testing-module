@@ -4,8 +4,8 @@
 
 **Env:** vcst-qa @ Platform `3.1072.0-pr-3108-b6ef`, `VirtoCommerce.UCP` `3.1006.0-pr-7-612c`
 **Surface:** MCP `POST {{FRONT_URL}}/ucp/mcp` → `tools/call` `create_cart` (anonymous, no credential)
-**Found:** 2026-09-23, during the VCST-5378 suite-101 machine-lane pass. Re-verified live the same day with the control below.
-**Case:** none yet — suite `101` records the OBSERVATION as `UCPA-035`; it does not assert this as a defect.
+**Found:** 2026-09-23, during the VCST-5378 suite-102 machine-lane pass. Re-verified live the same day with the control below.
+**Case:** none yet — suite `102` records the OBSERVATION as `UCPA-035`; it does not assert this as a defect.
 
 ## Summary
 
@@ -125,7 +125,7 @@ than no message, because it describes an event that did not happen.
 ## Evidence
 
 Re-verification transcript (control table above) produced 2026-09-23 against `vcst-qa`, anonymous
-session, one product. `UCPA-035` in `regression/suites/Backend/ucp/101-ucp-agentic-commerce.csv`
+session, one product. `UCPA-035` in `regression/suites/Backend/ucp/102-ucp-agentic-commerce.csv`
 records the observation; no case asserts the invariant yet, because no `BL-UCP-*` exists and
 `BL-CART-002` is the delegated invariant this would violate.
 

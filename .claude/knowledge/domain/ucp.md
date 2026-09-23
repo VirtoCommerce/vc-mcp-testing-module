@@ -7,7 +7,7 @@ rationale: |
   value chain and which links UCP OWNS versus DELEGATES, the surface inventory per layer (back office
   / storefront / API+MCP), where the layers DISAGREE, the shape of existing QA coverage, and the open
   gaps. Rev 2 re-derives every claim against a build that moved substantially in 6 days: a first
-  value-chain suite now exists (101, 36 cases, 31/32 passing on today's machine-lane run), four rev-1
+  value-chain suite now exists (102, 36 cases, 31/32 passing on today's machine-lane run), four rev-1
   gaps closed, one new HIGH security bug was filed, and the discovery manifest's own shape changed.
 generated: 2026-09-23
 rev: 2
@@ -16,7 +16,7 @@ stale_after_days: 60
 expires_after_days: 120
 sources:
   - .claude/knowledge/domain/ucp.md rev 1 (2026-09-17) — this file IS the previous rev; every D*/G* id carried forward, none renumbered
-  - regression/suites/Backend/ucp/101-ucp-agentic-commerce.csv — read in FULL this pass (36 cases, UCPA-001..036); config/test-suites.json suite `101` (domain: ucp, 36 cases, lanes machine 32/browser 4) and `094` (domain now `observability`, not `ucp` — see §0)
+  - regression/suites/Backend/ucp/102-ucp-agentic-commerce.csv — read in FULL this pass (36 cases, UCPA-001..036); config/test-suites.json suite `102` (domain: ucp, 36 cases, lanes machine 32/browser 4) and `094` (domain now `observability`, not `ucp` — see §0)
   - reports/regression/REG-2026-09-23-M7/suite-101-results.machine.json — today's machine-lane run: 31 pass / 0 fail / 1 blocked-by-design (UCPA-021's 300s wait ceiling; proven 5/5 separately at raised ceiling per suite notes)
   - .claude/knowledge/api/ucp-schema.md — GENERATED contract (`npm run ucp:schema:check` clean, 18 tools / 19 operations), read and cited rather than transcribed
   - .claude/knowledge/api/graphql-test-cases-runner.md §THE ENVELOPE RULE (measured 2026-09-23: 7 of 10 non-passing machine cases in REG-2026-09-23-M5 were wrong-envelope-path errors)
@@ -68,7 +68,7 @@ This is not a trickle of amendments — the ground moved. Read this section befo
 row below in isolation.
 
 1. **A real value-chain suite now exists.** Rev 1's headline finding was "23 cases, all telemetry, 0
-   touching the chain." That is no longer true: suite `101` (36 cases, `UCPA-001..036`) exercises
+   touching the chain." That is no longer true: suite `102` (36 cases, `UCPA-001..036`) exercises
    discovery, anonymous shopping, B2C/B2B identity linking, cart attribution, contract pricing,
    assortment scoping, handoff mint/restore reliability, single-use, TTL, tamper, envelope shapes,
    stock boundaries and the merge path. Today's machine-lane run: **31 pass / 0 fail / 1 blocked (by
@@ -86,7 +86,7 @@ row below in isolation.
 4. **The discovery manifest's own SHAPE changed**, not just its values. `/.well-known/ucp` no longer
    carries `resource` / `authorization_server` / `storefront_origin` / `handoff_url_template` at all —
    those moved to the RFC 9728 protected-resource document and to `get_store_capabilities`
-   respectively. Suite `101`'s own authoring note records this directly: an earlier form of `UCPA-002`
+   respectively. Suite `102`'s own authoring note records this directly: an earlier form of `UCPA-002`
    "asserted four fields that have never existed on this build and failed on all four." Any rev-1 claim
    about the bare manifest's field list is **DRIFT** unless restated below.
 5. **D1 got WORSE, not better.** Rev 1 framed it as a cross-endpoint disagreement (manifest empty,
@@ -117,9 +117,9 @@ row below in isolation.
 10. **`domain-checklists.md` gained §36** (UCP — Agentic Commerce, 42 items) — a new artifact this map
     did not have to build from scratch at rev 1.
 11. **This refresh RESTORES rev 1's per-tool hole/deliberate breakdown rather than dropping it.** Rev 1's
-    §4 separated deliberate absences from holes; this pass's first draft enumerated only what suite 101
+    §4 separated deliberate absences from holes; this pass's first draft enumerated only what suite 102
     covers and never what it doesn't — the exact silent-blank failure §4's own gate exists to catch.
-    Re-derived below, exhaustively: **8 of 18 MCP tools are never called by any case in suite 101**, and
+    Re-derived below, exhaustively: **8 of 18 MCP tools are never called by any case in suite 102**, and
     — a distinct, newly-derived finding, not a restatement — **the 19 REST-declared operations have a
     different and narrower gap shape of their own**, which does not mirror the tool-level one.
 
@@ -140,13 +140,13 @@ re-queried live this pass — unchanged).
 
 UCP **owns** links 1, 2, 5 and 6 and **delegates** everything else — unchanged in shape from rev 1.
 What changed is how much of this chain is now actually exercised: rev 1 could source only links 1, 3,
-4, 6-7 live; this pass (via suite `101`) sources every link **except** 8 (payment) and the write half
+4, 6-7 live; this pass (via suite `102`) sources every link **except** 8 (payment) and the write half
 of 9 (order attribution, still `MISSING` — see coverage.md §3a).
 
 | # | Link, in the customer's words | Mechanism | Owner | Rev-2 status |
 |---|---|---|---|---|
 | 1 | An AI agent finds out this store can be shopped | `GET /.well-known/ucp` (now a SLIMMER shape — §0.4) or MCP `get_store_capabilities` | **UCP** | `CONFIRMED` live both hosts, byte-identical |
-| 2 | The agent shops **anonymously**, or links the buyer's account | `link_buyer_identity`; **the automated recipe this repo uses is a direct Platform `password` grant** (`storeId` camelCase + `resource={{FRONT_URL}}/ucp/mcp`), not a browser-driven RFC 9728 challenge round trip — see G1/G10 below for the distinction | **UCP** (challenge) + Platform (OAuth) | `CONFIRMED` live (password-grant path, 100% of suite 101's authenticated cases today); the browser challenge path is developer-reported working (vc-platform#3108, vc-frontend#2467 PR bodies) but not independently re-driven this pass (G10) |
+| 2 | The agent shops **anonymously**, or links the buyer's account | `link_buyer_identity`; **the automated recipe this repo uses is a direct Platform `password` grant** (`storeId` camelCase + `resource={{FRONT_URL}}/ucp/mcp`), not a browser-driven RFC 9728 challenge round trip — see G1/G10 below for the distinction | **UCP** (challenge) + Platform (OAuth) | `CONFIRMED` live (password-grant path, 100% of suite 102's authenticated cases today); the browser challenge path is developer-reported working (vc-platform#3108, vc-frontend#2467 PR bodies) but not independently re-driven this pass (G10) |
 | 3 | The agent finds products | `search_products` / `get_product` → XCatalog GraphQL in-process | delegated | `CONFIRMED` live + suite |
 | 4 | The agent builds a cart | `create_cart` / `update_cart` / `get_cart` / `list_carts` → XCart. `create_cart` is a **non-idempotent upsert** into the buyer's single default cart when authenticated (new **D17**) | delegated | `CONFIRMED` live + suite, sharpened |
 | 4b | An anonymous cart becomes the signed-in buyer's cart | `update_cart` with the saved anonymous `buyer_id` under an authenticated token → XCart `mergeCart` | delegated (guarded by UCP) | `CONFIRMED` — `UCPA-014`: merge, then idempotent no-op replay, then source cart 404s |
@@ -188,7 +188,7 @@ flowchart TD
 
 | Actor | Can do | Verdict |
 |---|---|---|
-| **AI agent / MCP client** | Everything anonymously with no credential; with a Platform password-grant bearer, everything as a linked B2B or B2C buyer, decisively including contract pricing and assortment scoping (new fixtures, §5 G2 CLOSED) | `CONFIRMED` live — every case in suite 101 exercised this today |
+| **AI agent / MCP client** | Everything anonymously with no credential; with a Platform password-grant bearer, everything as a linked B2B or B2C buyer, decisively including contract pricing and assortment scoping (new fixtures, §5 G2 CLOSED) | `CONFIRMED` live — every case in suite 102 exercised this today |
 | **Anonymous buyer** | Represented by a synthetic `ucp-anonymous-<32hex>` id; receives a `continue_url`; lands on the storefront cart | `CONFIRMED` live |
 | **Authenticated B2C buyer** | Linked with no `organization_id` invented (`UCPA-004/008`); cart attributed to the buyer, never an org | `CONFIRMED` live — **closed rev-1's `UNVERIFIED` mark** |
 | **B2B org buyer** | `organization_id` derives only from the token (`UCPA-005`); assortment scoping and contract pricing are now decisively provable (`UCPA-016/017`); org context survives the handoff, verified by an actual contract-priced storefront line (`UCPA-018`) | `CONFIRMED` live — **closed rev-1's `UNVERIFIED` mark (G2)** |
@@ -227,7 +227,7 @@ table, none of it has an Admin surface today.
 |---|---|---|
 | `/checkout/:cartId?` + `?ucp_session=<token>` | The handoff entry point, no `requiresAuth` | `CONFIRMED` live — unchanged |
 | `/cart` + the "expired" toast | Where a 400 restore lands | `CONFIRMED` live this pass — **verbatim identical toast text** to rev 1: *"This checkout link has expired, has already been used, or is unavailable in this tab. Request a new checkout link from your shopping assistant."* |
-| `/cart/:cartId?ucp_handoff=1` | Where a successful restore lands | `CONFIRMED` — suite 101 today, 31/32 machine-lane pass; not independently re-walked in-browser by this map pass |
+| `/cart/:cartId?ucp_handoff=1` | Where a successful restore lands | `CONFIRMED` — suite 102 today, 31/32 machine-lane pass; not independently re-walked in-browser by this map pass |
 | `/oauth/authorize` | Anonymous hit → `/sign-in?returnUrl=/oauth/authorize` | `CONFIRMED` live this pass, byte-identical to rev 1's behaviour |
 | `/sign-in?returnUrl=...`, `/cart` | 401/403 landing | unchanged |
 
@@ -333,16 +333,18 @@ updated in place; D14–D20 are new this pass.**
 ## §4 — Coverage shape
 
 **Basis, corrected out loud:** rev 1 counted 23 cases, all in `094`, all telemetry, 0 touching the
-chain. That basis has **changed on two axes since 2026-09-17**: (a) suite `101` was authored and now
+chain. That basis has **changed on two axes since 2026-09-17**: (a) suite `102` was authored and now
 carries 36 chain-touching cases, and (b) `094`'s own manifest `domain` field was reassigned from `ucp`
 to `observability` — **so `094` no longer counts toward this domain's coverage at all**, regardless of
 its content. Basis for the table below: `config/test-suites.json` (both suite entries, read in full
-this pass) + a full parse of `regression/suites/Backend/ucp/101-ucp-agentic-commerce.csv` (36 rows) +
-today's machine-lane run `reports/regression/REG-2026-09-23-M7/suite-101-results.machine.json`.
+this pass) + a full parse of `regression/suites/Backend/ucp/102-ucp-agentic-commerce.csv` (36 rows) +
+today's machine-lane run `reports/regression/REG-2026-09-23-M7/suite-101-results.machine.json`
+(written before the suite was renumbered 101 -> 102 on 2026-09-23 — main had already taken 101 for
+Platform Sign-in Log; the artifact keeps the name the run gave it).
 
 | Suite | Domain (manifest) | UCP-relevant | Total | Status |
 |---|---|---|---|---|
-| `101` UCP Agentic Commerce | `ucp` | **36** of 36 | 36 | 34 `Automated`, 2 `Draft` (`UCPA-013` blocked pending an isolated guest-checkout stand; `UCPA-029` still Draft) |
+| `102` UCP Agentic Commerce | `ucp` | **36** of 36 | 36 | 34 `Automated`, 2 `Draft` (`UCPA-013` blocked pending an isolated guest-checkout stand; `UCPA-029` still Draft) |
 | `094` UCP Observability | **`observability`** (reassigned, not `ucp`) | **0** — out of scope for this domain now | 23 | unchanged from rev 1 otherwise |
 
 **Today's live run (`REG-2026-09-23-M7`, machine lane, 32 of 36 cases — the 4 browser-lane cases run
@@ -351,7 +353,7 @@ separately):** **31 pass, 0 fail, 1 blocked**. The one blocked case (`UCPA-021`,
 `GQL_MAX_WAIT_SECONDS` ceiling (300s); proven separately at a raised ceiling as **5/5 PASS** (see §5,
 G4 CLOSED). This is a working suite, not an aspirational one.
 
-**What suite 101 covers that suite 094 never did (all first-time-ever for this domain, this week):**
+**What suite 102 covers that suite 094 never did (all first-time-ever for this domain, this week):**
 the full handoff chain end to end (`UCPA-001`, the suite's own designated "must pass for the feature to
 be considered working" case) · anonymous shopping with no credential · B2C and B2B identity linking ·
 cart attribution for both personas · checkout-snapshot integrity · handoff-mint host parity ·
@@ -366,7 +368,7 @@ per-line-entry-split, and the reachable half of a stock-conflict scenario).
 ### §4a — Per-tool coverage: 8 of 18 MCP tools are never called, and none of the eight is deliberate
 
 **Basis — derived, not transcribed, and self-checked:** a full-text scan of
-`regression/suites/Backend/ucp/101-ucp-agentic-commerce.csv` for every `[MCP-OP <label>]` marker,
+`regression/suites/Backend/ucp/102-ucp-agentic-commerce.csv` for every `[MCP-OP <label>]` marker,
 resolving each to the tool name on its following non-blank line. **137 markers found, 137 resolved to
 one of the 18 tools `ucp:schema:check` declares, zero orphaned** — an exhaustive count, not a sample.
 (A first-pass line-anchored version of this same method undercounted by matching only markers that sit
@@ -374,7 +376,7 @@ alone on their own CSV line, missing ones embedded at the tail of a wrapped mult
 `get_store_capabilities` reads as called once with that method, twice with the exhaustive one. The
 table below uses the exhaustive count.)
 
-| Tool | Capability | Calls in suite 101 | Verdict |
+| Tool | Capability | Calls in suite 102 | Verdict |
 |---|---|---|---|
 | `create_cart` | cart | 43 | covered |
 | `search_products` | catalog | 38 | covered |
@@ -396,7 +398,7 @@ table below uses the exhaustive count.)
 | `list_regions` | geography | **0** | **HOLE** — same capability. Coverage.md flags all three geography tools together as the single cheapest coverage win available: `handoff_checkout` refuses a physical-goods handoff until `shipping_address` (and, where the country has regions, a resolved `region_id`) is set, so a country/region-resolution failure would currently surface only as an opaque handoff refusal |
 
 **None of the eight is Deliberate.** `coverage.md`'s own gap analysis ("direction B: tools no scenario
-exercises") frames all eight as unintentional holes, and no suite note anywhere in `101` states a reason
+exercises") frames all eight as unintentional holes, and no suite note anywhere in `102` states a reason
 to skip any of them on purpose — unlike, say, §2a's Admin-UI absence, which IS deliberate (there is no
 UI to test). An area left out on purpose and an area nobody got to must not read the same, and here
 they don't: this is eight rows of the latter.
@@ -410,7 +412,7 @@ distinct patterns, with these counts: `GET {HOST}/.well-known/ucp` (2) ·
 JSON-RPC transport calls in `UCPA-002`) · `POST {HOST}/ucp/v1/internal/handoff/restore` (22) ·
 `DELETE {HOST}/ucp/v1/internal/handoff/{token}` (1, `UCPA-026`'s revoke probe — expected and confirmed
 404, not one of the 19 declared operations at all). **Not one literal HTTP request anywhere in suite
-101 ever targets `/ucp/v1/carts*`, `/ucp/v1/catalog/*`, `/ucp/v1/checkouts*`, `/ucp/v1/geography/*` or
+102 ever targets `/ucp/v1/carts*`, `/ucp/v1/catalog/*`, `/ucp/v1/checkouts*`, `/ucp/v1/geography/*` or
 `/ucp/v1/orders*`** — every case that touches those areas does so exclusively through the MCP tool
 wrapper (§4a).
 
@@ -452,7 +454,7 @@ nothing:**
 nothing to either oracle. No `ECL` section covers UCP or MCP outside Appendix C's agentic-QA
 methodology note (unchanged from rev 1).
 
-**Suite 101's own `Business_Rule` citations are all delegated** — `BL-CART-002/005/007/008`,
+**Suite 102's own `Business_Rule` citations are all delegated** — `BL-CART-002/005/007/008`,
 `BL-CHK-001`, `BL-B2B-001/002`, `BL-AUTH-001/015/017` — every one verified this pass to actually exist
 in `business-logic.md` at the cited number. **Zero `BL-UCP-*` citations anywhere in the corpus.**
 
@@ -460,7 +462,7 @@ in `business-logic.md` at the cited number. **Zero `BL-UCP-*` citations anywhere
 — its own header states the same "zero invariants of its own" fact and lists the same promotion
 candidates as `BL-AUDIT-2026-09-22.md`.
 
-**Executability:** suite `101` is excluded from the `backend`/`full` selection groups pending
+**Executability:** suite `102` is excluded from the `backend`/`full` selection groups pending
 `/qa-test-lifecycle` promotion, same posture as `094` at rev 1. `requiresModules: VirtoCommerce.UCP`
 only (094 additionally needs the two OTel/AppInsights modules — consistent with its domain reassignment
 away from `ucp`).
@@ -501,7 +503,7 @@ G9–G11 are new.**
 | Rev 1's own D2 entry ("advertised handoff URL points at the Platform host; issued one points at storefront") | **RESOLVED**, not merely restated — see D2 above and the fix mechanism (`IUcpPublicOriginResolver`) |
 | A 2026-09-22 11:09 QA re-test comment: *"F2 (D2's fix): NOT FIXED — reproduces byte-for-byte"* | **DRIFT, but an honest one.** That comment measured UCP `pr-7-9bc9`; the environment moved to `pr-7-612c` minutes to hours afterward, and the SAME checks against `pr-7-612c` pass cleanly end to end. Recorded as the class this repo should watch for: a PR-tracked, still-open feature redeploys mid-investigation, and a correct verdict against one build reads as a false "still broken" against the next. Always cite the exact build string alongside a NOT-FIXED verdict on an unmerged PR |
 | SBTM O11 (2026-09-22, same-day): *"org price == anonymous price, 8 of 8 SKUs — Sc.15/16 stay UNDECIDABLE"* | **SUPERSEDED within the same day**, by the orchestrator's own note on the same finding: the 8-SKU sample predated the dedicated `UCP_CONTRACT_*` fixture (seeded concurrently by a different lane). Re-measured on the dedicated fixture: contract product 29.99 anon vs 11.11 contracted, control identical in both contexts. Sc.15/16 are now decidable and PASS (`UCPA-016/017`) |
-| SBTM O3 (2026-09-22): *"a signed-in buyer opening an ANONYMOUS handoff gets 200... who then owns the cart is unresolved"* | **Tightened, not contradicted, by the time suite 101 was authored.** `UCPA-024`'s own note: "originally SBTM finding O3... reproduced 3x across two runs, the product now refuses cross-identity redemption... 403 buyer_context_mismatch... safer than originally observed, not a regression." Read this as the product firming up between an exploratory pass and a regression-authoring pass, not as two contradictory observations of one static behaviour |
+| SBTM O3 (2026-09-22): *"a signed-in buyer opening an ANONYMOUS handoff gets 200... who then owns the cart is unresolved"* | **Tightened, not contradicted, by the time suite 102 was authored.** `UCPA-024`'s own note: "originally SBTM finding O3... reproduced 3x across two runs, the product now refuses cross-identity redemption... 403 buyer_context_mismatch... safer than originally observed, not a regression." Read this as the product firming up between an exploratory pass and a regression-authoring pass, not as two contradictory observations of one static behaviour |
 | Rev 1's D5 fourth vocabulary, quoted as `"dev.ucp.shopping.catalog.search"` specifically | **Not re-observed verbatim this pass** (this pass's own live check of the payment-handlers endpoint returned `"dev.ucp.shopping.checkout"` instead, on a different endpoint). The underlying phenomenon — a `dev.ucp.shopping.*` vocabulary co-existing with the discovery manifest's `com.virtocommerce.ucp.*` vocabulary — is CONFIRMED again, just on a different endpoint than rev 1 happened to check. Do not treat the exact string as stable across endpoints |
 | `reports/tickets/Sprint26-18/.../UCP Authenticated User Flow — Test Scenarios (VCST-5378).md` TS-01..TS-22 | **Unchanged verdict from rev 1 — CONFIRMED as prior art, several now decidable.** `coverage.md`'s tool×scenario matrix (this week) newly establishes which of the 22 are reachable at all: TS-02 (order attribution) and TS-10/TS-13 (approval rules) are **unwritable as UCP scenarios** — no tool writes attribution, and no approval logic exists in the service (D19) — so they are storefront-checkout scenarios wearing UCP clothing, not UCP gaps |
 | `094`'s manifest note (rev 1): "23 cases, all telemetry, 0 touching the chain" | **DRIFT as a statement about the DOMAIN, current as a statement about SUITE 094 SPECIFICALLY.** 094 itself is unchanged in content; what changed is that its manifest `domain` field is now `observability`, removing it from this map's scope entirely (§0.1, §4) |

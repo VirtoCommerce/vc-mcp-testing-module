@@ -409,7 +409,7 @@ Three measured instances, each found the hard way, each on a different surface:
 
 #### ⚠ THE ENVELOPE RULE — every MCP path is a guess until a run confirms it
 
-**The single largest source of false reds in suite 101 was not logic. It was writing `body.<field>`
+**The single largest source of false reds in suite 102 was not logic. It was writing `body.<field>`
 for a field the tool returns one level down.** Measured 2026-09-23: of 10 non-passing machine cases in
 `REG-2026-09-23-M5`, **seven** were wrong-envelope paths and nothing else — four of them BLOCKED the
 case outright (a capture landed `undefined`, then a later step refused to send on the unresolved token,
