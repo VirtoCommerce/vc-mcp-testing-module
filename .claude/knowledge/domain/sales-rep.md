@@ -799,3 +799,79 @@ No VirtoOZ page mentions `sales-rep:access`, `sales-rep-documents:read` or `…:
 (`Sales Rep Documents Manager`) appears in no documentation at all — the guides describe exactly two
 selectable roles. So a `{DOC}` oracle can ground the role NAMES and what they broadly grant, never a
 permission string; those are `{SPEC}` from module source.
+
+---
+
+## §11 — Test-data profiles: fixtures vs demo
+
+Not a live-enumeration finding — this section documents the **provisioning layer** the rest of this map
+takes for granted: two mutually exclusive datasets that occupy the same sales-rep surface, authored in
+`scripts/seed-data/sales-rep/`.
+
+**The two profiles.** `fixtures` (default) is the `AGENT-TEST` regression family: deterministic,
+prefix-marked, what the 9 suites in §7 consume. `demo` (`sales-rep-demo-specs.mjs`,
+`seed-sales-rep-demo.mjs`) is presentation-grade: real company names, real street addresses, real orders
+against real catalog products, real document titles backed by real openable files — no `AGENT-TEST`
+string on any surface a viewer can see (enforced by the spec module's own `demoProblems()` gate, which
+the seeder runs before any write). Correct for QA; unusable in front of a customer, and vice versa.
+
+**Why they cannot coexist.** One rep list, one GLOBAL document library, one served-org graph — the same
+three surfaces §2a/§2b/§1 L2 describe. Seeding either profile over a live other yields a mixture that is
+neither a clean fixture set nor a credible demo: a demo document sitting in the same library as sixteen
+`AGENT-TEST-*` rows, or a demo rep's "Organizations served" chip field carrying both real customers and
+paging-fixture orgs.
+
+**Switching profiles.** `TEST_ENV=<env> npm run seed:sales-rep-family -- --teardown`, then
+`TEST_ENV=<env> npm run seed:sales-rep-family -- --profile {demo|fixtures}` (`fixtures` is the default
+and needs no flag). The live profile is recorded in `_meta.dataset_profile` of
+`test-data/aliases.<env>.json` (`sales-rep-demo` or `sales-rep-fixtures`), stamped **before** the chain
+runs so a run that dies halfway still blocks the other profile, and cleared only **after** a fully clean
+teardown. `seed-sales-rep-family.mjs`'s `assertProfileFree()` refuses to seed one profile over a live
+other and prints the teardown command instead of interleaving them.
+
+**`npm run sr:inventory` — the changeover tool a per-CSV teardown cannot substitute for.**
+`inventory-sales-rep.mjs` enumerates every sales-rep entity on an environment, whatever created it, and
+classifies each into four buckets: `protected` (a real reused account, e.g. Alla Volkova — never
+touched), `repo-seeded` (matches a committed CSV/spec row), `repo-family` (carries the `AGENT-TEST` or
+`DEMO-SR` marker but no current CSV/spec row — an orphan), and `foreign` (carries neither — hand-made in
+the Admin UI, and nothing in this repo can recreate it). It exists because the per-CSV/per-ledger
+teardown can only see what it itself declared: a rep created by hand, or a document whose CSV row was
+since deleted, are invisible to it, so it reports a clean sweep over a surface that is still populated.
+Two-phase and confirm-token-gated: a read-only `npm run sr:inventory` prints the report and a
+`sha256`-derived confirm token; `npm run sr:inventory:delete -- --token <t> --env-confirm <env>
+[--include-foreign] [--include-orgs]` re-enumerates, recomputes the token, and aborts if it differs — the
+environment moved since the report was read, so the prior approval no longer covers this set.
+
+**The marker + ledger mechanism, in short.** The demo profile has no family prefix to sweep by, so
+teardown needs two other handles. A **hidden marker** — `demoMarker(type, key)` → `` `DEMO-SR:<type>:<key>` ``
+— is stamped into `outerId` on every globally-enumerable entity (`Member`/`CustomerOrder`, both
+`IHasOuterId`); no storefront fragment or Admin grid column renders `outerId`. An **id ledger** at the
+`_`-prefixed overlay key `_demo_sales_rep_ledger` (in `test-data/aliases.<env>.json`, skipped by
+`td:reconcile`'s member-probe per the leading underscore) covers the two entity types with no spare
+field at all: a sales-rep document's create body is closed (`fileId/category/name/summary/pageCount/
+previewUrl`, every one of which renders) and a task's five inputs are all list/filter/detail fields.
+Neither layer alone is sufficient — a ledger cannot survive an interrupted run or a reverted overlay, and
+a marker cannot reach a document or a task — so teardown reads the ledger first and sweeps by marker for
+orphans. **Verified live 2026-09-23** via `npm run sr:probe-markers` (`probe-demo-markers.mjs`, a
+self-cleaning create→GET→PUT→GET round trip against three throwaway rows): `Organization`, `Contact` and
+`CustomerOrder` `outerId` all round-trip through **both** create and update — the marker is sound, not
+assumed.
+
+**The role constraint is load-bearing.** Per §3b, a plain `Sales Representative` gets no **Document
+library** — no sidebar link, no dashboard widget. A demo rep who must show documents therefore needs
+`Advanced Sales Representative`; the demo spec asserts this live rather than writing it (`DEMO_REPS[].
+salesRepRole`, checked against the rep's actual `roleName`, never force-changed — the two reps are real
+people, so the seeder never mutates a role it did not create).
+
+**The order-date constraint.** `createdDate` is server-assigned and silently ignored on `POST`/`PUT`
+(§5b), so demo order history **cannot be backdated**. The narrative is therefore "a day in the life of
+two reps," not "this quarter" — which also makes every placed-today/new-this-week dashboard counter read
+non-zero, a better demo than an empty widget. Relative recency is controlled the only way it can be:
+**POST order**, latest last (`ordersInPostOrder()`, keyed on each order's declared `seq`).
+
+**State as of 2026-09-23.** virtostart currently holds **neither** profile — the sales-rep surface was
+torn down via `sr:inventory:delete` (14 reps, 31 orders, 16 documents, 14 organizations, 2 roles removed)
+and the demo dataset has not yet been seeded live. Alla Volkova is a rep there today, holding the
+`Advanced Sales Representative` role. Oleg Zhuk has a login account and a Contact record but **no**
+sales-rep record — `resolveReps()` in `seed-sales-rep-demo.mjs` will report him `SKIP … not-a-rep` until
+one is created in the Admin UI; the rest of the demo dataset seeds around him in the meantime.
