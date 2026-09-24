@@ -22,7 +22,7 @@ import {
   RETENTION_DAYS, SWEEP_AFTER_MS, appendEvidence, commitMessage, expiredLogs, flush, logPath,
   logTargetOf, outsideBase, ownFlushDue, queueFiles, sameEvidence, shouldSweep, unionLines,
 } from '../kb/core/push.mjs';
-import { orderQueue, queuePath, releaseConsumed } from '../kb/core/queue.mjs';
+import { orderQueue, queueBacklog, queuePath, readPushStatus, releaseConsumed } from '../kb/core/queue.mjs';
 import { reachPath } from '../kb/core/reach.mjs';
 import { fingerprint, whoPath } from '../kb/core/who.mjs';
 // THE READER, IN THE WRITER'S TEST, DELIBERATELY. STEP 3c's whole claim is that the path gained a
@@ -1401,3 +1401,37 @@ test('sameEvidence is exact on the observation key', () => {
   assert.equal(sameEvidence(e, { ...e, at: 'b' }), false);
   assert.equal(sameEvidence(e, { ...e, contradicts: true }), false);
 });
+
+// ─── a push that fails is visible afterwards (PR #313 review) ─────────────────────────────────
+
+test('a 403 on every push is RECORDED, sticky across a later "nothing", and cleared only by a push that lands', () => withQueue(async ({ dir, env }) => {
+  // The persistent case the detached hook hid: a token without push rights.
+  const state = makeBase([makeEntry({ id: 'KB-11111111', subject: 'a fact' })]);
+  const denied = fakeApi(state, { onUpdateRef: () => ({ ok: false, status: 403, reason: 'denied', detail: 'HTTP 403' }) });
+  await writeQueue(dir, SESSION, [{ at: '2026-09-18T10:02:00Z', kind: 'ask', q: 'x', matched: [], state: 'miss' }]);
+  assert.equal((await run(env, denied)).state, 'failed');
+  let s = readPushStatus(env);
+  assert.equal(s.last.state, 'failed');
+  assert.equal(s.lastFailure.state, 'failed');
+  // 2: the ask, and the failed flush line the push queues about itself.
+  assert.equal(queueBacklog(env).lines, 2, 'the queue is still there, and stat can say so');
+  assert.equal(queueBacklog(env).oldest, '2026-09-18T10:02:00Z');
+
+  // It drains, and the failure is cleared — not by "nothing to do", only by a push that landed.
+  assert.equal((await run(env, fakeApi(state))).state, 'pushed');
+  assert.equal((await run(env, fakeApi(state))).state, 'nothing');
+  s = readPushStatus(env);
+  assert.equal(s.last.state, 'nothing');
+  assert.equal(s.lastFailure, null);
+  assert.equal(s.lastPushed.state, 'pushed');
+  assert.ok(s.lastPushed.commit);
+}));
+
+test('a refused foreign base is recorded as a failure too, and a dry run is not recorded at all', () => withQueue(async ({ dir, env }) => {
+  await writeQueue(dir, SESSION, [{ at: '2026-09-18T10:02:00Z', kind: 'ask', q: 'x', matched: [], state: 'miss' }]);
+  await run(env, fakeApi(makeBase([])), { dryRun: true });
+  assert.deepEqual(readPushStatus(env), {});
+  await run(env, fakeApi(makeBase([])), { base: 'https://raw.githubusercontent.com/someone/else/main/v2' });
+  assert.equal(readPushStatus(env).lastFailure.state, 'foreign-base');
+  assert.ok(!JSON.stringify(readPushStatus(env)).includes('"q"'), 'no queue line is ever stored in the status');
+}));

@@ -38,8 +38,8 @@ import { buildIndex, buildRow, entryPath } from './index-build.mjs';
 import { normalizeRow } from './index-load.mjs';
 import { gateQueue, loadSecrets } from './secret-gate.mjs';
 import {
-  DISABLED_WHY, MUTATIONS, isSynthetic, kbDisabled, log, orderQueue, queueDir, queuePath, readQueue, releaseConsumed,
-  runOf, sessionId,
+  DISABLED_WHY, MUTATIONS, isSynthetic, kbDisabled, log, orderQueue, queueDir, queuePath, readQueue, recordPush,
+  releaseConsumed, runOf, sessionId,
 } from './queue.mjs';
 import { REACH_IDLE_MS, dropReach, idleReaches, reachLine } from './reach.mjs';
 import { toLogLine } from './verbs.mjs';
@@ -478,7 +478,18 @@ export function commitMessage({ session, captures, confirms, disputes, logs }) {
  * @param {Function|null} opts.gate async (plan) => boolean. The operator's yes before a real push.
  *                                 Returning false leaves the queue exactly as it was.
  */
-export async function flush({
+/**
+ * The push, with its outcome recorded (`recordPush`) — every caller goes through here, so a detached
+ * or unawaited push still leaves a trace `kb stat` can show. A dry run and a declined push change
+ * nothing and are not recorded; neither is `disabled`, which is the operator's own choice.
+ */
+export async function flush(opts = {}) {
+  const r = await flushOnce(opts);
+  if (!['dry-run', 'declined', 'disabled'].includes(r.state)) await recordPush(r, { env: opts.env ?? process.env, at: (opts.now ?? (() => new Date()))() });
+  return r;
+}
+
+async function flushOnce({
   env = process.env,
   base = null,
   token = null,
@@ -697,7 +708,9 @@ export async function sweepIfDue({ env = process.env, base = null, token = null,
     if (!mineDue && !(await shouldSweep({ env, now }))) return { state: 'too-soon' };
     return await flush({ env, base, token, now, fetchImpl, includeMine: mineDue, sweep: true });
   } catch (err) {
-    return { state: 'failed', why: String(err?.message ?? err) };
+    const r = { state: 'failed', why: String(err?.message ?? err) };
+    await recordPush(r, { env, at: now() });
+    return r;
   }
 }
 

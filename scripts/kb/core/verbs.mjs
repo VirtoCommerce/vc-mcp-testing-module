@@ -17,7 +17,9 @@ import { anchorProblems, isSingleSegmentPath, namespaceRoots, neighbours } from 
 import { findDuplicate, identityKey, refusalMessage } from './identity.mjs';
 import { buildIndex, buildRow, countEvidence, entryPath } from './index-build.mjs';
 import { loadIndex, normalizeScope, retrievable } from './index-load.mjs';
-import { log, metaAsks, pendingMutations, queueDir, readMeta, readQueue, sessionId } from './queue.mjs';
+import {
+  log, metaAsks, pendingMutations, queueBacklog, queueDir, readMeta, readPushStatus, readQueue, sessionId,
+} from './queue.mjs';
 import { cachedWho } from './who.mjs';
 import { MIN_RELATED_WORDS, RANKER, rank, rankNeighbours, relatedTo, tokenize } from './rank.mjs';
 
@@ -935,6 +937,11 @@ export async function stat(opened, { env = process.env } = {}) {
     queueDepth: queue.lines.length,
     pending: pendingMutations(queue.lines),
     malformedQueueLines: queue.malformed,
+    // EVERY queue file waiting here, not only this session's, and how long the oldest line has sat —
+    // the number that says whether the queue is draining at all. Plus what the last push did, which
+    // is the only trace a detached push leaves (`recordPush`).
+    backlog: queueBacklog(env),
+    push: readPushStatus(env),
   };
   const cat = await catalogue(opened);
   if (cat.state !== 'ok') return { ...out, state: cat.state, why: cat.why };

@@ -27,7 +27,7 @@
  *    flush that can fail a session is worse than a flush that is late.
  */
 import { spawn } from 'node:child_process';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -95,13 +95,26 @@ function main() {
   // being invoked from somewhere else.
   const root = process.env.CLAUDE_PROJECT_DIR || join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
+  // THE CHILD'S OUTPUT GOES TO A FILE, not to nowhere (PR #313 review). `stdio: 'ignore'` made a
+  // persistent failure — a token without push rights, 403 on every turn — invisible to everybody.
+  // Append-only beside the queue, rotated once at 256 KB so it can never grow without bound; the
+  // outcome itself is also recorded by the push (`last-push.json`) and shown by `kb stat`.
+  let out = 'ignore';
+  try {
+    mkdirSync(dir, { recursive: true });
+    const logFile = join(dir, 'push.log');
+    try { if (statSync(logFile).size > 256 * 1024) renameSync(logFile, `${logFile}.1`); } catch { /* no log yet */ }
+    out = openSync(logFile, 'a');
+  } catch { /* an unwritable log must not cost the push */ }
+
   const child = spawn(process.execPath, [join(root, 'scripts', 'kb', 'kb.mjs'), 'push'], {
     cwd: root,
     detached: true,
-    stdio: 'ignore',
+    stdio: ['ignore', out, out],
     env: process.env,
   });
   child.unref();
+  if (typeof out === 'number') closeSync(out);
 }
 
 try { main(); } catch { /* a flush must never fail a session */ }

@@ -21,7 +21,7 @@
 // product. Extending the base to client deployments must re-decide it first (PLAN §7, §11).
 
 import { appendFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -340,6 +340,81 @@ async function noteAsk(env, at, q) {
     const asks = [...metaAsks(meta), { at: String(at), q: String(q ?? '') }].slice(-ASK_MEMORY);
     await writeFile(metaPath(env), JSON.stringify({ ...meta, asks }), 'utf8');
   } catch { /* the pointer is lost, the ask is not */ }
+}
+
+// ── what the last push did: the only trace a detached push leaves ─────────────────────────────
+//
+// A push runs detached from the `Stop` hook, from an unawaited sweep, or on the server's timer —
+// none of them has anybody reading its output. For a TRANSIENT failure that is fine: the queue is
+// durable and the next session sweeps it. For a PERSISTENT one it is a black hole (PR #313 review):
+// a token without push rights answers 403 on every attempt, every capture reports `queued`, and
+// the queue grows in tmpdir until the OS clears it — with the operator believing it all landed.
+// So every push outcome is written HERE, and `kb stat` reads it back.
+
+/** Beside the queue, and NOT a `.jsonl`, so nothing ever sweeps or publishes it. */
+export const pushStatusPath = (env = process.env) => join(queueDir(env), 'last-push.json');
+
+/** States that mean "the queue did not drain" — sticky in `lastFailure` until a push lands. */
+export const PUSH_FAILURES = Object.freeze(['failed', 'foreign-base', 'no-base', 'no-token']);
+
+/** The recorded status, or `{}`. A torn or missing file is "never recorded", never an error. */
+export function readPushStatus(env = process.env) {
+  try {
+    const j = JSON.parse(readFileSync(pushStatusPath(env), 'utf8'));
+    return j && typeof j === 'object' && !Array.isArray(j) ? j : {};
+  } catch { return {}; }
+}
+
+/**
+ * Record one push outcome. `last` is always overwritten; `lastFailure` is kept until a push LANDS,
+ * so a failure is not hidden by a later "nothing to do". Only the state, a short why, the commit and
+ * a count are stored — never a line, a payload or a token.
+ */
+export async function recordPush(r, { env = process.env, at = new Date() } = {}) {
+  try {
+    const prev = readPushStatus(env);
+    const row = {
+      at: at.toISOString(),
+      state: r?.state ?? 'unknown',
+      ...(r?.why ? { why: String(r.why).slice(0, 300) } : {}),
+      ...(r?.commit ? { commit: r.commit } : {}),
+      ...(Number.isFinite(r?.queued) ? { queued: r.queued } : {}),
+    };
+    const failed = PUSH_FAILURES.includes(row.state);
+    const next = {
+      last: row,
+      lastFailure: failed ? row : row.state === 'pushed' ? null : (prev.lastFailure ?? null),
+      ...(row.state === 'pushed' ? { lastPushed: row } : prev.lastPushed ? { lastPushed: prev.lastPushed } : {}),
+    };
+    await mkdir(queueDir(env), { recursive: true });
+    await writeFile(pushStatusPath(env), JSON.stringify(next, null, 2), 'utf8');
+  } catch { /* the status is a report, never a reason a push fails */ }
+}
+
+/**
+ * Every queue file waiting in the directory — this session's and anybody else's — with its depth
+ * and the `at` of its oldest line. Synchronous and read-only: `stat` reports, it never sweeps.
+ */
+export function queueBacklog(env = process.env) {
+  const out = { files: 0, lines: 0, oldest: null };
+  let names = [];
+  try { names = readdirSync(queueDir(env)); } catch { return out; }
+  for (const name of names) {
+    if (!name.endsWith('.jsonl')) continue;
+    let text = '';
+    try { text = readFileSync(join(queueDir(env), name), 'utf8'); } catch { continue; }
+    let n = 0;
+    for (const raw of text.split('\n')) {
+      if (!raw.trim()) continue;
+      n += 1;
+      try {
+        const at = JSON.parse(raw)?.at;
+        if (typeof at === 'string' && (!out.oldest || at < out.oldest)) out.oldest = at;
+      } catch { /* a torn line still counts toward depth */ }
+    }
+    if (n) { out.files += 1; out.lines += n; }
+  }
+  return out;
 }
 
 /**
