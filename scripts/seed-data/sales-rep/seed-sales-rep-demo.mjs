@@ -416,7 +416,8 @@ async function discoverProductPools(need = productNeedByOrg()) {
     // Ask for a wide slice, then narrow it THREE ways. The catalog's search is relevance-ordered
     // but not relevance-bounded (see productMatch in the spec module), it carries near-duplicate
     // rows for the same physical product, and it still serves this repo's own fixture products.
-    const found = await discoverCatalogProducts(api, want * 8 + 40, { searchPhrase: org.productSearch }).catch(() => []);
+    // Capped: discoverCatalogProducts asks for twice this, and a search over ~1000 fails SILENTLY to [].
+    const found = await discoverCatalogProducts(api, Math.min(want * 8 + 40, 450), { searchPhrase: org.productSearch }).catch(() => []);
     const seenName = new Set();
     const usable = [];
     for (const p of found) {
@@ -915,32 +916,46 @@ async function ensureActiveCarts(orgs, pools, cursor = {}) {
     const ctx = `storeId: "${STORE_ID}", userId: "${user.id}", currencyCode: "USD", cultureName: "en-US"`;
 
 
-    let cart = (await gql(`query { cart(${ctx}) { ${CART_SEL} } }`))?.cart;
-    if (cart?.itemsCount > 0) {
-      log(`cart exists: ${who} @ ${org.name} — ${cart.itemsCount} line(s), ${cart.total?.formattedAmount}`);
-    } else {
-      // Walk the org's pool, skipping any product the cart refuses (no price, unavailable): the
-      // pool is discovered for orders, which are POSTed by admin and never check purchasability.
-      const pool = pools[contact.org] || [];
-      const refused = new Set();
-      let lines = 0;
-      while (lines < spec.items && (cursor[contact.org] || 0) < pool.length) {
-        const product = pool[cursor[contact.org] = (cursor[contact.org] || 0) + 1, cursor[contact.org] - 1];
-        const qty = spec.quantities[lines % spec.quantities.length];
-        const r = (await gql(`mutation { addItem(command: { ${ctx}, productId: "${product.id}", quantity: ${qty} }) { ${CART_SEL} } }`))?.addItem;
-        if (r) cart = r;
-        if ((r?.itemsCount || 0) > lines) lines = r.itemsCount;
-        else (r?.validationErrors || []).forEach((e) => refused.add(e.errorCode));
-      }
-      // A refused add leaves nothing behind in the cart, so nothing to clean up — only report it.
-      if (refused.size) (lines < spec.items ? log : verbose)(`  cart ${spec.key}: pool products refused — ${[...refused].join(', ')}${lines < spec.items ? ` (${pool.length} in pool)` : ''}`);
-      if (!cart?.itemsCount) { log(`  WARN cart ${spec.key}: ${who}'s cart is still EMPTY — not an active cart`); if (!cart?.id) continue; }
-      else log(`active cart: ${who} @ ${org.name} — ${cart.itemsCount}/${spec.items} line(s), ${cart.total?.formattedAmount}`);
-    }
+    const { cart, lines, added } = await fillCart(gql, ctx, spec, pools[contact.org] || [], cursor, contact.org);
+    if (!cart?.id) { log(`  WARN cart ${spec.key}: ${who} has no cart`); continue; }
+    if (!lines) log(`  WARN cart ${spec.key}: ${who}'s cart is still EMPTY — not an active cart`);
+    else log(`${added ? 'active cart' : 'cart exists'}: ${who} @ ${org.name} — ${lines}/${spec.items} line(s), ${cart.total?.formattedAmount}`);
     if (cart?.organizationId && cart.organizationId !== org.id) log(`  WARN cart ${spec.key}: organizationId is not ${org.name}`);
     created.push({ type: 'cart', key: spec.key, id: cart.id, owner: contact.email, org: contact.org, itemsCount: cart.itemsCount || 0 });
   }
   return created;
+}
+
+/**
+ * Fill a cart up to `spec.items` NON-GIFT lines from the org's pool — topping up a short cart, not
+ * only an empty one (a gift line from an env cart promotion is not one of ours and never counts).
+ * Any product the cart refuses (no price, no stock) is skipped: the pool is discovered for orders,
+ * which are POSTed by admin and never check purchasability. A refused add leaves nothing behind.
+ */
+async function fillCart(gql, ctx, spec, pool, cursor, orgKey) {
+  const SEL = `${CART_SEL} items { id productId quantity isGift selectedForCheckout }`;
+  const own = (c) => (c?.items || []).filter((i) => !i.isGift).length;
+  let cart = (await gql(`query { cart(${ctx}) { ${SEL} } }`))?.cart;
+  const refused = new Set();
+  let added = 0;
+  // Start where the previous cart stopped (variety), but WRAP rather than stop: on a catalog with one
+  // buyable product per family (virtostart, 2026-09-24) a strict disjoint walk left a buyer cartless.
+  const start = pool.length ? (cursor[orgKey] || 0) % pool.length : 0;
+  for (let n = 0; n < pool.length && own(cart) < spec.items; n += 1) {
+    const product = pool[(start + n) % pool.length];
+    cursor[orgKey] = start + n + 1;
+    // Already in the cart: addItem would RAISE its quantity, not add a line — every re-run would grow it.
+    if ((cart?.items || []).some((i) => i.productId === product.id)) continue;
+    const before = own(cart);
+    const qty = spec.quantities[before % spec.quantities.length];
+    const res = (await gql(`mutation { addItem(command: { ${ctx}, productId: "${product.id}", quantity: ${qty} }) { ${SEL} } }`))?.addItem;
+    if (res) cart = res;
+    if (own(res) > before) added += 1;
+    else (res?.validationErrors || []).forEach((e) => refused.add(e.errorCode));
+  }
+  const lines = own(cart);
+  if (refused.size) (lines < spec.items ? log : verbose)(`  cart ${spec.key}: pool products refused — ${[...refused].join(', ')}${lines < spec.items ? ` (pool of ${pool.length} exhausted)` : ''}`);
+  return { cart, lines, added };
 }
 
 /**
@@ -962,30 +977,18 @@ async function ensureRepCarts(orgs, pools, reps, cursor) {
     const ctx = `storeId: "${STORE_ID}", userId: "${r.rep.userId}", currencyCode: "USD", cultureName: "en-US"`;
     const SEL = `${CART_SEL} items { id quantity isGift selectedForCheckout }`;
 
-    let cart = (await gql(`query { cart(${ctx}) { ${SEL} } }`))?.cart;
-    if (!(cart?.itemsCount > 0)) {
-      // Same pool walk as the buyer carts: skip any product the cart refuses.
-      const pool = pools[spec.org] || [];
-      const refusedRep = new Set();
-      let lines = 0;
-      while (lines < spec.items && (cursor[spec.org] || 0) < pool.length) {
-        const product = pool[cursor[spec.org] = (cursor[spec.org] || 0) + 1, cursor[spec.org] - 1];
-        const qty = spec.quantities[lines % spec.quantities.length];
-        const res = (await gql(`mutation { addItem(command: { ${ctx}, productId: "${product.id}", quantity: ${qty} }) { ${SEL} } }`))?.addItem;
-        if (res) cart = res;
-        if ((res?.itemsCount || 0) > lines) lines = res.itemsCount;
-        else (res?.validationErrors || []).forEach((e) => refusedRep.add(e.errorCode));
-      }
-      if (refusedRep.size && lines < spec.items) log(`  rep cart ${spec.key}: pool products refused — ${[...refusedRep].join(', ')} (${pool.length} in pool)`);
-      if (!cart?.itemsCount) { log(`  WARN rep cart ${spec.key}: still EMPTY — not an active cart`); if (!cart?.id) continue; }
-    }
+    let { cart, lines: filled } = await fillCart(gql, ctx, spec, pools[spec.org] || [], cursor, spec.org);
+    if (!cart?.id) { log(`  WARN rep cart ${spec.key}: no cart`); continue; }
+    if (!filled) log(`  WARN rep cart ${spec.key}: still EMPTY — not an active cart`);
     if (cart?.organizationId && cart.organizationId !== org.id) log(`  WARN rep cart ${spec.key}: organizationId is not ${org.name}`);
 
     // Converge on: the `unselect` smallest-quantity NON-gift lines are off, every other line is on.
     // Response order is not insertion order, and a promotion's gift line must never be the one taken
     // out of checkout — so the choice is by quantity, which is stable across re-runs.
     const lines = (cart?.items || []).filter((i) => !i.isGift);
-    const wantOff = new Set([...lines].sort((a, b) => a.quantity - b.quantity || a.id.localeCompare(b.id)).slice(0, spec.unselect).map((i) => i.id));
+    // Capped at lines-1: unselecting the ONLY line leaves nothing for checkout and a $0.00 cart.
+    const offCount = Math.min(spec.unselect, Math.max(lines.length - 1, 0));
+    const wantOff = new Set([...lines].sort((a, b) => a.quantity - b.quantity || a.id.localeCompare(b.id)).slice(0, offCount).map((i) => i.id));
     const toOff = lines.filter((i) => wantOff.has(i.id) && i.selectedForCheckout !== false).map((i) => i.id);
     const toOn = lines.filter((i) => !wantOff.has(i.id) && i.selectedForCheckout === false).map((i) => i.id);
     for (const [mutation, ids] of [['selectCartItems', toOn], ['unSelectCartItems', toOff]]) {

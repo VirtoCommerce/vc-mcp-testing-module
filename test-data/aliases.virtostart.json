@@ -192,7 +192,7 @@
     "profile": "sales-rep-demo",
     "env": "virtostart",
     "marker": "DEMO-SR",
-    "generated": "2026-09-24T09:44:27.701Z",
+    "generated": "2026-09-24T10:03:24.377Z",
     "entities": [
       {
         "type": "organization",
@@ -466,6 +466,139 @@
         "sha256": "90871f287e0d1bc15797c0a643c50e490b88ed32e7ed8da3fcd96ac81fd15d62"
       },
       {
+        "type": "task",
+        "key": "DTSK-V-01",
+        "id": "ba3dcd9a-0448-45e4-bcaa-dc62db84840f",
+        "ownerUserId": "db222b30-2326-4fe0-86ab-e4d41d9329f2",
+        "name": "Follow up on Northwind reorder"
+      },
+      {
+        "type": "task",
+        "key": "DTSK-V-02",
+        "id": "b6bee6b7-c789-4001-a4df-68628d99b755",
+        "ownerUserId": "db222b30-2326-4fe0-86ab-e4d41d9329f2",
+        "name": "Send Q4 price list to Contoso"
+      },
+      {
+        "type": "task",
+        "key": "DTSK-V-03",
+        "id": "9ec72d40-a841-457c-82bf-dbb48df2a769",
+        "ownerUserId": "db222b30-2326-4fe0-86ab-e4d41d9329f2",
+        "name": "Prepare volume pricing proposal — Fabrikam"
+      },
+      {
+        "type": "task",
+        "key": "DTSK-V-04",
+        "id": "9834ee1b-57f8-4e06-a9e9-4cd80ed14728",
+        "ownerUserId": "db222b30-2326-4fe0-86ab-e4d41d9329f2",
+        "name": "Quarterly business review — Fabrikam Industrial"
+      },
+      {
+        "type": "task",
+        "key": "DTSK-V-05",
+        "id": "ff55581f-c9ef-41b3-ba57-6db76a43dfa9",
+        "ownerUserId": "db222b30-2326-4fe0-86ab-e4d41d9329f2",
+        "name": "Chase cancelled order SO-992788 with Contoso"
+      },
+      {
+        "type": "task",
+        "key": "DTSK-V-06",
+        "id": "8810c43b-e2f4-46ad-b580-35f1a29ccee4",
+        "ownerUserId": "db222b30-2326-4fe0-86ab-e4d41d9329f2",
+        "name": "Update credit terms for Northwind"
+      },
+      {
+        "type": "task",
+        "key": "DTSK-V-07",
+        "id": "5cf34e06-8133-4ed6-8ed7-c48811b66389",
+        "ownerUserId": "db222b30-2326-4fe0-86ab-e4d41d9329f2",
+        "name": "Call Fabrikam about the Plant 2 outage"
+      },
+      {
+        "type": "task",
+        "key": "DTSK-V-08",
+        "id": "593384dd-a1c1-4d26-8bde-779fad560ddc",
+        "ownerUserId": "db222b30-2326-4fe0-86ab-e4d41d9329f2",
+        "name": "Send revised fastener quote to Northwind"
+      },
+      {
+        "type": "task",
+        "key": "DTSK-V-09",
+        "id": "4e5dd892-43f0-4204-aa08-af43d70d92e4",
+        "ownerUserId": "db222b30-2326-4fe0-86ab-e4d41d9329f2",
+        "name": "Confirm delivery of order SO-619637"
+      },
+      {
+        "type": "task",
+        "key": "DTSK-V-10",
+        "id": "22bb6b2d-a21a-4c0f-b42c-b815a7bf776b",
+        "ownerUserId": "db222b30-2326-4fe0-86ab-e4d41d9329f2",
+        "name": "Send credit application to Contoso"
+      },
+      {
+        "type": "task",
+        "key": "DTSK-Z-01",
+        "id": "c9a789ad-fde3-45bf-ab29-a08430cfed82",
+        "ownerUserId": "dbb57432-f627-4e1c-ba34-36be362483ef",
+        "name": "Onboard Wingtip Electrical Supply"
+      },
+      {
+        "type": "task",
+        "key": "DTSK-Z-02",
+        "id": "c2178dd9-e8d3-41d2-bf45-f9fbf4c7c58d",
+        "ownerUserId": "dbb57432-f627-4e1c-ba34-36be362483ef",
+        "name": "Confirm delivery window for Wingtip order SO-741954"
+      },
+      {
+        "type": "task",
+        "key": "DTSK-Z-03",
+        "id": "b687dd6b-bfc9-4cae-8e66-af118319407b",
+        "ownerUserId": "dbb57432-f627-4e1c-ba34-36be362483ef",
+        "name": "Share safety data sheets with Contoso"
+      },
+      {
+        "type": "task",
+        "key": "DTSK-Z-04",
+        "id": "b46b3824-7a6d-4571-82ce-33b7b750d3b7",
+        "ownerUserId": "dbb57432-f627-4e1c-ba34-36be362483ef",
+        "name": "Review Contoso account with Alla"
+      },
+      {
+        "type": "task",
+        "key": "DTSK-Z-05",
+        "id": "150ff3f0-7cf4-4f17-808a-dd871cbaf084",
+        "ownerUserId": "dbb57432-f627-4e1c-ba34-36be362483ef",
+        "name": "Prepare Wingtip volume quote"
+      },
+      {
+        "type": "task",
+        "key": "DTSK-Z-06",
+        "id": "f4d181d1-5578-47a8-956d-5df65c5c3835",
+        "ownerUserId": "dbb57432-f627-4e1c-ba34-36be362483ef",
+        "name": "Archive closed opportunities"
+      },
+      {
+        "type": "task",
+        "key": "DTSK-Z-07",
+        "id": "1fe7fce0-e717-48d2-ae93-188c95aabea3",
+        "ownerUserId": "dbb57432-f627-4e1c-ba34-36be362483ef",
+        "name": "Resolve invoice query on order SO-741953"
+      },
+      {
+        "type": "task",
+        "key": "DTSK-Z-08",
+        "id": "f4b97b07-26e8-48c3-9487-575d70ce8dec",
+        "ownerUserId": "dbb57432-f627-4e1c-ba34-36be362483ef",
+        "name": "Kick-off call with Wingtip"
+      },
+      {
+        "type": "task",
+        "key": "DTSK-Z-09",
+        "id": "aeb1e02a-eb83-43f3-8b30-ce011aa32519",
+        "ownerUserId": "dbb57432-f627-4e1c-ba34-36be362483ef",
+        "name": "Send terms of sale to Contoso"
+      },
+      {
         "type": "rep-attachment",
         "key": "DEMO_REP_VOLKOVA",
         "salesRepId": "aa0b2efc-30ec-41d8-8396-834656ef0cf5",
@@ -586,7 +719,7 @@
         "id": "a20adc9a-7a1a-4219-968f-b3f5e06983e8",
         "owner": "m.hale@northwindtraders.example",
         "org": "DORG-NORTHWIND",
-        "itemsCount": 1
+        "itemsCount": 2
       },
       {
         "type": "cart",
@@ -615,7 +748,7 @@
       {
         "type": "cart",
         "key": "DCART-FB-1",
-        "id": "261f6de7-3cd9-4a74-bdb0-4982f57c61d2",
+        "id": "a45a25e8-bbb0-4a0c-8b09-1f137506b3db",
         "owner": "e.duarte@fabrikam-industrial.example",
         "org": "DORG-FABRIKAM",
         "itemsCount": 1
@@ -623,7 +756,7 @@
       {
         "type": "cart",
         "key": "DCART-FB-2",
-        "id": "31309363-5df8-488d-bed4-5d00a9b78079",
+        "id": "43e59643-06e4-457c-955a-171f7a4f81bf",
         "owner": "m.webb@fabrikam-industrial.example",
         "org": "DORG-FABRIKAM",
         "itemsCount": 1
@@ -631,7 +764,7 @@
       {
         "type": "cart",
         "key": "DCART-WT-1",
-        "id": "c427e21d-e650-4013-90ee-795bfb5fc63f",
+        "id": "76869845-f9d3-4afe-92c3-64ece73b5841",
         "owner": "j.whitfield@wingtip-electrical.example",
         "org": "DORG-WINGTIP",
         "itemsCount": 1
@@ -652,7 +785,7 @@
         "owner": "alla.volkova@virtoway.com",
         "org": "DORG-CONTOSO",
         "createdByRep": "DEMO_REP_VOLKOVA",
-        "itemsCount": 1
+        "itemsCount": 2
       },
       {
         "type": "cart",
@@ -666,11 +799,11 @@
       {
         "type": "cart",
         "key": "DRCART-ZHK-CN",
-        "id": "71bf9908-442d-41e2-bbbe-eb119a8c9c1a",
+        "id": "4db4adc6-0602-4f73-8b8f-8b8d3db15fd6",
         "owner": "oleg@virtoworks.com",
         "org": "DORG-CONTOSO",
         "createdByRep": "DEMO_REP_ZHUK",
-        "itemsCount": 3
+        "itemsCount": 2
       },
       {
         "type": "cart",
@@ -679,7 +812,7 @@
         "owner": "oleg@virtoworks.com",
         "org": "DORG-WINGTIP",
         "createdByRep": "DEMO_REP_ZHUK",
-        "itemsCount": 0
+        "itemsCount": 1
       }
     ]
   }

@@ -119,7 +119,9 @@ export const DEMO_ORGS = [
     productMatch: /\b(printer|toner|cartridge|scanner|copier|multifunction)\b/i,
     // The category word also appears in names that are NOT the category — measured live 2026-09-24:
     // 'Autoclave Tuttnauer "Elara 9i" without printer' and a kids' instant-print camera.
-    productExclude: /\b(without printer|autoclave|camera|kids|toys?)\b/i,
+    // Catalog and storefront names can differ, so the storefront-only words ("…Kids Instant Print
+    // Camera" on a thermal-paper roll) are excluded too — measured live on virtostart 2026-09-24.
+    productExclude: /\b(without printer|autoclave|camera|kids|children|toys?|paper|label|sticker)\b/i,
   },
   {
     key: 'DORG-FABRIKAM',
