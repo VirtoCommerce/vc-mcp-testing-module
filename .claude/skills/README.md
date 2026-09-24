@@ -7,7 +7,7 @@
 > live): `ls .claude/skills | wc -l` for the total,
 > `grep -ohE '^description: "?\[[A-Za-z ]+\]' .claude/skills/*/SKILL.md | sort | uniq -c` for the
 > per-category split. Skills without a tag are the root-level ones (`project-init`,
-> `vc-self-check`) plus `qa-local-env`, which is grouped under Testing but
+> `vc-self-check`, `prompt-review`) plus `qa-local-env`, which is grouped under Testing but
 > carries no tag of its own. Both `[QA Method]` and `[QA Methodology]` spellings exist in the wild — they
 > are the same category.
 
@@ -57,6 +57,7 @@ skills/
 │
 ├── project-init/                    # (root-level) Onboard the toolset onto a deployment
 ├── vc-self-check/                   # (root-level) Self-diagnostician (Tier B) → local DIAG-*.md
+├── prompt-review/                   # (root-level) Review / heal / improve our own skills, commands, agents
 │
 └── README.md                        # This file
 ```
@@ -158,7 +159,7 @@ module-embedded Vue 3 sub-app path.
 
 > `/storybook-test` (UI-kit Storybook play-function interaction tests) is planned/optional — `fullstack-frontend` degrades to a `/vue-unit-test` component test when it's absent.
 
-## Root-level (3)
+## Root-level (4)
 
 Outside the four QA categories.
 
@@ -166,6 +167,7 @@ Outside the four QA categories.
 |-------|---------|-----------------|
 | `/project-init` | Onboard the toolset onto a deployment — native-platform vs client; tracker + VCS host; write `project-profile.json` + `.env.<env>` + `.env.local` + `.mcp.json`; verify access. The profile is what routes each `/qa-fix` to the right repo + tracker | scaffold-env.mjs, scaffold-secrets.mjs, write-env.mjs, gen-profile.mjs, discover-repos.mjs, gen-mcp.mjs, verify-access.mjs |
 | `/vc-self-check` | Tier-B self-diagnostician — reads the passive session-telemetry jsonl + transcript + skill-expectations oracle → per-skill verdict into a local `DIAG-*.md`; the consent-gated `deliver` sub-step contributes a scrubbed quality report to VirtoCommerce. Never modifies the install | SKILL.md, deliver.mjs |
+| `/prompt-review` | Review, heal (`--fix`) and improve (`--improve`) THIS repo's own prompt files — skills, commands, agents in `.claude/` and `plugins/*/` — against 10 dimensions (triggering, BUDGET-004 tiering, single source of truth, no-hardcode, portability, executability, write safety, delegation, grounding, integration); findings to chat, gated by `context:check` | SKILL.md, review-dimensions.md, healing-playbook.md, improvement-loop.md |
 
 ## Agent → Skill Map
 
