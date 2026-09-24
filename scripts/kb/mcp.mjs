@@ -104,6 +104,14 @@ const TOPIC = str('Name what you are working on, as a SHORT ENGLISH NOUN PHRASE 
   + 'Write it yourself, in English: not a sentence, not the prompt you were given, not a translation of it, '
   + `and no customer or client names in it. Cut at ${TOPIC_MAX} characters.`);
 
+// WHAT HAPPENS TO A WRITE, said once for every write verb (PR #313 review). It used to promise
+// "published shortly after, without you doing anything", which KB_PUSH_CONFIRM=1 made untrue, and it
+// said nothing about the host scan — so an agent that quoted a stand's URL had its capture dropped
+// with no idea why. Both are stated here, in the one sentence every write tool shares.
+const PUBLISHED = 'Queued locally, then published to the PUBLIC base with no further step from you — unless the '
+  + 'operator set KB_PUSH_CONFIRM=1, in which case it waits for their review. Name the stand by `deployment` '
+  + '(e.g. vcst_qa), never by host or URL: a line containing the host of a stand, or a secret, is dropped before publishing.';
+
 export const TOOLS = Object.freeze([
   {
     name: 'kb_ask',
@@ -149,7 +157,7 @@ export const TOOLS = Object.freeze([
       + 'Names back the entries YOU OPENED earlier in this session and asks whether what you just wrote '
       + 'disagrees with any of them — if it does, kb_dispute that entry rather than leaving the base '
       + 'holding two answers to one question. Also lists entries sitting at the same coordinates. '
-      + 'Queued locally and published shortly after, without you doing anything.',
+      + PUBLISHED,
     inputSchema: {
       type: 'object',
       properties: {
@@ -169,7 +177,7 @@ export const TOOLS = Object.freeze([
     name: 'kb_confirm',
     description: 'Record that you saw an existing entry hold true on a deployment — its confirmation count is what a later '
       + 'reader weighs the claim by. Use when kb_ask returned an entry and you then observed the same thing yourself. '
-      + 'Queued locally and published shortly after, without you doing anything.',
+      + PUBLISHED,
     inputSchema: {
       type: 'object',
       properties: {
@@ -185,7 +193,7 @@ export const TOOLS = Object.freeze([
     name: 'kb_dispute',
     description: 'Record that an existing entry did NOT hold — what you observed instead, and where. Never deletes or retires '
       + 'anything: one contradiction against four confirmations is a flag for a human, not a deletion. '
-      + 'Queued locally and sent when this session ends.',
+      + PUBLISHED,
     inputSchema: {
       type: 'object',
       properties: {
