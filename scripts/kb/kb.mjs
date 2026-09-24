@@ -231,7 +231,7 @@ async function main(argv) {
       if (r.state === 'failed') out('  the queue is intact; the next session sweeps it.');
     }
     return r.state === 'pushed' || r.state === 'nothing' || r.state === 'dry-run' ? EXIT.ANSWER
-      : r.state === 'no-base' ? EXIT.NO_BASE
+      : r.state === 'no-base' || r.state === 'foreign-base' ? EXIT.NO_BASE
         : r.state === 'failed' ? EXIT.UNREACHABLE : EXIT.NO_COVERAGE;
   }
 

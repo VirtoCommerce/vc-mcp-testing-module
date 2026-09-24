@@ -22,6 +22,7 @@
 import { pathToFileURL } from 'node:url';
 import { execSync } from 'node:child_process';
 
+import { writeRefusal } from './core/base.mjs';
 import { coordinatesOf, githubApi } from './core/github-api.mjs';
 import { logTargetOf } from './core/push.mjs';
 
@@ -167,6 +168,8 @@ async function main(argv) {
   }
   const coords = coordinatesOf(base);
   if (!coords) { console.error(`refused: ${base} is not a raw.githubusercontent.com base`); return 2; }
+  const refused = apply ? writeRefusal(coords) : null;
+  if (refused) { console.error(`refused: ${refused}`); return 2; }
   const token = process.env.KB_GITHUB_TOKEN || process.env.GITHUB_TOKEN
     || (() => { try { return execSync('gh auth token', { encoding: 'utf8' }).trim(); } catch { return null; } })();
   const api = githubApi({ owner: coords.owner, repo: coords.repo, branch: coords.branch, token });

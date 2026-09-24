@@ -36,6 +36,37 @@ registerReader('https', (locator, opts) => httpReader(locator, opts));
 export const DEFAULT_BASE = 'https://raw.githubusercontent.com/VirtoCommerce/vc-knowledge/main';
 
 /**
+ * THE ONE REPO A PUSH MAY WRITE TO, derived from `DEFAULT_BASE` so the two cannot drift.
+ *
+ * READING any base is harmless and stays open — a fixture, a fork, a local checkout. WRITING is
+ * not: the push commits the whole local queue under the developer's `GITHUB_TOKEN`, and the write
+ * coordinates come from the read locator. Without this pin, a session talked into
+ * `KB_BASE=https://raw.githubusercontent.com/<someone>/<repo>/main` — by a page it browsed, a ticket
+ * body, an entry it read — would commit every queued question and capture body to that repo with no
+ * prompt and no output anyone reads. `push.mjs` keeping read and write on the SAME repo guaranteed
+ * consistency, not destination; this guarantees destination.
+ *
+ * `KB_ALLOW_ANY_BASE=1` is the explicit, human-set escape for a deliberate second base.
+ */
+export const WRITE_TARGET = Object.freeze((() => {
+  const m = /^https:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\//i.exec(DEFAULT_BASE);
+  return { owner: m[1], repo: m[2] };
+})());
+
+/**
+ * Why a push to these coordinates is refused, or null when it may go. Owner and repo only: a branch
+ * or a prefix inside the declared repo is still the declared repo. GitHub names are case-insensitive.
+ */
+export function writeRefusal(coords, env = process.env) {
+  if (!coords) return null;
+  if (env.KB_ALLOW_ANY_BASE === '1') return null;
+  const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
+  if (same(coords.owner, WRITE_TARGET.owner) && same(coords.repo, WRITE_TARGET.repo)) return null;
+  return `${coords.owner}/${coords.repo} is not the declared base (${WRITE_TARGET.owner}/${WRITE_TARGET.repo}) — `
+    + 'reading it is fine, writing to it needs KB_ALLOW_ANY_BASE=1';
+}
+
+/**
  * Resolve the base from the precedence chain, most explicit first, and say which link won.
  *
  * @param {{baseArg?: string|null, env?: Record<string,string|undefined>}} opts

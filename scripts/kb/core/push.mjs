@@ -30,6 +30,7 @@
 import { readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { writeRefusal } from './base.mjs';
 import { coordinatesOf, githubApi } from './github-api.mjs';
 import { findDuplicate } from './identity.mjs';
 import { parseEntry, stringifyFrontmatter } from './frontmatter.mjs';
@@ -479,6 +480,10 @@ export async function flush({
   if (!coords) {
     return { state: 'no-base', why: `${base} is not a writable base — the push targets a GitHub repo, and this locator names none` };
   }
+  // DESTINATION, not only consistency: the pin lives in `base.mjs` beside the default it is derived
+  // from. Refused before anything is read or gated, and the queue is left exactly as it was.
+  const refused = writeRefusal(coords, env);
+  if (refused) return { state: 'foreign-base', session: sessionId(env), why: refused };
   const prefix = coords.prefix ?? '';
   const full = (p) => (prefix ? `${prefix}/${p}` : p);
 

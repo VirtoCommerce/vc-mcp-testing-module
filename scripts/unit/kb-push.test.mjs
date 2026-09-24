@@ -14,6 +14,7 @@ import { readFile, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
+import { WRITE_TARGET, writeRefusal } from '../kb/core/base.mjs';
 import { mintId } from '../kb/core/canonical.mjs';
 import { stringifyFrontmatter } from '../kb/core/frontmatter.mjs';
 import { buildIndex, buildRow, entryPath } from '../kb/core/index-build.mjs';
@@ -1058,6 +1059,30 @@ test('a local base is not a writable one, and says so instead of guessing at a r
   const r = await flush({ env: { KB_QUEUE_DIR: tmpdir() }, base: 'C:/some/checkout/v2', token: 't' });
   assert.equal(r.state, 'no-base');
   assert.match(r.why, /not a writable base/);
+});
+
+test('a push to a repo that is not the declared base is REFUSED — reading it is fine, writing is not', () => withQueue(async ({ dir, env }) => {
+  // PR #313 review: the write coordinates came from whatever locator the session read, so a session
+  // talked into `KB_BASE=<attacker>/…` committed its whole queue there under the developer's token.
+  const state = makeBase([makeEntry({ id: 'KB-11111111', subject: 'a fact' })]);
+  const api = fakeApi(state);
+  await writeQueue(dir, SESSION, [{ at: '2026-09-18T10:02:00Z', kind: 'ask', q: 'x', matched: [], state: 'miss' }]);
+  const r = await run(env, api, { base: 'https://raw.githubusercontent.com/someone/kb-mirror/main/v2' });
+  assert.equal(r.state, 'foreign-base');
+  assert.match(r.why, /KB_ALLOW_ANY_BASE=1/);
+  assert.deepEqual(api.calls, [], 'nothing was read, gated or sent');
+  assert.equal(existsSync(join(dir, `${SESSION}.jsonl`)), true, 'the queue is untouched');
+  // The explicit, human-set escape opens it; case alone never does anything.
+  const opened = await run({ ...env, KB_ALLOW_ANY_BASE: '1' }, api, { base: 'https://raw.githubusercontent.com/someone/kb-mirror/main/v2' });
+  assert.equal(opened.state, 'pushed', opened.why);
+}));
+
+test('the pin compares owner/repo case-insensitively and ignores branch and prefix', () => {
+  assert.equal(writeRefusal({ owner: 'virtocommerce', repo: 'VC-KNOWLEDGE', branch: 'x', prefix: 'v2' }, {}), null);
+  assert.equal(WRITE_TARGET.owner, 'VirtoCommerce');
+  assert.equal(WRITE_TARGET.repo, 'vc-knowledge');
+  assert.ok(writeRefusal({ owner: 'VirtoCommerce', repo: 'vc-knowledge-fork' }, {}));
+  assert.ok(writeRefusal({ owner: 'x', repo: 'vc-knowledge' }, { KB_ALLOW_ANY_BASE: 'true' }), 'only the literal 1 opens it');
 });
 
 test('an empty queue pushes nothing at all', () => withQueue(async ({ env }) => {
