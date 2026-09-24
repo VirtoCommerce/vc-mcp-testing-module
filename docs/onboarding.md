@@ -253,6 +253,15 @@ queued and nothing is published, the `Stop` hook does nothing, and the `SessionS
 repo sends nothing. Pushes go only to `VirtoCommerce/vc-knowledge`. A push to any other base is refused
 unless `KB_ALLOW_ANY_BASE=1` is set.
 
+**Reviewing before anything is published.** Set `KB_PUSH_CONFIRM=1` in the same place and nothing is
+published automatically. The hook, the sweep and the server's timer all hold the queue. Run
+`npm run kb -- push` in a terminal to see the exact commit, entry bodies included, and publish only on a
+`y`. The default path is still filtered before any push. A line is dropped if it contains a secret value
+from `.env.local` / `.env.playwright.local`, a token shape (PAT, JWT, Bearer), or a stand's **host** from
+any root `.env*` file. Stands are named by their `deployment` label, never by host. `npm run kb -- stat`
+shows the backlog, the age of the oldest queued line, and the last push result. A failure stays listed
+until a push lands. The detached push's own output goes to `push.log` next to the queue.
+
 **Pin the version — never `@playwright/mcp@latest`.** The pin must match `package.json`'s
 `@playwright/mcp` devDependency and `PLAYWRIGHT_MCP_PACKAGE` in `ci/lib/lane-mcp.ts`; `/project-init`'s
 `gen-mcp.mjs` emits it for the same reason. Two things break on drift: each MCP release bundles its own

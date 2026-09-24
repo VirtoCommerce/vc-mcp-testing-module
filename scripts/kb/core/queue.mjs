@@ -69,6 +69,8 @@ export const MUTATIONS = Object.freeze(['capture', 'confirm', 'dispute']);
  * It is an env var and not a flag because it has to reach the MCP server, which nobody passes
  * arguments to: `KB_SYNTHETIC=1` on the harness that spawns the run covers both doors at once.
  */
+export const isSynthetic = (env = process.env) => /^(1|true|yes|on)$/i.test(String(env.KB_SYNTHETIC ?? '').trim());
+
 /**
  * THE OFF SWITCH (PR #313 review). `KB_ENABLED=0` — set durably in `.claude/settings.local.json`
  * `env`, which reaches hooks and MCP servers as well as the session — takes this machine out of the
@@ -81,10 +83,19 @@ export const MUTATIONS = Object.freeze(['capture', 'confirm', 'dispute']);
  */
 export const kbDisabled = (env = process.env) => /^(0|false|no|off)$/i.test(String(env.KB_ENABLED ?? '').trim());
 
+/**
+ * THE OPERATOR'S YES, opt-in (PR #313 review). `KB_PUSH_CONFIRM=1` holds every push that has no
+ * one to ask — the `Stop` hook, the sweep, the server's timer and shutdown — and leaves the queue
+ * as it is. Only `npm run kb -- push` in a terminal publishes, after showing the plan and getting a
+ * `y`. Off by default: the team default is autonomous publication behind the secret-and-host gate
+ * and the pinned write target; this is for whoever wants to read every commit first.
+ */
+export const pushConfirmRequired = (env = process.env) => /^(1|true|yes|on)$/i.test(String(env.KB_PUSH_CONFIRM ?? '').trim());
+
+export const HELD_WHY = 'KB_PUSH_CONFIRM=1 — held for the operator; run `npm run kb -- push` in a terminal to review and send.';
+
 /** What every refused write says, so the CLI, the MCP text and the push all name the same switch. */
 export const DISABLED_WHY = 'KB_ENABLED=0 on this machine — nothing is queued or published. Unset it to take part again.';
-
-export const isSynthetic = (env = process.env) => /^(1|true|yes|on)$/i.test(String(env.KB_SYNTHETIC ?? '').trim());
 
 /**
  * WHAT RUN THIS WAS -- an opaque operator-set handle that JOINS this log to something outside it.

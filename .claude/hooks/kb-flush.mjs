@@ -32,7 +32,7 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { REACH_IDLE_MS, advanceReach, idleReaches } from '../../scripts/kb/core/reach.mjs';
-import { isSynthetic, kbDisabled, runOf, sessionId } from '../../scripts/kb/core/queue.mjs';
+import { isSynthetic, kbDisabled, pushConfirmRequired, runOf, sessionId } from '../../scripts/kb/core/queue.mjs';
 import { cachedWho } from '../../scripts/kb/core/who.mjs';
 
 function queueHasWork(dir) {
@@ -90,6 +90,8 @@ function main() {
   // ones that could never report themselves. A finished session's counters are queue work now.
   const stale = idleReaches(dir, { session, idleMs: REACH_IDLE_MS }).length > 0;
   if (!queueHasWork(dir) && !stale) return;
+  // KB_PUSH_CONFIRM=1: a detached child has nobody to ask, so it would only hold. Not spawned.
+  if (pushConfirmRequired(process.env)) return;
 
   // `$CLAUDE_PROJECT_DIR` is set for hooks; resolving from this file is the fallback that survives
   // being invoked from somewhere else.

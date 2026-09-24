@@ -1435,3 +1435,29 @@ test('a refused foreign base is recorded as a failure too, and a dry run is not 
   assert.equal(readPushStatus(env).lastFailure.state, 'foreign-base');
   assert.ok(!JSON.stringify(readPushStatus(env)).includes('"q"'), 'no queue line is ever stored in the status');
 }));
+
+// ─── KB_PUSH_CONFIRM=1: nobody to ask means nothing is sent (PR #313 review) ──────────────────
+
+test('KB_PUSH_CONFIRM=1: a push with no gate HOLDS — nothing read, nothing sent, queue intact', () => withQueue(async ({ dir, env }) => {
+  const api = fakeApi(makeBase([makeEntry({ id: 'KB-11111111', subject: 'a fact' })]));
+  await writeQueue(dir, SESSION, [{ at: '2026-09-18T10:02:00Z', kind: 'ask', q: 'x', matched: [], state: 'miss' }]);
+  const confirmEnv = { ...env, KB_PUSH_CONFIRM: '1' };
+  const r = await run(confirmEnv, api);
+  assert.equal(r.state, 'held');
+  assert.deepEqual(api.calls, []);
+  assert.equal(existsSync(join(dir, `${SESSION}.jsonl`)), true);
+  assert.equal(readPushStatus(confirmEnv).last.state, 'held', 'the hold is visible in stat');
+  // The sweep path holds too — it never carries a gate.
+  assert.equal(r.why.includes('npm run kb -- push'), true);
+}));
+
+test('KB_PUSH_CONFIRM=1: a push WITH a gate is shown the plan and sends only on yes', () => withQueue(async ({ dir, env }) => {
+  const state = makeBase([makeEntry({ id: 'KB-11111111', subject: 'a fact' })]);
+  await writeQueue(dir, SESSION, [{ at: '2026-09-18T10:02:00Z', kind: 'ask', q: 'x', matched: [], state: 'miss' }]);
+  const confirmEnv = { ...env, KB_PUSH_CONFIRM: '1' };
+  assert.equal((await run(confirmEnv, fakeApi(state), { gate: async () => false })).state, 'declined');
+  let shown = null;
+  const r = await run(confirmEnv, fakeApi(state), { gate: async (plan) => { shown = plan; return true; } });
+  assert.equal(r.state, 'pushed', r.why);
+  assert.ok(shown?.writes?.length, 'the operator saw what was written');
+}));

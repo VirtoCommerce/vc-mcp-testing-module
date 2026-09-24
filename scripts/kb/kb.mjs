@@ -19,7 +19,7 @@
 import { openBase } from './core/base.mjs';
 import { EXIT, HEADLINE, exitFor } from './core/exits.mjs';
 import { flush, sweepIfDue } from './core/push.mjs';
-import { queueDir } from './core/queue.mjs';
+import { pushConfirmRequired, queueDir } from './core/queue.mjs';
 import { resolveWho } from './core/who.mjs';
 import { writeToken } from './core/token.mjs';
 import { askLines, captureLines, evidenceLines, showLines } from './core/render.mjs';
@@ -211,11 +211,15 @@ async function main(argv) {
   if (verb === 'push' || verb === 'flush') {
     // The one verb that sends anything. Everything else in this CLI is local.
     const { token, from } = writeToken();
+    // KB_PUSH_CONFIRM=1: a terminal is the one place a person can say yes, so only there is a gate
+    // offered. Anywhere else (the hook's detached child, a pipe) there is no gate and the push HOLDS.
+    const gate = pushConfirmRequired() && process.stdin.isTTY ? confirmPlan : null;
     const r = await flush({
       base: opened.locator,
       token,
       dryRun: Boolean(args.flags['dry-run']),
       sweep: !args.flags['no-sweep'],
+      gate,
     });
     if (json) { out(JSON.stringify(r, null, 2)); }
     else if (r.state === 'pushed') {
@@ -239,7 +243,7 @@ async function main(argv) {
       if (r.state === 'failed') out('  the queue is intact; the next session sweeps it.');
     }
     return r.state === 'pushed' || r.state === 'nothing' || r.state === 'dry-run' ? EXIT.ANSWER
-      : r.state === 'no-base' || r.state === 'foreign-base' || r.state === 'disabled' ? EXIT.NO_BASE
+      : r.state === 'no-base' || r.state === 'foreign-base' || r.state === 'disabled' || r.state === 'held' ? EXIT.NO_BASE
         : r.state === 'failed' ? EXIT.UNREACHABLE : EXIT.NO_COVERAGE;
   }
 
@@ -247,6 +251,24 @@ async function main(argv) {
   out('');
   out(USAGE);
   return EXIT.NO_BASE;
+}
+
+/**
+ * Show the exact commit and ask. Everything that would be written is listed with its size, and the
+ * entry BODIES are printed in full: they are the free prose the gate cannot judge, and the reason
+ * this mode exists.
+ */
+async function confirmPlan(plan) {
+  const { createInterface } = await import('node:readline/promises');
+  const say = (s) => process.stdout.write(`${s}\n`);
+  say(`kb push: about to commit on ${plan.parent.slice(0, 7)} — ${plan.message}`);
+  for (const w of plan.writes) {
+    say(`  + ${w.path}  (${w.text.length} B)`);
+    if (/(^|\/)entries\//.test(w.path)) say(w.text.replace(/^/gm, '    | '));
+  }
+  for (const d of plan.deletions) say(`  - ${d}  (retention)`);
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try { return /^y(es)?$/i.test((await rl.question('publish this to the PUBLIC base? [y/N] ')).trim()); } finally { rl.close(); }
 }
 
 /**

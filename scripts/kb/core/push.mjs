@@ -38,7 +38,7 @@ import { buildIndex, buildRow, entryPath } from './index-build.mjs';
 import { normalizeRow } from './index-load.mjs';
 import { gateQueue, loadSecrets } from './secret-gate.mjs';
 import {
-  DISABLED_WHY, MUTATIONS, isSynthetic, kbDisabled, log, orderQueue, queueDir, queuePath, readQueue, recordPush,
+  DISABLED_WHY, HELD_WHY, MUTATIONS, isSynthetic, pushConfirmRequired, kbDisabled, log, orderQueue, queueDir, queuePath, readQueue, recordPush,
   releaseConsumed, runOf, sessionId,
 } from './queue.mjs';
 import { REACH_IDLE_MS, dropReach, idleReaches, reachLine } from './reach.mjs';
@@ -506,6 +506,8 @@ async function flushOnce({
 } = {}) {
   const session = sessionId(env);
   if (kbDisabled(env)) return { state: 'disabled', session, why: DISABLED_WHY };
+  // Nobody to ask means nothing is sent: held before anything is read, the queue untouched.
+  if (pushConfirmRequired(env) && !gate && !dryRun) return { state: 'held', session, why: HELD_WHY };
   // The repo coordinates come from the READ locator, always — `injected` replaces the transport and
   // nothing else. Deriving the write target from the base the session read is what makes "you
   // cannot read one base and write to another" true by construction.
