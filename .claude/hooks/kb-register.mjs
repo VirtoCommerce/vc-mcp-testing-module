@@ -24,7 +24,10 @@
  * `kb` key, leaves every other server byte-for-byte, refuses a `.mcp.json` that does not parse
  * rather than rewriting it, and does not touch the file at all when nothing changed.
  */
-import { install } from '../../scripts/kb/install-mcp.mjs';
+import { install, uninstall } from '../../scripts/kb/install-mcp.mjs';
+import { kbDisabled } from '../../scripts/kb/core/queue.mjs';
 
-try { install(); } catch { /* a registration must never fail a session start */ }
+// `KB_ENABLED=0` is the durable off switch: removed, not merely not-added, so opting out is one
+// setting (`.claude/settings.local.json` `env`) and survives every later session start.
+try { if (kbDisabled(process.env)) uninstall(); else install(); } catch { /* a registration must never fail a session start */ }
 process.exit(0);

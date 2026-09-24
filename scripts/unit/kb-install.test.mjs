@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { KB_SERVER, install, merge } from '../kb/install-mcp.mjs';
+import { KB_SERVER, install, merge, uninstall, unmerge } from '../kb/install-mcp.mjs';
 
 const json = (o) => JSON.stringify(o, null, 2);
 
@@ -77,4 +77,32 @@ test('install() writes only when something changed', () => {
   const refused = install(fake('{ broken'));
   assert.equal(refused.state, 'invalid');
   assert.equal(writes.length, 1, 'and a refusal certainly does not');
+});
+
+// ─── the off switch and the pinned command (PR #313 review) ───────────────────────────────────
+
+test('KB_SERVER is pinned: the command settings.json pre-approves by NAME cannot change as an ordinary hunk', () => {
+  // `enabledMcpjsonServers: ["kb"]` approves whatever this constant says. A change to it must fail
+  // here and be re-approved on purpose, not ride in unnoticed.
+  assert.deepEqual(KB_SERVER, { command: 'node', args: ['scripts/kb/mcp.mjs'] });
+});
+
+test('unmerge drops exactly the kb key and leaves every other server and top-level key alone', () => {
+  const before = { mcpServers: { kb: KB_SERVER, github: { command: 'docker' } }, other: 1 };
+  const r = unmerge(json(before));
+  assert.equal(r.state, 'removed');
+  assert.deepEqual(JSON.parse(r.text), { mcpServers: { github: { command: 'docker' } }, other: 1 });
+  assert.equal(unmerge(r.text).state, 'absent', 'a second run is a no-op');
+  assert.equal(unmerge('').state, 'absent');
+  assert.equal(unmerge('{nope').state, 'invalid', 'a broken config is refused, never rewritten');
+});
+
+test('uninstall writes only when there was something to remove', () => {
+  const writes = [];
+  const fake = (text) => ({ env: { VC_ENV_ROOT: '/r' }, exists: () => true, read: () => text, write: (p, t) => writes.push(t) });
+  uninstall(fake(json({ mcpServers: { github: {} } })));
+  assert.equal(writes.length, 0);
+  uninstall(fake(json({ mcpServers: { kb: KB_SERVER, github: {} } })));
+  assert.equal(writes.length, 1);
+  assert.deepEqual(JSON.parse(writes[0]).mcpServers, { github: {} });
 });

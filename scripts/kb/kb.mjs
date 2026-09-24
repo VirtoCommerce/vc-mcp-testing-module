@@ -186,7 +186,7 @@ async function main(argv) {
     // exists, and instead of a duplicate the base gets a confirmation) -- but it is not a queued
     // capture either, and 0 would say it was.
     if (r.state === 'invalid' || r.state === 'refused') return EXIT.NO_COVERAGE;
-    return r.state === 'queued' ? EXIT.ANSWER : exitFor(r.state);
+    return r.state === 'queued' ? EXIT.ANSWER : r.state === 'disabled' ? EXIT.NO_BASE : exitFor(r.state);
   }
 
   if (verb === 'confirm' || verb === 'dispute') {
@@ -197,7 +197,7 @@ async function main(argv) {
     if (json) out(JSON.stringify(r, null, 2));
     else emit(evidenceLines(verb, r));
     if (r.state === 'invalid') return EXIT.NO_COVERAGE;
-    return r.state === 'queued' ? EXIT.ANSWER : exitFor(r.state);
+    return r.state === 'queued' ? EXIT.ANSWER : r.state === 'disabled' ? EXIT.NO_BASE : exitFor(r.state);
   }
 
   if (verb === 'push' || verb === 'flush') {
@@ -231,7 +231,7 @@ async function main(argv) {
       if (r.state === 'failed') out('  the queue is intact; the next session sweeps it.');
     }
     return r.state === 'pushed' || r.state === 'nothing' || r.state === 'dry-run' ? EXIT.ANSWER
-      : r.state === 'no-base' || r.state === 'foreign-base' ? EXIT.NO_BASE
+      : r.state === 'no-base' || r.state === 'foreign-base' || r.state === 'disabled' ? EXIT.NO_BASE
         : r.state === 'failed' ? EXIT.UNREACHABLE : EXIT.NO_COVERAGE;
   }
 

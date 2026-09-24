@@ -37,7 +37,7 @@ import { parseEntry, stringifyFrontmatter } from './frontmatter.mjs';
 import { buildIndex, buildRow, entryPath } from './index-build.mjs';
 import { normalizeRow } from './index-load.mjs';
 import { gateQueue, loadSecrets } from './secret-gate.mjs';
-import { MUTATIONS, isSynthetic, log, queueDir, queuePath, readQueue, runOf, sessionId } from './queue.mjs';
+import { DISABLED_WHY, MUTATIONS, isSynthetic, kbDisabled, log, queueDir, queuePath, readQueue, runOf, sessionId } from './queue.mjs';
 import { REACH_IDLE_MS, dropReach, idleReaches, reachLine } from './reach.mjs';
 import { toLogLine } from './verbs.mjs';
 import { cachedWho } from './who.mjs';
@@ -473,6 +473,7 @@ export async function flush({
   sleep = (ms) => new Promise((r) => { setTimeout(r, ms); }),
 } = {}) {
   const session = sessionId(env);
+  if (kbDisabled(env)) return { state: 'disabled', session, why: DISABLED_WHY };
   // The repo coordinates come from the READ locator, always — `injected` replaces the transport and
   // nothing else. Deriving the write target from the base the session read is what makes "you
   // cannot read one base and write to another" true by construction.
@@ -660,7 +661,7 @@ export async function ownFlushDue({ env = process.env, now = () => new Date() } 
 
 export async function sweepIfDue({ env = process.env, base = null, token = null, now = () => new Date(), fetchImpl = null } = {}) {
   try {
-    if (env.KB_NO_SWEEP) return { state: 'off' };
+    if (env.KB_NO_SWEEP || kbDisabled(env)) return { state: 'off' };
     if (!coordinatesOf(base)) return { state: 'off', why: 'not a writable base' };
     const mineDue = await ownFlushDue({ env, now });
     const due = await queueFiles({ env, now, sweep: true, includeMine: false });

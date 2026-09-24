@@ -1316,3 +1316,12 @@ test('a `session` line for a state that never saw a run handle carries none', ()
   assert.equal(line.session, 'quiet004');
   assert.ok(!('run' in line), 'no run beats the pusher’s');
 })));
+
+test('KB_ENABLED=0: the flush sends nothing and the queue is left exactly as it was', () => withQueue(async ({ dir, env }) => {
+  const api = fakeApi(makeBase([makeEntry({ id: 'KB-11111111', subject: 'a fact' })]));
+  await writeQueue(dir, SESSION, [{ at: '2026-09-18T10:02:00Z', kind: 'ask', q: 'x', matched: [], state: 'miss' }]);
+  const r = await run({ ...env, KB_ENABLED: '0' }, api);
+  assert.equal(r.state, 'disabled');
+  assert.deepEqual(api.calls, []);
+  assert.equal(existsSync(join(dir, `${SESSION}.jsonl`)), true);
+}));

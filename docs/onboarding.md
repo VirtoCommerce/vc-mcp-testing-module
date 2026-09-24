@@ -246,6 +246,13 @@ teammate is a full-value reader and can still record what they found — **but n
 drains on the machine it was written on**, so a reader-only machine accumulates locally until a token
 appears there.
 
+**Opting out.** The base is on by default. To take a machine out of it, set `KB_ENABLED=0` in the
+`env` block of your own `.claude/settings.local.json` and restart. With the switch set, nothing is
+queued and nothing is published, the `Stop` hook does nothing, and the `SessionStart` hook *removes*
+`kb` from `.mcp.json` rather than adding it back. `npm run kb -- ask` still reads, since reading a public
+repo sends nothing. Pushes go only to `VirtoCommerce/vc-knowledge`. A push to any other base is refused
+unless `KB_ALLOW_ANY_BASE=1` is set.
+
 **Pin the version — never `@playwright/mcp@latest`.** The pin must match `package.json`'s
 `@playwright/mcp` devDependency and `PLAYWRIGHT_MCP_PACKAGE` in `ci/lib/lane-mcp.ts`; `/project-init`'s
 `gen-mcp.mjs` emits it for the same reason. Two things break on drift: each MCP release bundles its own

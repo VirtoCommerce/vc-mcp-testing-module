@@ -59,6 +59,34 @@ export function merge(existingText, server = KB_SERVER) {
   };
 }
 
+/**
+ * The inverse of `merge`: drop exactly the `kb` key, leave every other server and the rest of the
+ * file alone. `absent` when there is nothing to remove, so a disabled machine's file is not rewritten
+ * on every session start.
+ */
+export function unmerge(existingText) {
+  if (!existingText || !existingText.trim()) return { state: 'absent', text: existingText };
+  let doc;
+  try { doc = JSON.parse(existingText); } catch (err) {
+    return { state: 'invalid', why: `.mcp.json is not valid JSON (${err.message}) — fix it, then re-run` };
+  }
+  if (!doc?.mcpServers || typeof doc.mcpServers !== 'object' || !('kb' in doc.mcpServers)) return { state: 'absent', text: existingText };
+  const { kb: _dropped, ...rest } = doc.mcpServers;
+  return { state: 'removed', text: `${JSON.stringify({ ...doc, mcpServers: rest }, null, 2)}
+`, servers: Object.keys(rest) };
+}
+
+/**
+ * `KB_ENABLED=0` (PR #313 review): the SessionStart hook REMOVES the entry instead of adding it, so
+ * the off switch is one setting and not "delete it from .mcp.json and watch the hook put it back".
+ */
+export function uninstall({ env = process.env, write = writeFileSync, read = readFileSync, exists = existsSync } = {}) {
+  const path = join(repoRoot(env), '.mcp.json');
+  const r = unmerge(exists(path) ? read(path, 'utf8') : '');
+  if (r.state === 'removed') write(path, r.text, 'utf8');
+  return { ...r, path };
+}
+
 export function install({ env = process.env, write = writeFileSync, read = readFileSync, exists = existsSync } = {}) {
   const path = join(repoRoot(env), '.mcp.json');
   const current = exists(path) ? read(path, 'utf8') : '';

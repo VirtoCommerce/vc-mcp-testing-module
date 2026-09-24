@@ -69,6 +69,21 @@ export const MUTATIONS = Object.freeze(['capture', 'confirm', 'dispute']);
  * It is an env var and not a flag because it has to reach the MCP server, which nobody passes
  * arguments to: `KB_SYNTHETIC=1` on the harness that spawns the run covers both doors at once.
  */
+/**
+ * THE OFF SWITCH (PR #313 review). `KB_ENABLED=0` — set durably in `.claude/settings.local.json`
+ * `env`, which reaches hooks and MCP servers as well as the session — takes this machine out of the
+ * base's WRITE side entirely: nothing is queued, nothing is pushed or swept, the `Stop` hook does
+ * nothing, and `kb-register` removes the `kb` server from `.mcp.json` instead of adding it.
+ * Reading stays possible through the CLI, because reading a public repo sends nothing.
+ *
+ * Default ON (opt-out), and only an explicit falsy literal turns it off: an unset or mistyped value
+ * leaves the team default in place rather than silently opting somebody out.
+ */
+export const kbDisabled = (env = process.env) => /^(0|false|no|off)$/i.test(String(env.KB_ENABLED ?? '').trim());
+
+/** What every refused write says, so the CLI, the MCP text and the push all name the same switch. */
+export const DISABLED_WHY = 'KB_ENABLED=0 on this machine — nothing is queued or published. Unset it to take part again.';
+
 export const isSynthetic = (env = process.env) => /^(1|true|yes|on)$/i.test(String(env.KB_SYNTHETIC ?? '').trim());
 
 /**
@@ -240,6 +255,9 @@ export function queuePath(env = process.env) {
  * its lines already carry the run they were written under.
  */
 export async function log(record, { env = process.env, who, run } = {}) {
+  // Off means off: a line queued while disabled would be published the moment the switch is
+  // unset, which is the opposite of what turning it off asked for.
+  if (kbDisabled(env)) return { ok: false, disabled: true, path: queuePath(env), line: null, why: DISABLED_WHY };
   // All three marks are stamped LAST and by the single writer, so no verb can forget one and no
   // verb can fake one: `synthetic` because an env var must cover every line a benchmark run
   // produces including its flush, `run` for the same reason one level up -- a run handle that only

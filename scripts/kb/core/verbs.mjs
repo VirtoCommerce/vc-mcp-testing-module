@@ -848,6 +848,7 @@ export async function capture(input, opened, { env = process.env, via = null, ca
     payload: { entry, body: String(input.claim).trim(), key: identityKey({ anchors: input.anchors, scope }) },
   }, { env });
 
+  if (written.disabled) return { state: 'disabled', why: written.why };
   return { state: 'queued', id, entry, queuedTo: written.path, logWrite: written, alsoHere, related, read: readRows };
 }
 
@@ -907,6 +908,7 @@ async function appendEvidence(kind, id, input, opened, { env = process.env, via 
   // A dispute NEVER auto-retires anything. One contradicting observation against four
   // confirmations is not a deletion; it is a flag, and a human decides. Automatic retirement on a
   // single dissent would let one bad observation delete four good ones.
+  if (written.disabled) return { state: 'disabled', why: written.why };
   return { state: 'queued', id: row.id, row, item, queuedTo: written.path, logWrite: written };
 }
 

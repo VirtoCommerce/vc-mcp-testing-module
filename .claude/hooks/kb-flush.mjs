@@ -32,7 +32,7 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { REACH_IDLE_MS, advanceReach, idleReaches } from '../../scripts/kb/core/reach.mjs';
-import { isSynthetic, runOf, sessionId } from '../../scripts/kb/core/queue.mjs';
+import { isSynthetic, kbDisabled, runOf, sessionId } from '../../scripts/kb/core/queue.mjs';
 import { cachedWho } from '../../scripts/kb/core/who.mjs';
 
 function queueHasWork(dir) {
@@ -54,6 +54,10 @@ function main() {
   // harness with a broken pipe, and a malformed payload must not cost the turn.
   let payload = null;
   try { payload = JSON.parse(readFileSync(0, 'utf8')); } catch { /* no stdin, or not JSON — fine */ }
+
+  // THE OFF SWITCH, after stdin is drained and before anything is counted or spawned: a machine that
+  // opted out contributes neither a push nor a `session` line (`queue.mjs` `kbDisabled`).
+  if (kbDisabled(process.env)) return;
 
   const dir = process.env.KB_QUEUE_DIR || join(tmpdir(), 'claude-kb-queue');
 

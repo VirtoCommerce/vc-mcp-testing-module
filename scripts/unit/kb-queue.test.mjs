@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { KEY_LEN, LOGGED, MUTATIONS, RUN_MAX, pendingMutations, queuePath, readQueue, runOf, sessionId, shortSession } from '../kb/core/queue.mjs';
+import { KEY_LEN, LOGGED, MUTATIONS, RUN_MAX, kbDisabled, pendingMutations, queuePath, readQueue, runOf, sessionId, shortSession } from '../kb/core/queue.mjs';
 import { localReader } from '../kb/core/reader.mjs';
 import { ask, capture, confirm, dispute, show, stat, toLogLine } from '../kb/core/verbs.mjs';
 
@@ -365,4 +365,21 @@ test('stat names the base AND how it was chosen, and reports the queue depth', (
   assert.equal(s.queueDepth, 2);
   assert.equal(s.pending, 1, 'one queued change, one log line');
   assert.equal(s.active, s.entries - 1, 'the fixture holds exactly one retired entry');
+}));
+
+// ─── the off switch (PR #313 review) ──────────────────────────────────────────────────────────
+
+test('KB_ENABLED: only an explicit falsy literal turns it off — unset or mistyped keeps the team default', () => {
+  for (const v of ['0', 'false', 'no', 'off', ' OFF ']) assert.equal(kbDisabled({ KB_ENABLED: v }), true, v);
+  for (const v of [undefined, '', '1', 'true', 'disable']) assert.equal(kbDisabled({ KB_ENABLED: v }), false, String(v));
+});
+
+test('disabled: a capture or a confirm is REFUSED and nothing is queued — it would publish once re-enabled', () => withQueue(async (dir, env) => {
+  const off = { ...env, KB_ENABLED: '0' };
+  const c = await capture(CAPTURE, opened(), { env: off });
+  assert.equal(c.state, 'disabled');
+  assert.match(c.why, /KB_ENABLED=0/);
+  const a = await ask('why does the shipping method reset', opened(), { env: off });
+  assert.equal(a.state === 'answer' || a.state === 'miss', true, 'reading still works');
+  assert.equal((await readQueue({ env: off })).lines.length, 0, 'not one line was queued');
 }));
