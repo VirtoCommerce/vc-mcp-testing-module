@@ -310,7 +310,7 @@ export function nearMisses(lines, idx) {
 export function captureLoop(lines) {
   const askAt = new Map();
   for (const l of lines) {
-    if (l.kind === 'ask' && l.at) askAt.set(`${l._session} ${String(l.at)}`, l);
+    if (l.kind === 'ask' && l.at) askAt.set(`${l._session}\0${String(l.at)}`, l);
   }
 
   const rows = [];
@@ -322,7 +322,7 @@ export function captureLoop(lines) {
     const isRefused = l.kind === 'capture-refused';
     if (!isCapture && !isRefused) continue;
 
-    const ask = l.after ? askAt.get(`${l._session} ${String(l.after)}`) : null;
+    const ask = l.after ? askAt.get(`${l._session}\0${String(l.after)}`) : null;
     let link;
     if (!l.after) { link = 'unlinked'; counts.unlinked += 1; } else if (!ask) { link = 'dangling'; counts.dangling += 1; } else if (ask.state === 'miss') {
       link = 'after-miss';
