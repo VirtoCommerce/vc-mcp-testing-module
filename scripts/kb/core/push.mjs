@@ -528,7 +528,7 @@ export async function flush({
   const secrets = loadSecrets(env);
   let dropped = 0;
   for (const f of loaded) {
-    const gated = gateQueue(f.lines, secrets.values);
+    const gated = gateQueue(f.lines, secrets.values, secrets.hosts);
     f.lines = gated.kept;
     f.dropped = gated.dropped;
     dropped += gated.dropped.length;

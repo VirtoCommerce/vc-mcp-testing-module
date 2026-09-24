@@ -24,7 +24,7 @@
 // stripped the log line but still committed its payload would launder the secret into the one
 // artifact everybody reads.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -80,12 +80,96 @@ export function secretFiles(env = process.env) {
   return [join(root, '.env.local'), join(root, '.env.playwright.local')];
 }
 
+// ── deployment hosts: not secrets, but not ours to publish either ─────────────────────────────
+//
+// A value scan over SECRETS cannot see the other thing that must not reach a public base: where
+// the stand is. `qa-admin-<client>.example.com` is not a credential, so no secret-shaped key names
+// it, and yet a capture that quotes it tells the world which client runs on which host. The base
+// names a stand by its `deployment` label (`vcst`, `leo`), never by its host, so a host in a line
+// is never the only way to say what that line says.
+//
+// Read from EVERY `.env*` file at the root, not only the active `TEST_ENV`'s: a session on `vcst`
+// can still paste a URL it saw on another stand, and the host it would leak is exactly the one the
+// active layer does not carry.
+
+/** Keys whose value is a location. The suffix, not a substring: `URL_PREFIX_MODE` is not one. */
+export const HOST_NAME = /(?:^|_)(?:URL|HOST|HOSTNAME|DOMAIN|ENDPOINT)$/i;
+
+/**
+ * Hosts that ARE public and that a question legitimately names: the base's own GitHub, a vendor
+ * CMS. A host listed here is never a hit. Kept short on purpose — adding one widens the aperture.
+ */
+export const PUBLIC_HOSTS = Object.freeze(new Set([
+  'github.com', 'api.github.com', 'raw.githubusercontent.com', 'builder.io',
+]));
+
+const LOOPBACK = /^(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[?::1\]?)$/i;
+
+/** One URL-ish value -> its host, or null. Scheme optional: `ADMIN_URL=host:8090` is common. */
+export function hostOf(value) {
+  let v = String(value ?? '').trim();
+  const q = v.charAt(0);
+  if ((q === '"' || q === "'") && v.endsWith(q) && v.length > 1) v = v.slice(1, -1);
+  if (!v) return null;
+  let host;
+  try { host = new URL(/^\w+:\/\//.test(v) ? v : `https://${v}`).hostname.toLowerCase(); } catch { return null; }
+  // A dotless name is a machine on this LAN (or `localhost`), not a stand anybody can reach.
+  if (!host.includes('.') || LOOPBACK.test(host) || PUBLIC_HOSTS.has(host)) return null;
+  return host;
+}
+
+/** One env file's text -> the deployment hosts in it. Pure, like `secretValuesFrom`. */
+export function hostValuesFrom(text) {
+  const out = new Set();
+  for (const raw of String(text).split(/\r?\n/)) {
+    const l = raw.trim();
+    if (!l || l.startsWith('#')) continue;
+    const e = l.indexOf('=');
+    if (e < 1) continue;
+    if (!HOST_NAME.test(l.slice(0, e).trim())) continue;
+    const h = hostOf(l.slice(e + 1));
+    if (h) out.add(h);
+  }
+  return out;
+}
+
+/**
+ * Every `.env*` file at the env root — the same root `secretFiles` anchors on. `VC_MEASURE_SECRETS`
+ * overrides this list too, for the reason it overrides that one: one explicit list of files, so a
+ * caller that pinned what the gate reads gets exactly that and nothing from the repo around it.
+ */
+export function hostFiles(env = process.env) {
+  if (env.VC_MEASURE_SECRETS) return env.VC_MEASURE_SECRETS.split(';').filter(Boolean);
+  const root = env.VC_ENV_ROOT || resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  try {
+    return readdirSync(root).filter((n) => /^\.env(?:\.|$)/.test(n)).map((n) => join(root, n));
+  } catch { return []; }
+}
+
+/** The deployment hosts: every root `.env*` file, plus URL-shaped keys of the live environment. */
+export function loadHosts(env = process.env) {
+  const hosts = new Set();
+  for (const f of hostFiles(env)) {
+    let text;
+    try { text = readFileSync(f, 'utf8'); } catch { continue; }
+    for (const h of hostValuesFrom(text)) hosts.add(h);
+  }
+  for (const [k, v] of Object.entries(env)) {
+    if (!HOST_NAME.test(k)) continue;
+    const h = hostOf(v);
+    if (h) hosts.add(h);
+  }
+  return hosts;
+}
+
 /**
  * Load the secret values. Values are never returned to a caller that prints them and never logged;
  * the COUNT is reported, so an operator can see the gate loaded something rather than assume it.
+ * The deployment hosts ride along as `hosts` (see `loadHosts`); `count` stays the secret count.
  */
 export function loadSecrets(env = process.env) {
   const values = new Set();
+  const hosts = loadHosts(env);
   const read = [];
   for (const f of secretFiles(env)) {
     let text;
@@ -97,20 +181,47 @@ export function loadSecrets(env = process.env) {
     read.push(f);
     for (const v of secretValuesFrom(text)) values.add(v);
   }
-  return { values, files: read, count: values.size };
+  return { values, hosts, files: read, count: values.size };
+}
+
+/**
+ * Every string in a queue line — values AND keys, at any depth — exactly as it will be written.
+ *
+ * THE SCAN RUNS OVER THESE, NEVER OVER `JSON.stringify(line)`. Serialising first escapes `"`, `\`,
+ * a tab and a newline, so a secret containing any of them no longer appears in the serialised text
+ * and a substring test passes it straight through — in the flattering direction, on the one control
+ * between `.env.local` and a public repo. The raw strings are what the commit will carry once it is
+ * serialised the SAME way on the other side, so they are the only honest thing to compare against.
+ */
+export function stringsOf(value, out = []) {
+  if (typeof value === 'string') out.push(value);
+  else if (Array.isArray(value)) for (const v of value) stringsOf(v, out);
+  else if (value && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) { out.push(k); stringsOf(v, out); }
+  }
+  return out;
 }
 
 /**
  * What tripped, if anything. Returns the KINDS only -- never the matched text, because a scanner
  * that prints the secret it found has published it to the terminal, the transcript and the log.
+ *
+ * `text` is one string or an array of them (`stringsOf` of a line). Hosts match case-insensitively:
+ * a hostname is, and `VCST-QA.govirto.com` is the same stand.
  */
-export function scanText(text, secrets = new Set()) {
+export function scanText(text, secrets = new Set(), hosts = new Set()) {
   const hits = [];
-  const s = String(text);
+  const parts = (Array.isArray(text) ? text : [text]).map(String);
   for (const v of secrets) {
-    if (v && s.includes(v)) { hits.push('env-secret-value'); break; }
+    if (v && parts.some((s) => s.includes(v))) { hits.push('env-secret-value'); break; }
   }
-  for (const [name, re] of TOKEN_SHAPES) if (re.test(s)) hits.push(name);
+  if (hosts.size) {
+    const lower = parts.map((s) => s.toLowerCase());
+    for (const h of hosts) {
+      if (h && lower.some((s) => s.includes(h))) { hits.push('env-host'); break; }
+    }
+  }
+  for (const [name, re] of TOKEN_SHAPES) if (parts.some((s) => re.test(s))) hits.push(name);
   return hits;
 }
 
@@ -121,11 +232,11 @@ export function scanText(text, secrets = new Set()) {
  * WHAT KIND of thing it was -- a gap with a shape is a finding; a gap with no shape is an unexplained
  * hole in the record.
  */
-export function gateQueue(lines, secrets = new Set()) {
+export function gateQueue(lines, secrets = new Set(), hosts = new Set()) {
   const kept = [];
   const dropped = [];
   for (const line of lines) {
-    const hits = scanText(JSON.stringify(line), secrets);
+    const hits = scanText(stringsOf(line), secrets, hosts);
     if (!hits.length) { kept.push(line); continue; }
     dropped.push({ line, hits });
     // `who` survives with them, off the ORIGINAL line and never off this process: a redaction is a

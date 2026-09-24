@@ -7,11 +7,13 @@
 // much is one people turn off.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 import {
-  MIN_SECRET_LENGTH, SECRET_NAME, gateQueue, loadSecrets, looksLikePath, scanText, secretFiles,
-  secretValuesFrom,
+  HOST_NAME, MIN_SECRET_LENGTH, PUBLIC_HOSTS, SECRET_NAME, gateQueue, hostValuesFrom, loadHosts,
+  loadSecrets, looksLikePath, scanText, secretFiles, secretValuesFrom, stringsOf,
 } from '../kb/core/secret-gate.mjs';
 
 // ─── the loader, lifted from the vendor scanner ───────────────────────────────────────────────
@@ -158,4 +160,65 @@ test('the gate does not block: everything else in the queue still goes', () => {
   const lines = [line({ q: 'clean one' }), line({ q: 'has hunter2-not-really in it' }), line({ q: 'clean two' })];
   const { kept } = gateQueue(lines, new Set(['hunter2-not-really']));
   assert.deepEqual(kept.filter((l) => l.kind === 'ask').map((l) => l.q), ['clean one', 'clean two']);
+});
+
+// ─── escaping must not hide a secret (PR #313 review) ─────────────────────────────────────────
+
+test('a secret containing a quote, a backslash, a tab or a newline is still caught — JSON escaping must not hide it', () => {
+  // The gate used to scan `JSON.stringify(line)` against the RAW value: `quote"pass123` appears in
+  // the serialised line as `quote\"pass123`, the substring test failed, and the line was pushed.
+  for (const secret of ['quote"pass123', 'back\\slash99', 'tab\there99', 'new\nline99', 'plain-secret99']) {
+    const bad = line({ q: `login with ${secret} fails`, payload: { body: `saw ${secret}` } });
+    const { kept, dropped } = gateQueue([bad], new Set([secret]));
+    assert.equal(dropped.length, 1, `${JSON.stringify(secret)} must be caught`);
+    assert.equal(JSON.stringify(kept).includes(JSON.stringify(secret).slice(1, -1)), false,
+      `${JSON.stringify(secret)} must not survive into what is published`);
+  }
+});
+
+test('a secret used as an object KEY is caught too — keys are published as well as values', () => {
+  const { dropped } = gateQueue([line({ payload: { 'hunter2-not-really': 1 } })], new Set(['hunter2-not-really']));
+  assert.equal(dropped.length, 1);
+});
+
+test('stringsOf walks values and keys at every depth, and leaves non-strings out', () => {
+  assert.deepEqual(stringsOf({ a: 'x', b: [1, 'y', { c: 'z' }], d: null }).sort(), ['a', 'b', 'c', 'd', 'x', 'y', 'z']);
+});
+
+// ─── deployment hosts ─────────────────────────────────────────────────────────────────────────
+
+test('a host is read off a URL-shaped KEY, with or without a scheme, and loopback / LAN / public hosts are not hosts', () => {
+  const hosts = hostValuesFrom([
+    'FRONT_URL=https://qa-frontend-client.example.com/',
+    'ADMIN_URL=admin.example.net:8090',
+    'BACK_URL=http://localhost:8090',
+    'SEARCH_HOST=buildbox',
+    'DEPLOY_PACKAGES_URL=https://github.com/VirtoCommerce/vc-deploy-dev/blob/x/backend/packages.json',
+    'STORE_ID=shop.example.org',
+    '# OLD_URL=https://commented.example.com',
+  ].join('\n'));
+  assert.deepEqual([...hosts].sort(), ['admin.example.net', 'qa-frontend-client.example.com']);
+  assert.ok(PUBLIC_HOSTS.has('github.com'));
+  assert.ok(HOST_NAME.test('BACK_URL') && !HOST_NAME.test('URL_PREFIX_MODE'));
+});
+
+test('a line that names a deployment host is dropped, case-insensitively, with the kind `env-host`', () => {
+  const hosts = new Set(['qa-frontend-client.example.com']);
+  const bad = line({ kind: 'capture', payload: { body: 'on https://QA-Frontend-Client.example.com/cart the total is wrong' } });
+  const { kept, dropped } = gateQueue([line(), bad], new Set(), hosts);
+  assert.equal(dropped.length, 1);
+  assert.deepEqual(kept[1].hits, ['env-host']);
+  assert.ok(!JSON.stringify(kept).toLowerCase().includes('qa-frontend-client'));
+});
+
+test('hosts are loaded from every root .env* file and from URL-shaped keys of the live env', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kb-hosts-'));
+  try {
+    writeFileSync(join(dir, '.env.vcst'), 'FRONT_URL=https://one.example.com\n');
+    writeFileSync(join(dir, '.env.client'), 'BACK_URL=https://two.example.com\n');
+    writeFileSync(join(dir, 'not-an-env'), 'BACK_URL=https://three.example.com\n');
+    const hosts = loadHosts({ VC_ENV_ROOT: dir, STORYBOOK_URL: 'https://four.example.com' });
+    assert.deepEqual([...hosts].sort(), ['four.example.com', 'one.example.com', 'two.example.com']);
+    assert.ok(loadSecrets({ VC_ENV_ROOT: dir }).hosts.has('two.example.com'), 'loadSecrets carries them');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
