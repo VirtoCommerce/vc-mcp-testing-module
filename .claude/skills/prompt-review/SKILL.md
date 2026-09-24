@@ -53,7 +53,9 @@ of them and this skill disagree, they win — and that disagreement is a finding
 
 1. **Name → files.** Check `.claude/skills/<name>/`, `.claude/commands/<name>.md`,
    `.claude/agents/<name>.md`, then the same under `plugins/*/`. Every hit is reviewed **as one
-   unit** — the command/skill split and any duplicate copy are part of what is under review.
+   unit** — the command/skill split and any duplicate copy are part of what is under review. An
+   **alias** stub (a skill that forwards to another) is the unit; read the skill it forwards to only
+   as far as needed to check the alias against it — findings in that skill are a separate run.
 2. **`changed`** → the union of `git diff --name-only origin/main...HEAD` and
    `git diff --name-only HEAD`, filtered to `SKILL.md`, its supporting files, `commands/*.md` and
    `agents/*.md` under `.claude/` or `plugins/*/` (**not** `.claude/skills/README.md` or `.claude/ROUTING.md`). If
@@ -69,8 +71,8 @@ of them and this skill disagree, they win — and that disagreement is a finding
    "Canonical copy"). They are `.mjs`, so they are outside `--fix` scope: report drift, never heal it.
 5. **Concurrent editors** (this skill's own rule, by analogy with the suite one-author rule in
    `.claude/rules/regression.md`): probe with `git log --all --since=3.days --oneline -- <paths>` and,
-   when GitHub MCP is available, `search_pull_requests` for open PRs in this repo touching the
-   paths. A hit → stop and say who. If neither probe could run, say "concurrent edits not
+   when GitHub MCP is available, `list_pull_requests` (state open, this repo) then `pull_request_read`
+   `get_files` on each — PR search matches text, not changed files. A hit → stop and say who. If neither probe could run, say "concurrent edits not
    verified" — never let the check pass silently.
 
 ## Step 1 — Collect facts deterministically (one batch, before reading prose)

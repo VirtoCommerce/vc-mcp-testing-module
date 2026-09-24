@@ -20,7 +20,7 @@ for(const f of process.argv.slice(1)){const o=r.prompts.over.find(x=>x.file===f)
 wc -c $T
 ```
 
-**Grep pack** — candidates only; confirm each before it becomes a finding:
+**Grep pack** — candidates only; confirm each before it becomes a finding (a grep with no hits exits 1 — that is not an error):
 ```bash
 grep -nE '\b(feedback|reference|project)_[a-z0-9_]{3,}' $T                        # D5 memory slugs
 grep -nE '~?\b[0-9]{2,}\+?[- ](suites?|test cases?|cases?|agents?|skills?|commands?|files?|dimensions?|class(es)?|groups?)\b' $T  # D3 counts
@@ -34,7 +34,7 @@ grep -nE '~/\.claude|settings\.local\.json|[A-Z]:\\|/Users/' $T                 
 ```
 
 **Citation sweep** — resolves markdown links and backticked file names relative to the citing
-file, the repo root and (for `plugins/*`) the plugin root; checks `file.md §Heading` (first two words); skips fenced code; flags a bare
+file, the repo root, `.claude/` and (for `plugins/*`) the plugin root; checks `file.md §Heading` (first two words); skips fenced code; flags a bare
 `§N` with no file; prints each `BL-*` id's real title so you can check it backs the claim:
 ```bash
 node -e '
@@ -42,9 +42,9 @@ const fs=require("fs"),path=require("path"),all=require("child_process").execSyn
 const bl=fs.readFileSync(".claude/knowledge/oracles/business-logic.md","utf8");
 const heads=f=>{try{return fs.readFileSync(f,"utf8").split("\n").filter(l=>/^#+ /.test(l)).map(l=>l.replace(/^#+\s*/,"").toLowerCase())}catch{return null}};
 for(const f of process.argv.slice(1)){const plug=(f.match(/^plugins\/[^/]+\//)||[""])[0];
- const resolve=r=>[path.join(path.dirname(f),r),r,plug&&path.join(plug,r)].find(p=>p&&fs.existsSync(p));
+ const resolve=r=>[path.join(path.dirname(f),r),r,plug&&path.join(plug,r),path.join(".claude",r)].find(p=>p&&fs.existsSync(p));
  let fence=false;fs.readFileSync(f,"utf8").split("\n").forEach((l,i)=>{const at=`${f}:${i+1}`;if(/^```/.test(l)){fence=!fence;return}if(fence)return;
-  const refs=[...l.matchAll(/\]\(([^)#\s]+)/g),...l.matchAll(/`([^`\s]+\.(?:md|mjs|ts|js|json|yml|csv))`/g)].map(m=>m[1]);
+  const bare=l.replace(/\[[^\]]*\]\([^)]*\)/g,"");const refs=[...l.matchAll(/\]\(([^)#\s]+)/g),...bare.matchAll(/`([^`\s]+\.(?:md|mjs|ts|js|json|yml|csv))`/g)].map(m=>m[1]);
   for(const r of refs){if(/^https?:|[<*{$]|XX|\.\.\./.test(r))continue;
    if(!resolve(r)){const hit=all.filter(p=>p.endsWith("/"+path.basename(r)));console.log(`${at}  UNRESOLVED ${r}${hit.length?"  (same name at: "+hit.slice(0,2).join(", ")+")":""}`)}}
   for(const m of l.matchAll(/`([^`\s]+\.md)`\s*§\s*([A-Za-z0-9][^`,;.)*—(]{2,40})/g)){const p=resolve(m[1]);const h=p&&heads(p);const want=m[2].replace(/[^\w\s-]/g," ").trim().toLowerCase().split(/\s+/).slice(0,2).join(" ");
@@ -163,7 +163,8 @@ example, MAJOR in a rule. Exact UI strings cited as `{DOC}` → MINOR (they are 
 
 - Callers (SKILL.md Step 2) still match name, arguments and outputs; a mismatch → MAJOR.
 - **`disable-model-invocation: true` + a caller that invokes it by name** (a pipeline phase, a CI
-  workflow) → MAJOR: the call cannot run.
+  workflow) → MAJOR: the Skill tool cannot run it; a model falling back to reading the `SKILL.md`
+  is an unreliable workaround, not a pass.
 - Listed in `.claude/skills/README.md` and, if user-facing, `.claude/ROUTING.md` → MINOR if missing.
 - `.claude/` ↔ `plugins/vc-fix/` copies: a difference is reported and asked about, not judged;
   self-diagnostics containment files that are not byte-identical → MAJOR (SKILL.md Step 0.4).
@@ -176,5 +177,6 @@ example, MAJOR in a rule. Exact UI strings cited as `{DOC}` → MINOR (they are 
 - **HEALTHY** — no BLOCKER, no MAJOR.
 - **NEEDS HEALING** — no BLOCKER; every MAJOR has a concrete fix in `healing-playbook.md` (SAFE or
   PROPOSE) that does not need restructuring the prompt.
-- **NEEDS REDESIGN** — a BLOCKER, or a MAJOR whose fix means restructuring steps, changing the
-  prompt's contract with callers, or a decision nobody in the evidence has made.
+- **NEEDS REDESIGN** — a BLOCKER, or a MAJOR whose fix means restructuring the steps or changing
+  the prompt's arguments/outputs that callers rely on. A MAJOR settled by one PROPOSE recipe (e.g.
+  H10, flip a flag) is still NEEDS HEALING — the decision is the user's, the fix is local.
