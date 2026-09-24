@@ -10,19 +10,19 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
-import { readFile, utimes, writeFile } from 'node:fs/promises';
+import { appendFile, readFile, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
 import { WRITE_TARGET, writeRefusal } from '../kb/core/base.mjs';
 import { mintId } from '../kb/core/canonical.mjs';
-import { stringifyFrontmatter } from '../kb/core/frontmatter.mjs';
+import { parseEntry, stringifyFrontmatter } from '../kb/core/frontmatter.mjs';
 import { buildIndex, buildRow, entryPath } from '../kb/core/index-build.mjs';
 import {
   RETENTION_DAYS, SWEEP_AFTER_MS, appendEvidence, commitMessage, expiredLogs, flush, logPath,
-  logTargetOf, outsideBase, ownFlushDue, queueFiles, shouldSweep, unionLines,
+  logTargetOf, outsideBase, ownFlushDue, queueFiles, sameEvidence, shouldSweep, unionLines,
 } from '../kb/core/push.mjs';
-import { queuePath } from '../kb/core/queue.mjs';
+import { orderQueue, queuePath, releaseConsumed } from '../kb/core/queue.mjs';
 import { reachPath } from '../kb/core/reach.mjs';
 import { fingerprint, whoPath } from '../kb/core/who.mjs';
 // THE READER, IN THE WRITER'S TEST, DELIBERATELY. STEP 3c's whole claim is that the path gained a
@@ -144,10 +144,18 @@ async function withQueue(fn) {
 const writeQueue = (dir, session, lines) =>
   writeFile(join(dir, `${session}.jsonl`), `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`, 'utf8');
 
-const captureLine = (entry, body = 'The claim, in prose.') => ({
-  at: '2026-09-18T10:15:00Z', kind: 'capture', id: entry.data.id, subject: entry.data.subject,
-  payload: { entry: entry.data, body, key: 'k' },
-});
+// Each capture carries ITS OWN evidence item, minted at verb time with its own `at` — as `capture`
+// does for real. Reusing `makeEntry`'s seed item here made two unrelated captures byte-identical
+// observations, which `sameEvidence` now (correctly) treats as one.
+let minted = 0;
+const captureLine = (entry, body = 'The claim, in prose.') => {
+  minted += 1;
+  const item = { method: 'observation', deployment: 'vcptcore_stable', at: `2026-09-18T10:15:00.${String(minted).padStart(3, '0')}Z`, by: `session:${SESSION}` };
+  return {
+    at: '2026-09-18T10:15:00Z', kind: 'capture', id: entry.data.id, subject: entry.data.subject,
+    payload: { entry: { ...entry.data, evidence: [item] }, body, key: 'k' },
+  };
+};
 
 const confirmLine = (id, path) => ({
   at: '2026-09-18T10:40:00Z', kind: 'confirm', id, deployment: 'vcptcore_stable', trust: 2,
@@ -1325,3 +1333,71 @@ test('KB_ENABLED=0: the flush sends nothing and the queue is left exactly as it 
   assert.deepEqual(api.calls, []);
   assert.equal(existsSync(join(dir, `${SESSION}.jsonl`)), true);
 }));
+
+// ─── the queue is released by what was READ, not deleted whole (PR #313 review) ───────────────
+
+test('a line appended WHILE the push is in flight survives it — only the consumed bytes are released', () => withQueue(async ({ dir, env }) => {
+  const state = makeBase([makeEntry({ id: 'KB-11111111', subject: 'a fact' })]);
+  const api = fakeApi(state);
+  const file = join(dir, `${SESSION}.jsonl`);
+  await writeQueue(dir, SESSION, [{ at: '2026-09-18T10:02:00Z', kind: 'ask', q: 'x', matched: [], state: 'miss' }]);
+  // The capture that follows an ask by seconds, landing between the read and the ref update.
+  const late = captureLine(makeEntry({ id: 'KB-33333333', subject: 'written mid-push', anchors: ['/late'] }));
+  const update = api.updateRef;
+  api.updateRef = async (args) => { await appendFile(file, `${JSON.stringify(late)}\n`, 'utf8'); return update(args); };
+  const r = await run(env, api);
+  assert.equal(r.state, 'pushed', r.why);
+  const left = (await readFile(file, 'utf8')).trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(left, [late], 'the late capture is still queued, and nothing already published is');
+}));
+
+test('releaseConsumed keeps everything when the file is not the one that was read', () => withQueue(async ({ dir }) => {
+  const file = join(dir, 'x.jsonl');
+  await writeFile(file, 'b\n', 'utf8');
+  const r = await releaseConsumed(file, Buffer.from('a\n'));
+  assert.deepEqual(r, { released: 0, kept: 2 });
+  assert.equal(await readFile(file, 'utf8'), 'b\n');
+  assert.deepEqual(await releaseConsumed(join(dir, 'gone.jsonl'), Buffer.from('a')), { released: 0, kept: 0 });
+}));
+
+test('orderQueue restores write order by `at`, stable, and an undated line keeps its place', () => {
+  const lines = [{ at: '2026-09-18T10:05:00.000Z', n: 3 }, { at: '2026-09-18T10:01:00.000Z', n: 1 }, { n: 2 }, { at: '2026-09-18T10:01:00.000Z', n: 4 }];
+  assert.deepEqual(orderQueue(lines).map((l) => l.n), [1, 2, 4, 3]);
+});
+
+// ─── a re-applied mutation is not a second observation (PR #313 review) ───────────────────────
+
+test('a capture pushed TWICE leaves ONE evidence item — no inflated trust, no conversion counted', () => withQueue(async ({ dir, env }) => {
+  const state = makeBase([makeEntry({ id: 'KB-11111111', subject: 'a fact' })]);
+  const fresh = makeEntry({ id: 'KB-22222222', subject: 'a brand new fact', anchors: ['/checkout/shipping'] });
+  const line = captureLine(fresh);
+  await writeQueue(dir, SESSION, [line]);
+  assert.equal((await run(env, fakeApi(state))).state, 'pushed');
+  // The same queue line again: a lost CAS retried, or a second pusher before the release.
+  await writeQueue(dir, SESSION, [line]);
+  const r2 = await run(env, fakeApi(state));
+  assert.equal(r2.state, 'pushed', r2.why);
+  assert.equal(r2.converted, 0, 'a repeat is not a conversion');
+  const { data } = parseEntry(state.files.get('v2/entries/KB-22222222.md'), 'KB-22222222');
+  assert.equal(data.evidence.length, 1);
+  assert.equal(linesOfSession(state, SESSION).filter((l) => l.kind === 'capture-refused').length, 0);
+}));
+
+test('a confirm applied twice appends once; a genuinely later observation still appends', () => withQueue(async ({ dir, env }) => {
+  const state = makeBase([makeEntry({ id: 'KB-11111111', subject: 'a fact' })]);
+  const c = confirmLine('KB-11111111', 'entries/KB-11111111.md');
+  await writeQueue(dir, SESSION, [c, c]);
+  assert.equal((await run(env, fakeApi(state))).state, 'pushed');
+  const later = { ...c, payload: { ...c.payload, item: { ...c.payload.item, at: '2026-09-18T10:41:00Z' } } };
+  await writeQueue(dir, SESSION, [c, later]);
+  assert.equal((await run(env, fakeApi(state))).state, 'pushed');
+  const { data } = parseEntry(state.files.get('v2/entries/KB-11111111.md'), 'KB-11111111');
+  assert.equal(data.evidence.length, 3, 'the seed, the confirm once, and the later one');
+}));
+
+test('sameEvidence is exact on the observation key', () => {
+  const e = { at: 'a', by: 's', method: 'observation', deployment: 'd' };
+  assert.equal(sameEvidence(e, { ...e, note: 'different prose is still the same observation' }), true);
+  assert.equal(sameEvidence(e, { ...e, at: 'b' }), false);
+  assert.equal(sameEvidence(e, { ...e, contradicts: true }), false);
+});

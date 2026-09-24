@@ -27,7 +27,7 @@
 // log line never does. `toLogLine()` in `verbs.mjs` is the ONE place that distinction lives, and
 // every line is mapped through it on the way into the log blob.
 
-import { readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { readdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { writeRefusal } from './base.mjs';
@@ -37,7 +37,10 @@ import { parseEntry, stringifyFrontmatter } from './frontmatter.mjs';
 import { buildIndex, buildRow, entryPath } from './index-build.mjs';
 import { normalizeRow } from './index-load.mjs';
 import { gateQueue, loadSecrets } from './secret-gate.mjs';
-import { DISABLED_WHY, MUTATIONS, isSynthetic, kbDisabled, log, queueDir, queuePath, readQueue, runOf, sessionId } from './queue.mjs';
+import {
+  DISABLED_WHY, MUTATIONS, isSynthetic, kbDisabled, log, orderQueue, queueDir, queuePath, readQueue, releaseConsumed,
+  runOf, sessionId,
+} from './queue.mjs';
 import { REACH_IDLE_MS, dropReach, idleReaches, reachLine } from './reach.mjs';
 import { toLogLine } from './verbs.mjs';
 import { cachedWho } from './who.mjs';
@@ -95,6 +98,9 @@ export const stamp = (d) => `${dateStamp(d)}`
  * contain (PLAN §21.7 item 3) — hold the same lines, compute the same paths, and `unionLines`
  * merges them. The counter, its file and the two ordering rules that guarded it are gone because
  * the state they guarded is no longer reachable, not because it stopped mattering.
+ *
+ * That argument covers LOG LINES ONLY. A MUTATION applied twice is not merged by `unionLines`; it is
+ * kept from counting twice by `sameEvidence` in `appendEvidence` (PR #313 review).
  *
  * DATE FIRST, so a listing of `log/` is chronological and `--days N` is a prefix test on a name.
  * FLAT, with no day folder: the date is already in the name, and a folder holding it a second time
@@ -238,9 +244,19 @@ export async function queueFiles({
  */
 export function appendEvidence(text, item, where) {
   const { data, body } = parseEntry(text, where);
+  // ALREADY THERE: the same observation re-applied — a lost compare-and-swap retried, or a second
+  // pusher over a queue file the first had not yet released. Appending it again would read as an
+  // independent corroboration: trust +1 and the label flipping to "corroborated" on one observation,
+  // in a public append-only base (PR #313 review). `at` is an ISO-ms stamp minted once per verb, so
+  // a genuine second observation always differs on it.
+  if ((data.evidence ?? []).some((e) => sameEvidence(e, item))) return { text, data, already: true };
   const next = { ...data, evidence: [...(data.evidence ?? []), item] };
   return { text: `${stringifyFrontmatter(next)}\n${body}`, data: next };
 }
+
+/** Two evidence items are ONE observation when these agree. Exact on purpose: see `appendEvidence`. */
+const EVIDENCE_KEY = ['at', 'by', 'method', 'deployment', 'contradicts'];
+export const sameEvidence = (a, b) => EVIDENCE_KEY.every((k) => (a?.[k] ?? null) === (b?.[k] ?? null));
 
 /** A new entry's file. The trailing newline is added if the claim did not carry one. */
 export function entryText(entry, body) {
@@ -289,6 +305,8 @@ export async function applyQueue({ lines, rows, read, at = new Date() }) {
       problems.push({ id, why: `${path} did not parse: ${err.message}` });
       return false;
     }
+    // Nothing to write and nothing to count: the item is in the entry already.
+    if (applied.already) return 'already';
     files.set(path, applied.text);
     rowFor(applied.data, path);
     return true;
@@ -334,6 +352,9 @@ export async function applyQueue({ lines, rows, read, at = new Date() }) {
       if (target) {
         const item = { ...(entry.evidence?.[0] ?? { method: 'observation', at: at.toISOString() }) };
         const ok = await addEvidence(target.id, target.path ?? entryPath(target.id), item, target.id);
+        // A capture re-applied onto the entry IT created is not a duplicate someone else wrote —
+        // it is this same line landing twice. No refusal line, and no conversion counted.
+        if (ok === 'already') continue;
         extraLog.push({
           at: at.toISOString(),
           kind: 'capture-refused',
@@ -518,7 +539,7 @@ export async function flush({
   const loaded = [];
   for (const f of files) {
     const q = await readQueue({ env, path: f.path });
-    if (q.lines.length) loaded.push({ ...f, lines: q.lines, malformed: q.malformed });
+    if (q.lines.length) loaded.push({ ...f, lines: orderQueue(q.lines), malformed: q.malformed, raw: q.raw });
   }
   if (!loaded.length) {
     await touchStamp({ env, now });
@@ -584,10 +605,12 @@ export async function flush({
     const landed = await land({ api, plan: built.plan });
     if (landed.ok) {
       await touchStamp({ env, now });
-      // A queue file that cannot be removed is published again by the next push — into the SAME
-      // paths, where `unionLines` merges it rather than doubling it. That is the whole reason no
-      // ordering rule has to be kept here any more.
-      for (const f of loaded) { try { await rm(f.path, { force: true }); } catch { /* merged, not doubled, next time */ } }
+      // A queue file that cannot be released is published again by the next push — into the SAME
+      // paths, where `unionLines` merges its log lines and `applyQueue` skips a repeated evidence
+      // item, so it is merged, never doubled.
+      // ONLY WHAT WAS READ is released (`releaseConsumed`): a line appended while this push was in
+      // flight stays queued for the next one (PR #313 review — deleting the file whole lost it).
+      for (const f of loaded) { try { await releaseConsumed(f.path, f.raw); } catch { /* merged, not doubled, next time */ } }
       return {
         state: 'pushed',
         session,

@@ -20,7 +20,7 @@
 // run over this file BEFORE the push, plus the fact that these questions are about a public
 // product. Extending the base to client deployments must re-decide it first (PLAN §7, §11).
 
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -342,11 +342,25 @@ async function noteAsk(env, at, q) {
   } catch { /* the pointer is lost, the ask is not */ }
 }
 
-/** Read this session's queue back -- used by `stat` for the depth, and by the pusher later. */
+/**
+ * Read this session's queue back -- used by `stat` for the depth, and by the pusher later.
+ *
+ * `raw` is the exact bytes that were read. The pusher needs them to release ONLY what it consumed:
+ * the queue has writers that hold no lock (the MCP server's verbs, a CLI call, the `Stop` hook's
+ * detached push), so the file can grow between this read and a successful push, and deleting it
+ * whole destroyed whatever arrived in that window (PR #313 review) -- typically the capture that
+ * follows an ask by seconds. See `releaseConsumed`.
+ */
 export async function readQueue({ env = process.env, path = null } = {}) {
   const file = path ?? queuePath(env);
-  if (!existsSync(file)) return { path: file, lines: [], malformed: 0 };
-  const text = await readFile(file, 'utf8');
+  if (!existsSync(file)) return { path: file, lines: [], malformed: 0, raw: Buffer.alloc(0) };
+  let raw;
+  try { raw = await readFile(file); } catch (err) {
+    // Rotated away between the existence check and the read: another pusher has it.
+    if (err.code === 'ENOENT') return { path: file, lines: [], malformed: 0, raw: Buffer.alloc(0) };
+    throw err;
+  }
+  const text = raw.toString('utf8');
   const lines = [];
   let malformed = 0;
   for (const raw of text.split('\n')) {
@@ -359,7 +373,53 @@ export async function readQueue({ env = process.env, path = null } = {}) {
       malformed += 1;
     }
   }
-  return { path: file, lines, malformed };
+  return { path: file, lines, malformed, raw };
+}
+
+/**
+ * After a successful push, drop exactly the bytes that push read -- never the whole file.
+ *
+ * ROTATE, THEN INSPECT. The file is renamed away first, which is atomic: from that instant every
+ * later append creates a fresh queue file instead of landing in the one being inspected, so there
+ * is no window in which a line can be both unread and deleted. The renamed copy is then compared
+ * with what the push consumed:
+ *
+ *   * it STARTS WITH the consumed bytes -> only the tail past them is new, and it is appended back;
+ *   * it does NOT -> this is not the file the push read (another pusher already rotated it), so all
+ *     of it goes back. Re-publishing a line is safe: log lines merge in `unionLines` and a repeated
+ *     evidence item is skipped by `applyQueue`, so a line is never lost and never counted twice.
+ *
+ * Appending the tail back can put it AFTER lines written in the meantime; `orderQueue` restores
+ * write order by each line's own `at` before anything is applied.
+ */
+export async function releaseConsumed(path, consumed) {
+  const aside = `${path}.${process.pid}-${Date.now()}.released`;
+  try { await rename(path, aside); } catch (err) {
+    if (err.code === 'ENOENT') return { released: 0, kept: 0 };
+    throw err;
+  }
+  const now = await readFile(aside);
+  const ours = consumed && now.length >= consumed.length && now.subarray(0, consumed.length).equals(consumed);
+  const tail = ours ? now.subarray(consumed.length) : now;
+  if (tail.length) await appendFile(path, tail);
+  await rm(aside, { force: true });
+  return { released: ours ? consumed.length : 0, kept: tail.length };
+}
+
+/**
+ * Queue lines in WRITE order, by their own `at` (an ISO-ms stamp minted by `log()`). Stable, so
+ * lines of one millisecond keep file order; a line with no usable `at` inherits its predecessor's,
+ * so it stays where it was rather than jumping to one end.
+ */
+export function orderQueue(lines) {
+  let last = '';
+  const keyed = lines.map((line, i) => {
+    const at = typeof line?.at === 'string' && line.at ? line.at : last;
+    last = at;
+    return { line, at, i };
+  });
+  keyed.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.i - b.i));
+  return keyed.map((k) => k.line);
 }
 
 /** How many queued changes are waiting to be pushed -- the number `stat` prints. */
