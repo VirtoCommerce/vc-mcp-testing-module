@@ -159,7 +159,7 @@ module-embedded Vue 3 sub-app path.
 
 > `/storybook-test` (UI-kit Storybook play-function interaction tests) is planned/optional — `fullstack-frontend` degrades to a `/vue-unit-test` component test when it's absent.
 
-## Root-level (4)
+## Root-level (3)
 
 Outside the four QA categories.
 
