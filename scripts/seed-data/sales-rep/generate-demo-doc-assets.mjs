@@ -42,7 +42,12 @@ const PAGE_W = 595;
 const PAGE_H = 842;
 const MARGIN = 56;
 
-const esc = (s) => String(s).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+// The fonts are WinAnsiEncoding and the file is written as latin1, so a character above U+00FF is
+// truncated to a control byte and renders as a blank. Map the typographic ones to their WinAnsi slot.
+const WIN_ANSI = { '—': 0x97, '–': 0x96, '‘': 0x91, '’': 0x92, '“': 0x93, '”': 0x94, '•': 0x95, '…': 0x85, '€': 0x80 };
+const esc = (s) => String(s)
+  .replace(/[—–‘’“”•…€]/g, (c) => String.fromCharCode(WIN_ANSI[c]))
+  .replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
 
 /** One page = an array of ops. `text` flows from the top; `rect` draws a filled/stroked box. */
 function pageStream(ops) {
@@ -554,9 +559,8 @@ function creditDocx() {
   ]);
 }
 
-function returnsDocx() {
-  return richDocx('Returns and Warranty Policy', [
-    'Virto Industrial Supply — effective 1 January 2026. This policy sits alongside clauses 6 and 7 of the Terms and Conditions of Sale.',
+const RETURNS_INTRO = 'Virto Industrial Supply — effective 1 January 2026. This policy sits alongside clauses 6 and 7 of the Terms and Conditions of Sale.';
+const RETURNS_SECTIONS = [
     { h: '1. Return material authorisation', body: [
       'No return is accepted without a return material authorisation (RMA) number. Request one from your account',
       'representative or at returns@virtoindustrial.example, quoting the invoice number, part number and quantity.',
@@ -594,7 +598,21 @@ function returnsDocx() {
       'A claim not resolved within 15 working days may be escalated to the customer service manager at',
       'escalations@virtoindustrial.example, quoting the RMA number.',
     ] },
-  ]);
+];
+
+/** Cover + the seven sections over three pages, padded to the declared page count. */
+function returnsPdf(spec) {
+  const pages = [coverPage('Returns and Warranty Policy', 'Effective 1 January 2026', [
+    ...wrap(RETURNS_INTRO, 80),
+    '',
+    'Request a return material authorisation from your account representative',
+    'or at returns@virtoindustrial.example.',
+  ])];
+  const groups = [RETURNS_SECTIONS.slice(0, 3), RETURNS_SECTIONS.slice(3, 5), RETURNS_SECTIONS.slice(5)];
+  groups.forEach((g, i) => pages.push(sectionPage(i === 0 ? 'Returns' : i === 1 ? 'Credit and warranty' : 'Logistics and escalation', g,
+    `Returns and Warranty Policy — page ${2 + i}`)));
+  return padToPageCount(pages, spec.pageCount, (n) => sectionPage('Notes', wrap(
+    'The controlled version of this policy is published at virtoindustrial.example/returns and supersedes any printed copy.'), `Page ${n}`));
 }
 
 // ---- drive -----------------------------------------------------------------
@@ -607,7 +625,7 @@ const BUILDERS = {
   'DDOC-WAREHOUSE': (spec) => buildPdf(sitePlanPdf(spec), { title: spec.name }),
   'DDOC-PRICE-Q4': () => priceListXlsx(),
   'DDOC-CREDIT': () => creditDocx(),
-  'DDOC-RETURNS': () => returnsDocx(),
+  'DDOC-RETURNS': (spec) => buildPdf(returnsPdf(spec), { title: spec.name }),
 };
 
 function main() {

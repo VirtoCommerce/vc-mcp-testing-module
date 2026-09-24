@@ -23,7 +23,7 @@ import {
   DEMO_ORDERS, DEMO_ORGS, DEMO_CONTACTS, DEMO_REPS,
   demoMarker, isDemoMarker, demoMarkerKey, markerSweepInScope,
   splitTotal, demoOrderNumber, isDemoSafeProduct, buildDemoOrderBody, productNeedByOrg,
-  orgByKey, contactByKey, repByKey, ordersInPostOrder,
+  orgByKey, contactByKey, repByKey, ordersInPostOrder, resolveTaskText,
 } from '../seed-data/sales-rep/sales-rep-demo-specs.mjs';
 
 /** Key lists are DERIVED from the declared rows — these tests assert the lookup, never the contents. */
@@ -353,4 +353,14 @@ test('ordersInPostOrder: ascending seq, non-destructive, and every order kept', 
     assert.ok(sorted[i].seq >= sorted[i - 1].seq, `seq went backwards at ${sorted[i].key}`);
   }
   assert.deepEqual(DEMO_ORDERS.map((o) => o.key), before, 'ordersInPostOrder() must not mutate DEMO_ORDERS');
+});
+
+test('resolveTaskText: an order token becomes the number the order is posted with', () => {
+  const orders = [{ key: 'DORD-X-01' }];
+  assert.equal(resolveTaskText('Chase {{order:DORD-X-01}} today', orders), `Chase ${demoOrderNumber('DORD-X-01')} today`);
+});
+
+test('resolveTaskText: an unknown order key is left in place for demoProblems to report', () => {
+  assert.equal(resolveTaskText('See {{order:NOPE}}', [{ key: 'DORD-X-01' }]), 'See {{order:NOPE}}');
+  assert.equal(resolveTaskText(undefined), '');
 });

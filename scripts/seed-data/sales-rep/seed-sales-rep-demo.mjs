@@ -24,7 +24,7 @@
  * DEGRADES IN THREE PLACES, ON PURPOSE. Each needs an input this repo cannot derive:
  *   - a rep whose email variable is unset          -> that rep is skipped
  *   - a rep who is not already a sales rep         -> that rep is skipped
- *   - a rep whose password is unset                -> that rep's TASKS and CART are skipped
+ *   - a rep whose password is unset                -> that rep's TASKS are skipped
  * Everything not downstream of the missing input still seeds. A half-configured environment should
  * cost you the part that depends on the gap, not the whole run.
  *
@@ -35,6 +35,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import {
   ROOT, BACK_URL, FRONT_URL, STORE_ID, DRY_RUN, TEARDOWN, ONLY,
@@ -53,7 +54,7 @@ import {
   buildDemoFileBytes, buildDemoDocumentRequest, buildDemoOrderBody,
   demoOrderNumber, ordersInPostOrder, productNeedByOrg, isDemoSafeProduct,
   orgByKey, contactByKey, roleSeesDocuments, SALES_REP_ROLE_ADVANCED, documentSourceRel,
-  DEMO_LISTS, listProductNeedByOrg, DEMO_LIST_SCOPE,
+  DEMO_LISTS, listProductNeedByOrg, DEMO_LIST_SCOPE, DEMO_CARTS, DEMO_REP_CARTS, cartProductNeedByOrg, resolveTaskText,
 } from './sales-rep-demo-specs.mjs';
 
 const TEST_ENV = process.env.TEST_ENV || 'vcst';
@@ -423,6 +424,7 @@ async function discoverProductPools(need = productNeedByOrg()) {
       const name = String(p.name || '').trim();
       // (a) the name must actually carry the category word — a relevance tail is not a pool;
       if (org.productMatch && !org.productMatch.test(name)) continue;
+      if (org.productExclude && org.productExclude.test(name)) continue;
       // (b) one row per distinct product name, or an order shows the same line twice;
       const nameKey = name.toLowerCase().replace(/s+/g, ' ');
       if (!nameKey || seenName.has(nameKey)) continue;
@@ -521,12 +523,23 @@ async function ensureDocuments() {
   const created = [];
   for (const spec of DEMO_DOCUMENTS) {
     if (!only(spec.key)) continue;
-    const hit = byName.get(spec.name);
-    if (hit?.id) { created.push({ type: 'document', key: spec.key, id: hit.id, fileId: hit.fileId, name: spec.name }); verbose(`document "${spec.name}" exists`); continue; }
+    let hit = byName.get(spec.name);
+    // Same title, different file (e.g. DOCX -> PDF): replace it, or the old bytes stay live forever.
+    // A regenerated asset is replaced too, or a generator fix never reaches the library. Compared by
+    // the content hash recorded in the ledger — size alone misses a same-length byte fix (a mis-encoded
+    // em-dash is one byte either way). No recorded hash means "unknown", which replaces once.
+    const sha = createHash('sha256').update(documentBytes(spec).bytes).digest('hex');
+    const priorSha = (readLedger().entities || []).find((e) => e.type === 'document' && e.key === spec.key)?.sha256;
+    if (hit?.id && (hit.name !== spec.fileName || hit.contentType !== spec.contentType || priorSha !== sha)) {
+      if (!DRY_RUN) await api('DELETE', `/api/sales-rep/documents?${idsParam([hit.id])}`, null, { expectStatus: [200, 204, 404] });
+      log(`document replaced: ${spec.name} (${hit.name} -> ${spec.fileName})`);
+      hit = null;
+    }
+    if (hit?.id) { created.push({ type: 'document', key: spec.key, id: hit.id, fileId: hit.fileId, name: spec.name, sha256: sha }); verbose(`document "${spec.name}" exists`); continue; }
     const { bytes, origin } = documentBytes(spec);
     const file = await uploadScopedFile(UPLOAD_SCOPE, spec.fileName, bytes, spec.contentType);
     const doc = await api('POST', '/api/sales-rep/documents', buildDemoDocumentRequest(spec, file.id));
-    created.push({ type: 'document', key: spec.key, id: doc?.id || `dry-${spec.key}`, fileId: file.id, name: spec.name });
+    created.push({ type: 'document', key: spec.key, id: doc?.id || `dry-${spec.key}`, fileId: file.id, name: spec.name, sha256: sha });
     log(`document created: ${spec.name} (${spec.fileName}, ${bytes.length} bytes, from ${origin})`);
     // Pin is a separate call: CreateAsync forces isPinned=false, so sending it above would look
     // effective while doing nothing.
@@ -543,7 +556,11 @@ async function ensureDocuments() {
 const GQL = '/graphql/sales-rep';
 const M_CREATE_TASK = 'mutation($c:InputCreateSalesRepTask!){createSalesRepTask(command:$c){id name}}';
 const M_DELETE_TASK = 'mutation($c:InputDeleteSalesRepTask!){deleteSalesRepTask(command:$c)}';
-const Q_TASKS = '{salesRepTasks(first:200){items{id name}}}';
+const M_UPDATE_TASK = 'mutation($c:InputUpdateSalesRepTask!){updateSalesRepTask(command:$c){id name}}';
+const M_TASK_STATUS = 'mutation($c:InputChangeSalesRepTaskStatus!){changeSalesRepTaskStatus(command:$c){id completed}}';
+// The unfiltered list is not guaranteed to include completed tasks, so every filter is read and merged.
+const TASK_FILTERS = ['upcoming', 'overdue', 'completed'];
+const Q_TASKS = (filter) => `{salesRepTasks(first:200, filter:"${filter}"){items{id name description dueDate completed}}}`;
 
 /**
  * A rep-scoped token. `storeId` is REQUIRED by this grant. Returns null rather than throwing when
@@ -553,9 +570,14 @@ async function repToken(r) {
   const envKey = `${r.spec.passwordVar}`;
   const password = process.env[envKey];
   if (!password) {
-    log(`SKIP tasks for ${r.spec.key} — ${envKey}_${TEST_ENV.toUpperCase()} is not set in .env.local.`);
-    log('     Orders, customers and documents are unaffected; only the task widget renders empty.');
-    return null;
+    // Tasks are private to their owner, so an operator acting ON BEHALF of the rep is the only
+    // other way in. No org switch: a task belongs to the rep, not to a customer organization.
+    const token = await repTokenInOrg(r, null);
+    if (!token) {
+      log(`SKIP tasks for ${r.spec.key} — ${envKey}_${TEST_ENV.toUpperCase()} is not set in .env.local and no operator could log in on behalf.`);
+      log('     Orders, customers and documents are unaffected; only the task widget renders empty.');
+    }
+    return token;
   }
   const res = await fetch(`${BACK_URL}/connect/token`, {
     method: 'POST',
@@ -599,15 +621,41 @@ async function ensureTasks(reps) {
     const token = await repToken(r);
     if (!token) continue;
     const gql = makeGql(token);
-    const existing = new Set(((await gql(Q_TASKS))?.salesRepTasks?.items || []).map((t) => t.name));
+    const live = new Map();
+    try {
+      for (const f of TASK_FILTERS) for (const x of (await gql(Q_TASKS(f)))?.salesRepTasks?.items || []) live.set(x.id, x);
+    } catch (e) {
+      if (!/salesRepTasks/.test(e.message)) throw e;
+      log(`SKIP tasks — this platform's sales-rep module has no tasks API (${e.message.slice(0, 90)}…). Upgrade the module to seed them.`);
+      return created;
+    }
     for (const t of mine) {
-      if (existing.has(t.name)) { verbose(`task "${t.name}" exists`); continue; }
-      const res = await gql(M_CREATE_TASK, {
-        c: { name: t.name, description: t.description, type: t.type, priority: t.priority, dueDate: dueDate(t.dueInDays) },
-      });
-      const id = res?.createSalesRepTask?.id;
-      created.push({ type: 'task', key: t.key, id, ownerUserId: r.rep.userId, name: t.name });
-      log(`task created (${r.spec.key}): ${t.name}`);
+      const name = resolveTaskText(t.name);
+      const description = resolveTaskText(t.description);
+      const due = dueDate(t.dueInDays);
+      // Ledger id first, so a task whose text changed is UPDATED rather than duplicated; name second,
+      // for a lost overlay.
+      const prior = live.get(priorId('task', t.key)) || [...live.values()].find((x) => x.name === name);
+      let id = prior?.id;
+      if (prior) {
+        const drift = prior.name !== name || (prior.description || '') !== description
+          || Math.abs(new Date(prior.dueDate) - new Date(due)) > 12 * 3600e3;
+        if (drift) {
+          await gql(M_UPDATE_TASK, { c: { id, name, description, type: t.type, priority: t.priority, dueDate: due } });
+          log(`task updated (${r.spec.key}): ${name}`);
+        } else verbose(`task "${name}" exists`);
+      } else {
+        id = (await gql(M_CREATE_TASK, { c: { name, description, type: t.type, priority: t.priority, dueDate: due } }))?.createSalesRepTask?.id;
+        if (!id) { log(`  WARN task ${t.key}: createSalesRepTask returned no id`); continue; }
+        log(`task created (${r.spec.key}): ${name}${t.dueInDays < 0 ? ` — due ${-t.dueInDays} day(s) ago` : ''}`);
+      }
+      // Completion is a separate status call; converge both ways so a spec edit can re-open a task.
+      if (!!prior?.completed !== !!t.completed) {
+        const res = await gql(M_TASK_STATUS, { c: { id, completed: !!t.completed } });
+        if (res?.changeSalesRepTaskStatus?.completed !== !!t.completed) log(`  WARN task ${t.key}: status did not change to completed=${!!t.completed}`);
+        else if (t.completed) log(`  task completed (${r.spec.key}): ${name}`);
+      }
+      created.push({ type: 'task', key: t.key, id, ownerUserId: r.rep.userId, name });
     }
   }
   return created;
@@ -647,6 +695,13 @@ async function teardown() {
   //     cannot be swept by marker (a wishlist carries no outerId of ours). Ledger only. Deleted with
   //     the ADMIN cart API rather than the storefront mutation, because the author is sometimes a real
   //     person whose token this seeder does not hold at teardown time.
+  // 1a. Active carts — buyer-owned, deleted through the admin cart API for the same reason.
+  const carts = ent('cart');
+  if (carts.length && !DRY_RUN) {
+    await api('DELETE', `/api/carts?${idsParam(carts.map((c) => c.id))}`, null, { expectStatus: [200, 204, 404] });
+    log(`  active carts: deleted ${carts.length}`);
+  } else if (carts.length) log(`[DRY] active carts: would delete ${carts.length}`);
+
   const lists = ent('list');
   if (lists.length && !DRY_RUN) {
     await api('DELETE', `/api/carts?${idsParam(lists.map((l) => l.id))}`, null, { expectStatus: [200, 204, 404] });
@@ -833,6 +888,128 @@ async function ensureSharedLists(orgs, contacts, pools, reps) {
 }
 
 /**
+ * ACTIVE CARTS — one per buyer member (DEMO_CARTS), created with the buyer's own token switched
+ * into their organization so the cart carries organizationId. Reused when the buyer's cart already
+ * holds items; an empty one is filled, because an empty cart is not an active cart (BL-SR-006).
+ */
+const CART_SEL = 'id name itemsCount organizationId total { formattedAmount } validationErrors { errorCode errorMessage }';
+
+async function ensureActiveCarts(orgs, pools, cursor = {}) {
+  const created = [];
+  if (!DEMO_CARTS.length) return created;
+  const buyerPassword = resolvePassword('{{SR_DEMO_BUYER_PASSWORD}}');
+
+  for (const spec of DEMO_CARTS) {
+    if (!only(spec.key)) continue;
+    const contact = contactByKey(spec.contact);
+    const org = contact && orgs[contact.org];
+    if (!org) { verbose(`cart ${spec.key}: org not in scope, skip`); continue; }
+    const who = `${contact.firstName} ${contact.lastName}`;
+    if (DRY_RUN) { log(`[DRY] would fill ${who}'s cart @ ${org.name} with ${spec.items} line(s)`); continue; }
+
+    const user = await api('GET', `/api/platform/security/users/${encodeURIComponent(contact.email)}`, null, { expectStatus: [200, 404] });
+    if (!user?.id) { log(`  SKIP cart ${spec.key} — no account for ${contact.email}`); continue; }
+    const token = await buyerTokenInOrg(contact.email, buyerPassword, org.id);
+    if (!token) { log(`  SKIP cart ${spec.key} — ${contact.email} could not obtain a storefront token in ${org.name}`); continue; }
+    const gql = storefrontGql(token);
+    const ctx = `storeId: "${STORE_ID}", userId: "${user.id}", currencyCode: "USD", cultureName: "en-US"`;
+
+
+    let cart = (await gql(`query { cart(${ctx}) { ${CART_SEL} } }`))?.cart;
+    if (cart?.itemsCount > 0) {
+      log(`cart exists: ${who} @ ${org.name} — ${cart.itemsCount} line(s), ${cart.total?.formattedAmount}`);
+    } else {
+      // Walk the org's pool, skipping any product the cart refuses (no price, unavailable): the
+      // pool is discovered for orders, which are POSTed by admin and never check purchasability.
+      const pool = pools[contact.org] || [];
+      const refused = new Set();
+      let lines = 0;
+      while (lines < spec.items && (cursor[contact.org] || 0) < pool.length) {
+        const product = pool[cursor[contact.org] = (cursor[contact.org] || 0) + 1, cursor[contact.org] - 1];
+        const qty = spec.quantities[lines % spec.quantities.length];
+        const r = (await gql(`mutation { addItem(command: { ${ctx}, productId: "${product.id}", quantity: ${qty} }) { ${CART_SEL} } }`))?.addItem;
+        if (r) cart = r;
+        if ((r?.itemsCount || 0) > lines) lines = r.itemsCount;
+        else (r?.validationErrors || []).forEach((e) => refused.add(e.errorCode));
+      }
+      // A refused add leaves nothing behind in the cart, so nothing to clean up — only report it.
+      if (refused.size) (lines < spec.items ? log : verbose)(`  cart ${spec.key}: pool products refused — ${[...refused].join(', ')}${lines < spec.items ? ` (${pool.length} in pool)` : ''}`);
+      if (!cart?.itemsCount) { log(`  WARN cart ${spec.key}: ${who}'s cart is still EMPTY — not an active cart`); if (!cart?.id) continue; }
+      else log(`active cart: ${who} @ ${org.name} — ${cart.itemsCount}/${spec.items} line(s), ${cart.total?.formattedAmount}`);
+    }
+    if (cart?.organizationId && cart.organizationId !== org.id) log(`  WARN cart ${spec.key}: organizationId is not ${org.name}`);
+    created.push({ type: 'cart', key: spec.key, id: cart.id, owner: contact.email, org: contact.org, itemsCount: cart.itemsCount || 0 });
+  }
+  return created;
+}
+
+/**
+ * REP-CREATED CARTS (DEMO_REP_CARTS) — the only carts the rep's Active-carts tile counts. Built with
+ * a token acting as the rep inside the served org (own password, else an operator's login-on-behalf),
+ * then `unselect` lines are taken out of checkout so both tile figures read non-zero.
+ */
+async function ensureRepCarts(orgs, pools, reps, cursor) {
+  const created = [];
+  for (const spec of DEMO_REP_CARTS) {
+    if (!only(spec.key)) continue;
+    const org = orgs[spec.org];
+    const r = (reps || []).find((x) => !x.skipped && x.spec.key === spec.rep);
+    if (!org || !r) { log(`  SKIP rep cart ${spec.key} — ${!r ? `rep ${spec.rep} unavailable` : 'org not in scope'}`); continue; }
+    if (DRY_RUN) { log(`[DRY] would fill ${r.spec.fullName}'s cart @ ${org.name} with ${spec.items} line(s), ${spec.unselect} unselected`); continue; }
+    const token = await repTokenInOrg(r, org.id);
+    if (!token) { log(`  SKIP rep cart ${spec.key} — could not obtain a rep token for ${r.spec.fullName} in ${org.name}`); continue; }
+    const gql = storefrontGql(token);
+    const ctx = `storeId: "${STORE_ID}", userId: "${r.rep.userId}", currencyCode: "USD", cultureName: "en-US"`;
+    const SEL = `${CART_SEL} items { id quantity isGift selectedForCheckout }`;
+
+    let cart = (await gql(`query { cart(${ctx}) { ${SEL} } }`))?.cart;
+    if (!(cart?.itemsCount > 0)) {
+      // Same pool walk as the buyer carts: skip any product the cart refuses.
+      const pool = pools[spec.org] || [];
+      const refusedRep = new Set();
+      let lines = 0;
+      while (lines < spec.items && (cursor[spec.org] || 0) < pool.length) {
+        const product = pool[cursor[spec.org] = (cursor[spec.org] || 0) + 1, cursor[spec.org] - 1];
+        const qty = spec.quantities[lines % spec.quantities.length];
+        const res = (await gql(`mutation { addItem(command: { ${ctx}, productId: "${product.id}", quantity: ${qty} }) { ${SEL} } }`))?.addItem;
+        if (res) cart = res;
+        if ((res?.itemsCount || 0) > lines) lines = res.itemsCount;
+        else (res?.validationErrors || []).forEach((e) => refusedRep.add(e.errorCode));
+      }
+      if (refusedRep.size && lines < spec.items) log(`  rep cart ${spec.key}: pool products refused — ${[...refusedRep].join(', ')} (${pool.length} in pool)`);
+      if (!cart?.itemsCount) { log(`  WARN rep cart ${spec.key}: still EMPTY — not an active cart`); if (!cart?.id) continue; }
+    }
+    if (cart?.organizationId && cart.organizationId !== org.id) log(`  WARN rep cart ${spec.key}: organizationId is not ${org.name}`);
+
+    // Converge on: the `unselect` smallest-quantity NON-gift lines are off, every other line is on.
+    // Response order is not insertion order, and a promotion's gift line must never be the one taken
+    // out of checkout — so the choice is by quantity, which is stable across re-runs.
+    const lines = (cart?.items || []).filter((i) => !i.isGift);
+    const wantOff = new Set([...lines].sort((a, b) => a.quantity - b.quantity || a.id.localeCompare(b.id)).slice(0, spec.unselect).map((i) => i.id));
+    const toOff = lines.filter((i) => wantOff.has(i.id) && i.selectedForCheckout !== false).map((i) => i.id);
+    const toOn = lines.filter((i) => !wantOff.has(i.id) && i.selectedForCheckout === false).map((i) => i.id);
+    for (const [mutation, ids] of [['selectCartItems', toOn], ['unSelectCartItems', toOff]]) {
+      if (!ids.length) continue;
+      const res = (await gql(`mutation { ${mutation}(command: { cartId: "${cart.id}", ${ctx}, lineItemIds: ${JSON.stringify(ids)} }) { ${SEL} } }`))?.[mutation];
+      if (res) cart = res;
+    }
+    const off = (cart?.items || []).filter((i) => i.selectedForCheckout === false).length;
+    log(`rep cart: ${r.spec.fullName} @ ${org.name} — ${cart?.itemsCount || 0} line(s), ${off} not for checkout, ${cart?.total?.formattedAmount}`);
+    created.push({ type: 'cart', key: spec.key, id: cart.id, owner: r.email, org: spec.org, createdByRep: spec.rep, itemsCount: cart?.itemsCount || 0 });
+  }
+  return created;
+}
+
+/** A buyer's storefront token switched into one organization. Never written to disk. */
+async function buyerTokenInOrg(username, password, organizationId) {
+  const t = await tokenRequest({ grant_type: 'password', username, password, scope: 'offline_access', storeId: STORE_ID });
+  if (!t?.access_token) return null;
+  if (!t.refresh_token) return t.access_token;
+  const switched = await tokenRequest({ grant_type: 'refresh_token', refresh_token: t.refresh_token, organization_id: organizationId, scope: 'offline_access' });
+  return switched?.access_token || t.access_token;
+}
+
+/**
  * A storefront token that acts as the REP, inside one served organization.
  *
  * Two paths, because a demo environment rarely has both. If the rep's own password is set we use it.
@@ -851,10 +1028,16 @@ async function repTokenInOrg(resolved, organizationId) {
     if (!tokens?.access_token) log(`  NOTE ${resolved.spec.key}: ${envKey} did not authenticate; falling back to the operator path.`);
   }
   if (!tokens?.access_token) {
-    const opEmail = process.env.SR_DEMO_OPERATOR_EMAIL || process.env.USER2_EMAIL;
-    const opPassword = process.env.SR_DEMO_OPERATOR_PASSWORD || process.env.USER2_PASSWORD;
+    // First fully-configured operator wins. IMPERSONATION_ADMIN is the env's dedicated login-on-behalf
+    // account; USER2 is a last resort and usually lacks platform:security:loginOnBehalf.
+    const operators = [
+      [process.env.SR_DEMO_OPERATOR_EMAIL, process.env.SR_DEMO_OPERATOR_PASSWORD],
+      [process.env.IMPERSONATION_ADMIN_EMAIL, process.env.IMPERSONATION_ADMIN_PASSWORD],
+      [process.env.USER2_EMAIL, process.env.USER2_PASSWORD],
+    ];
+    const [opEmail, opPassword] = operators.find(([e, pw]) => e && pw) || [];
     if (!opEmail || !opPassword) {
-      log(`  NOTE no rep password and no operator (SR_DEMO_OPERATOR_EMAIL/_PASSWORD, or USER2_*) — cannot act as ${resolved.spec.fullName}.`);
+      log(`  NOTE no rep password and no operator (SR_DEMO_OPERATOR_*, IMPERSONATION_ADMIN_* or USER2_*) — cannot act as ${resolved.spec.fullName}.`);
       return null;
     }
     const op = await tokenRequest({ grant_type: "password", username: opEmail, password: opPassword, scope: "offline_access", storeId: STORE_ID });
@@ -862,7 +1045,7 @@ async function repTokenInOrg(resolved, organizationId) {
     tokens = await tokenRequest({ grant_type: "impersonate", user_id: resolved.rep.userId, scope: "offline_access" }, op.access_token);
     if (!tokens?.access_token) { log(`  NOTE operator ${opEmail} cannot log in on behalf of ${resolved.spec.fullName} (needs platform:security:loginOnBehalf).`); return null; }
   }
-  if (tokens.refresh_token) {
+  if (tokens.refresh_token && organizationId) {
     const switched = await tokenRequest({ grant_type: "refresh_token", refresh_token: tokens.refresh_token, organization_id: organizationId, scope: "offline_access" });
     if (switched?.access_token) return switched.access_token;
     log("  NOTE could not switch the rep into the target organization; the list would attach to the wrong one.");
@@ -935,20 +1118,36 @@ async function main() {
   const attachments = await attachServedOrgs(reps, orgs);
   const orders = await ensureOrders(orgs, reps);
   const lists = await ensureSharedLists(orgs, contacts, await discoverProductPools(listProductNeedByOrg()), reps);
+  // Oversampled ×8: a discovered product may carry no price or no stock, and the cart refuses it.
+  // ×3 ran dry on virtostart (2026-09-24: PRODUCT_PRICE_INVALID / PRODUCT_FFC_QTY across 18 candidates).
+  const cartNeed = Object.fromEntries(Object.entries(cartProductNeedByOrg()).map(([k, n]) => [k, n * 8]));
+  // One pool + one cursor for buyer and rep carts, so the two never draw the same product twice.
+  const cartPools = await discoverProductPools(cartNeed);
+  const cartCursor = {};
+  const carts = [
+    ...await ensureActiveCarts(orgs, cartPools, cartCursor),
+    ...await ensureRepCarts(orgs, cartPools, reps, cartCursor),
+  ];
   const documents = await ensureDocuments();
   const tasks = await ensureTasks(reps);
 
   const entities = [
     ...Object.entries(orgs).map(([key, v]) => ({ type: 'organization', key, id: v.id, name: v.name, marker: demoMarker('ORG', key) })),
     ...Object.entries(contacts).map(([key, v]) => ({ type: 'contact', key, id: v.id, name: v.name, marker: demoMarker('CT', key) })),
-    ...accounts, ...orders, ...documents, ...tasks, ...attachments, ...lists,
+    ...accounts, ...orders, ...documents, ...tasks, ...attachments, ...lists, ...carts,
   ];
-  writeLedger(entities);
+  // A scoped run (--only) produced a SUBSET, so it MERGES into the ledger instead of replacing it.
+  // Replacing it once dropped every contact id; the next full run fell back to a member search the
+  // index had not caught up with, and created seven duplicate buyers (vcst, 2026-09-24).
+  const merged = ONLY
+    ? [...(readLedger().entities || []).filter((e) => !entities.some((n) => n.type === e.type && n.key === e.key)), ...entities]
+    : entities;
+  writeLedger(merged);
 
   const skipped = reps.filter((r) => r.skipped);
   log('');
   log(`Demo seeded: ${Object.keys(orgs).length} org(s), ${Object.keys(contacts).length} contact(s), `
-    + `${orders.length} order(s), ${documents.length} document(s), ${lists.length} shared list(s), `
+    + `${orders.length} order(s), ${documents.length} document(s), ${lists.length} shared list(s), ${carts.filter((c) => c.itemsCount > 0).length} active cart(s), `
     + `${tasks.length} task(s), ${usable.length} rep(s).`);
   if (skipped.length) log(`${skipped.length} rep(s) skipped — see the SKIP lines above; re-run after fixing to fill them in.`);
   log(DRY_RUN ? 'DRY RUN — no writes were made.' : `Ledger → test-data/aliases.${TEST_ENV}.json[${LEDGER_KEY}]. Commit it.`);

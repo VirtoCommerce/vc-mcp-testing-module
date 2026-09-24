@@ -117,6 +117,9 @@ export const DEMO_ORGS = [
     phone: '+1 614 555 0118', email: 'procurement@contoso-mfg.example',
     productSearch: 'printer',
     productMatch: /\b(printer|toner|cartridge|scanner|copier|multifunction)\b/i,
+    // The category word also appears in names that are NOT the category — measured live 2026-09-24:
+    // 'Autoclave Tuttnauer "Elara 9i" without printer' and a kids' instant-print camera.
+    productExclude: /\b(without printer|autoclave|camera|kids|toys?)\b/i,
   },
   {
     key: 'DORG-FABRIKAM',
@@ -309,7 +312,10 @@ export const DEMO_DOCUMENTS = [
   { key: 'DDOC-CREDIT', sourceFile: 'sales-rep-demo/Credit-Application.docx', kind: 'docx', fileName: 'Credit-Application.docx', contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', name: 'Credit Application Form', category: DEMO_DOC_CATEGORIES.CONTRACTS, pinned: false, pageCount: 3, summary: 'Standard net-30 credit application for new business accounts.' },
   { key: 'DDOC-SDS', sourceFile: 'sales-rep-demo/Safety-Data-Sheet-Lubricants.pdf', kind: 'pdf', fileName: 'Safety-Data-Sheet-Lubricants.pdf', contentType: 'application/pdf', name: 'Safety Data Sheet — Industrial Lubricants', category: DEMO_DOC_CATEGORIES.CATALOGS, pinned: false, pageCount: 22, summary: 'GHS-compliant safety data for the industrial lubricant range.' },
   { key: 'DDOC-TERMS', sourceFile: 'sales-rep-demo/Terms-And-Conditions.pdf', kind: 'pdf', fileName: 'Terms-And-Conditions.pdf', contentType: 'application/pdf', name: 'Terms and Conditions of Sale', category: DEMO_DOC_CATEGORIES.CONTRACTS, pinned: false, pageCount: 6, summary: 'Standard commercial terms applying to all orders.' },
-  { key: 'DDOC-RETURNS', sourceFile: 'sales-rep-demo/Returns-Policy.docx', kind: 'docx', fileName: 'Returns-Policy.docx', contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', name: 'Returns and Warranty Policy', category: DEMO_DOC_CATEGORIES.CONTRACTS, pinned: false, pageCount: 4, summary: 'RMA process, warranty periods and restocking terms.' },
+  // PDF, not DOCX: the storefront offers Open only for inline-renderable types (vc-frontend
+  // modules/sales-rep/files.ts), and the dashboard widget has no Download fallback — a .docx row there
+  // has no action at all.
+  { key: 'DDOC-RETURNS', sourceFile: 'sales-rep-demo/Returns-Policy.pdf', kind: 'pdf', fileName: 'Returns-Policy.pdf', contentType: 'application/pdf', name: 'Returns and Warranty Policy', category: DEMO_DOC_CATEGORIES.CONTRACTS, pinned: false, pageCount: 4, summary: 'RMA process, warranty periods and restocking terms.' },
   { key: 'DDOC-WAREHOUSE', sourceFile: 'sales-rep-demo/Distribution-Centre-Memphis.pdf', kind: 'pdf', fileName: 'Distribution-Centre-Memphis.pdf', contentType: 'application/pdf', name: 'Memphis Distribution Centre', category: DEMO_DOC_CATEGORIES.CATALOGS, pinned: false, pageCount: 2, summary: 'Regional distribution facility serving the south-east.' },
 ];
 
@@ -341,18 +347,37 @@ export const DEMO_TASKS = [
   { key: 'DTSK-V-02', rep: 'DEMO_REP_VOLKOVA', name: 'Send Q4 price list to Contoso', type: 'Email', priority: 'High', dueInDays: 0, description: 'Priya asked for the updated list ahead of their planning cycle.' },
   { key: 'DTSK-V-03', rep: 'DEMO_REP_VOLKOVA', name: 'Prepare volume pricing proposal — Fabrikam', type: 'Task', priority: 'Normal', dueInDays: 2, description: 'Model tier breaks at 500 / 1000 / 2500 units.' },
   { key: 'DTSK-V-04', rep: 'DEMO_REP_VOLKOVA', name: 'Quarterly business review — Fabrikam Industrial', type: 'Meeting', priority: 'Normal', dueInDays: 5, description: 'Review service levels and the pending power-station trial.' },
-  { key: 'DTSK-V-05', rep: 'DEMO_REP_VOLKOVA', name: 'Chase cancelled order CN-02 with Contoso', type: 'Call', priority: 'Normal', dueInDays: 1, description: 'Understand why the plant buyer cancelled and whether it can be recovered.' },
+  { key: 'DTSK-V-05', rep: 'DEMO_REP_VOLKOVA', name: 'Chase cancelled order {{order:DORD-CN-02}} with Contoso', type: 'Call', priority: 'Normal', dueInDays: 1, description: 'Understand why the plant buyer cancelled and whether it can be recovered.' },
   { key: 'DTSK-V-06', rep: 'DEMO_REP_VOLKOVA', name: 'Update credit terms for Northwind', type: 'Task', priority: 'Low', dueInDays: 9, description: 'Net-30 extension approved by finance; update the account record.' },
+  // Overdue (past due, still open) and completed — so every Calendar tab has something in it.
+  { key: 'DTSK-V-07', rep: 'DEMO_REP_VOLKOVA', name: 'Call Fabrikam about the Plant 2 outage', type: 'Call', priority: 'High', dueInDays: -3, description: 'Elena asked for a call back on backup power options after last week\'s line stoppage.' },
+  { key: 'DTSK-V-08', rep: 'DEMO_REP_VOLKOVA', name: 'Send revised fastener quote to Northwind', type: 'Email', priority: 'Normal', dueInDays: -1, description: 'Daniel is waiting on the Grade 8 pricing before he releases order {{order:DORD-NW-03}}.' },
+  { key: 'DTSK-V-09', rep: 'DEMO_REP_VOLKOVA', name: 'Confirm delivery of order {{order:DORD-NW-01}}', type: 'Call', priority: 'Normal', dueInDays: -4, completed: true, description: 'Margaret confirmed the full shipment arrived at the Seattle yard.' },
+  { key: 'DTSK-V-10', rep: 'DEMO_REP_VOLKOVA', name: 'Send credit application to Contoso', type: 'Email', priority: 'Normal', dueInDays: -2, completed: true, description: 'Priya returned the signed form the same day.' },
 
   { key: 'DTSK-Z-01', rep: 'DEMO_REP_ZHUK', name: 'Onboard Wingtip Electrical Supply', type: 'Meeting', priority: 'High', dueInDays: 0, description: 'First full account review with James; walk through the portal.' },
-  { key: 'DTSK-Z-02', rep: 'DEMO_REP_ZHUK', name: 'Confirm delivery window for Wingtip order WT-02', type: 'Call', priority: 'High', dueInDays: 1, description: 'Customer needs delivery before the end of the month.' },
+  { key: 'DTSK-Z-02', rep: 'DEMO_REP_ZHUK', name: 'Confirm delivery window for Wingtip order {{order:DORD-WT-02}}', type: 'Call', priority: 'High', dueInDays: 1, description: 'Customer needs delivery before the end of the month.' },
   { key: 'DTSK-Z-03', rep: 'DEMO_REP_ZHUK', name: 'Share safety data sheets with Contoso', type: 'Email', priority: 'Normal', dueInDays: 2, description: 'Plant compliance requested SDS for the lubricant range.' },
   { key: 'DTSK-Z-04', rep: 'DEMO_REP_ZHUK', name: 'Review Contoso account with Alla', type: 'Meeting', priority: 'Normal', dueInDays: 3, description: 'Shared account — align on coverage before the next quarter.' },
   { key: 'DTSK-Z-05', rep: 'DEMO_REP_ZHUK', name: 'Prepare Wingtip volume quote', type: 'Task', priority: 'Normal', dueInDays: 6, description: 'Quote the conduit and cabling lines at committed annual volume.' },
   { key: 'DTSK-Z-06', rep: 'DEMO_REP_ZHUK', name: 'Archive closed opportunities', type: 'Task', priority: 'Low', dueInDays: 12, description: 'Housekeeping on last quarter’s pipeline.' },
+  { key: 'DTSK-Z-07', rep: 'DEMO_REP_ZHUK', name: 'Resolve invoice query on order {{order:DORD-WT-01}}', type: 'Call', priority: 'High', dueInDays: -2, description: 'James flagged a freight line he did not expect on the invoice.' },
+  { key: 'DTSK-Z-08', rep: 'DEMO_REP_ZHUK', name: 'Kick-off call with Wingtip', type: 'Meeting', priority: 'Normal', dueInDays: -5, completed: true, description: 'Introduced the portal and agreed a monthly check-in.' },
+  { key: 'DTSK-Z-09', rep: 'DEMO_REP_ZHUK', name: 'Send terms of sale to Contoso', type: 'Email', priority: 'Low', dueInDays: -1, completed: true, description: 'Shared the Terms and Conditions of Sale from the document library.' },
 ];
 
 // ---- derivations -----------------------------------------------------------
+
+/**
+ * Task text may cite an order as `{{order:<DEMO_ORDERS key>}}`, resolved to the number the order is
+ * actually POSTed with. A literal like "CN-02" is a spec key no screen ever shows, and a hand-copied
+ * SO-number would drift the moment demoOrderNumber() changed. Unknown keys are left in place so
+ * demoProblems() can report them rather than silently printing a blank.
+ */
+export const ORDER_TOKEN_RE = /\{\{order:([A-Z0-9-]+)\}\}/g;
+export function resolveTaskText(text, orders = DEMO_ORDERS) {
+  return String(text ?? '').replace(ORDER_TOKEN_RE, (m, key) => (orders.some((o) => o.key === key) ? demoOrderNumber(key) : m));
+}
 
 /** Deterministic, real-looking order numbers. No family prefix — the marker lives in `outerId`. */
 export const demoOrderNumber = (key) => `SO-${String(hashKey(key) % 900000 + 100000)}`;
@@ -505,7 +530,7 @@ export function visibleStrings() {
   for (const r of DEMO_REPS) out.push(['rep.fullName', r.key, r.fullName]);
   for (const o of DEMO_ORDERS) out.push(['order.number', o.key, demoOrderNumber(o.key)]);
   for (const d of DEMO_DOCUMENTS) out.push(['doc.name', d.key, d.name], ['doc.fileName', d.key, d.fileName], ['doc.category', d.key, d.category], ['doc.summary', d.key, d.summary || '']);
-  for (const t of DEMO_TASKS) out.push(['task.name', t.key, t.name], ['task.description', t.key, t.description || '']);
+  for (const t of DEMO_TASKS) out.push(['task.name', t.key, resolveTaskText(t.name)], ['task.description', t.key, resolveTaskText(t.description || '')]);
   return out;
 }
 
@@ -544,6 +569,50 @@ export const DEMO_LISTS = [
   { key: 'DLIST-CN-ORG', scope: 'Organization', author: 'DCT-CN-2', org: 'DORG-CONTOSO', name: 'Print Room Standing Order', description: 'Monthly consumables for the print room.', items: 3 },
 ];
 
+/**
+ * ACTIVE CARTS — one per buyer member, created with the BUYER'S own token inside their organization,
+ * so each carries `organizationId` and reads as that person's in-progress cart on the storefront.
+ *
+ * Not on the rep's "Active carts" tile, and that is the platform, not a gap: cart statistics are
+ * creator-scoped (BL-SR-002 half b), so a tile only counts carts the calling REP created.
+ * `items` is a line count drawn from the org's own pool; quantities cycle through `quantities`.
+ */
+export const DEMO_CARTS = [
+  { key: 'DCART-NW-1', contact: 'DCT-NW-1', items: 2, quantities: [4, 1] },
+  { key: 'DCART-NW-2', contact: 'DCT-NW-2', items: 3, quantities: [10, 5, 2] },
+  { key: 'DCART-CN-1', contact: 'DCT-CN-1', items: 1, quantities: [2] },
+  { key: 'DCART-CN-2', contact: 'DCT-CN-2', items: 3, quantities: [6, 3, 1] },
+  { key: 'DCART-FB-1', contact: 'DCT-FB-1', items: 2, quantities: [1, 2] },
+  { key: 'DCART-FB-2', contact: 'DCT-FB-2', items: 2, quantities: [3, 8] },
+  { key: 'DCART-WT-1', contact: 'DCT-WT-1', items: 3, quantities: [12, 4, 2] },
+];
+
+/**
+ * REP-CREATED CARTS — what the rep's own "Active carts" tile counts. A rep acting inside a served
+ * organization builds a cart there (the storefront's own flow after an org switch); cart statistics
+ * are creator-scoped (BL-SR-002 half b), so only these move the tile. One per (rep, org): the cart is
+ * the rep's default cart in that org. `unselect` leaves that many lines NOT selected for checkout,
+ * so the tile's second figure ("… not for checkout") reads non-zero instead of a permanent 0.
+ */
+export const DEMO_REP_CARTS = [
+  { key: 'DRCART-VOL-NW', rep: 'DEMO_REP_VOLKOVA', org: 'DORG-NORTHWIND', items: 3, quantities: [20, 10, 5], unselect: 1 },
+  { key: 'DRCART-VOL-CN', rep: 'DEMO_REP_VOLKOVA', org: 'DORG-CONTOSO', items: 2, quantities: [2, 6], unselect: 0 },
+  { key: 'DRCART-VOL-FB', rep: 'DEMO_REP_VOLKOVA', org: 'DORG-FABRIKAM', items: 2, quantities: [1, 3], unselect: 1 },
+  { key: 'DRCART-ZHK-CN', rep: 'DEMO_REP_ZHUK', org: 'DORG-CONTOSO', items: 2, quantities: [4, 2], unselect: 0 },
+  { key: 'DRCART-ZHK-WT', rep: 'DEMO_REP_ZHUK', org: 'DORG-WINGTIP', items: 3, quantities: [15, 8, 3], unselect: 1 },
+];
+
+/** Products the active carts need from each org's pool. */
+export function cartProductNeedByOrg(carts = DEMO_CARTS) {
+  const need = {};
+  for (const c of carts) {
+    const org = DEMO_CONTACTS.find((x) => x.key === c.contact)?.org;
+    if (org) need[org] = (need[org] || 0) + c.items;
+  }
+  for (const c of DEMO_REP_CARTS) need[c.org] = (need[c.org] || 0) + c.items;
+  return need;
+}
+
 /** Total products a shared list needs from each org's pool, so discovery asks for enough. */
 export function listProductNeedByOrg(lists = DEMO_LISTS) {
   const need = {};
@@ -566,7 +635,7 @@ export function demoProblems() {
     if (GUID_RE.test(value)) problems.push(`${field} (${key}) contains a raw GUID: "${value}"`);
   }
 
-  for (const list of [DEMO_ORGS, DEMO_CONTACTS, DEMO_ORDERS, DEMO_DOCUMENTS, DEMO_TASKS, DEMO_REPS]) {
+  for (const list of [DEMO_ORGS, DEMO_CONTACTS, DEMO_ORDERS, DEMO_DOCUMENTS, DEMO_TASKS, DEMO_REPS, DEMO_CARTS, DEMO_REP_CARTS]) {
     const keys = list.map((x) => x.key);
     const dupes = keys.filter((k, i) => keys.indexOf(k) !== i);
     if (dupes.length) problems.push(`duplicate keys: ${[...new Set(dupes)].join(', ')}`);
@@ -597,6 +666,20 @@ export function demoProblems() {
   // this gate catches the DECLARATION that makes disjointness impossible.
   const phrases = DEMO_ORGS.map((o) => o.productSearch);
   for (const o of DEMO_ORGS) if (!o.productSearch) problems.push(`org ${o.key} declares no productSearch — its orders would draw from an arbitrary catalog slice`);
+  for (const c of DEMO_REP_CARTS) {
+    if (!DEMO_REPS.some((r) => r.key === c.rep)) problems.push(`rep cart ${c.key}: rep "${c.rep}" is not declared`);
+    if (!DEMO_ORGS.some((o) => o.key === c.org)) problems.push(`rep cart ${c.key}: org "${c.org}" is not declared`);
+    if (!(c.items > 0) || !(c.unselect >= 0) || c.unselect >= c.items) problems.push(`rep cart ${c.key}: needs items > 0 and 0 <= unselect < items, or no line is left for checkout`);
+    if (!(c.quantities || []).length || c.quantities.some((q) => !(q > 0))) problems.push(`rep cart ${c.key}: quantities must be a non-empty list of positive numbers`);
+  }
+  const repOrgPairs = DEMO_REP_CARTS.map((c) => `${c.rep}|${c.org}`);
+  if (new Set(repOrgPairs).size !== repOrgPairs.length) problems.push('rep carts: two entries share a (rep, org) — each rep has ONE default cart per organization');
+  if (DEMO_REP_CARTS.length && !DEMO_REP_CARTS.some((c) => c.unselect > 0)) problems.push('rep carts: none leaves a line unselected — the "not for checkout" figure could never read non-zero');
+  for (const c of DEMO_CARTS) {
+    if (!DEMO_CONTACTS.some((x) => x.key === c.contact)) problems.push(`cart ${c.key}: contact "${c.contact}" is not declared`);
+    if (!(c.items > 0)) problems.push(`cart ${c.key}: declares ${c.items} line(s) — an empty cart is not an active cart (BL-SR-006)`);
+    if (!(c.quantities || []).length || c.quantities.some((q) => !(q > 0))) problems.push(`cart ${c.key}: quantities must be a non-empty list of positive numbers`);
+  }
   for (const l of DEMO_LISTS) {
     const org = DEMO_ORGS.find((o) => o.key === l.org);
     if (!org) problems.push(`list ${l.key}: org "${l.org}" is not declared`);
@@ -684,9 +767,21 @@ export function demoProblems() {
     problems.push(`${DEMO_DOCUMENTS.length} document(s) are declared but no rep is marked showsDocuments — nobody in the demo can open them`);
   }
 
-  for (const t of DEMO_TASKS) if (!repByKey(t.rep)) problems.push(`task ${t.key} references unknown rep ${t.rep}`);
+  for (const t of DEMO_TASKS) {
+    if (!repByKey(t.rep)) problems.push(`task ${t.key} references unknown rep ${t.rep}`);
+    for (const field of [t.name, t.description]) {
+      const left = resolveTaskText(field).match(/\{\{[^}]*\}\}/g);
+      if (left) problems.push(`task ${t.key} cites ${left.join(', ')} — not a declared DEMO_ORDERS key, so the raw token would render`);
+    }
+    if (t.completed && t.dueInDays > 0) problems.push(`task ${t.key} is completed but due in the future — reads as done before it was due`);
+  }
   for (const r of DEMO_REPS) {
     if (!DEMO_TASKS.some((t) => t.rep === r.key)) problems.push(`rep ${r.key} has no tasks — its task widget renders empty`);
+    // One per Calendar tab, or that tab reads 0 in front of the audience.
+    const mine = DEMO_TASKS.filter((t) => t.rep === r.key);
+    if (mine.length && !mine.some((t) => !t.completed && t.dueInDays >= 0)) problems.push(`rep ${r.key} has no upcoming task`);
+    if (mine.length && !mine.some((t) => !t.completed && t.dueInDays < 0)) problems.push(`rep ${r.key} has no overdue task — the Overdue tab reads 0`);
+    if (mine.length && !mine.some((t) => t.completed)) problems.push(`rep ${r.key} has no completed task — the Completed tab reads 0`);
     for (const k of r.servedOrgs) if (!orgByKey(k)) problems.push(`rep ${r.key} serves unknown org ${k}`);
   }
 

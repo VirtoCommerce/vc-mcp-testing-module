@@ -150,8 +150,31 @@ Document library** — no sidebar link, no dashboard widget. A demo rep who must
 `Advanced Sales Representative`.
 
 **Passwords.** `SR_DEMO_REP_{VOLKOVA,ZHUK}_PASSWORD_<ENV>` in `.env.local` are only ever **read**, to
-mint a rep-scoped token for tasks and carts (tasks are private to their owner, so there is no admin
-REST surface for them). Without them the seed completes and skips those two steps. The `_<ENV>`
+mint a rep-scoped token for tasks, rep carts and the four Customer-scoped shared lists (tasks are
+private to their owner, so there is no admin REST surface for them). Without them every one of those
+steps falls back to an operator's login-on-behalf (the chain below); only when no operator works
+either does the seed skip them. Verified live on vcst 2026-09-24: all 12 tasks seeded with no rep
+password and render on the hub's **Calendar** page and the dashboard's *Tasks & due dates* widget.
+
+**Active carts are the BUYERS', not the reps'.** `DEMO_CARTS` gives each buyer contact one non-empty
+cart, created with that buyer's own token inside their organization (`SR_DEMO_BUYER_PASSWORD`, no rep
+password needed). The seeder skips any pool product the cart refuses (`CART_PRODUCT_UNAVAILABLE`,
+`PRODUCT_PRICE_INVALID`), because the pool is discovered for admin-POSTed orders, which never check
+whether a product can be bought. These carts do **not** move the rep dashboard's *Active carts*
+tile: cart statistics are creator-scoped (BL-SR-002 half b), so the tile counts only carts the rep
+created.
+
+**The tile is fed by `DEMO_REP_CARTS` instead** — one default cart per (rep, served org), built with a
+token acting as the rep inside that org. With no rep password the seeder logs in on behalf of the rep
+through the first configured operator: `SR_DEMO_OPERATOR_*`, then `IMPERSONATION_ADMIN_*`, then
+`USER2_*`. USER2 usually lacks `platform:security:loginOnBehalf` — on vcst it does, and that is why
+the Customer-scoped lists were skipped before this fallback existed. `unselect` switches off that many
+of the smallest-quantity **non-gift** lines, so the tile's "not for checkout" figure is non-zero.
+Verified live on vcst 2026-09-24: the tile read exactly the seeded sums (44 items, 6 not for
+checkout). Two things to know when reading it: an env cart promotion adds a **gift** line to every
+cart, which the tile's item figures include and the header cart badge does not; and an org's
+`productMatch` word can occur in an unrelated product's name ("…without printer"), which is what
+the per-org `productExclude` is for. The `_<ENV>`
 suffix must match `TEST_ENV` exactly — a re-arranged name is never promoted and the miss is silent.
 
 ---
@@ -268,4 +291,4 @@ discovery is the only place that can be caught.
   is a real person's record and `New` is not the platform's known sign-in blocker (`Invited` is).
 - **Maria Smith** — a colleague actively placing orders, not part of the demo. `protected`.
 - Outstanding before a full demo seed: both `SR_DEMO_REP_*_PASSWORD_VIRTOSTART` values, without which
-  the 12 tasks and 2 active carts are skipped.
+  nothing is skipped any more — the operator fallback covers tasks, rep carts and Customer lists.
