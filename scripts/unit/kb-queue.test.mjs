@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { KEY_LEN, LOGGED, MUTATIONS, RUN_MAX, kbDisabled, pendingMutations, queuePath, readQueue, runOf, sessionId, shortSession } from '../kb/core/queue.mjs';
 import { localReader } from '../kb/core/reader.mjs';
 import { captureLines } from '../kb/core/render.mjs';
-import { ask, capture, confirm, dispute, show, stat, toLogLine } from '../kb/core/verbs.mjs';
+import { ask, askAbout, capture, confirm, dispute, show, stat, toLogLine } from '../kb/core/verbs.mjs';
 
 const FIXTURE = join(import.meta.dirname, 'fixtures', 'kb-base');
 const opened = () => ({ reader: localReader(FIXTURE), locator: FIXTURE, how: 'test', why: null });
@@ -406,3 +406,22 @@ test('a capture whose SUBJECT an entry already holds, at other anchors, is REFUS
   assert.equal(refused.why, 'same-subject');
   assert.equal(refused.when, 'call');
 }));
+
+// ─── one coordinate, every spelling (PR #313 review 2) ─────────────────────────────────────────
+
+test('a one-segment page is accepted in EVERY spelling that normalises to it, not only a bare /cart', () => withQueue(async (dir, env) => {
+  // The verdict was computed on the normalised coordinate and the carve-out tested the RAW one, so
+  // three of these four were refused as `unstructured` while the message said `/cart` was fine.
+  for (const [i, anchor] of ['/cart', '{FRONT_URL}/cart', 'https://shop.example.com/cart', 'FRONT_URL/cart'].entries()) {
+    const r = await capture({ ...CAPTURE, subject: `cart spelling ${i} behaves`, anchors: [anchor] }, opened(), { env });
+    assert.notEqual(r.state, 'invalid', `${anchor}: ${JSON.stringify(r.problems ?? r.why)}`);
+  }
+}));
+
+test('askAbout pairs a capture with an ask through a PREFIXED anchor — the ask carries the plain route', () => {
+  const asks = [
+    { at: '2026-09-18T10:00:00Z', q: 'what does /api/platform/modules return for a disabled module' },
+    { at: '2026-09-18T10:05:00Z', q: 'something else entirely about pricing' },
+  ];
+  assert.equal(askAbout(asks, { text: 'unrelated words only', anchors: ['{BACK_URL}/api/platform/modules'] }), '2026-09-18T10:00:00Z');
+});

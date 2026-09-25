@@ -173,7 +173,12 @@ export function anchorProblems(anchors, { namespaces } = {}) {
       });
     }
   }
-  return out;
+  // THE NORMALISED COORDINATE RIDES ALONG (PR #313 review 2). The verdict above is computed on
+  // `normalizeAnchor(raw)`, so any follow-up test on the SAME coordinate must use the same value:
+  // testing the raw string made `{FRONT_URL}/cart` and a full URL fail a carve-out that `/cart`
+  // passes, although all three normalise to `/cart`. `coordinate` stays raw — it is what the writer
+  // typed, and the message has to quote it back.
+  return out.map((p) => ({ ...p, normalized: normalizeAnchor(p.coordinate) }));
 }
 
 export { namespaceOf, normalizeAnchor };

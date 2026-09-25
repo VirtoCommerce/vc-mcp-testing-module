@@ -13,7 +13,7 @@ import { join } from 'node:path';
 
 import { mintId } from './canonical.mjs';
 import { parseEntry } from './frontmatter.mjs';
-import { anchorProblems, isSingleSegmentPath, namespaceRoots, neighbours } from './coordinates.mjs';
+import { anchorProblems, isSingleSegmentPath, namespaceRoots, neighbours, normalizeAnchor } from './coordinates.mjs';
 import { findDuplicate, identityKey, refusalMessage, subjectTakenMessage } from './identity.mjs';
 import { buildIndex, buildRow, countEvidence, entryPath } from './index-build.mjs';
 import { loadIndex, normalizeScope, retrievable } from './index-load.mjs';
@@ -597,8 +597,13 @@ export function askAbout(asks, { text, anchors = [] }) {
   // storefront's questions, and a rejected one names everything: `/` is a substring of every question
   // that mentions a page, which is how a live smoke on 2026-09-23 paired a `capture-invalid` with an
   // unrelated answer. Either still counts as the words it contributes.
+  // NORMALISED before it is tested or searched for (PR #313 review 2): an ask carries the plain route,
+  // so `{BACK_URL}/api/platform/x` searched for verbatim never matched it and pairing was dead for
+  // every prefixed spelling.
   const coords = anchors.map((a) => String(typeof a === 'string' ? a : a?.coordinate ?? '').trim())
-    .filter((c) => c && !isSingleSegmentPath(c) && !anchorProblems([c]).length).map((c) => c.toLowerCase());
+    .filter((c) => c && !anchorProblems([c]).length)
+    .map((c) => normalizeAnchor(c))
+    .filter((c) => c && !isSingleSegmentPath(c)).map((c) => c.toLowerCase());
   let best = null;
   for (const a of asks) {
     const q = String(a.q ?? '');
@@ -711,7 +716,7 @@ export async function capture(input, opened, { env = process.env, via = null, ca
   // Refused at the door, before the base is read -- except a one-segment path (`/cart`), which is
   // a page or a namespace, and only the corpus can say which, so it is judged once the rows are here.
   const problems = anchorProblems(input.anchors)
-    .filter((p) => !(p.kind === 'unstructured' && isSingleSegmentPath(p.coordinate)));
+    .filter((p) => !(p.kind === 'unstructured' && isSingleSegmentPath(p.normalized)));
   if (problems.length) return refuseAtDoor({ state: 'invalid', why: 'unusable anchor(s)', problems }, input, door);
 
   const cat = await catalogue(opened);
