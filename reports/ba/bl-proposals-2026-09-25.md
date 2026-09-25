@@ -35,3 +35,4 @@ both lists. Source-only; needs a live reproduction before it is a bug.
 round trip BL-CART-015 describes, so the entry would hide a real regression. Suggested: remove the entry
 (and, separately, restore the deferred display assertion when the Saved-for-Later card renders
 configuration). Owner: whoever maintains the registry — `/qa-review-tests` for any `CART-070` change.
+**Applied 2026-09-25** at the user's request — the entry is removed; the deferred display assertion is still pending.
