@@ -27,7 +27,7 @@
  *   2. it changes NOTHING else — every other server, and the file's own formatting, survive;
  *   3. a second run is a no-op that says so.
  */
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { repoRoot } from './core/token.mjs';
@@ -48,10 +48,20 @@ export function merge(existingText, server = KB_SERVER) {
     }
   }
   const servers = doc.mcpServers && typeof doc.mcpServers === 'object' ? doc.mcpServers : {};
-  const before = JSON.stringify(servers.kb ?? null);
-  if (before === JSON.stringify(server)) return { state: 'already', text: existingText, servers: Object.keys(servers) };
+  const current = servers.kb && typeof servers.kb === 'object' && !Array.isArray(servers.kb) ? servers.kb : null;
 
-  const next = { ...doc, mcpServers: { ...servers, kb: { ...server } } };
+  // COMPARED BY MEANING, ON THE FIELDS WE OWN (PR #313 review 2). This used to be an exact
+  // `JSON.stringify` of the whole entry, so key order or any key the operator had added — a `type`,
+  // an `env` with `KB_RUN` — made it "differ", and the entry was REPLACED on every session start:
+  // the operator's keys dropped and the whole file re-serialised, every other server reformatted.
+  // We own `command` and `args` (the pinned KB_SERVER) and nothing else under `kb`.
+  const owned = Object.keys(server);
+  const same = current && owned.every((k) => JSON.stringify(current[k]) === JSON.stringify(server[k]));
+  // Nothing changed ⇒ nothing is written, so the file stays byte-identical.
+  if (same) return { state: 'already', text: existingText, servers: Object.keys(servers) };
+
+  // The operator's own keys under `kb` survive; only ours are set.
+  const next = { ...doc, mcpServers: { ...servers, kb: { ...(current ?? {}), ...server } } };
   return {
     state: servers.kb ? 'replaced' : 'added',
     text: `${JSON.stringify(next, null, 2)}\n`,
@@ -72,22 +82,39 @@ export function unmerge(existingText) {
   }
   if (!doc?.mcpServers || typeof doc.mcpServers !== 'object' || !('kb' in doc.mcpServers)) return { state: 'absent', text: existingText };
   const { kb: _dropped, ...rest } = doc.mcpServers;
-  return { state: 'removed', text: `${JSON.stringify({ ...doc, mcpServers: rest }, null, 2)}
-`, servers: Object.keys(rest) };
+  return { state: 'removed', text: `${JSON.stringify({ ...doc, mcpServers: rest }, null, 2)}\n`, servers: Object.keys(rest) };
+}
+
+/**
+ * Write `.mcp.json` ATOMICALLY: a temp file beside it, then a rename (PR #313 review 2). A plain
+ * write interrupted half-way leaves a file the NEXT run refuses as malformed — and since `merge`
+ * rightly refuses to overwrite malformed JSON, one crash would end registration until a human
+ * repaired the file by hand. A rename within one directory is atomic, so a reader sees the old
+ * file or the new one, never half of either.
+ */
+export function atomicWrite(path, text, { write = writeFileSync, move = renameSync, remove = rmSync } = {}) {
+  const tmp = `${path}.${process.pid}-${Date.now()}.tmp`;
+  try {
+    write(tmp, text, 'utf8');
+    move(tmp, path);
+  } catch (err) {
+    try { remove(tmp, { force: true }); } catch { /* nothing to clean */ }
+    throw err;
+  }
 }
 
 /**
  * `KB_ENABLED=0` (PR #313 review): the SessionStart hook REMOVES the entry instead of adding it, so
  * the off switch is one setting and not "delete it from .mcp.json and watch the hook put it back".
  */
-export function uninstall({ env = process.env, write = writeFileSync, read = readFileSync, exists = existsSync } = {}) {
+export function uninstall({ env = process.env, write = atomicWrite, read = readFileSync, exists = existsSync } = {}) {
   const path = join(repoRoot(env), '.mcp.json');
   const r = unmerge(exists(path) ? read(path, 'utf8') : '');
   if (r.state === 'removed') write(path, r.text, 'utf8');
   return { ...r, path };
 }
 
-export function install({ env = process.env, write = writeFileSync, read = readFileSync, exists = existsSync } = {}) {
+export function install({ env = process.env, write = atomicWrite, read = readFileSync, exists = existsSync } = {}) {
   const path = join(repoRoot(env), '.mcp.json');
   const current = exists(path) ? read(path, 'utf8') : '';
   const r = merge(current);

@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { KB_SERVER, install, merge, uninstall, unmerge } from '../kb/install-mcp.mjs';
+import { KB_SERVER, atomicWrite, install, merge, uninstall, unmerge } from '../kb/install-mcp.mjs';
 
 const json = (o) => JSON.stringify(o, null, 2);
 
@@ -105,4 +105,33 @@ test('uninstall writes only when there was something to remove', () => {
   uninstall(fake(json({ mcpServers: { kb: KB_SERVER, github: {} } })));
   assert.equal(writes.length, 1);
   assert.deepEqual(JSON.parse(writes[0]).mcpServers, { github: {} });
+});
+
+// ─── compared by meaning, the operator's keys kept, written atomically (PR #313 review 2) ─────
+
+test('an entry equal on command+args is `already` — key order and operator keys do not trigger a rewrite', () => {
+  // Byte-for-byte odd formatting, a reversed key order and operator-added keys: none of it is ours.
+  const text = '{"mcpServers":{"other":{"url":"x"},"kb":{"env":{"KB_RUN":"VCST-1"},"type":"stdio","args":["scripts/kb/mcp.mjs"],"command":"node"}}}';
+  const r = merge(text);
+  assert.equal(r.state, 'already');
+  assert.equal(r.text, text, 'nothing to write, so the file stays byte-identical');
+});
+
+test('a changed command is re-pinned, and the operator\'s own keys under kb SURVIVE', () => {
+  const r = merge(json({ mcpServers: { kb: { command: 'old', args: [], type: 'stdio', env: { KB_RUN: 'VCST-1' } } } }));
+  assert.equal(r.state, 'replaced');
+  assert.deepEqual(JSON.parse(r.text).mcpServers.kb, { command: 'node', args: ['scripts/kb/mcp.mjs'], type: 'stdio', env: { KB_RUN: 'VCST-1' } });
+});
+
+test('atomicWrite goes through a temp file and a rename, and cleans the temp up when the rename fails', () => {
+  const ops = [];
+  atomicWrite('/r/.mcp.json', 'x', { write: (p) => ops.push(['write', p]), move: (a, b) => ops.push(['move', a, b]), remove: () => ops.push(['rm']) });
+  assert.equal(ops[0][0], 'write');
+  assert.notEqual(ops[0][1], '/r/.mcp.json', 'never written in place');
+  assert.deepEqual(ops[1], ['move', ops[0][1], '/r/.mcp.json']);
+  const failing = [];
+  assert.throws(() => atomicWrite('/r/.mcp.json', 'x', {
+    write: () => {}, move: () => { throw new Error('EPERM'); }, remove: () => failing.push('rm'),
+  }), /EPERM/);
+  assert.deepEqual(failing, ['rm']);
 });
