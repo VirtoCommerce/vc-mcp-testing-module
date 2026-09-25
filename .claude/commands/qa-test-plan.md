@@ -216,8 +216,6 @@ References (read these):
   - reports/exploratory/  (last 24h of SBTM-* sessions — disqualifier D3)
 
 Context7: query `/virtocommerce/vc-docs` per primary domain (tokens: 8000)
-Observed behaviour: the line from agent-dispatch.md §Agent Prompt Structure — ask the base yourself before a gap
-  or charter states how a coordinate behaves; never packed answers.
 
 Output:
   - section_5_1_suites_activated: [{suiteId, name, module, sprintTrigger: [VCST-...], priority, layer: "Frontend"|"Backend"}]

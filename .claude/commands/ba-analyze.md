@@ -115,7 +115,6 @@ Launch agents 1 and 2 **in parallel** (single message with 2 Task calls). Agent 
 - `audience` = the doc audience(s) from `docs [audience]` (default `all`) — pass to `ba-doc-writer`
 - `module_scope` = module name (when scope is `module <name>`)
 - `existing_bl_ids` = list gathered in Step 0 (pass to `ba-system-analyzer` only)
-- **Every brief** (Step 3, `docs ticket`/`release`, stories review) carries the `Observed behaviour` line of `.claude/templates/agent-dispatch.md` §Agent Prompt Structure verbatim, with `{TEST_ENV}` filled.
 
 ### Step 4 — Synthesize & Deliver Report
 Combine all subagent outputs into the final structured report (see Output Format below).

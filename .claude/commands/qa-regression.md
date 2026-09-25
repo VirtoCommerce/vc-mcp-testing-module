@@ -230,8 +230,7 @@ the last suite settles is the App Insights correlation window used in Step 5.5.
 
 3. Fill `.claude/agents/test-runner-agent.md` with the suite parameters, including **`{{LANE_ID}}`** — it
    selects the credential slot, and there are only 3 seeded accounts, so two concurrent suites must
-   never share one. The brief also carries the scripted-variant `Observed behaviour` line
-   (`.claude/templates/agent-dispatch.md` §Agent Prompt Structure).
+   never share one.
 
 Full mechanics, including why each of these was a hand-derived decision that went wrong on the
 record: `.claude/agents/regression-orchestrator.md` Steps 1.5–4.

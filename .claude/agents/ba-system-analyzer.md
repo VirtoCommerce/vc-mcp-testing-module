@@ -32,7 +32,7 @@ amend an existing document rather than writing a second one beside it.
 ## Knowledge Files (read at runtime, on-demand)
 
 | File | When to consult |
-|------|-----------------|
+|---|---|
 | `.claude/knowledge/oracles/business-logic.md` | Always before drafting `bl_proposals` — extract existing BL-* IDs, reuse domain codes (PRICE, CART, CHK, ORD, AUTH, B2B, CAT, SRCH, SHIP, BOPIS, NOTIF, IMPEX, SEO, CROSS), follow entry schema. **Do not modify** — proposals only. |
 | `.claude/knowledge/oracles/e-commerce-edge-cases-library.md` | When flagging pain points or risks — cross-reference ECL-* IDs (13 generic + 7 VC-specific categories). |
 | `.claude/knowledge/execution/module-suite-map.md` | When mapping VC modules → existing test suites (avoid recommending coverage that already exists in `regression/suites/`). |
@@ -113,7 +113,7 @@ org:VirtoCommerce repo:VirtoCommerce/vc-module-{name} "IHandler"
 **Standard VC module repos to check**:
 
 | Module | Repo |
-|--------|------|
+|---|---|
 | Platform | `VirtoCommerce/vc-platform` |
 | Catalog | `VirtoCommerce/vc-module-catalog` |
 | Orders | `VirtoCommerce/vc-module-orders` |
@@ -156,8 +156,7 @@ When analyzing a module:
 
 Use **`playwright-firefox`** browser to explore the live storefront and map actual user flows, navigation structure, and UI state. This provides ground-truth data that code analysis alone cannot.
 
-**Step 0 — ASK, per coordinate, before its first live check (here and §4)** — each page path / GraphQL operation / endpoint in scope: `npm run kb -- ask "<coordinate> <question>"` (MCP: `mcp__kb__kb_ask`). Record hit ids; a miss is not a blocker. Rule: `CLAUDE.md` §Essential Rules → *Product context*; team form: `.claude/knowledge/agents/ba/shared-instructions.md` §Documentation source.
-
+**KB:** `npm run kb -- ask "<coordinate> …"` before asserting behaviour; confirm/dispute/capture after (`CLAUDE.md` §Product context).
 **Storefront exploration checklist:**
 1. **Navigation & Information Architecture**
    - Browse the main menu, category tree, footer links
@@ -291,7 +290,7 @@ Look for these anti-patterns — from **both** code analysis AND live UI explora
 - Missing error handling in API calls
 
 ### 7. VC Docs Cross-Reference
-Use **VirtoOZ MCP** (primary — pick the topic-scoped tool that matches the question: `PlatformDeveloperGuide`, `StorefrontDeveloperGuide`, `PlatformUserGuide`, `StorefrontUserGuide`, `MarketplaceUserGuide`/`MarketplaceDeveloperGuide`, `DeploymentGuide`, `B2BExperts`, `*SourceCode`, or general `VirtoCommerce`). Fall back to **Context7 MCP** (`resolve-library-id` → `query-docs` for `/virtocommerce/vc-docs`) when VirtoOZ returns thin results. Fetch relevant sections from `https://docs.virtocommerce.org` to:
+Use **VirtoOZ MCP** (primary — pick the topic-scoped tool that matches the question: `PlatformDeveloperGuide`, `StorefrontDeveloperGuide`, `PlatformUserGuide`, `StorefrontUserGuide`, `MarketplaceUserGuide`/`MarketplaceDeveloperGuide`, `DeploymentGuide`, `B2BExperts`, `*SourceCode`, or general `VirtoCommerce`). Fallback: **Context7** `/virtocommerce/vc-docs` if VirtoOZ is thin. Fetch relevant sections from `https://docs.virtocommerce.org` to:
 - Verify the project is using best practices for detected modules
 - Identify features available in the platform that aren't being used
 - Flag deprecated APIs or patterns
@@ -351,16 +350,13 @@ Everything in this section applies to both axes. Three `ecl`-specific rules you 
 
 **You never edit a CSV** on either axis. Citation remaps belong to `test-management-specialist` via `/qa-review-tests --fix`.
 
-- **Parallel batch (default).** `/qa-review-oracles` fans you out — up to 3 of you run concurrently, one per browser slot, each on a **disjoint batch** of entries with an **isolated browser session + distinct test user**. In this mode you **do your own live observation on your assigned slot** (do not sub-delegate to `qa-testing-expert` — that would exceed the 3-browser cap), and you **return each verdict + evidence tuple + the proposed edit; you do NOT write the oracle yourself.** The orchestrator applies all edits serially (single writer) to avoid concurrent-write corruption.
+- **Parallel batch (default).** `/qa-review-oracles` fans you out — up to 3 of you run concurrently, one per browser slot, each on a **disjoint batch** of entries with an **isolated browser session + distinct test user**. In this mode you **do your own live observation on your assigned slot** (never sub-delegate to `qa-testing-expert` — it breaks the 3-browser cap), and you **return each verdict + evidence tuple + the proposed edit; you do NOT write the oracle yourself.** The orchestrator applies all edits serially (single writer).
 - **Three axes (all three required to confirm):** **docs** (`/vc-docs` VirtoOZ — quote + reference), **source** (GitHub MCP `search_code`/`get_file_contents` on `org:VirtoCommerce`, read-only — a `file:line` anchor), **live** (your own playwright slot — an `{OBSERVED}` result + screenshot, REAL-USER rule, no `browser_evaluate` bypass).
 - **Verdict → proposed action (applied by the orchestrator, not you):**
   - **CONFIRMED / DRIFT / MISSING** with unanimous, agreeing evidence → propose a body-only edit: **entry body only** (never the Severity-Tags meta table), stamp `- **Amended:** <date> (auto-applied, triangulated — BL-AUDIT-<date>)` + refresh `- **Source:**` (`file:line` + docs ref); MISSING gets the next free `BL-<DOMAIN>-<NNN>` (the orchestrator assigns the final number at apply time to avoid parallel ID collisions). Keep every entry **env-agnostic** (no env names/URLs/slugs).
   - **CONTRADICTORY / UNGROUNDED / STALE-RETIRE** → **not confirmed**: flag for staging to `reports/ba/bl-proposals-{date}.md` as a `PROPOSED-BL-*` draft (or stale/retire entry) for a human. This is the definition of "not confirmed", not a human gate on confirmed items.
 - **Opportunistic extraction during `/ba-analyze` (no triangulation run)** still produces `PROPOSED-BL-*` drafts only — it never auto-applies, because a single-axis observation is by definition not confirmed. Auto-apply happens exclusively through the `/qa-review-oracles` three-axis path.
 - **Re-run the axis's gate before returning.** `npm run bl:lint` / `npm run ecl:lint` is the acceptance check for your own edits — report its before/after High count. A run that raises the count has broken something. Note that a green lint proves each citation **exists**, never that it is **right**: a case citing a real-but-wrong entry passes every gate. Report those for `/qa-review-tests` Dimension 6; never claim the citations are correct on the strength of a green lint.
-
-### 9. BANK — close-out, before you return
-For each platform behaviour your output states: matched ⇒ `kb confirm <id>`, contradicted ⇒ `kb dispute <id>`, base held nothing ⇒ `kb capture` (`--deployment {TEST_ENV}`). Public base — nothing client-specific. List the ids in `kb_entries`.
 
 ---
 
@@ -392,7 +388,6 @@ Return a structured JSON object:
     "new_in_this_analysis": ["what this pass adds or contradicts, and on what evidence"],
     "existing_coverage": ["suite ids from the map that already exercise this surface"]
   },
-  "kb_entries": ["ids read / confirmed / disputed / captured — Step 0 + §9"],
   "test_object": {
     "$comment": "The object under test — from the map's Test object block PLUS whatever you established this run. You cannot design an experiment on an object whose properties you do not know; without this you can only walk screens, which is the measured Loyalty Missions failure (127 cases, 71 placing zero orders, mechanism end-to-end at 11%). Where the map reads UNDECLARED, establish it or say you could not. NEVER invent a purpose: it becomes context every later run trusts.",
     "purpose": "the value chain in the user's words — trigger -> effect -> persisted state -> the surface the user sees it on -> what it unlocks. Or UNDECLARED + why you could not establish it",

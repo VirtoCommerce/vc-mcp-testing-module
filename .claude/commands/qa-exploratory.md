@@ -141,7 +141,7 @@ Rationale, the charter derivation table and the record: [`exploratory-lane.md`](
    - [modern-web-attack-surface.md](../skills/qa-sbtm/modern-web-attack-surface.md) — Cache/multi-tab/browser-feature probes
    - The agent uses these to spot familiar problems faster — NOT as a sequential checklist.
 
-Delegate to **qa-testing-expert** (Task tool, `subagent_type: qa-testing-expert`) with the target area + the chosen discovery technique. The brief carries its `Observed behaviour` line (`agent-dispatch.md` §Agent Prompt Structure).
+Delegate to **qa-testing-expert** (Task tool, `subagent_type: qa-testing-expert`) with the target area + the chosen discovery technique.
 
 ### Exploration Charter
 
@@ -152,9 +152,6 @@ For each session, the agent should:
    - Good: "Discover scenarios in checkout that aren't covered by suites 011–013 and aren't in VC-CHECKOUT-* / VC-CART-* catalog entries"
    - Name 2–3 *candidate scenarios* up front (from coverage-diff, feature-pair matrix, user-flow edges, or a `[THEORETICAL]` ECL section from Step 5a). These are the discovery targets — they may be wrong, but they force a hypothesis.
    - Record the charter's `Edge-Case Refs` (the `ECL-<n>.<m>` sections it hunts) and `BL Refs` (the invariants it will judge observations against) — the same two fields the ready-made charters in [`charter-library.md`](../skills/qa-sbtm/charter-library.md) carry.
-   - **Ask the base for the charter's coordinates** — for each page path / GraphQL operation / endpoint, before
-     its first live check: `npm run kb -- ask "<coordinate> <question>"` (MCP: `mcp__kb__kb_ask`). Record hit
-     ids; a miss is not a blocker. Rule: [`CLAUDE.md`](../../CLAUDE.md) §Essential Rules → *Product context*.
 2. **Time-box** — 30 minutes (5 min setup + 20 min explore + 5 min document):
    - First 10 min: **Surprise-seeking time** — no goal, just look for "huh, that's weird" (per scenario-discovery.md § 4)
    - Next 10 min: Pursue the most surprising observation OR the chosen discovery technique
@@ -176,9 +173,6 @@ For each session, the agent should:
    - Risk areas identified
    - Questions for the team
    - Charter-from-gap list (next-session candidates)
-7. **Bank what the session established** — for each platform behaviour the report states: matched ⇒
-   `kb confirm <id>`, contradicted ⇒ `kb dispute <id>`, base held nothing ⇒ `kb capture`
-   (`--deployment {TEST_ENV}`). Public base — nothing client-specific. List the ids in the report.
 
 ### Area-Specific Focus
 
@@ -208,7 +202,6 @@ Write a session report to `reports/exploratory/SBTM-{charter}-YYYY-MM-DD.md`:
 **Discovery technique:** [which one from scenario-discovery.md]
 **Charter:** Discover scenarios in [area] that aren't covered by [suites] and aren't in [VC-* catalog entries]
 **Edge-Case Refs:** ECL-<n>.<m>, … (hunted) | **BL Refs:** BL-XXX-NNN, … (judged against)
-**KB ids:** read … | confirmed … | disputed … | captured …
 
 ## Net-New Scenarios Discovered (mandatory for [EXP])
 | # | Scenario | Why uncovered | What we found | Oracle ref | Fate | Suggested next charter |
