@@ -1173,3 +1173,43 @@ test('the topics panel renders, and an empty one says why it is empty', () => {
   const bare = renderHtml(analyse({ lines: [line({ kind: 'ask', q: 'x', state: 'miss', _session: 's1', _path: 'log/20260921-a-s1.jsonl' })], rows: ROWS, meta: { days: 30, files: 1 } }));
   assert.match(bare, /nothing has passed one yet/);
 });
+
+// ── the cache honours --days, and a total log-read failure is not "no activity" (PR #313 review 2) ─
+
+test('a cache-rendered report applies the --days window, like the live path', async () => {
+  await withTmp(async (dir) => {
+    const base = 'https://raw.githubusercontent.com/VirtoCommerce/vc-knowledge/main';
+    const line = JSON.stringify({ at: '2026-09-19T03:00:00Z', kind: 'ask', q: 'x', state: 'miss' });
+    const old = JSON.stringify({ at: '2026-08-01T03:00:00Z', kind: 'ask', q: 'old', state: 'miss' });
+    // A wide live run fills the cache with an old day and a recent one.
+    const tree = [{ type: 'blob', path: 'log/20260919-aaaa1111.jsonl' }, { type: 'blob', path: 'log/20260801-bbbb2222.jsonl' }];
+    const live = async (url) => ({
+      ok: true, status: 200,
+      text: async () => (url.includes('/git/trees/') ? JSON.stringify({ tree, truncated: false })
+        : url.endsWith('index.json') ? JSON.stringify({ entries: [] }) : url.includes('20260801') ? old : line),
+    });
+    await collect({ base, days: 90, at: new Date('2026-09-19T04:00:00Z'), fetchImpl: live, cacheDir: dir });
+    // Then a NARROW report while the base is unreachable.
+    const dead = async () => { throw new TypeError('fetch failed'); };
+    const got = await collect({ base, days: 1, at: new Date('2026-09-19T04:00:00Z'), fetchImpl: dead, cacheDir: dir });
+    assert.equal(got.meta.fromCache, true);
+    assert.equal(got.meta.days, 1);
+    assert.deepEqual(got.lines.map((l) => l.q), ['x'], 'the August file is outside --days 1 and is not read');
+    assert.equal(got.meta.files, 1);
+  });
+});
+
+test('EVERY log read failing falls through to the cache banner — never ok:true with no lines', async () => {
+  await withTmp(async (dir) => {
+    const base = 'https://raw.githubusercontent.com/VirtoCommerce/vc-knowledge/main';
+    const tree = [{ type: 'blob', path: 'log/20260919-aaaa1111.jsonl' }, { type: 'blob', path: 'log/20260919-cccc3333.jsonl' }];
+    const halfDead = async (url) => (url.includes('/git/trees/')
+      ? { ok: true, status: 200, text: async () => JSON.stringify({ tree, truncated: false }) }
+      : { ok: false, status: 503, text: async () => 'unavailable' });
+    const got = await collect({ base, days: 1, at: new Date('2026-09-19T04:00:00Z'), fetchImpl: halfDead, cacheDir: dir });
+    assert.equal(got.meta.fromCache, true, 'rendered behind the cache banner, like a failed tree read');
+    assert.match(got.meta.failure, /all 2 log file\(s\) failed to read/);
+    const html = renderHtml(analyse({ lines: got.lines, rows: got.rows, meta: got.meta }));
+    assert.doesNotMatch(html, /No misses in this window\. Either coverage is good/);
+  });
+});

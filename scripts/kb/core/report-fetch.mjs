@@ -233,6 +233,16 @@ export async function collect({
     malformed += parsed.malformed;
   }
 
+  // EVERY LOG READ FAILED: that is not silence (PR #313 review 2). Returned as `ok` it rendered
+  // "no misses / no activity" and exited 0 — an affirmative "nobody is missing knowledge" from a run
+  // that read nothing. It takes the same road a failed TREE read takes: the cache, behind a banner.
+  if (paths.length && failures.length === paths.length) {
+    return fromCacheOnly({
+      base, days, sessions: wanted, cacheDir, useCache, at,
+      detail: `all ${paths.length} log file(s) failed to read — first: ${failures[0].detail}`,
+    });
+  }
+
   const indexUrl = `${rawRoot}/index.json`;
   const idx = await getText(indexUrl, net);
   let rows = [];
@@ -276,6 +286,7 @@ export async function collect({
  */
 async function fromCacheOnly({ base, days, sessions = null, cacheDir, detail, useCache, at }) {
   const wanted = normalizeSessions(sessions);
+  const window = windowDays(days, at);
   const cached = useCache ? await cacheAll(cacheDir) : [];
   const rawRoot = String(base).replace(/\/+$/, '');
   const lines = [];
@@ -295,6 +306,10 @@ async function fromCacheOnly({ base, days, sessions = null, cacheDir, detail, us
     // has to be re-applied here too -- otherwise `--sessions` silently widens the moment the base
     // goes unreachable, which is the one direction a scoped report must not drift.
     if (wanted && !wanted.has(sessionOf(rel))) continue;
+    // …and so does the DAY window, by the same argument (PR #313 review 2): without it a cached
+    // `--days 7` report rendered over everything ever fetched while its header still said 7. The
+    // same rule `selectLogPaths` applies live — sessions replace the window, never narrow it.
+    if (!wanted && !window.has(dayOf(rel))) continue;
     files += 1;
     lines.push(...parseLogFile(c.payload?.text ?? '', { path: rel, session: sessionOf(rel) }).lines);
   }
@@ -310,7 +325,10 @@ async function fromCacheOnly({ base, days, sessions = null, cacheDir, detail, us
       fromCache: true,
       failure: detail,
       newestCached: newest || null,
-      cacheEmpty: cached.length === 0,
+      // EMPTY FOR THIS SCOPE, not "no cache file at all": a cache holding only a tree listing, or
+      // only days outside the window, has read nothing either, and must get the NOT-"no activity"
+      // banner rather than a confident empty page (PR #313 review 2).
+      cacheEmpty: files === 0,
       indexLoaded: rows.length > 0,
       failures: [],
       malformed: 0,
