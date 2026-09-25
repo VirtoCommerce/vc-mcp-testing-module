@@ -70,12 +70,13 @@ export function normalizeRow(raw, { index = 'index.json' } = {}) {
 }
 
 /**
- * Read `kb.json`, then every index it declares, and return the merged catalogue.
+ * Read and validate `kb.json` alone. Split out of `loadIndex` so `reindex` — which needs the manifest
+ * and rebuilds the indexes from the entries — can run when an index is exactly what is broken
+ * (PR #313 review 2).
  *
- * @returns {Promise<{state:'ok', manifest: object, rows: IndexRow[], indexes: string[]}
- *                 | {state:'no-base'|'unreachable', why: string}>}
+ * @returns {Promise<{state:'ok', manifest: object, names: string[]} | {state:'no-base'|'unreachable', why: string}>}
  */
-export async function loadIndex(reader) {
+export async function loadManifest(reader) {
   const manifestRead = await reader.readManifest();
   if (!manifestRead.ok) {
     // `missing` here is rule 2: the thing we were told is a base is not one. STOP.
@@ -96,6 +97,19 @@ export async function loadIndex(reader) {
   const declared = manifest.indexes && typeof manifest.indexes === 'object' ? manifest.indexes : null;
   const names = declared ? [...new Set(Object.values(declared).map(String))] : [];
   if (!names.length) return { state: 'no-base', why: `kb.json at ${reader.locator} declares no indexes` };
+  return { state: 'ok', manifest, names };
+}
+
+/**
+ * Read `kb.json`, then every index it declares, and return the merged catalogue.
+ *
+ * @returns {Promise<{state:'ok', manifest: object, rows: IndexRow[], indexes: string[]}
+ *                 | {state:'no-base'|'unreachable', why: string}>}
+ */
+export async function loadIndex(reader) {
+  const m = await loadManifest(reader);
+  if (m.state !== 'ok') return m;
+  const { manifest, names } = m;
 
   const rows = [];
   for (const name of names) {

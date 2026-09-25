@@ -16,7 +16,7 @@ import { parseEntry } from './frontmatter.mjs';
 import { anchorProblems, isSingleSegmentPath, namespaceRoots, neighbours, normalizeAnchor } from './coordinates.mjs';
 import { findDuplicate, identityKey, refusalMessage, subjectTakenMessage } from './identity.mjs';
 import { buildIndex, buildRow, countEvidence, entryPath } from './index-build.mjs';
-import { loadIndex, normalizeScope, retrievable } from './index-load.mjs';
+import { loadIndex, loadManifest, normalizeScope, retrievable } from './index-load.mjs';
 import {
   log, metaAsks, pendingMutations, queueBacklog, queueDir, readMeta, readPushStatus, readQueue, sessionId,
 } from './queue.mjs';
@@ -1019,19 +1019,27 @@ export async function reindex(opened, { env = process.env, write = true, generat
     };
   }
 
+  // THE MANIFEST IS REQUIRED; THE OLD INDEX IS NOT (PR #313 review 2). The index is rebuilt FROM
+  // THE ENTRIES, and a truncated or half-written index.json is precisely what the drift messages send
+  // an operator here to repair — so requiring it to parse made the repair verb refuse the one case it
+  // exists for. An unreadable index costs only the drift report (`before`), and says so.
+  const man = await loadManifest(opened.reader);
+  if (man.state !== 'ok') return { state: man.state, why: man.why };
   const cat = await catalogue(opened);
-  if (cat.state !== 'ok') return { state: cat.state, why: cat.why };
+  const problems = [];
+  if (cat.state !== 'ok') {
+    problems.push({ path: man.names.join(', '), why: `the old index could not be read (${cat.why}) — rebuilt from entries/, so nothing is reported as added or removed` });
+  }
 
   const listed = await opened.reader.listEntries();
   if (!listed.ok) return { state: 'unreachable', why: `could not list entries/: ${listed.detail}` };
 
   // plane -> index file, inverted from the manifest. An entry whose plane nothing declares has
   // nowhere to be filed, and silently dropping it is how an index starts lying.
-  const byPlane = new Map(Object.entries(cat.manifest.indexes).map(([plane, file]) => [plane, String(file)]));
+  const byPlane = new Map(Object.entries(man.manifest.indexes).map(([plane, file]) => [plane, String(file)]));
   const rowsFor = new Map([...new Set(byPlane.values())].map((file) => [file, []]));
 
-  const problems = [];
-  const before = new Map(cat.rows.map((r) => [r.id, r]));
+  const before = new Map((cat.state === 'ok' ? cat.rows : []).map((r) => [r.id, r]));
   const seen = new Set();
 
   for (const path of listed.paths) {
@@ -1060,7 +1068,9 @@ export async function reindex(opened, { env = process.env, write = true, generat
     written.push({ file, count: built.count });
   }
 
-  const added = [...seen].filter((id) => !before.has(id)).sort();
+  // With no readable old index there is nothing to diff against: every entry would read as "added",
+  // which is noise, not drift. The problem line above says why the diff is absent.
+  const added = cat.state === 'ok' ? [...seen].filter((id) => !before.has(id)).sort() : [];
   const removed = [...before.keys()].filter((id) => !seen.has(id)).sort();
   const retrusted = [...rowsFor.values()].flat()
     .filter((r) => before.has(r.id) && (before.get(r.id).trust !== r.trust || before.get(r.id).disputed !== r.disputed))

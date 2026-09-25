@@ -207,3 +207,26 @@ test('the logged base is categorised, never a local path — the log is a PUBLIC
   assert.equal(publicLocator('http://localhost:8080/v2'), 'http://localhost:8080/v2');
   assert.equal(publicLocator(null), '(local checkout)');
 });
+
+// ─── the repair verb repairs a BROKEN index (PR #313 review 2) ────────────────────────────────
+
+test('a truncated index.json is REBUILT from the entries — the case the drift messages send people here for', async () => {
+  await withBase(async ({ dir, env }) => {
+    const intact = readIndex(dir);
+    // What an interrupted push leaves: half a file.
+    writeFileSync(join(dir, 'index.json'), JSON.stringify(intact).slice(0, 40), 'utf8');
+    const r = await reindex(open(dir), { env, generated: intact.generated });
+    assert.equal(r.state, 'answer', r.why);
+    assert.deepEqual(readIndex(dir).entries.map((e) => e.id).sort(), intact.entries.map((e) => e.id).sort());
+    assert.ok(r.problems.some((p) => /old index could not be read/.test(p.why)), 'it says why there is no drift report');
+    assert.deepEqual(r.added, [], 'no diff against an unreadable index — not every entry as "added"');
+  });
+});
+
+test('a broken kb.json is still a hard stop — the manifest is what says which indexes to write', async () => {
+  await withBase(async ({ dir, env }) => {
+    writeFileSync(join(dir, 'kb.json'), '{not json', 'utf8');
+    const r = await reindex(open(dir), { env });
+    assert.equal(r.state, 'no-base');
+  });
+});
