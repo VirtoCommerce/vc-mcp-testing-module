@@ -89,7 +89,9 @@ and BL ids. Every grep/sweep hit is a **candidate**; confirm it before it become
 
 **`all` mode is triage-only:** one row per prompt file with: breach (over cap, not in baseline) ·
 overage vs baseline · DOC findings · sweep UNRESOLVED count · grep hits. Sort by those columns in
-that order, print the table, recommend the top 5 for individual runs, and stop.
+that order, print the table, recommend the top 5 for individual runs, and stop. Asked to keep it?
+Save it as `docs/prompt-review-triage-<date>.md` — a dated audit snapshot beside the repo's other audits
+(prompt reviews are not a `reports/` category), with the head SHA and the regenerate note.
 
 ## Step 2 — Read the target whole, find its callers
 
