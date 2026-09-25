@@ -19,7 +19,7 @@ The product genuinely misbehaves. **Must be confirmable by a live repro** (Phase
 
 *Signals:* a real 5xx or GraphQL `errors[]` on a valid operation in `trace.networkFailures[]`; an app-code exception with a real stack frame (`ProductCard.vue:47`) in `consoleErrors[]`; a screenshot showing a control genuinely broken/missing (not merely renamed); a BL-* invariant actually violated by the product.
 
-*Example:* `CART-018` asserts line total = unit × qty. Trace: `POST /graphql (AddItem) → 200` but response `price.total` is `0`; screenshot shows `$0.00` in the cart. Live repro confirms. → `REAL_BUG`, P1, `vc-module-x-cart`, `ORACLE_MATCH: none` (no `BL-*` invariant states line total = unit × qty — never cite the nearest-looking id).
+*Example:* `CART-018` asserts line total = unit × qty. Trace: `POST /graphql (AddItem) → 200` but response `price.total` is `0`; screenshot shows `$0.00` in the cart. Live repro confirms. → `REAL_BUG`, P1, `vc-module-x-cart`, `ORACLE_MATCH: BL-PRICE-008` (its violation signal is *line total ≠ qty × unit price*; check an id's own text before citing it — never the nearest-looking id).
 
 ---
 
@@ -60,7 +60,7 @@ Oscillates PASS↔FAIL across runs with no code change (`flaky:true` from the st
 Infra/environment failure: env unreachable, deploy window, search index still rebuilding, auth/session setup failed. Not product, not test. → recommend re-run once the env is healthy. (A flow that redirects, e.g. Datatrans checkout, is *not* an ENV/BLOCKED reason — execute through it, `.claude/knowledge/execution/test-runner-tags.md`; provenance `feedback_datatrans_redirect_not_blocker`.)
 
 ### `KNOWN_ISSUE`
-Matches a `vc-bug-catalog` entry, an already-filed tracker ticket in `References`, or documented by-design / config-gated behavior (e.g. multi-step checkout gated by `checkout_multistep_enabled`, `.claude/knowledge/automation/storefront-config-flags.md`; token revocation needs the platform `Authorization` setting `EnablePersistentStorageTokenValidation`). → dismiss with the link.
+Matches a `vc-bug-catalog` entry, an already-filed tracker ticket in `References`, or documented by-design / config-gated behavior (e.g. multi-step checkout gated by `checkout_multistep_enabled`, `.claude/knowledge/automation/storefront-config-flags.md`; token revocation needs `EnablePersistentStorageTokenValidation`). → dismiss with the link.
 
 ---
 

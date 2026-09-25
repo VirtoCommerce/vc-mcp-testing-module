@@ -30,13 +30,15 @@ draft itself declares wins over the classifier's if `/qa-bug` re-grades it.
 ## The `/qa-bug` brief (REAL_BUG under `--fix`)
 
 `/qa-bug` is a vc-fix plugin command (`plugins/vc-fix/commands/qa-bug.md`) built for a fresh bug,
-so two of its steps must be steered:
+so three of its steps must be steered — say all three in the brief:
 
 - **Step 1 (reproduce)** — pass the Phase 4 live-repro evidence (STR, screenshots, trace, HAR path)
   and say the bug is already reproduced; it must reuse that evidence, not dispatch a second repro.
-- **Step 5 (create the tracker ticket)** — answer **"No — keep the local report only"**. The brief
-  says so explicitly, because `/qa-bug` asks and a "Yes" would file a ticket from a flow that
-  never files.
+- **Step 4 (write the report)** — write it to `reports/bugs/open/<severity>/` per the map above,
+  not the flat `open/` its template names.
+- **Step 5 (create the tracker ticket)** — **skip it: stop after Step 4 and do not ask.** Step 5
+  puts "Create a bug-tracker ticket?" to the human via `AskUserQuestion`, so the orchestrator
+  cannot answer it for them, and a "Yes" would file a ticket from a flow that never files.
 
 If `/qa-bug` is not available (the vc-fix plugin is not installed), **draft nothing**: list the
 bug in the report's *Confirmed real bugs* table with its evidence paths and recommend installing
@@ -46,7 +48,7 @@ vc-fix and running `/qa-bug`.
 
 1. **No silent writes.** `--fix` is required for any test-case or bug-draft change. Without it the flow writes only its bookkeeping (above) and recommends.
 2. **CSV edits go through `/qa-review-tests --fix` only** — never edit a suite CSV from this flow directly. `/qa-review-tests` shows a before/after diff and asks before each write, and re-runs structure validation after. This preserves IDs and the peer-review discipline (`Automation_Status`).
-3. **Bug drafts are files, not tickets.** A confirmed `REAL_BUG` is written under `reports/bugs/open/<severity>/` via the brief above. It is **never** transitioned into Jira / Azure Boards here — a human runs `/qa-bug` (to file) then `/qa-fix` (to fix). This matches the detect-and-report discipline of `/qa-monitoring` and the no-auto-file norm (`feedback_subagent_external_writes`).
+3. **Bug drafts are files, not tickets.** A confirmed `REAL_BUG` is written under `reports/bugs/open/<severity>/` via the brief above. It is **never** transitioned into Jira / Azure Boards here — a human runs `/qa-bug` (to file) then `/qa-fix` (to fix). This matches the detect-and-report discipline of `/qa-monitoring`: both flows file and transition nothing (`.claude/knowledge/execution/ticket-status-transitions.md`; provenance `feedback_subagent_external_writes`).
 4. **Batch confirmation.** When several failures in one suite share a fix class, present them together before delegating one `/qa-review-tests --fix` pass over that suite — don't prompt per case where one pass covers them.
 
 ## Live-verification gating (Phase 4 → Phase 5)

@@ -11,9 +11,12 @@ argument-hint: "all | domain <name> | BL-<ID> | diff [--dry-run]"
 `/qa-review-bl <args>` is exactly `/qa-review-oracles bl <args>`. **Read
 [`../qa-review-oracles/SKILL.md`](../qa-review-oracles/SKILL.md) in full and follow it** with the
 axis fixed to **`bl`** — every `bl`-specific file, script, rule code and output path is in that
-skill's **Axis contract** table, the `bl` column. Do not call `/qa-review-oracles` through the
-Skill tool: it is `disable-model-invocation: true` (a manual audit stays user-invoked), so that
-call cannot run. This alias is model-invocable so that `/qa-test-lifecycle` Phase 4c can reach it.
+skill's **Axis contract** table, the `bl` column. Read the file rather than invoking
+`/qa-review-oracles`: that skill is `disable-model-invocation: true` (a manual audit stays
+user-invoked). This alias is model-invocable only so that `/qa-test-lifecycle` Phase 4c can reach
+it — **when a model invokes it, the scope is the `BL-<ID>` candidates Phase 4c passes.** A broader
+scope (`all`, `domain <name>`, `diff`) runs only when the user asked for it, because it auto-applies
+to `.claude/knowledge/oracles/business-logic.md`.
 
 | `/qa-review-bl …` | ≡ |
 |---|---|
