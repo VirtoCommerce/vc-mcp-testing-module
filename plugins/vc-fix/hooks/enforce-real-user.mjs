@@ -6,8 +6,8 @@
 // via the plugin manifest hooks/hooks.json (PreToolUse, ${CLAUDE_PLUGIN_ROOT}) so
 // it ships with the plugin; a per-machine .claude/settings.json entry may also
 // point here. Source of rule: knowledge/agents/qa/shared-instructions.md
-// §"Browser Interaction — Mandatory Real-User Behavior" plus the memory entries
-// Rationale: a real user cannot click a disabled control, so forcing one proves nothing.
+// §"Browser Interaction — Mandatory Real-User Behavior". Rationale: a real user
+// cannot click a disabled control, so forcing one proves nothing.
 
 import { readFileSync } from "node:fs";
 
