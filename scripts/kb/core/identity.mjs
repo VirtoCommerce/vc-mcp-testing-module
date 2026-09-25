@@ -64,6 +64,22 @@ export function findDuplicate(rows, { anchors, scope }) {
 }
 
 /** What the writer is told when the capture is refused -- it must name the id and both next verbs. */
+/**
+ * The door's refusal when the SUBJECT is taken but the coordinates differ (PR #313 review 2). The id
+ * is minted from the subject, so writing this capture would either land on the incumbent's id or be
+ * refused at push. Said while the writer can still act on it: the two honest moves are to confirm
+ * the incumbent (it is the same fact) or to reword the subject (it is a different one).
+ */
+export function subjectTakenMessage(row, { sameSubject = true } = {}) {
+  const anchors = (row.anchors ?? row.anchorKeys ?? []).join(', ');
+  return `${row.id} already ${sameSubject ? 'has this exact subject' : 'is the id this subject hashes to, held by a different subject'}`
+    + ` at other coordinates (${anchors}).\n`
+    + `  ${row.subject}\n`
+    + `Read it: kb show ${row.id}\n`
+    + `Same fact? confirm it:        kb confirm ${row.id} --deployment <env>\n`
+    + 'Different fact? reword the subject so it says what is different, and capture again.';
+}
+
 export function refusalMessage(row) {
   const anchors = (row.anchors ?? row.anchorKeys ?? []).join(', ');
   const scope = (row.scope ?? []).join(', ');

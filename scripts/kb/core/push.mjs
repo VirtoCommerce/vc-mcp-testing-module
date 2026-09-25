@@ -343,11 +343,19 @@ export async function applyQueue({ lines, rows, read, at = new Date() }) {
       // reason, which is a state a human can see and act on, where a silent merge is not.
       const idClash = !dupe && working.find((r) => r.id === entry.id);
       const sameSubject = idClash && String(idClash.subject ?? '').trim() === String(entry.subject ?? '').trim();
-      const target = dupe?.row ?? (sameSubject ? idClash : null);
-      // A TRUE HASH COLLISION — one id, two different subjects. Refused, never merged and never
-      // overwritten, and said out loud: the remedy is a human renaming one subject, which is cheap,
-      // and the alternative is losing a claim to arithmetic.
-      const hashClash = Boolean(idClash) && !sameSubject;
+      // ONLY an anchors+scope duplicate converts. A SAME-SUBJECT id collision used to convert too, and
+      // that was the common case of the loss described above (PR #313 review 2): the same subject
+      // re-captured under DIFFERENT anchors appended its one evidence item to the incumbent — an
+      // observation about another coordinate confirming this one — and wrote its claim nowhere, with
+      // a `capture-refused` line whose matching subject read as a legitimate dedup. The door now
+      // refuses it while the session is live (`capture` in verbs.mjs); this is the backstop for a
+      // capture queued before the incumbent reached the base.
+      const target = dupe?.row ?? null;
+      // ANY id collision that is not an anchors+scope duplicate — one id, and either two different
+      // subjects (a true hash collision) or one subject at different coordinates. Refused, never
+      // merged and never overwritten, and said out loud: the remedy is a human confirming the
+      // incumbent or rewording one subject, which is cheap, and the alternative is losing a claim.
+      const hashClash = Boolean(idClash);
 
       if (target) {
         const item = { ...(entry.evidence?.[0] ?? { method: 'observation', at: at.toISOString() }) };
@@ -369,8 +377,10 @@ export async function applyQueue({ lines, rows, read, at = new Date() }) {
       }
 
       if (hashClash) {
-        // NOTHING IS WRITTEN AND NOTHING IS CONFIRMED. The incumbent keeps its file; this claim
-        // keeps its queue line, so it is not lost and can be re-captured under a reworded subject.
+        // NOTHING IS WRITTEN AND NOTHING IS CONFIRMED. The incumbent keeps its file; this claim is
+        // not published, and the refusal is said in `problems` and in the log so it can be
+        // re-captured under a reworded subject. The door refuses the same case while the writer is
+        // still there to act on it, so reaching this line needs a race.
         // The refusal names BOTH subjects, because the one thing a reader needs here is the evidence
         // that these are two different facts wearing one address.
         extraLog.push({
@@ -378,12 +388,20 @@ export async function applyQueue({ lines, rows, read, at = new Date() }) {
           kind: 'capture-refused',
           dupeOf: idClash.id,
           subject: entry.subject,
-          why: 'id-collision-different-subject',
+          why: sameSubject ? 'id-collision-same-subject' : 'id-collision-different-subject',
           when: 'push',
-          note: `${entry.id} is already held by a DIFFERENT subject (${JSON.stringify(idClash.subject)}); `
-            + 'nothing was merged and nothing was confirmed — reword this subject and capture again',
+          note: sameSubject
+            ? `${entry.id} already holds this subject at other coordinates; nothing was merged and nothing was `
+              + 'confirmed — confirm the incumbent if it is the same fact, or reword this subject and capture again'
+            : `${entry.id} is already held by a DIFFERENT subject (${JSON.stringify(idClash.subject)}); `
+              + 'nothing was merged and nothing was confirmed — reword this subject and capture again',
         });
-        problems.push({ id: entry.id, why: `id collision with a different subject — the capture was refused, not merged` });
+        problems.push({
+          id: entry.id,
+          why: sameSubject
+            ? 'id collision with the same subject at different coordinates — the capture was refused, not merged'
+            : 'id collision with a different subject — the capture was refused, not merged',
+        });
         continue;
       }
 

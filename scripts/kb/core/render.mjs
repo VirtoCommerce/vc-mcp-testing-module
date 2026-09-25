@@ -109,7 +109,11 @@ export function captureLines(r, { prefix = 'kb capture' } = {}) {
   if (r.state === 'refused') {
     // A refusal is not a failure -- it is the design working. The ranking missed an entry that
     // exists, and instead of a duplicate the base gets a confirmation.
-    return [`${prefix}: REFUSED — the base already holds this fact.`, '', `  ${r.message.split('\n').join('\n  ')}`];
+    // A taken SUBJECT is not necessarily the same fact — the writer decides which (PR #313 review 2).
+    const head = r.reason === 'subject-taken'
+      ? 'REFUSED — an entry already has this subject, so this capture would take its id.'
+      : 'REFUSED — the base already holds this fact.';
+    return [`${prefix}: ${head}`, '', `  ${r.message.split('\n').join('\n  ')}`];
   }
   if (r.state !== 'queued') {
     const lines = [`${prefix}: ${HEADLINE[r.state] ?? r.state}`];

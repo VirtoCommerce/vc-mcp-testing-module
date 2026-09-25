@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { mintId } from './canonical.mjs';
 import { parseEntry } from './frontmatter.mjs';
 import { anchorProblems, isSingleSegmentPath, namespaceRoots, neighbours } from './coordinates.mjs';
-import { findDuplicate, identityKey, refusalMessage } from './identity.mjs';
+import { findDuplicate, identityKey, refusalMessage, subjectTakenMessage } from './identity.mjs';
 import { buildIndex, buildRow, countEvidence, entryPath } from './index-build.mjs';
 import { loadIndex, normalizeScope, retrievable } from './index-load.mjs';
 import {
@@ -740,6 +740,19 @@ export async function capture(input, opened, { env = process.env, via = null, ca
   }
 
   const id = mintId(input.subject);
+  // THE SUBJECT IS TAKEN, at other coordinates — the case `findDuplicate` cannot see because it
+  // compares anchors and scope only, while the id is a pure function of the subject. Accepting it
+  // as `queued` told the writer it landed and then lost the claim at push (PR #313 review 2).
+  const holder = cat.rows.find((r) => r.id === id);
+  if (holder) {
+    const sameSubject = String(holder.subject ?? '').trim() === String(input.subject ?? '').trim();
+    await log({
+      kind: 'capture-refused', dupeOf: holder.id, subject: input.subject,
+      why: sameSubject ? 'same-subject' : 'id-collision-different-subject', when: 'call',
+      ...(after ? { after } : {}), ...context({ via, call, topic }),
+    }, { env });
+    return { state: 'refused', reason: 'subject-taken', dupeOf: holder, message: subjectTakenMessage(holder, { sameSubject }) };
+  }
   const entry = {
     id,
     subject: input.subject,

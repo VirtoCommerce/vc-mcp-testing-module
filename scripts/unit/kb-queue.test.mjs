@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { KEY_LEN, LOGGED, MUTATIONS, RUN_MAX, kbDisabled, pendingMutations, queuePath, readQueue, runOf, sessionId, shortSession } from '../kb/core/queue.mjs';
 import { localReader } from '../kb/core/reader.mjs';
+import { captureLines } from '../kb/core/render.mjs';
 import { ask, capture, confirm, dispute, show, stat, toLogLine } from '../kb/core/verbs.mjs';
 
 const FIXTURE = join(import.meta.dirname, 'fixtures', 'kb-base');
@@ -382,4 +383,26 @@ test('disabled: a capture or a confirm is REFUSED and nothing is queued — it w
   const a = await ask('why does the shipping method reset', opened(), { env: off });
   assert.equal(a.state === 'answer' || a.state === 'miss', true, 'reading still works');
   assert.equal((await readQueue({ env: off })).lines.length, 0, 'not one line was queued');
+}));
+
+// ─── the subject is the id: a taken subject is refused at the door (PR #313 review 2) ─────────
+
+test('a capture whose SUBJECT an entry already holds, at other anchors, is REFUSED while the writer can act on it', () => withQueue(async (dir, env) => {
+  // `findDuplicate` compares anchors + scope only; the id is a pure function of the subject. So this
+  // used to come back `queued` and lose its claim at push. Now it is refused, naming the incumbent.
+  const r = await capture({
+    ...CAPTURE,
+    subject: 'storefront members Active column reads contact status not account state',
+    anchors: ['/checkout/shipping'],
+  }, opened(), { env });
+  assert.equal(r.state, 'refused');
+  assert.equal(r.dupeOf.id, 'KB-27B4CD10');
+  assert.match(r.message, /kb confirm KB-27B4CD10/);
+  assert.match(r.message, /reword the subject/);
+  assert.match(captureLines(r)[0], /already has this subject/, 'the headline does not claim it is the same fact');
+  const lines = (await readQueue({ env })).lines;
+  assert.equal(lines.filter((l) => l.kind === 'capture').length, 0, 'nothing was queued to lose');
+  const refused = lines.find((l) => l.kind === 'capture-refused');
+  assert.equal(refused.why, 'same-subject');
+  assert.equal(refused.when, 'call');
 }));

@@ -546,22 +546,26 @@ test('a DIFFERENT scope on the same anchor is a different fact, and still gets w
   assert.ok(state.files.has('v2/entries/KB-BBBBBBBB.md'), 'the same coordinate on two surfaces is two facts');
 }));
 
-test('an id collision converts too — writing the blob would REPLACE somebody else\'s entry', () => withQueue(async ({ dir, env }) => {
-  // The id is minted from the subject, so two entries with one id have the same subject verbatim.
-  // Different anchors means the anchors+scope test misses it; the blob write would not.
+test('a SAME-subject id collision at different anchors is REFUSED at push — never merged, prose never lost silently', () => withQueue(async ({ dir, env }) => {
+  // PR #313 review 2: this used to CONVERT — the newcomer's one evidence item landed on the
+  // incumbent (an observation about /mine confirming a fact about /theirs) and MY PROSE was written
+  // nowhere, under a refusal line that read as a legitimate dedup. The door refuses it now; this is
+  // the push-time backstop for a capture queued before the incumbent reached the base.
   const theirs = makeEntry({ id: 'KB-AAAAAAAA', subject: 'one subject', anchors: ['/theirs'], body: 'THEIR PROSE' });
   const state = makeBase([theirs]);
   const mine = makeEntry({ id: 'KB-AAAAAAAA', subject: 'one subject', anchors: ['/mine'], body: 'MY PROSE' });
   await writeQueue(dir, SESSION, [captureLine(mine, 'MY PROSE')]);
 
   const r = await run(env, fakeApi(state));
-  assert.equal(r.converted, 1);
+  assert.equal(r.state, 'pushed', r.why);
+  assert.equal(r.converted, 0, 'nothing converted');
   const entry = state.files.get('v2/entries/KB-AAAAAAAA.md');
-  assert.ok(entry.includes('THEIR PROSE'), 'their prose survived');
-  assert.ok(!entry.includes('MY PROSE'));
+  assert.equal(entry, theirs.text, 'the incumbent is byte-identical: no evidence appended, nothing overwritten');
   const refused = state.files.get(`v2/${logPath(SESSION, AT)}`).trim().split('\n')
     .map((l) => JSON.parse(l)).find((l) => l.kind === 'capture-refused');
-  assert.equal(refused.why, 'id-collision');
+  assert.equal(refused.why, 'id-collision-same-subject');
+  assert.match(refused.note, /confirm the incumbent/);
+  assert.ok(r.problems.some((p) => /same subject at different coordinates/.test(p.why)), 'said out loud in the push result');
 }));
 
 test('an id collision between DIFFERENT subjects is refused, never merged', () => withQueue(async ({ dir, env }) => {
